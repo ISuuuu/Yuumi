@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use tokio::sync::RwLock;
 
-use crate::{build_auth_header, LcuClient};
-use std::sync::Arc;
+use crate::{build_auth_header, AppState};
 
 // ─── LCU 原始响应结构体 ───
 
@@ -73,12 +71,10 @@ impl LcuSummoner {
 /// 获取当前召唤师信息（清洗后）
 #[tauri::command]
 pub async fn get_current_summoner(
-    lcu_state: State<'_, Arc<RwLock<Option<LcuClient>>>>,
+    app_state: State<'_, AppState>,
 ) -> Result<SummonerDisplay, String> {
-    let lock = lcu_state.read().await;
-    let lcu = lock
-        .as_ref()
-        .ok_or("LCU 未连接，请先启动英雄联盟客户端")?;
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
 
     let url = format!(
         "https://127.0.0.1:{}/lol-summoner/v1/current-summoner",

@@ -1,9 +1,8 @@
+use base64::Engine;
 use serde_json::Value;
 use tauri::State;
-use tokio::sync::RwLock;
 
-use crate::{build_auth_header, LcuClient};
-use std::sync::Arc;
+use crate::{build_auth_header, AppState};
 
 /// 统一的 LCU API 调用命令。
 /// 前端通过 invoke("call_lcu_api", { method, path, body }) 调用。
@@ -12,12 +11,10 @@ pub async fn call_lcu_api(
     method: String,
     path: String,
     body: Option<Value>,
-    lcu_state: State<'_, Arc<RwLock<Option<LcuClient>>>>,
+    app_state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let lock = lcu_state.read().await;
-    let lcu = lock
-        .as_ref()
-        .ok_or("LCU 未连接，请先启动英雄联盟客户端")?;
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
 
     let url = format!("https://127.0.0.1:{}{}", lcu.port, path);
 
@@ -56,4 +53,44 @@ pub async fn call_lcu_api(
             text
         ))
     }
+}
+
+/// 获取 LCU 静态资源（图片等），返回 data URL。
+/// 前端可用于 <img :src="dataUrl">，绕过自签名证书问题。
+#[tauri::command]
+pub async fn get_lcu_asset(
+    path: String,
+    app_state: State<'_, AppState>,
+) -> Result<String, String> {
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
+
+    let url = format!("https://127.0.0.1:{}{}", lcu.port, path);
+    let auth = build_auth_header(&lcu.token);
+
+    let resp = lcu
+        .http_client
+        .get(&url)
+        .header("Authorization", auth)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        log::warn!("LCU 资源加载失败 [{}]: {}", path, resp.status());
+        return Err(format!("获取资源失败: HTTP {}", resp.status()));
+    }
+
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/png")
+        .to_string();
+
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let data_url = format!("data:{};base64,{}", content_type, b64);
+    log::debug!("LCU 资源加载成功: {} ({} bytes, {} chars data-url)", path, bytes.len(), data_url.len());
+    Ok(data_url)
 }

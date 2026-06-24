@@ -78,8 +78,12 @@ export const fetchCurrentSummoner = () =>
   invoke<SummonerDisplay>("get_current_summoner");
 
 /** 获取战绩列表（Rust 解析层清洗后） */
-export const fetchMatchHistory = (puuid: string, begin?: number, count?: number) =>
-  invoke<MatchDisplay[]>("get_match_history", { puuid, begin, count });
+export const fetchMatchHistory = (puuid: string, begIndex?: number, endIndex?: number) =>
+  invoke<MatchDisplay[]>("get_match_history", { puuid, begIndex, endIndex });
+
+/** 获取 LCU 静态资源（图片等），返回 data URL */
+export const fetchLcuAsset = (path: string) =>
+  invoke<string>("get_lcu_asset", { path });
 
 // ─── LCU API 快捷方法（透传原始 JSON）───
 
