@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use tokio::sync::RwLock;
 
-use crate::{build_auth_header, LcuClient};
+use crate::{build_auth_header, AppState};
 use crate::parsers::match_parser::{LcuMatchHistoryResponse, MatchDisplay};
-use std::sync::Arc;
 
 // ─── 输入数据结构（来自 champ select 的 myTeam / theirTeam）───
 
@@ -72,15 +70,14 @@ struct _LcuRankedEntry {
 pub async fn get_game_player_summaries(
     players: Vec<GamePlayerInfo>,
     current_summoner_id: u64,
-    lcu_state: State<'_, Arc<RwLock<Option<LcuClient>>>>,
+    app_state: State<'_, AppState>,
 ) -> Result<Vec<PlayerGameSummary>, String> {
-    let lock = lcu_state.read().await;
-    let lcu = lock
-        .as_ref()
-        .ok_or("LCU 未连接，请先启动英雄联盟客户端")?;
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
 
     let auth = build_auth_header(&lcu.token);
     let base = format!("https://127.0.0.1:{}", lcu.port);
+    let assets = app_state.game_data.read().await.clone();
 
     // 并发查询所有玩家
     let mut handles = Vec::new();
@@ -89,9 +86,10 @@ pub async fn get_game_player_summaries(
         let base = base.clone();
         let http = lcu.http_client.clone();
         let player = player.clone();
+        let assets = assets.clone();
 
         handles.push(tokio::spawn(async move {
-            fetch_player_summary(&http, &base, &auth, &player, current_summoner_id).await
+            fetch_player_summary(&http, &base, &auth, &player, current_summoner_id, &assets).await
         }));
     }
 
@@ -113,6 +111,7 @@ async fn fetch_player_summary(
     auth: &str,
     player: &GamePlayerInfo,
     current_summoner_id: u64,
+    assets: &crate::lcu::game_data::GameDataAssets,
 ) -> Option<PlayerGameSummary> {
     // 1. 获取召唤师信息
     let summoner_url = format!(
@@ -161,7 +160,7 @@ async fn fetch_player_summary(
                 .games
                 .iter()
                 .filter(|g| !g.participants.is_empty())
-                .map(|g| g.to_display())
+                .map(|g| g.to_display(assets))
                 .collect();
 
             let (k, d, a, w) = games.iter().fold((0, 0, 0, 0), |(k, d, a, w), g| {
@@ -192,7 +191,7 @@ async fn fetch_player_summary(
     let recently_champion_id = recent_games.first().map(|g| g.champion_id);
 
     let champion_icon_url = format!(
-        "/lol-game-data/assets/v1/champions/{}.png",
+        "/lol-game-data/assets/v1/champion-icons/{}.png",
         player.champion_id
     );
 

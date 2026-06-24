@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use tokio::sync::RwLock;
 
-use crate::{build_auth_header, LcuClient};
-use std::sync::Arc;
+use crate::{build_auth_header, AppState};
 
 // ─── LCU 原始响应结构体 ───
 
@@ -108,7 +106,7 @@ pub struct MatchDisplay {
 
 impl LcuMatchGame {
     /// 将 LCU 原始对局数据清洗为前端展示结构
-    pub fn to_display(&self) -> MatchDisplay {
+    pub fn to_display(&self, assets: &crate::lcu::game_data::GameDataAssets) -> MatchDisplay {
         let participant = &self.participants[0];
         let stats = &participant.stats;
 
@@ -143,16 +141,32 @@ impl LcuMatchGame {
         };
 
         let champion_icon_url =
-            format!("/lol-game-data/assets/v1/champions/{}.png", participant.champion_id);
-        let spell1_icon_url =
-            format!("/lol-game-data/assets/v1/summoner-spells/{}.png", participant.spell1_id);
-        let spell2_icon_url =
-            format!("/lol-game-data/assets/v1/summoner-spells/{}.png", participant.spell2_id);
-        let rune_icon_url =
-            format!("/lol-game-data/assets/v1/runes/{}.png", stats.perk0);
+            format!("/lol-game-data/assets/v1/champion-icons/{}.png", participant.champion_id);
+        let spell1_icon_url = assets
+            .spells
+            .get(&participant.spell1_id)
+            .cloned()
+            .unwrap_or_default();
+        let spell2_icon_url = assets
+            .spells
+            .get(&participant.spell2_id)
+            .cloned()
+            .unwrap_or_default();
+        let rune_icon_url = assets
+            .runes
+            .get(&stats.perk0)
+            .cloned()
+            .unwrap_or_default();
         let item_icon_urls: Vec<String> = item_ids
             .iter()
-            .map(|id| format!("/lol-game-data/assets/v1/items/{}.png", id))
+            .filter(|&&id| id > 0)
+            .map(|id| {
+                assets
+                    .items
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("/lol-game-data/assets/v1/items/{}.png", id))
+            })
             .collect();
 
         MatchDisplay {
@@ -286,14 +300,12 @@ fn is_leap_year(year: u32) -> bool {
 #[tauri::command]
 pub async fn get_match_history(
     puuid: String,
-    begin: Option<u32>,
-    count: Option<u32>,
-    lcu_state: State<'_, Arc<RwLock<Option<LcuClient>>>>,
+    beg_index: Option<u32>,
+    end_index: Option<u32>,
+    app_state: State<'_, AppState>,
 ) -> Result<Vec<MatchDisplay>, String> {
-    let lock = lcu_state.read().await;
-    let lcu = lock
-        .as_ref()
-        .ok_or("LCU 未连接，请先启动英雄联盟客户端")?;
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
 
     let mut url = format!(
         "https://127.0.0.1:{}/lol-match-history/v1/products/lol/{}/matches",
@@ -301,11 +313,11 @@ pub async fn get_match_history(
     );
 
     let mut params = Vec::new();
-    if let Some(b) = begin {
-        params.push(format!("begin={}", b));
+    if let Some(b) = beg_index {
+        params.push(format!("begIndex={}", b));
     }
-    if let Some(c) = count {
-        params.push(format!("count={}", c));
+    if let Some(e) = end_index {
+        params.push(format!("endIndex={}", e));
     }
     if !params.is_empty() {
         url.push('?');
@@ -328,12 +340,13 @@ pub async fn get_match_history(
 
     let history: LcuMatchHistoryResponse = resp.json().await.map_err(|e| e.to_string())?;
 
+    let assets = app_state.game_data.read().await;
     let displays: Vec<MatchDisplay> = history
         .games
         .games
         .iter()
         .filter(|g| !g.participants.is_empty())
-        .map(|g| g.to_display())
+        .map(|g| g.to_display(&assets))
         .collect();
 
     Ok(displays)

@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
-use tokio::sync::RwLock;
 
-use crate::{build_auth_header, LcuClient};
-use std::sync::Arc;
+use crate::{build_auth_header, AppState};
 
 // ─── TFT 数据结构 ───
 
@@ -97,12 +95,10 @@ fn parse_tft_data(content: &TftJsonRoot) -> TftDataMapping {
 /// 从 LCU 获取 TFT 数据资源
 #[tauri::command]
 pub async fn get_tft_data(
-    lcu_state: State<'_, Arc<RwLock<Option<LcuClient>>>>,
+    app_state: State<'_, AppState>,
 ) -> Result<TftDataMapping, String> {
-    let lock = lcu_state.read().await;
-    let lcu = lock
-        .as_ref()
-        .ok_or("LCU 未连接，请先启动英雄联盟客户端")?;
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
 
     let auth = build_auth_header(&lcu.token);
 

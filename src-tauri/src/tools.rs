@@ -1,9 +1,7 @@
 use serde::Deserialize;
 use tauri::State;
-use tokio::sync::RwLock;
 
-use crate::{build_auth_header, LcuClient};
-use std::sync::Arc;
+use crate::{build_auth_header, AppState};
 
 // ─── 创建 5v5 训练营 ───
 
@@ -17,12 +15,10 @@ pub struct CreateLobbyParams {
 #[tauri::command]
 pub async fn create_5v5_practice_lobby(
     params: CreateLobbyParams,
-    lcu_state: State<'_, Arc<RwLock<Option<LcuClient>>>>,
+    app_state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let lock = lcu_state.read().await;
-    let lcu = lock
-        .as_ref()
-        .ok_or("LCU 未连接，请先启动英雄联盟客户端")?;
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
 
     let url = format!("https://127.0.0.1:{}/lol-lobby/v1/lobby", lcu.port);
     let auth = build_auth_header(&lcu.token);
@@ -66,12 +62,10 @@ pub async fn create_5v5_practice_lobby(
 /// 逻辑：先 reroll，再从 bench 换回之前暂存的英雄。
 #[tauri::command]
 pub async fn aram_reroll_and_swap_back(
-    lcu_state: State<'_, Arc<RwLock<Option<LcuClient>>>>,
+    app_state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let lock = lcu_state.read().await;
-    let lcu = lock
-        .as_ref()
-        .ok_or("LCU 未连接，请先启动英雄联盟客户端")?;
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
 
     let auth = build_auth_header(&lcu.token);
     let base = format!("https://127.0.0.1:{}", lcu.port);
@@ -150,12 +144,10 @@ pub struct RunePageParams {
 #[tauri::command]
 pub async fn apply_rune_page(
     params: RunePageParams,
-    lcu_state: State<'_, Arc<RwLock<Option<LcuClient>>>>,
+    app_state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let lock = lcu_state.read().await;
-    let lcu = lock
-        .as_ref()
-        .ok_or("LCU 未连接，请先启动英雄联盟客户端")?;
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
 
     let auth = build_auth_header(&lcu.token);
     let base = format!("https://127.0.0.1:{}", lcu.port);
@@ -217,12 +209,10 @@ pub async fn apply_rune_page(
 /// 获取当前 LCU 客户端缩放比例（用于窗口修复）
 #[tauri::command]
 pub async fn get_lcu_zoom(
-    lcu_state: State<'_, Arc<RwLock<Option<LcuClient>>>>,
+    app_state: State<'_, AppState>,
 ) -> Result<f64, String> {
-    let lock = lcu_state.read().await;
-    let lcu = lock
-        .as_ref()
-        .ok_or("LCU 未连接")?;
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
 
     let url = format!("https://127.0.0.1:{}/riotclient/zoom-scale", lcu.port);
     let auth = build_auth_header(&lcu.token);
@@ -247,12 +237,12 @@ pub async fn get_lcu_zoom(
 /// 通过系统命令强制重新设置窗口属性。
 #[tauri::command]
 pub async fn fix_lcu_window(
-    lcu_state: State<'_, Arc<RwLock<Option<LcuClient>>>>,
+    app_state: State<'_, AppState>,
 ) -> Result<String, String> {
     // 获取当前缩放比例
     let zoom = {
-        let lock = lcu_state.read().await;
-        let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
         let url = format!("https://127.0.0.1:{}/riotclient/zoom-scale", lcu.port);
         let auth = build_auth_header(&lcu.token);
         let resp = lcu

@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import { fetchCurrentSummoner, fetchMatchHistory } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
+import LcuImage from "../components/LcuImage.vue";
 
 const store = useLcuStore();
 const summoner = ref<SummonerDisplay | null>(null);
@@ -66,7 +67,7 @@ function getKdaClass(kda: string): string {
 
       <!-- 召唤师信息 -->
       <div v-if="summoner" class="summoner-card">
-        <img :src="summoner.profileIconUrl" class="icon" alt="icon" />
+        <LcuImage :src="summoner.profileIconUrl" class="icon" alt="icon" />
         <div class="info">
           <h3>{{ summoner.displayName }}</h3>
           <span class="tag">{{ summoner.gameName }}#{{ summoner.tagLine }}</span>
@@ -87,10 +88,13 @@ function getKdaClass(kda: string): string {
             <span class="duration">{{ m.duration }}</span>
           </div>
           <div class="match-center">
-            <img :src="m.championIconUrl" class="champ-icon" alt="champ" />
+            <div class="champ-col">
+              <LcuImage :src="m.championIconUrl" class="champ-icon" alt="champ" />
+              <LcuImage :src="m.runeIconUrl" class="rune-icon" alt="rune" />
+            </div>
             <div class="spells">
-              <img :src="m.spell1IconUrl" class="spell-icon" alt="s1" />
-              <img :src="m.spell2IconUrl" class="spell-icon" alt="s2" />
+              <LcuImage :src="m.spell1IconUrl" class="spell-icon" alt="s1" />
+              <LcuImage :src="m.spell2IconUrl" class="spell-icon" alt="s2" />
             </div>
           </div>
           <div class="match-stats">
@@ -100,6 +104,15 @@ function getKdaClass(kda: string): string {
             <span class="kda-ratio">{{ m.kda }} KDA</span>
             <span class="cs">{{ m.cs }} CS</span>
             <span class="gold">{{ (m.gold / 1000).toFixed(1) }}k 金</span>
+          </div>
+          <div class="match-items">
+            <LcuImage
+              v-for="(icon, idx) in m.itemIconUrls"
+              :key="idx"
+              :src="icon"
+              class="item-icon"
+              alt="item"
+            />
           </div>
           <div class="match-result">
             {{ m.remake ? "重开" : m.win ? "胜利" : "失败" }}
@@ -136,10 +149,14 @@ function getKdaClass(kda: string): string {
 
 .match-left { display: flex; flex-direction: column; min-width: 80px; font-size: 0.8rem; color: #666; }
 .match-center { display: flex; align-items: center; gap: 4px; }
+.champ-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .champ-icon { width: 40px; height: 40px; border-radius: 4px; }
+.rune-icon { width: 20px; height: 20px; border-radius: 50%; }
 .spells { display: flex; flex-direction: column; gap: 2px; }
 .spell-icon { width: 16px; height: 16px; border-radius: 2px; }
 .match-stats { display: flex; flex-direction: column; font-size: 0.85rem; }
+.match-items { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; max-width: 88px; }
+.item-icon { width: 20px; height: 20px; border-radius: 2px; }
 .kda-perfect { color: #ff9800; }
 .kda-great { color: #e91e63; }
 .kda-good { color: #2196f3; }

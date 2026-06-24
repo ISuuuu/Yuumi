@@ -22,12 +22,26 @@ pub struct LcuClient {
 pub struct AppState {
     pub lcu_client: Arc<RwLock<Option<LcuClient>>>,
     pub config: Arc<RwLock<config::AppConfig>>,
+    /// LCU 连接后加载的游戏资源路径映射（物品/技能/符文 iconPath）
+    pub game_data: Arc<RwLock<lcu::game_data::GameDataAssets>>,
     /// BP agent 的选人会话发送端
     pub bp_session_tx: mpsc::Sender<agents::auto_bp::ChampSelectSession>,
     /// 游戏流程 agent 的事件发送端
     pub gameflow_tx: mpsc::Sender<agents::auto_match::GameflowEvent>,
     /// 上传队列（可用于外部手动触发上传）
     pub upload_queue: Arc<upload::UploadQueue>,
+}
+
+impl AppState {
+    /// 获取 LCU 连接读锁，未连接时返回错误
+    pub async fn lcu(&self) -> Result<tokio::sync::RwLockReadGuard<'_, Option<LcuClient>>, String> {
+        let lock = self.lcu_client.read().await;
+        if lock.is_some() {
+            Ok(lock)
+        } else {
+            Err("LCU 未连接，请先启动英雄联盟客户端".to_string())
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -52,9 +66,12 @@ pub fn run() {
 
             // 初始化全局状态
             let lcu_state: Arc<RwLock<Option<LcuClient>>> = Arc::new(RwLock::new(None));
+            let game_data: Arc<RwLock<lcu::game_data::GameDataAssets>> =
+                Arc::new(RwLock::new(lcu::game_data::GameDataAssets::default()));
             let state = AppState {
                 lcu_client: lcu_state.clone(),
                 config: app_config_arc.clone(),
+                game_data: game_data.clone(),
                 bp_session_tx: bp_tx,
                 gameflow_tx,
                 upload_queue,
@@ -67,7 +84,7 @@ pub fn run() {
 
             // 启动 LCU 进程监测
             let app_handle = app.handle().clone();
-            lcu::monitor::start(app_handle, lcu_state);
+            lcu::monitor::start(app_handle, lcu_state, game_data);
 
             // 条件启动 SignalR Hub 远程反代
             {
@@ -99,6 +116,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             lcu::client::call_lcu_api,
+            lcu::client::get_lcu_asset,
             parsers::summoner::get_current_summoner,
             parsers::match_parser::get_match_history,
             parsers::game_info::get_game_player_summaries,
@@ -124,3 +142,7 @@ pub fn build_auth_header(token: &str) -> String {
     let encoded = base64::engine::general_purpose::STANDARD.encode(&credentials);
     format!("Basic {}", encoded)
 }
+
+
+
+
