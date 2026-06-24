@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed, provide } from "vue";
 import { useLcuStore, initLcuListeners } from "./store/lcuStore";
+import { storeToRefs } from "pinia";
 import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
 import { updateThemeColor } from "./utils/theme";
 import type { SummonerDisplay } from "./api/lcu";
@@ -15,6 +16,7 @@ import LcuImage from "./components/LcuImage.vue";
 import OpggModal from "./components/OpggModal.vue";
 
 const store = useLcuStore();
+const { gamePhase } = storeToRefs(store);
 const currentPage = ref("home");
 const showOpgg = ref(false);
 const isSidebarExpanded = ref(false);
@@ -45,8 +47,8 @@ const regionName = computed(() => {
   return PLATFORM_MAP[platformId.value] || platformId.value || "艾欧尼亚";
 });
 
-onMounted(() => {
-  initLcuListeners();
+onMounted(async () => {
+  await initLcuListeners();
 });
 
 function navigate(page: string) {
@@ -71,7 +73,9 @@ async function loadLcuState() {
 
       // 3. 核心修复：同步拉取当前 LCU 对局状态，以便在已经开始的对局中启动软件时能自动跳转
       const phaseResp = await lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase");
+      console.log("[loadLcuState] gameflow-phase resp:", phaseResp);
       if (phaseResp.success && phaseResp.data) {
+        console.log("[loadLcuState] setGamePhase:", phaseResp.data);
         store.setGamePhase(phaseResp.data);
       }
 
@@ -113,9 +117,11 @@ watch(navigateSearchPayload, (payload) => {
   }
 });
 
-// 进入选人/游戏中时自动跳转到对局信息页
-watch(() => store.gamePhase, (phase: string) => {
-  if (phase === "ChampSelect" || phase === "InProgress") {
+// 进入选人/游戏加载/游戏中时自动跳转到对局信息页
+watch(gamePhase, (phase: string) => {
+  console.log("[watch gamePhase] phase changed:", phase);
+  if (phase === "ChampSelect" || phase === "GameStart" || phase === "InProgress") {
+    console.log("[watch gamePhase] navigating to gameinfo");
     currentPage.value = "gameinfo";
   }
 });

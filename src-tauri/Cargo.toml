@@ -32,18 +32,18 @@ reqwest = { version = "0.12", features = ["json"] }
 http = "1"
 
 # WebSocket
-tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 
 # 进程检测
 sysinfo = "0.33"
+regex-lite = "0.1"
 
 # 编码
 base64 = "0.22"
 
-# TLS（WebSocket 用）
-native-tls = "0.2"
-tokio-native-tls = "0.3"
+# TLS（WebSocket 用，等价于 Python ssl=False 的完全不验证）
+rustls = { version = "0.23", features = ["ring"] }
 
 # 路径
 dirs = "6"

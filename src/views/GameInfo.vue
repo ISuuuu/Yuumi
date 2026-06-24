@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from "vue";
 import { useLcuStore } from "../store/lcuStore";
-import { getGameflowPhase, getChampSelectSession, fetchMatchHistory, lcuRequest } from "../api/lcu";
+import {
+  getGameflowPhase, getChampSelectSession, fetchMatchHistory,
+  fetchCurrentSummoner, lcuRequest,
+} from "../api/lcu";
 import type { MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 
 const store = useLcuStore();
 const loading = ref(false);
 const error = ref("");
-
 const activeTab = ref<"my" | "their">("my");
+
+// 当前登录玩家的 summonerId，用于 InProgress 阶段分离己方/敌方
+const currentSummonerId = ref<number>(0);
 
 // 每个玩家的完整数据
 interface PlayerData {
@@ -23,12 +28,27 @@ const playerData = ref<Record<number, PlayerData>>({});
 const TIER_MAP: Record<string, string> = {
   NONE: "", IRON: "黑铁", BRONZE: "黄铜", SILVER: "白银", GOLD: "黄金",
   PLATINUM: "铂金", EMERALD: "翡翠", DIAMOND: "钻石",
-  MASTER: "大师", GRANDMASTER: "宗师", CHALLENGER: "王者"
+  MASTER: "大师", GRANDMASTER: "宗师", CHALLENGER: "王者",
 };
 
-const myTeam = computed(() => store.champSelectSession?.myTeam ?? []);
-const theirTeam = computed(() => store.champSelectSession?.theirTeam ?? []);
+const myTeam = computed(() => {
+  if (gameflowMyTeam.value.length > 0) return gameflowMyTeam.value;
+  return store.champSelectSession?.myTeam ?? [];
+});
+const theirTeam = computed(() => {
+  if (gameflowTheirTeam.value.length > 0) return gameflowTheirTeam.value;
+  return store.champSelectSession?.theirTeam ?? [];
+});
 const currentTeam = computed(() => activeTab.value === "my" ? myTeam.value : theirTeam.value);
+
+// InProgress/GameStart 阶段的队伍数据（从 gameflow session 获取）
+const gameflowMyTeam = ref<any[]>([]);
+const gameflowTheirTeam = ref<any[]>([]);
+
+/** 当前是否处于可展示战绩的阶段 */
+const isGameActive = computed(() =>
+  store.gamePhase === "ChampSelect" || store.gamePhase === "InProgress",
+);
 
 async function refreshState() {
   loading.value = true;
@@ -43,49 +63,93 @@ async function refreshState() {
   loading.value = false;
 }
 
+/** 加载单个玩家的战绩/排位数据（通用，ChampSelect 和 InProgress 共用） */
+async function loadPlayerData(cellId: number, summonerId: number) {
+  if (!summonerId || playerData.value[cellId]?.info) return;
+  playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: true };
+
+  try {
+    const resp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners/${summonerId}`);
+    if (!resp.success || !resp.data) {
+      playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: false };
+      return;
+    }
+    const info = resp.data;
+
+    const [matches, rankedResp] = await Promise.all([
+      info.puuid ? fetchMatchHistory(info.puuid, 0, 10) : Promise.resolve([]),
+      info.puuid ? lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${info.puuid}`) : Promise.resolve({ success: false } as any),
+    ]);
+
+    let solo = null, flex = null;
+    if (rankedResp.success && rankedResp.data?.queues) {
+      solo = rankedResp.data.queues.find((q: any) => q.queueType === "RANKED_SOLO_5x5") || null;
+      flex = rankedResp.data.queues.find((q: any) => q.queueType === "RANKED_FLEX_SR") || null;
+    }
+
+    playerData.value[cellId] = { info, matches, ranked: { solo, flex }, loading: false };
+  } catch {
+    playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: false };
+  }
+}
+
+/** ChampSelect 阶段：加载当前 Tab 下的己方/敌方玩家 */
 async function loadAllPlayers() {
   const team = currentTeam.value;
   if (!team || team.length === 0) return;
+  await Promise.all(team.map((p: any) => loadPlayerData(p.cellId, p.summonerId)));
+}
 
-  await Promise.all(team.map(async (p: any) => {
-    const cellId = p.cellId;
-    if (!p.summonerId || playerData.value[cellId]?.info) return;
-    playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: true };
-
-    try {
-      // 1. 召唤师信息
-      const resp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners/${p.summonerId}`);
-      if (!resp.success || !resp.data) {
-        playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: false };
-        return;
-      }
-      const info = resp.data;
-
-      // 2. 并行拉取战绩 + 排位数据
-      const [matches, rankedResp] = await Promise.all([
-        info.puuid ? fetchMatchHistory(info.puuid, 0, 10) : Promise.resolve([]),
-        info.puuid ? lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${info.puuid}`) : Promise.resolve({ success: false } as any)
-      ]);
-
-      let solo = null, flex = null;
-      if (rankedResp.success && rankedResp.data?.queues) {
-        solo = rankedResp.data.queues.find((q: any) => q.queueType === "RANKED_SOLO_5x5") || null;
-        flex = rankedResp.data.queues.find((q: any) => q.queueType === "RANKED_FLEX_SR") || null;
-      }
-
-      playerData.value[cellId] = { info, matches, ranked: { solo, flex }, loading: false };
-    } catch {
-      playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: false };
+/**
+ * InProgress / GameStart 阶段：通过 /lol-gameflow/v1/session 加载双方数据。
+ * 该接口的 teamOne/teamTwo 包含完整 championId，可同时获取敌方信息。
+ */
+async function loadFromGameflowSession() {
+  loading.value = true;
+  error.value = "";
+  try {
+    const resp = await lcuRequest<any>("GET", "/lol-gameflow/v1/session");
+    if (!resp.success || !resp.data?.gameData) {
+      error.value = "无法获取对局 Session";
+      loading.value = false;
+      return;
     }
-  }));
+
+    const { teamOne, teamTwo } = resp.data.gameData;
+    if (!teamOne || !teamTwo) return;
+
+    // 用当前玩家 summonerId 判断哪队是己方
+    const isTeamOne = teamOne.some((p: any) => p.summonerId === currentSummonerId.value);
+    const allyTeam = isTeamOne ? teamOne : teamTwo;
+    const enemyTeam = isTeamOne ? teamTwo : teamOne;
+
+    // 将 gameflow session 的数据注入队伍列表
+    // 使用 summonerId 作为 cellId（gameflow 无 cellId 字段）
+    gameflowMyTeam.value = allyTeam.map((p: any) => ({
+      ...p,
+      cellId: p.summonerId,
+      displayName: p.summonerName || p.displayName,
+    }));
+    gameflowTheirTeam.value = enemyTeam.map((p: any) => ({
+      ...p,
+      cellId: p.summonerId,
+      displayName: p.summonerName || p.displayName,
+    }));
+
+    // 并行加载双方全部玩家
+    await Promise.all([
+      ...allyTeam.map((p: any) => loadPlayerData(p.summonerId, p.summonerId)),
+      ...enemyTeam.map((p: any) => loadPlayerData(p.summonerId, p.summonerId)),
+    ]);
+  } catch (e) {
+    console.error("加载 gameflow session 失败:", e);
+    error.value = "加载对局数据失败";
+  }
+  loading.value = false;
 }
 
 function getChampionIcon(id: number): string {
   return id > 0 ? `/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
-}
-
-function getProfileIcon(id: number): string {
-  return `/lol-game-data/assets/v1/profile-icons/${id ?? 29}.jpg`;
 }
 
 function formatRank(q: any): string {
@@ -95,14 +159,29 @@ function formatRank(q: any): string {
   return `${tier}${div}`;
 }
 
-onMounted(() => refreshState());
-
-watch(() => store.gamePhase, (phase: string) => {
-  if (phase === "ChampSelect") refreshState();
+onMounted(async () => {
+  // 获取当前玩家 summonerId，用于 InProgress 阶段分离队伍
+  try {
+    const s = await fetchCurrentSummoner();
+    if (s?.summonerId) currentSummonerId.value = s.summonerId;
+  } catch { /* ignore */ }
+  refreshState();
 });
 
+// 监听阶段变化：ChampSelect → 加载己方；InProgress/GameStart → 加载双方
+watch(() => store.gamePhase, (phase: string) => {
+  if (phase === "ChampSelect") {
+    // 清除 gameflow 数据，回退到 champSelectSession
+    gameflowMyTeam.value = [];
+    gameflowTheirTeam.value = [];
+    refreshState();
+  }
+  if (phase === "InProgress" || phase === "GameStart") loadFromGameflowSession();
+});
+
+// ChampSelect session 更新时加载己方玩家
 watch(() => store.champSelectSession, (session: any) => {
-  if (session) {
+  if (session && store.gamePhase === "ChampSelect") {
     loading.value = false;
     error.value = "";
     loadAllPlayers();
@@ -115,11 +194,19 @@ watch(activeTab, () => loadAllPlayers());
 <template>
   <div class="game-info">
     <div class="page-header">
-      <h2 class="page-title">🎮 对局信息</h2>
+      <h2 class="page-title">
+        🎮 对局信息
+        <span v-if="isGameActive" class="title-phase">
+          · {{ store.gamePhase === 'ChampSelect' ? '选人阶段' :
+               store.gamePhase === 'InProgress' ? '游戏中' :
+               store.gamePhase === 'GameStart' ? '加载中' : '' }}
+        </span>
+      </h2>
       <div class="header-right">
         <span :class="['phase-badge', store.gamePhase.toLowerCase()]">
           {{ store.gamePhase === 'ChampSelect' ? '选人阶段' :
              store.gamePhase === 'InProgress' ? '游戏中' :
+             store.gamePhase === 'GameStart' ? '加载中' :
              store.gamePhase === 'ReadyCheck' ? '准备确认' :
              store.gamePhase === 'Lobby' ? '房间大厅' :
              store.gamePhase === 'Matchmaking' ? '匹配中' :
@@ -136,7 +223,7 @@ watch(activeTab, () => loadAllPlayers());
       <p class="tip">请先启动英雄联盟客户端</p>
     </div>
 
-    <div v-else-if="store.gamePhase !== 'ChampSelect'" class="tip-container">
+    <div v-else-if="!isGameActive" class="tip-container">
       <div class="offline-logo">⏳</div>
       <p class="tip">进入选人阶段后将自动加载对局信息</p>
     </div>
@@ -160,18 +247,17 @@ watch(activeTab, () => loadAllPlayers());
             class="player-card"
           >
             <div class="pc-avatar-area">
-              <div class="pc-avatar">
-                <LcuImage
-                  v-if="playerData[p.cellId]?.info?.profileIconId"
-                  :src="getProfileIcon(playerData[p.cellId].info.profileIconId)"
-                  alt="icon"
-                />
-                <div v-else class="pc-avatar-placeholder">?</div>
-              </div>
-              <!-- 选中的英雄小图标 -->
-              <div v-if="p.championId" class="pc-champ-badge">
-                <LcuImage :src="getChampionIcon(p.championId)" alt="champ" />
-              </div>
+              <!-- 选人阶段：选了英雄才显示英雄头像；未选则只显示等级 -->
+              <template v-if="p.championId">
+                <div class="pc-avatar">
+                  <LcuImage :src="getChampionIcon(p.championId)" alt="champ" />
+                </div>
+              </template>
+              <template v-else>
+                <div class="pc-avatar pc-avatar-empty">
+                  <div class="pc-avatar-placeholder">?</div>
+                </div>
+              </template>
               <div v-if="playerData[p.cellId]?.info?.summonerLevel" class="pc-level">
                 {{ playerData[p.cellId].info.summonerLevel }}
               </div>
@@ -264,6 +350,12 @@ watch(activeTab, () => loadAllPlayers());
   color: #303133;
   margin: 0;
 }
+.title-phase {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #909399;
+  margin-left: 2px;
+}
 .header-right { display: flex; align-items: center; gap: 10px; }
 
 .phase-badge {
@@ -272,6 +364,7 @@ watch(activeTab, () => loadAllPlayers());
 }
 .phase-badge.champselect { background: #1976d2; }
 .phase-badge.inprogress { background: #388e3c; }
+.phase-badge.gamestart { background: #388e3c; }
 .phase-badge.readycheck { background: #f57c00; }
 .phase-badge.lobby { background: #7b1fa2; }
 .phase-badge.matchmaking { background: #0097a7; }
@@ -338,17 +431,10 @@ watch(activeTab, () => loadAllPlayers());
   overflow: hidden; border: 2px solid #dcdfe6;
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
+.pc-avatar-empty { border-color: #e4e7eb; }
 .pc-avatar-placeholder {
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-  background: #e0e0e0; font-size: 1rem; color: #999;
-}
-/* 英雄小图标角标 */
-.pc-champ-badge {
-  position: absolute; bottom: -2px; right: -4px;
-  width: 22px; height: 22px; border-radius: 50%;
-  overflow: hidden; border: 2px solid #fff;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-  background: #fff;
+  background: #f0f2f5; font-size: 1rem; color: #c0c4cc;
 }
 .pc-level {
   position: absolute; top: -4px; right: -4px;
