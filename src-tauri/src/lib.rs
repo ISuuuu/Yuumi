@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, RwLock};
 
 /// LCU 连接凭证及预配置的 HTTP Client
 pub struct LcuClient {
+    pub pid: u32,
     pub port: u16,
     pub token: String,
     pub http_client: reqwest::Client,
@@ -126,9 +127,58 @@ pub fn run() {
             tools::apply_rune_page,
             tools::get_lcu_zoom,
             tools::fix_lcu_window,
+            get_config,
+            update_config,
+            get_lcu_connection_info,
+            get_game_data_assets,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameDataAssetsDisplay {
+    pub items: std::collections::HashMap<i32, String>,
+    pub spells: std::collections::HashMap<i32, String>,
+    pub runes: std::collections::HashMap<i32, String>,
+}
+
+/// 获取 LCU 预加载的静态资源映射 (ID -> iconPath)
+#[tauri::command]
+async fn get_game_data_assets(
+    app_state: tauri::State<'_, AppState>,
+) -> Result<GameDataAssetsDisplay, String> {
+    let gd = app_state.game_data.read().await;
+    Ok(GameDataAssetsDisplay {
+        items: gd.items.clone(),
+        spells: gd.spells.clone(),
+        runes: gd.runes.clone(),
+    })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LcuConnectionDetails {
+    pub pid: u32,
+    pub port: u16,
+    pub token: String,
+}
+
+/// 获取当前 LCU 连接信息（PID、端口、Token）
+#[tauri::command]
+async fn get_lcu_connection_info(
+    app_state: tauri::State<'_, AppState>,
+) -> Result<Option<LcuConnectionDetails>, String> {
+    let lock = app_state.lcu_client.read().await;
+    match lock.as_ref() {
+        Some(client) => Ok(Some(LcuConnectionDetails {
+            pid: client.pid,
+            port: client.port,
+            token: client.token.clone(),
+        })),
+        None => Ok(None),
+    }
 }
 
 #[tauri::command]
@@ -141,6 +191,25 @@ pub fn build_auth_header(token: &str) -> String {
     let credentials = format!("riot:{}", token);
     let encoded = base64::engine::general_purpose::STANDARD.encode(&credentials);
     format!("Basic {}", encoded)
+}
+
+/// 获取完整配置
+#[tauri::command]
+async fn get_config(app_state: tauri::State<'_, AppState>) -> Result<config::AppConfig, String> {
+    let cfg = app_state.config.read().await;
+    Ok(cfg.clone())
+}
+
+/// 更新配置（接收完整 AppConfig JSON，写入内存并持久化）
+#[tauri::command]
+async fn update_config(
+    new_config: config::AppConfig,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut cfg = app_state.config.write().await;
+    *cfg = new_config;
+    cfg.save();
+    Ok(())
 }
 
 
