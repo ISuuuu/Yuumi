@@ -53,6 +53,10 @@ impl Default for GeneralConfig {
 
 // ─── 个性化设置 ───
 
+fn default_theme_color() -> String {
+    "#6c5ce7".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PersonalizationConfig {
@@ -64,6 +68,8 @@ pub struct PersonalizationConfig {
     pub remake_card_color: String,
     pub light_deaths_number_color: String,
     pub dark_deaths_number_color: String,
+    #[serde(default = "default_theme_color")]
+    pub theme_color: String,
 }
 
 impl Default for PersonalizationConfig {
@@ -77,6 +83,7 @@ impl Default for PersonalizationConfig {
             remake_card_color: "#28a2a2a2".into(),
             light_deaths_number_color: "#ffb60000".into(),
             dark_deaths_number_color: "#ffff8d8d".into(),
+            theme_color: "#6c5ce7".into(),
         }
     }
 }

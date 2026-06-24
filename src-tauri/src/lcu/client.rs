@@ -65,7 +65,16 @@ pub async fn get_lcu_asset(
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
 
-    let url = format!("https://127.0.0.1:{}{}", lcu.port, path);
+    let mut clean_path = path.clone();
+    if let Some(pos) = clean_path.find("/lol-game-data/assets/") {
+        let prefix_len = pos + "/lol-game-data/assets/".len();
+        if prefix_len < clean_path.len() {
+            let (prefix, suffix) = clean_path.split_at(prefix_len);
+            clean_path = format!("{}{}", prefix, suffix.to_lowercase());
+        }
+    }
+
+    let url = format!("https://127.0.0.1:{}{}", lcu.port, clean_path);
     let auth = build_auth_header(&lcu.token);
 
     let resp = lcu

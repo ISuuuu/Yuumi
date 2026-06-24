@@ -212,7 +212,7 @@ function removeSpell(slot: 'D' | 'F') {
   user-select: none;
 }
 .spell-slot-card:hover {
-  border-color: #6c5ce7;
+  border-color: var(--primary-color);
   background: #fbfbfe;
 }
 
@@ -220,13 +220,13 @@ function removeSpell(slot: 'D' | 'F') {
   position: absolute;
   top: -8px;
   left: 12px;
-  background: #6c5ce7;
+  background: var(--primary-color);
   color: white;
   font-size: 0.65rem;
   font-weight: 700;
   padding: 1px 6px;
   border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(108, 92, 231, 0.2);
+  box-shadow: 0 2px 4px var(--primary-color-alpha-30);
 }
 
 .slot-content {
@@ -351,8 +351,8 @@ function removeSpell(slot: 'D' | 'F') {
 }
 .spell-cell:hover { background: #e8e8ec; }
 .spell-cell.selected {
-  border-color: #6c5ce7;
-  background: #f0eef9;
+  border-color: var(--primary-color);
+  background: var(--primary-color-alpha-15);
 }
 .spell-cell.disabled {
   opacity: 0.4;

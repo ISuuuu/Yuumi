@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed, provide } from "vue";
 import { useLcuStore, initLcuListeners } from "./store/lcuStore";
-import { fetchCurrentSummoner, lcuRequest } from "./api/lcu";
+import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
+import { updateThemeColor } from "./utils/theme";
 import type { SummonerDisplay } from "./api/lcu";
 import Home from "./views/Home.vue";
 import Career from "./views/Career.vue";
@@ -56,16 +57,39 @@ function toggleSidebar() {
   isSidebarExpanded.value = !isSidebarExpanded.value;
 }
 
-async function loadSummonerInfo() {
+async function loadLcuState() {
   if (store.isConnected) {
     try {
+      // 1. 获取当前召唤师数据
       summoner.value = await fetchCurrentSummoner();
+      
+      // 2. 获取大区平台
       const resp = await lcuRequest<any>("GET", "/lol-platform-config/v1/namespaces/LoginPlatformLocalization/platformId");
       if (resp.success && resp.data) {
         platformId.value = resp.data;
       }
+
+      // 3. 核心修复：同步拉取当前 LCU 对局状态，以便在已经开始的对局中启动软件时能自动跳转
+      const phaseResp = await lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase");
+      if (phaseResp.success && phaseResp.data) {
+        store.setGamePhase(phaseResp.data);
+      }
+
+      // 4. 同步拉取对局 Session
+      if (store.gamePhase === "ChampSelect") {
+        const sessionResp = await lcuRequest<any>("GET", "/lol-champ-select/v1/session");
+        if (sessionResp.success && sessionResp.data) {
+          store.setChampSelectSession(sessionResp.data);
+        }
+      }
+
+      // 5. 初始化加载主题色并应用到全局 CSS 变量中
+      const cfg = await fetchConfig();
+      if (cfg && cfg.Personalization && cfg.Personalization.ThemeColor) {
+        updateThemeColor(cfg.Personalization.ThemeColor);
+      }
     } catch (e) {
-      console.error("获取当前召唤师数据失败:", e);
+      console.error("加载 LCU 基础状态失败:", e);
     }
   } else {
     summoner.value = null;
@@ -75,7 +99,7 @@ async function loadSummonerInfo() {
 
 watch(() => store.isConnected, (connected) => {
   if (connected) {
-    loadSummonerInfo();
+    loadLcuState();
   } else {
     summoner.value = null;
     platformId.value = "";
@@ -281,6 +305,13 @@ function handleReconnect() {
 </template>
 
 <style>
+:root {
+  --primary-color: #6c5ce7;
+  --primary-color-hover: #5b4cc4;
+  --primary-color-alpha-15: rgba(108, 92, 231, 0.15);
+  --primary-color-alpha-30: rgba(108, 92, 231, 0.3);
+  --primary-color-alpha-40: rgba(108, 92, 231, 0.4);
+}
 * { box-sizing: border-box; }
 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #fafbfc; color: #333; overflow: hidden; }
 </style>
@@ -373,8 +404,8 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Ro
 }
 
 .nav-item.active {
-  background-color: #e2e5e9;
-  color: #2c3e50;
+  background-color: var(--primary-color-alpha-15);
+  color: var(--primary-color);
   font-weight: 500;
 }
 
@@ -386,7 +417,7 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Ro
   top: 8px;
   bottom: 8px;
   width: 4px;
-  background-color: #2ecc71;
+  background-color: var(--primary-color);
   border-radius: 0 4px 4px 0;
 }
 
@@ -545,8 +576,8 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Ro
   width: 60px;
   height: 60px;
   line-height: 56px;
-  border: 3px solid #6c5ce7;
-  color: #6c5ce7;
+  border: 3px solid var(--primary-color);
+  color: var(--primary-color);
   font-size: 1.5rem;
   font-weight: 800;
   border-radius: 50%;
@@ -609,7 +640,7 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Ro
 
 .version-tag {
   display: inline-block;
-  background: #6c5ce7;
+  background: var(--primary-color);
   color: white;
   padding: 4px 12px;
   border-radius: 4px;

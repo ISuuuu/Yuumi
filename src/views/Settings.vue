@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
+import { updateThemeColor } from "../utils/theme";
 
 const config = ref<AppConfig | null>(null);
 
@@ -42,6 +43,9 @@ function autoSave() {
 onMounted(async () => {
   try {
     config.value = await fetchConfig();
+    if (config.value && config.value.Personalization && config.value.Personalization.ThemeColor) {
+      updateThemeColor(config.value.Personalization.ThemeColor);
+    }
   } catch (e) {
     console.error("加载系统配置失败:", e);
   }
@@ -89,6 +93,11 @@ async function handleProvideFeedback() {
 async function handleOpenGithub() {
   try { await openUrl("https://github.com/xzmkim/lolhelper"); }
   catch { showToast('打开链接失败', 'error'); }
+}
+
+function onThemeColorInput(e: Event) {
+  const target = e.target as HTMLInputElement;
+  updateThemeColor(target.value);
 }
 </script>
 
@@ -408,7 +417,7 @@ async function handleOpenGithub() {
         <div v-show="activeCollapse === 'themecolor'" class="collapse-content">
           <div class="input-row align-center">
             <label class="color-picker-label">调色盘:</label>
-            <input type="color" class="color-picker" v-model="config.Personalization.WinCardColor" @change="autoSave" />
+            <input type="color" class="color-picker" v-model="config.Personalization.ThemeColor" @input="onThemeColorInput" @change="autoSave" />
           </div>
         </div>
       </div>
@@ -600,10 +609,63 @@ async function handleOpenGithub() {
 
 .loading-spinner {
   width: 36px; height: 36px; border: 3px solid #e2e5e9;
-  border-top-color: #6c5ce7; border-radius: 50%;
+  border-top-color: var(--primary-color); border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.action-btn, .github-btn {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.183);
+  color: #2c3e50;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: bold;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s cubic-bezier(0.25, 0.8, 0.25, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}
+.action-btn:hover, .github-btn:hover {
+  background: rgba(249, 249, 249, 0.85);
+  border-color: rgba(0, 0, 0, 0.12);
+  border-bottom-color: rgba(0, 0, 0, 0.24);
+  transform: translateY(-0.5px);
+}
+.action-btn:active, .github-btn:active {
+  background: rgba(243, 243, 243, 0.6);
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+  transform: translateY(0.5px);
+}
+
+.feedback-btn {
+  background: #2ecc71;
+  border: 1px solid #27ae60;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.2);
+  color: white;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: 0 1px 2px rgba(46, 204, 113, 0.1);
+}
+.feedback-btn:hover {
+  background: #2ecc71cc;
+  border-color: #27ae60;
+  transform: translateY(-0.5px);
+}
+.feedback-btn:active {
+  color: rgba(255, 255, 255, 0.7);
+  border-bottom-color: transparent;
+  transform: translateY(0.5px);
+}
 
 .settings-container { max-width: 800px; margin: 0 auto; animation: fadeIn 0.3s ease-out; }
 
@@ -615,18 +677,27 @@ async function handleOpenGithub() {
 }
 
 .card-item, .collapse-item {
-  background: white; padding: 14px 20px; display: flex; align-items: center;
-  justify-content: space-between; border: 1px solid #ebeef5;
-  border-radius: 8px; margin-bottom: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.01);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(235, 238, 245, 0.8);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.015);
+  transition: transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+              box-shadow 0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+              border-color 0.25s ease,
+              background-color 0.25s ease;
 }
-.card-item.border-bottom, .collapse-item.border-bottom {
-  margin-bottom: 0; border-bottom: none;
-  border-bottom-left-radius: 0; border-bottom-right-radius: 0;
-}
-.card-item + .card-item:not(.border-bottom),
-.collapse-item + .card-item:not(.border-bottom),
-.card-item + .collapse-item:not(.border-bottom) {
-  border-top-left-radius: 0; border-top-right-radius: 0;
+.card-item:hover, .collapse-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px var(--primary-color-alpha-15), 0 2px 6px rgba(0, 0, 0, 0.02);
+  border-color: var(--primary-color-alpha-30);
+  background-color: rgba(255, 255, 255, 0.95);
 }
 
 .card-left { display: flex; flex-direction: column; flex: 1; }
@@ -639,27 +710,8 @@ async function handleOpenGithub() {
   text-overflow: ellipsis; display: inline-block; vertical-align: middle;
 }
 
-.action-btn {
-  background: white; border: 1px solid #dcdfe6; color: #606266;
-  padding: 6px 20px; border-radius: 6px; font-size: 0.82rem;
-  font-weight: bold; cursor: pointer; transition: all 0.2s;
-}
-.action-btn:hover { background: #f5f7fa; border-color: #c0c4cc; }
 
-.feedback-btn {
-  background-color: #2ecc71; color: white; border: none;
-  padding: 6px 20px; border-radius: 6px; font-size: 0.82rem;
-  font-weight: bold; cursor: pointer; transition: background-color 0.2s;
-}
-.feedback-btn:hover { background-color: #27ae60; }
 
-.github-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: white; border: 1px solid #dcdfe6; color: #606266;
-  padding: 6px 16px; border-radius: 6px; font-size: 0.82rem;
-  font-weight: bold; cursor: pointer; transition: all 0.2s;
-}
-.github-btn:hover { background: #f5f7fa; border-color: #c0c4cc; }
 .github-icon { width: 16px; height: 16px; }
 
 .toggle-switch {
@@ -697,16 +749,34 @@ async function handleOpenGithub() {
 
 .input-row { display: flex; gap: 8px; width: 100%; }
 .input-row.align-center { align-items: center; }
+.text-input, .select-input {
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.183);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  outline: none;
+  background-color: rgba(255, 255, 255, 0.7);
+  transition: all 0.2s ease;
+  color: #303133;
+}
+.text-input:hover, .select-input:hover {
+  background-color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+.text-input:focus, .select-input:focus {
+  background-color: #ffffff;
+  border-color: var(--primary-color);
+  border-bottom: 2px solid var(--primary-color);
+  padding-bottom: 7px;
+  box-shadow: 0 4px 12px var(--primary-color-alpha-15);
+}
 .text-input {
-  flex: 1; padding: 8px 12px; border: 1px solid #dcdfe6;
-  border-radius: 6px; font-size: 0.85rem; outline: none;
+  flex: 1;
 }
-.text-input:focus { border-color: #6c5ce7; }
 .select-input {
-  padding: 8px 12px; border: 1px solid #dcdfe6; border-radius: 6px;
-  font-size: 0.85rem; background-color: white; outline: none; min-width: 140px;
+  min-width: 140px;
 }
-.select-input:focus { border-color: #6c5ce7; }
 
 .color-picker-label { font-size: 0.88rem; color: #606266; }
 .color-picker {

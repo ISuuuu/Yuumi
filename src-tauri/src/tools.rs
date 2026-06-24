@@ -214,7 +214,20 @@ pub struct SkinEntry {
     pub load_screen_path: String,
 }
 
-/// 根据英雄 ID 获取皮肤列表（从 champions-minimal 提取英雄名，构造 loadscreen 路径）
+#[derive(serde::Deserialize)]
+struct LcuSkin {
+    id: i32,
+    name: String,
+    #[serde(rename = "loadScreenPath")]
+    load_screen_path: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct LcuChampionDetails {
+    skins: Vec<LcuSkin>,
+}
+
+/// 根据英雄 ID 获取皮肤列表 (直接从 LCU 静态资源加载)
 #[tauri::command]
 pub async fn get_champion_skins(
     champion_id: i32,
@@ -225,55 +238,24 @@ pub async fn get_champion_skins(
     let auth = build_auth_header(&lcu.token);
     let base = format!("https://127.0.0.1:{}", lcu.port);
 
-    // 1. 从 champions-minimal 获取英雄内部名 (alias)
-    let url = format!("{}/lol-champions/v1/inventories/0/champions-minimal", base);
+    let url = format!("{}/lol-game-data/assets/v1/champions/{}.json", base, champion_id);
     let resp = lcu.http_client.get(&url)
         .header("Authorization", &auth)
         .send().await.map_err(|e| e.to_string())?;
 
-    let champs: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
-
-    let champ = champs.iter().find(|c| c.get("id").and_then(|v| v.as_i64()) == Some(champion_id as i64));
-    let (champ_name, display_name) = match champ {
-        Some(c) => {
-            let alias = c.get("alias").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            (alias, name)
-        }
-        None => return Err(format!("未找到英雄 ID: {}", champion_id)),
-    };
-
-    if champ_name.is_empty() {
-        return Err(format!("英雄 {} 无内部名称", champion_id));
+    if !resp.status().is_success() {
+        return Err(format!("LCU 返回错误 [{}]: 无法加载该英雄的皮肤数据", resp.status().as_u16()));
     }
 
-    // 2. 构造皮肤列表（基底 + 最多 30 个皮肤编号）
-    let mut skins = Vec::new();
-
-    // 基底皮肤
-    skins.push(SkinEntry {
-        id: champion_id * 1000,
-        name: format!("{} (默认)", display_name),
-        load_screen_path: format!(
-            "/lol-game-data/assets/ASSETS/Characters/{}/Skins/Base/{}LoadScreen.jpg",
-            champ_name, champ_name
-        ),
-    });
-
-    // 编号皮肤（001 ~ 030）
-    for i in 1..=30 {
-        let skin_id = champion_id * 1000 + i;
-        let num = format!("{:03}", i);
-        let path = format!(
-            "/lol-game-data/assets/ASSETS/Characters/{}/Skins/{}/{}{}LoadScreen.jpg",
-            champ_name, num, champ_name, num
-        );
-        skins.push(SkinEntry {
-            id: skin_id,
-            name: format!("皮肤 #{}", i),
-            load_screen_path: path,
-        });
-    }
+    let details: LcuChampionDetails = resp.json().await.map_err(|e| e.to_string())?;
+    
+    let skins = details.skins.into_iter().map(|s| SkinEntry {
+        id: s.id,
+        name: s.name,
+        load_screen_path: s.load_screen_path.unwrap_or_else(|| {
+            format!("/lol-game-data/assets/v1/champion-loadscreens/{}/{}.jpg", champion_id, s.id)
+        }),
+    }).collect();
 
     Ok(skins)
 }
@@ -474,4 +456,69 @@ pub async fn fix_lcu_window(
     .await
     .map_err(|e| format!("任务执行失败: {}", e))?
 }
+
+use std::path::{Path, PathBuf};
+use std::fs;
+
+fn get_persisted_settings_path(lol_paths: &[String]) -> Option<PathBuf> {
+    if lol_paths.is_empty() {
+        return None;
+    }
+    let p = Path::new(&lol_paths[0]);
+    let base_dir = if p.is_file() {
+        p.parent()?
+    } else {
+        p
+    };
+    Some(base_dir.join("Game").join("Config").join("PersistedSettings.json"))
+}
+
+/// 查询游戏设置（PersistedSettings.json）是否已被锁定（只读）
+#[tauri::command]
+pub async fn get_game_settings_readonly(
+    app_state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let cfg = app_state.config.read().await;
+    let path = get_persisted_settings_path(&cfg.general.lol_path)
+        .ok_or_else(|| "未配置英雄联盟客户端路径".to_string())?;
+
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    let metadata = fs::metadata(&path)
+        .map_err(|e| format!("获取文件元数据失败: {}", e))?;
+    
+    Ok(metadata.permissions().readonly())
+}
+
+/// 锁定/解锁游戏设置（修改 PersistedSettings.json 的只读属性）
+#[tauri::command]
+pub async fn set_game_settings_readonly(
+    readonly: bool,
+    app_state: State<'_, AppState>,
+) -> Result<String, String> {
+    let cfg = app_state.config.read().await;
+    let path = get_persisted_settings_path(&cfg.general.lol_path)
+        .ok_or_else(|| "未配置英雄联盟客户端路径".to_string())?;
+
+    if !path.exists() {
+        return Err("游戏配置文件 PersistedSettings.json 不存在，请先登录一次游戏以自动生成该文件".to_string());
+    }
+
+    let metadata = fs::metadata(&path)
+        .map_err(|e| format!("获取文件元数据失败: {}", e))?;
+    let mut permissions = metadata.permissions();
+    permissions.set_readonly(readonly);
+
+    fs::set_permissions(&path, permissions)
+        .map_err(|e| format!("修改文件属性失败: {}", e))?;
+
+    if readonly {
+        Ok("游戏设置已锁定（只读状态）".to_string())
+    } else {
+        Ok("游戏设置已解锁（可读写状态）".to_string())
+    }
+}
+
 

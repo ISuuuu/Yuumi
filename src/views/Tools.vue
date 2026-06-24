@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from "vue";
+import { ref, onMounted, watch, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { fetchConfig, updateConfig, lcuRequest } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
@@ -44,11 +44,20 @@ const skinList = ref<SkinInfo[]>([]);
 const selectedSkinId = ref<number | null>(null);
 const skinLoading = ref(false);
 
+// 皮肤弹窗状态
+const showSkinModal = ref(false);
+const activeSkinIndex = ref(0);
+
+const currentSelectedSkin = computed(() => {
+  return skinList.value.find(s => s.id === selectedSkinId.value) || null;
+});
+
 // 监听背景英雄点选，自动加载该英雄的皮肤列表
 watch(bgChampion, async (newVal: number[]) => {
   skinList.value = [];
   selectedSkinId.value = null;
   skinIdInput.value = null;
+  activeSkinIndex.value = 0;
   if (!newVal || newVal.length === 0) return;
 
   skinLoading.value = true;
@@ -65,6 +74,7 @@ watch(bgChampion, async (newVal: number[]) => {
       }));
       selectedSkinId.value = skinList.value[0].id;
       skinIdInput.value = skinList.value[0].id;
+      activeSkinIndex.value = 0;
     } else {
       showToast('该英雄暂无皮肤数据', 'error');
     }
@@ -76,14 +86,79 @@ watch(bgChampion, async (newVal: number[]) => {
   }
 });
 
-// 选择皮肤
-function selectSkin(skinId: number) {
-  selectedSkinId.value = skinId;
-  skinIdInput.value = skinId;
+// 键盘事件处理
+function handleKeyDown(e: KeyboardEvent) {
+  if (!showSkinModal.value) return;
+  if (e.key === "ArrowLeft") {
+    prevSkin();
+  } else if (e.key === "ArrowRight") {
+    nextSkin();
+  } else if (e.key === "Enter") {
+    confirmSkinSelection();
+  } else if (e.key === "Escape") {
+    showSkinModal.value = false;
+  }
+}
+
+// 监听弹窗打开以注册/解绑键盘事件
+watch(showSkinModal, (val) => {
+  if (val) {
+    window.addEventListener("keydown", handleKeyDown);
+  } else {
+    window.removeEventListener("keydown", handleKeyDown);
+  }
+});
+
+function openSkinModal() {
+  if (skinList.value.length === 0) {
+    showToast('请先选择英雄以加载皮肤列表', 'error');
+    return;
+  }
+  const idx = skinList.value.findIndex(s => s.id === selectedSkinId.value);
+  if (idx !== -1) {
+    activeSkinIndex.value = idx;
+  } else {
+    activeSkinIndex.value = 0;
+  }
+  showSkinModal.value = true;
+}
+
+function prevSkin() {
+  if (skinList.value.length === 0) return;
+  activeSkinIndex.value = (activeSkinIndex.value - 1 + skinList.value.length) % skinList.value.length;
+}
+
+function nextSkin() {
+  if (skinList.value.length === 0) return;
+  activeSkinIndex.value = (activeSkinIndex.value + 1) % skinList.value.length;
+}
+
+function selectSkin(index: number) {
+  activeSkinIndex.value = index;
+}
+
+async function confirmSkinSelection() {
+  const currentSkin = skinList.value[activeSkinIndex.value];
+  if (currentSkin) {
+    selectedSkinId.value = currentSkin.id;
+    skinIdInput.value = currentSkin.id;
+    showSkinModal.value = false;
+    await handleApplyBackground();
+  }
 }
 
 // 观战输入项
 const spectateSummonerName = ref("");
+
+// 锁定游戏设置状态
+const isGameSettingsLocked = ref(false);
+async function checkGameSettingsLock() {
+  try {
+    isGameSettingsLocked.value = await invoke<boolean>("get_game_settings_readonly");
+  } catch (e) {
+    console.error("获取游戏设置锁定状态失败:", e);
+  }
+}
 
 const GAME_MODES: Record<number, string> = {
   2400: "海克斯大乱斗", 450: "极地大乱斗", 430: "匹配模式",
@@ -94,6 +169,7 @@ const GAME_MODES: Record<number, string> = {
 onMounted(async () => {
   try {
     config.value = await fetchConfig();
+    await checkGameSettingsLock();
   } catch (e) {
     console.error("加载其他功能配置失败:", e);
   }
@@ -307,6 +383,18 @@ async function handleClearBorder() {
     showToast('卸下头像框异常: ' + e.toString(), 'error');
   } finally {
     loading.value = false;
+  }
+}
+
+// 切换锁定游戏设置
+async function handleToggleLockGameSettings() {
+  try {
+    const nextState = !isGameSettingsLocked.value;
+    const msg = await invoke<string>("set_game_settings_readonly", { readonly: nextState });
+    isGameSettingsLocked.value = nextState;
+    showToast(msg);
+  } catch (e: any) {
+    showToast(e.toString(), 'error');
   }
 }
 </script>
@@ -551,8 +639,8 @@ async function handleClearBorder() {
           <span class="card-desc">让你的游戏设置不会因为切换账号而改变</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Functions.GameInfoFilter ? 'on' : 'off']" @click="config.Functions.GameInfoFilter = !config.Functions.GameInfoFilter; triggerAutoSave()">
-            <span class="toggle-text">{{ config.Functions.GameInfoFilter ? '开' : '关' }}</span>
+          <div :class="['toggle-switch', isGameSettingsLocked ? 'on' : 'off']" @click="handleToggleLockGameSettings">
+            <span class="toggle-text">{{ isGameSettingsLocked ? '开' : '关' }}</span>
             <span class="toggle-slider"></span>
           </div>
         </div>
@@ -620,26 +708,30 @@ async function handleClearBorder() {
         </div>
         <div v-show="activeCollapse === 'profilebg'" class="collapse-content">
           <div class="input-row align-center margin-bottom">
-            <span class="toggle-desc">选择英雄后显示对应皮肤：</span>
+            <span class="toggle-desc">选择英雄并更换皮肤背景：</span>
           </div>
           <ChampionPicker v-model="bgChampion" :maxCount="1" />
-          <div v-if="skinLoading" class="skin-loading">加载皮肤中...</div>
-          <div v-else-if="skinList.length > 0" class="skin-grid">
-            <div
-              v-for="skin in skinList"
-              :key="skin.id"
-              :class="['skin-card', { active: selectedSkinId === skin.id }]"
-              @click="selectSkin(skin.id)"
-            >
-              <LcuImage :src="skin.loadScreenPath" class="skin-img" />
-              <div class="skin-name">{{ skin.name }}</div>
+          
+          <div v-if="skinLoading" class="skin-loading">
+            <div class="loading-spinner"></div>
+            <span>加载皮肤中...</span>
+          </div>
+          
+          <!-- 已选择皮肤的预览信息，代替原来的平铺列表 -->
+          <div v-else-if="skinList.length > 0" class="selected-skin-preview">
+            <div class="preview-layout">
+              <div class="preview-img-container">
+                <LcuImage :src="currentSelectedSkin?.loadScreenPath" class="preview-img" />
+              </div>
+              <div class="preview-info-box">
+                <span class="preview-title">已选背景皮肤</span>
+                <span class="preview-skin-name">{{ currentSelectedSkin?.name }}</span>
+                <button class="select-skin-btn" @click="openSkinModal">更换背景皮肤</button>
+              </div>
             </div>
           </div>
-          <div class="input-row margin-top">
-            <label class="delay-label">皮肤 ID:</label>
-            <input v-model.number="skinIdInput" type="number" placeholder="手动输入皮肤 ID..." class="text-input" />
-            <button class="apply-btn" @click="handleApplyBackground" :disabled="loading || skinIdInput === null">应用</button>
-          </div>
+
+
         </div>
       </div>
 
@@ -735,6 +827,64 @@ async function handleClearBorder() {
       </div>
 
     </div>
+
+    <!-- 皮肤选择轮播图弹窗 -->
+    <Transition name="fade">
+      <div v-if="showSkinModal" class="skin-modal-overlay" @click.self="showSkinModal = false">
+        <div class="skin-modal-card">
+          <!-- 弹窗头部 -->
+          <div class="skin-modal-header">
+            <h3>选择背景皮肤</h3>
+            <button class="modal-close-btn" @click="showSkinModal = false">✕</button>
+          </div>
+
+          <!-- 轮播主图区 -->
+          <div class="skin-carousel-container">
+            <!-- 左箭头 -->
+            <button class="carousel-nav-btn prev" @click="prevSkin" title="上一张 (←)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+
+            <!-- 皮肤加载图展示 -->
+            <div class="skin-carousel-slide">
+              <div class="slide-img-wrapper">
+                <LcuImage :src="skinList[activeSkinIndex]?.loadScreenPath" class="carousel-img" />
+              </div>
+              <div class="carousel-skin-name">{{ skinList[activeSkinIndex]?.name }}</div>
+            </div>
+
+            <!-- 右箭头 -->
+            <button class="carousel-nav-btn next" @click="nextSkin" title="下一张 (→)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+
+          <!-- 底部小缩略图滑轨 -->
+          <div class="thumbnail-slider-wrapper">
+            <div class="thumbnail-slider">
+              <div
+                v-for="(skin, index) in skinList"
+                :key="skin.id"
+                :class="['thumbnail-dot', { active: activeSkinIndex === index }]"
+                @click="selectSkin(index)"
+                :title="skin.name"
+              >
+                <LcuImage :src="skin.loadScreenPath" class="thumbnail-img" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 底部控制按钮 -->
+          <div class="skin-modal-footer">
+            <span class="carousel-counter">{{ activeSkinIndex + 1 }} / {{ skinList.length }}</span>
+            <div class="footer-actions">
+              <button class="cancel-action-btn" @click="showSkinModal = false">取消</button>
+              <button class="confirm-action-btn" @click="confirmSkinSelection">确 定</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -764,7 +914,7 @@ async function handleClearBorder() {
   width: 36px;
   height: 36px;
   border: 3px solid #e2e5e9;
-  border-top-color: #6c5ce7;
+  border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -797,29 +947,27 @@ async function handleClearBorder() {
 
 /* 卡片 Item 通用样式 */
 .card-item, .collapse-item {
-  background: white;
-  padding: 14px 20px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 16px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  margin-bottom: 4px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.01);
+  border: 1px solid rgba(235, 238, 245, 0.8);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.015);
+  transition: transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+              box-shadow 0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+              border-color 0.25s ease,
+              background-color 0.25s ease;
 }
-
-.card-item.border-bottom, .collapse-item.border-bottom {
-  margin-bottom: 0px;
-  border-bottom: none;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.card-item + .card-item:not(.border-bottom), 
-.collapse-item + .card-item:not(.border-bottom),
-.card-item + .collapse-item:not(.border-bottom) {
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
+.card-item:hover, .collapse-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px var(--primary-color-alpha-15), 0 2px 6px rgba(0, 0, 0, 0.02);
+  border-color: var(--primary-color-alpha-30);
+  background-color: rgba(255, 255, 255, 0.95);
 }
 
 .card-left {
@@ -856,25 +1004,38 @@ async function handleClearBorder() {
 
 /* 按钮样式 */
 .action-btn {
-  background: white;
-  border: 1px solid #dcdfe6;
-  color: #606266;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.183);
+  color: #2c3e50;
   padding: 6px 20px;
   border-radius: 6px;
   font-size: 0.82rem;
   font-weight: bold;
   cursor: pointer;
-  transition: all 0.2s;
+  outline: none;
+  transition: all 0.15s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
 }
 
 .action-btn:hover {
-  background: #f5f7fa;
-  border-color: #c0c4cc;
+  background: rgba(249, 249, 249, 0.85);
+  border-color: rgba(0, 0, 0, 0.12);
+  border-bottom-color: rgba(0, 0, 0, 0.24);
+  transform: translateY(-0.5px);
+}
+
+.action-btn:active {
+  background: rgba(243, 243, 243, 0.6);
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+  transform: translateY(0.5px);
 }
 
 .action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 .text-danger {
@@ -905,7 +1066,7 @@ async function handleClearBorder() {
 }
 
 .toggle-switch.on {
-  background-color: #6c5ce7;
+  background-color: var(--primary-color);
   justify-content: flex-start;
 }
 
@@ -1009,60 +1170,65 @@ async function handleClearBorder() {
   margin-bottom: 12px;
 }
 
-.text-input {
-  flex: 1;
+.text-input, .select-input, .number-input {
   padding: 8px 12px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.183);
   border-radius: 6px;
   font-size: 0.85rem;
   outline: none;
+  background-color: rgba(255, 255, 255, 0.7);
+  transition: all 0.2s ease;
+  color: #303133;
 }
-
-.text-input:focus {
-  border-color: #6c5ce7;
+.text-input:hover, .select-input:hover, .number-input:hover {
+  background-color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 0, 0, 0.12);
 }
-
+.text-input:focus, .select-input:focus, .number-input:focus {
+  background-color: #ffffff;
+  border-color: var(--primary-color);
+  border-bottom: 2px solid var(--primary-color);
+  padding-bottom: 7px;
+  box-shadow: 0 4px 12px var(--primary-color-alpha-15);
+}
+.text-input {
+  flex: 1;
+}
+.select-input {
+  min-width: 140px;
+}
 .number-input {
   width: 70px;
   padding: 6px 10px;
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  outline: none;
 }
-
 .number-input:focus {
-  border-color: #6c5ce7;
-}
-
-.select-input {
-  padding: 8px 12px;
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  background-color: white;
-  outline: none;
-}
-
-.select-input:focus {
-  border-color: #6c5ce7;
+  padding-bottom: 5px;
 }
 
 .apply-btn {
-  background-color: #6c5ce7;
+  background: var(--primary-color);
+  border: 1px solid var(--primary-color-hover);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.2);
   color: white;
-  border: none;
   padding: 8px 20px;
   border-radius: 6px;
   font-size: 0.85rem;
   font-weight: bold;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.15s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: 0 1px 2px var(--primary-color-alpha-15);
+}
+.apply-btn:hover {
+  background: var(--primary-color-hover);
+  transform: translateY(-0.5px);
+}
+.apply-btn:active {
+  color: rgba(255, 255, 255, 0.7);
+  border-bottom-color: transparent;
+  transform: translateY(0.5px);
 }
 
-.apply-btn:hover {
-  background-color: #5a4bd1;
-}
 
 .apply-btn:disabled {
   opacity: 0.5;
@@ -1144,68 +1310,345 @@ async function handleClearBorder() {
   margin-top: 12px;
 }
 
-/* 皮肤选择网格 */
+/* 皮肤加载 */
 .skin-loading {
-  font-size: 0.82rem;
-  color: #909399;
-  text-align: center;
-  padding: 12px 0;
-}
-
-.skin-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 8px;
-  margin: 8px 0 12px;
-  max-height: 320px;
-  overflow-y: auto;
-  padding-right: 4px;
+  color: #909399;
+  font-size: 0.85rem;
+  padding: 1.5rem 0;
 }
 
-.skin-grid::-webkit-scrollbar {
-  width: 4px;
+/* 已选择皮肤的横向精致预览框 */
+.selected-skin-preview {
+  margin: 12px 0 16px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(235, 238, 245, 0.8);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.01);
 }
 
-.skin-grid::-webkit-scrollbar-thumb {
-  background: #dcdfe6;
+.preview-layout {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.preview-img-container {
+  width: 130px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  flex-shrink: 0;
+}
+
+.preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.preview-info-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.preview-title {
+  font-size: 0.75rem;
+  color: #909399;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.preview-skin-name {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #2c3e50;
+}
+
+.select-skin-btn {
+  align-self: flex-start;
+  background: var(--primary-color-alpha-15);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color-alpha-30);
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-top: 4px;
+}
+
+.select-skin-btn:hover {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--primary-color-alpha-30);
+}
+
+/* 轮播图皮肤选择模态弹窗 */
+.skin-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.skin-modal-card {
+  width: 480px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalScaleIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+@keyframes modalScaleIn {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.skin-modal-header {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(235, 238, 245, 0.5);
+  background: rgba(250, 250, 252, 0.5);
+}
+
+.skin-modal-header h3 {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #2c3e50;
+  margin: 0;
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: #909399;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.modal-close-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #303133;
+}
+
+/* 轮播主体区 */
+.skin-carousel-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 16px;
+  position: relative;
+  background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, rgba(240,242,245,0.3) 100%);
+}
+
+.carousel-nav-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(235, 238, 245, 0.8);
+  color: #606266;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  z-index: 2;
+}
+
+.carousel-nav-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.carousel-nav-btn:hover {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: white;
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px var(--primary-color-alpha-30);
+}
+
+.skin-carousel-slide {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 320px;
+}
+
+.slide-img-wrapper {
+  width: 200px;
+  height: 330px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
+  border: 2px solid white;
+  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.slide-img-wrapper:hover {
+  transform: scale(1.02);
+}
+
+.carousel-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.carousel-skin-name {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #2c3e50;
+  text-align: center;
+  min-height: 24px;
+}
+
+/* 缩略图横排滑轨 */
+.thumbnail-slider-wrapper {
+  padding: 0 24px 16px;
+  overflow-x: auto;
+}
+
+.thumbnail-slider-wrapper::-webkit-scrollbar {
+  height: 4px;
+}
+
+.thumbnail-slider-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.1);
   border-radius: 2px;
 }
 
-.skin-card {
-  border: 2px solid transparent;
-  border-radius: 8px;
+.thumbnail-slider {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+.thumbnail-dot {
+  width: 44px;
+  height: 26px;
+  border-radius: 4px;
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.2s, transform 0.15s;
-  background: #f5f7fa;
+  opacity: 0.5;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
-.skin-card:hover {
-  border-color: #c0c4cc;
-  transform: translateY(-1px);
-}
-
-.skin-card.active {
-  border-color: #6c5ce7;
-  box-shadow: 0 0 0 1px #6c5ce7;
-}
-
-.skin-img {
+.thumbnail-img {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: 100%;
   object-fit: cover;
   display: block;
-  border-radius: 6px 6px 0 0;
 }
 
-.skin-name {
-  font-size: 0.72rem;
+.thumbnail-dot:hover {
+  opacity: 0.8;
+  transform: scale(1.05);
+}
+
+.thumbnail-dot.active {
+  opacity: 1;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--primary-color-alpha-30);
+  transform: scale(1.08);
+}
+
+/* 弹窗底部 */
+.skin-modal-footer {
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid rgba(235, 238, 245, 0.5);
+  background: rgba(250, 250, 252, 0.5);
+}
+
+.carousel-counter {
+  font-size: 0.85rem;
+  color: #909399;
+  font-weight: bold;
+}
+
+.footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cancel-action-btn {
+  background: white;
+  border: 1px solid #dcdfe6;
   color: #606266;
-  padding: 4px 6px;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cancel-action-btn:hover {
+  background: #f5f7fa;
+  border-color: #c0c4cc;
+}
+
+.confirm-action-btn {
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px var(--primary-color-alpha-30);
+}
+
+.confirm-action-btn:hover {
+  background: var(--primary-color-hover);
+  box-shadow: 0 6px 16px var(--primary-color-alpha-40);
 }
 
 /* Toast 通知 */

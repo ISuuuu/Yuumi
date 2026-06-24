@@ -131,6 +131,8 @@ pub fn run() {
             tools::open_log_folder,
             tools::fetch_opgg_data,
             tools::get_champion_skins,
+            tools::get_game_settings_readonly,
+            tools::set_game_settings_readonly,
             get_config,
             update_config,
             get_lcu_connection_info,

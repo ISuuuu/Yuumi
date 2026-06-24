@@ -818,9 +818,9 @@ const statsSummary = computed(() => {
 }
 
 .queue-dropdown-item.active {
-  color: #6c5ce7;
+  color: var(--primary-color);
   font-weight: 600;
-  background: #f0efff;
+  background: var(--primary-color-alpha-15);
 }
 
 .arrow-icon {

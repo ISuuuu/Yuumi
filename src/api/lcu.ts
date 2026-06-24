@@ -171,6 +171,7 @@ export interface PersonalizationConfig {
   RemakeCardColor: string;
   LightDeathsNumberColor: string;
   DarkDeathsNumberColor: string;
+  ThemeColor: string;
 }
 
 export interface FunctionsConfig {

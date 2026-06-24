@@ -305,7 +305,7 @@ function getChampIcon(id: number): string {
 .opgg-header-left { display: flex; align-items: center; gap: 12px; }
 
 .opgg-logo {
-  font-weight: 900; font-size: 1.1rem; color: #6c5ce7;
+  font-weight: 900; font-size: 1.1rem; color: var(--primary-color);
   letter-spacing: -0.5px;
 }
 
@@ -314,7 +314,7 @@ function getChampIcon(id: number): string {
   padding: 4px 14px; border-radius: 6px; font-size: 0.82rem;
   font-weight: 600; cursor: pointer; transition: all 0.15s;
 }
-.tab-btn.active { background: #6c5ce7; color: white; border-color: #6c5ce7; }
+.tab-btn.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
 .tab-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .close-btn {
@@ -333,7 +333,7 @@ function getChampIcon(id: number): string {
   border-radius: 6px; font-size: 0.82rem; background: white;
   outline: none;
 }
-.filter-select:focus { border-color: #6c5ce7; }
+.filter-select:focus { border-color: var(--primary-color); }
 
 .opgg-body {
   flex: 1; overflow-y: auto; padding: 0;
@@ -350,7 +350,7 @@ function getChampIcon(id: number): string {
 
 .spinner {
   width: 32px; height: 32px; border: 3px solid #e2e5e9;
-  border-top-color: #6c5ce7; border-radius: 50%;
+  border-top-color: var(--primary-color); border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -385,7 +385,7 @@ function getChampIcon(id: number): string {
 /* 出装详情 */
 .build-header { padding: 12px 20px 0; }
 .back-btn {
-  background: none; border: none; color: #6c5ce7;
+  background: none; border: none; color: var(--primary-color);
   font-size: 0.85rem; font-weight: 600; cursor: pointer;
 }
 .back-btn:hover { text-decoration: underline; }

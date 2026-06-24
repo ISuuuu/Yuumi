@@ -191,6 +191,7 @@ pub fn start(
                                 let pid_for_gd = pid;
                                 let port_for_gd = port;
                                 let token_for_gd = token.clone();
+                                let app_handle_for_gd = app_handle.clone();
                                 tauri::async_runtime::spawn(async move {
                                     match reqwest::Client::builder()
                                         .danger_accept_invalid_certs(true)
@@ -206,6 +207,7 @@ pub fn start(
                                             let assets = super::game_data::fetch_game_data_assets(&tmp_lcu).await;
                                             *gd.write().await = assets;
                                             log::info!("游戏资源已更新");
+                                            let _ = app_handle_for_gd.emit("game-data-ready", ());
                                         }
                                         Err(e) => log::error!("加载游戏资源失败: {}", e),
                                     }
