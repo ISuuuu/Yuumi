@@ -3,6 +3,7 @@ pub mod config;
 pub mod lcu;
 pub mod parsers;
 pub mod tools;
+pub mod upload;
 
 use base64::Engine;
 use std::sync::Arc;
