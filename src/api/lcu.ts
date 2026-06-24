@@ -212,6 +212,9 @@ export interface FunctionsConfig {
   AutoSetSummonerSpellMid: number[];
   AutoSetSummonerSpellBot: number[];
   AutoSetSummonerSpellSup: number[];
+  EnableReserveGameinfo: boolean;
+  LcuRealtimeEnabled: boolean;
+  LcuUserId: string;
 }
 
 export interface OtherConfig {

@@ -11,9 +11,11 @@ import TFT from "./views/TFT.vue";
 import Settings from "./views/Settings.vue";
 import Tools from "./views/Tools.vue";
 import LcuImage from "./components/LcuImage.vue";
+import OpggModal from "./components/OpggModal.vue";
 
 const store = useLcuStore();
 const currentPage = ref("home");
+const showOpgg = ref(false);
 const isSidebarExpanded = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
 const platformId = ref("");
@@ -22,6 +24,12 @@ const platformId = ref("");
 const navigateSearchPayload = ref<{ name: string; gameId: number | null } | null>(null);
 
 provide("navigateSearchPayload", navigateSearchPayload);
+
+// 供子组件跳转页面
+function navigateTo(page: string) {
+  currentPage.value = page;
+}
+provide("navigateTo", navigateTo);
 
 const PLATFORM_MAP: Record<string, string> = {
   HN1: "艾欧尼亚", HN2: "祖安", HN3: "诺克萨斯", HN4: "班德尔城", HN5: "皮尔特沃夫",
@@ -170,7 +178,7 @@ function handleReconnect() {
 
       <!-- 底部附加操作 -->
       <div class="sidebar-bottom">
-        <div :class="['nav-item', { active: currentPage === 'opgg' }]" @click="navigate('opgg')" title="OP.GG">
+        <div class="nav-item" @click="showOpgg = true" title="OP.GG">
           <span class="nav-icon text-icon">OP</span>
           <span class="nav-label">OP.GG</span>
         </div>
@@ -266,6 +274,9 @@ function handleReconnect() {
         </div>
       </template>
     </main>
+
+    <!-- OP.GG 弹窗 -->
+    <OpggModal v-if="showOpgg" @close="showOpgg = false" />
   </div>
 </template>
 

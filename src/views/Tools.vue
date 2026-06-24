@@ -5,9 +5,22 @@ import { fetchConfig, updateConfig, lcuRequest } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import ChampionPicker from "../components/ChampionPicker.vue";
 import SpellPicker from "../components/SpellPicker.vue";
+import LcuImage from "../components/LcuImage.vue";
 
 const config = ref<AppConfig | null>(null);
 const loading = ref(false);
+
+// Toast 通知
+const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
+  message: '', type: 'success', visible: false
+});
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  if (toastTimer) clearTimeout(toastTimer);
+  toast.value = { message, type, visible: true };
+  toastTimer = setTimeout(() => { toast.value.visible = false; }, 2000);
+}
 
 // 折叠面板状态
 const activeCollapse = ref<string | null>(null);
@@ -19,26 +32,63 @@ function toggleCollapse(panelName: string) {
 // 个人主页状态项
 const statusInput = ref("");
 const skinIdInput = ref<number | null>(null);
+// 段位展示状态
+const spoofQueue = ref("RANKED_SOLO_5x5");
 const spoofTier = ref("CHALLENGER");
 const spoofDivision = ref("I");
 const bgChampion = ref<number[]>([]);
 
-// 监听背景英雄点选，自动设为该英雄默认皮肤 ID (例如 103 -> 103000)
-watch(bgChampion, (newVal) => {
-  if (newVal && newVal.length > 0) {
-    skinIdInput.value = newVal[0] * 1000;
-  } else {
-    skinIdInput.value = null;
+// 皮肤列表（选英雄后加载）
+interface SkinInfo { id: number; name: string; splashPath: string; loadScreenPath: string }
+const skinList = ref<SkinInfo[]>([]);
+const selectedSkinId = ref<number | null>(null);
+const skinLoading = ref(false);
+
+// 监听背景英雄点选，自动加载该英雄的皮肤列表
+watch(bgChampion, async (newVal: number[]) => {
+  skinList.value = [];
+  selectedSkinId.value = null;
+  skinIdInput.value = null;
+  if (!newVal || newVal.length === 0) return;
+
+  skinLoading.value = true;
+  try {
+    const skins = await invoke<Array<{id: number; name: string; load_screen_path: string}>>("get_champion_skins", {
+      championId: newVal[0],
+    });
+    if (skins && skins.length > 0) {
+      skinList.value = skins.map((s: {id: number; name: string; load_screen_path: string}) => ({
+        id: s.id,
+        name: s.name,
+        splashPath: s.load_screen_path,
+        loadScreenPath: s.load_screen_path,
+      }));
+      selectedSkinId.value = skinList.value[0].id;
+      skinIdInput.value = skinList.value[0].id;
+    } else {
+      showToast('该英雄暂无皮肤数据', 'error');
+    }
+  } catch (e) {
+    console.error("加载皮肤列表失败:", e);
+    showToast('加载皮肤失败', 'error');
+  } finally {
+    skinLoading.value = false;
   }
 });
+
+// 选择皮肤
+function selectSkin(skinId: number) {
+  selectedSkinId.value = skinId;
+  skinIdInput.value = skinId;
+}
 
 // 观战输入项
 const spectateSummonerName = ref("");
 
 const GAME_MODES: Record<number, string> = {
-  420: "单双排位", 430: "匹配模式", 440: "灵活排位", 450: "极地大乱斗",
-  900: "无限火力", 1020: "克隆模式", 1300: "极限闪击", 1700: "斗魂竞技场",
-  2400: "斗魂竞技场 (2v2v2v2)",
+  2400: "海克斯大乱斗", 450: "极地大乱斗", 430: "匹配模式",
+  420: "单双排位", 440: "灵活排位", 900: "无限火力",
+  1020: "克隆模式", 1300: "极限闪击", 1700: "斗魂竞技场",
 };
 
 onMounted(async () => {
@@ -65,9 +115,37 @@ async function triggerAutoSave() {
 }
 
 // 模拟观战启动
-function handleSpectate() {
+async function handleSpectate() {
   if (!spectateSummonerName.value.trim()) return;
-  alert(`⚔️ 正在初始化观战通道... 准备载入玩家 [${spectateSummonerName.value.trim()}] 的实时对局。`);
+  loading.value = true;
+  try {
+    // 第一步：通过召唤师名称获取 puuid
+    const name = spectateSummonerName.value.trim().replace(/[⁦⁩]/g, '');
+    const summonerResp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners?name=${encodeURIComponent(name)}`);
+    if (!summonerResp.success || !summonerResp.data) {
+      showToast('未找到该召唤师，请检查名称后重试', 'error');
+      return;
+    }
+    const puuid = summonerResp.data.puuid;
+
+    // 第二步：通过 LCU API 发起观战
+    const resp = await lcuRequest<any>("POST", "/lol-spectator/v1/spectate/launch", {
+      allowObserveMode: "ALL",
+      dropInSpectateGameId: name,
+      gameQueueType: "",
+      puuid: puuid
+    });
+    if (resp.success) {
+      showToast('观战启动成功，请等待加载...');
+    } else {
+      // 空 body 表示成功，非空表示该玩家不在游戏中
+      showToast('观战失败: ' + (resp.error || '该召唤师可能在游戏中'), 'error');
+    }
+  } catch (e: any) {
+    showToast('观战异常: ' + e.toString(), 'error');
+  } finally {
+    loading.value = false;
+  }
 }
 
 // 修复客户端窗口
@@ -75,9 +153,9 @@ async function handleFixWindow() {
   loading.value = true;
   try {
     await invoke("fix_lcu_window");
-    alert("✅ 客户端窗口大小属性已成功重设！如果未生效，请尝试使用管理员模式启动软件。");
+    showToast('客户端窗口已重设，未生效请用管理员模式启动');
   } catch (e: any) {
-    alert("❌ 修复失败: " + e.toString());
+    showToast('修复失败: ' + e.toString(), 'error');
   } finally {
     loading.value = false;
   }
@@ -88,14 +166,14 @@ async function handleRestartClient() {
   if (!confirm("⚡ 您确定要重启 LOL 客户端吗？(无需重新登录或排队)")) return;
   loading.value = true;
   try {
-    const resp = await lcuRequest<any>("POST", "/riotclient/kill-and-restart");
+    const resp = await lcuRequest<any>("POST", "/riotclient/kill-and-restart-ux");
     if (resp.success) {
-      alert("🚀 重启指令已成功发送，客户端正在重新引导...");
+      showToast('重启指令已发送，客户端正在重新引导...');
     } else {
-      alert("❌ 重启失败: " + resp.error);
+      showToast('重启失败: ' + resp.error, 'error');
     }
   } catch (e: any) {
-    alert("❌ 重启异常: " + e.toString());
+    showToast('重启异常: ' + e.toString(), 'error');
   } finally {
     loading.value = false;
   }
@@ -110,13 +188,13 @@ async function handleApplyStatus() {
       statusMessage: statusInput.value.trim()
     });
     if (resp.success) {
-      alert("✅ 个人卡片签名已成功更新！");
+      showToast('签名已更新');
       statusInput.value = "";
     } else {
-      alert("❌ 修改失败: " + resp.error);
+      showToast('修改失败: ' + resp.error, 'error');
     }
   } catch (e: any) {
-    alert("❌ 修改异常: " + e.toString());
+    showToast('修改异常: ' + e.toString(), 'error');
   } finally {
     loading.value = false;
   }
@@ -127,16 +205,18 @@ async function handleApplyBackground() {
   if (skinIdInput.value === null) return;
   loading.value = true;
   try {
-    const resp = await lcuRequest<any>("POST", "/lol-summoner/v1/current-summoner/background-id", {
-      key: skinIdInput.value
+    // Python 使用 POST /lol-summoner/v1/current-summoner/summoner-profile
+    const resp = await lcuRequest<any>("POST", "/lol-summoner/v1/current-summoner/summoner-profile", {
+      key: "backgroundSkinId",
+      value: skinIdInput.value
     });
     if (resp.success) {
-      alert("✅ 个人主页背景皮肤更换成功！");
+      showToast('背景皮肤更换成功');
     } else {
-      alert("❌ 更换失败: " + resp.error);
+      showToast('更换失败: ' + resp.error, 'error');
     }
   } catch (e: any) {
-    alert("❌ 更换异常: " + e.toString());
+    showToast('更换异常: ' + e.toString(), 'error');
   } finally {
     loading.value = false;
   }
@@ -148,17 +228,18 @@ async function handleApplyRankSpoof() {
   try {
     const resp = await lcuRequest<any>("PUT", "/lol-chat/v1/me", {
       lol: {
+        rankedLeagueQueue: spoofQueue.value,
         rankedLeagueTier: spoofTier.value,
         rankedLeagueDivision: spoofDivision.value
       }
     });
     if (resp.success) {
-      alert(`✅ 段位伪装应用成功 (${spoofTier.value} ${spoofDivision.value})！进入房间生效。`);
+      showToast('段位伪装已应用');
     } else {
-      alert("❌ 段位伪装失败: " + resp.error);
+      showToast('段位伪装失败: ' + resp.error, 'error');
     }
   } catch (e: any) {
-    alert("❌ 伪装异常: " + e.toString());
+    showToast('伪装异常: ' + e.toString(), 'error');
   } finally {
     loading.value = false;
   }
@@ -173,12 +254,12 @@ async function handleApplyAvailability(avail: string) {
     });
     if (resp.success) {
       const availText = avail === 'chat' ? '在线' : avail === 'away' ? '离开' : '隐身';
-      alert(`✅ 在线状态已成功切换为: ${availText}`);
+      showToast('在线状态已切换: ' + availText);
     } else {
-      alert("❌ 状态切换失败: " + resp.error);
+      showToast('状态切换失败: ' + resp.error, 'error');
     }
   } catch (e: any) {
-    alert("❌ 状态切换异常: " + e.toString());
+    showToast('状态切换异常: ' + e.toString(), 'error');
   } finally {
     loading.value = false;
   }
@@ -189,16 +270,21 @@ async function handleClearBadges() {
   if (!confirm("🏅 确定要清除个人主页展示的所有挑战勋章吗？")) return;
   loading.value = true;
   try {
-    const resp = await lcuRequest<any>("PUT", "/lol-regalia/v2/current-regalia", {
-      selectedChallengeBadges: []
+    // Python: POST /lol-challenges/v1/update-player-preferences/ with challengeIds: []
+    // 先获取当前 banner 信息
+    const meResp = await lcuRequest<any>("GET", "/lol-chat/v1/me");
+    const banner = meResp.data?.lol?.bannerIdSelected || "";
+    const resp = await lcuRequest<any>("POST", "/lol-challenges/v1/update-player-preferences/", {
+      challengeIds: [],
+      bannerAccent: banner
     });
     if (resp.success) {
-      alert("✅ 所有勋章已成功卸下！");
+      showToast('勋章已全部卸下');
     } else {
-      alert("❌ 勋章卸下失败: " + resp.error);
+      showToast('勋章卸下失败: ' + resp.error, 'error');
     }
   } catch (e: any) {
-    alert("❌ 勋章卸下异常: " + e.toString());
+    showToast('勋章卸下异常: ' + e.toString(), 'error');
   } finally {
     loading.value = false;
   }
@@ -213,12 +299,12 @@ async function handleClearBorder() {
       preferredBorderType: "NONE"
     });
     if (resp.success) {
-      alert("✅ 头像框已成功卸下！");
+      showToast('头像框已卸下');
     } else {
-      alert("❌ 头像框卸下失败: " + resp.error);
+      showToast('头像框卸下失败: ' + resp.error, 'error');
     }
   } catch (e: any) {
-    alert("❌ 卸下头像框异常: " + e.toString());
+    showToast('卸下头像框异常: ' + e.toString(), 'error');
   } finally {
     loading.value = false;
   }
@@ -227,6 +313,13 @@ async function handleClearBorder() {
 
 <template>
   <div class="tools-view">
+    <!-- Toast 通知 -->
+    <Transition name="toast">
+      <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">
+        {{ toast.message }}
+      </div>
+    </Transition>
+
     <div v-if="!config" class="tip-container">
       <div class="loading-spinner"></div>
       <p class="tip">加载功能模块中...</p>
@@ -527,12 +620,24 @@ async function handleClearBorder() {
         </div>
         <div v-show="activeCollapse === 'profilebg'" class="collapse-content">
           <div class="input-row align-center margin-bottom">
-            <span class="toggle-desc">通过选择英雄快速设置默认背景：</span>
+            <span class="toggle-desc">选择英雄后显示对应皮肤：</span>
           </div>
           <ChampionPicker v-model="bgChampion" :maxCount="1" />
+          <div v-if="skinLoading" class="skin-loading">加载皮肤中...</div>
+          <div v-else-if="skinList.length > 0" class="skin-grid">
+            <div
+              v-for="skin in skinList"
+              :key="skin.id"
+              :class="['skin-card', { active: selectedSkinId === skin.id }]"
+              @click="selectSkin(skin.id)"
+            >
+              <LcuImage :src="skin.loadScreenPath" class="skin-img" />
+              <div class="skin-name">{{ skin.name }}</div>
+            </div>
+          </div>
           <div class="input-row margin-top">
-            <label class="delay-label">当前背景皮肤 ID:</label>
-            <input v-model.number="skinIdInput" type="number" placeholder="输入背景皮肤 ID (如 103000 为安妮)..." class="text-input" />
+            <label class="delay-label">皮肤 ID:</label>
+            <input v-model.number="skinIdInput" type="number" placeholder="手动输入皮肤 ID..." class="text-input" />
             <button class="apply-btn" @click="handleApplyBackground" :disabled="loading || skinIdInput === null">应用</button>
           </div>
         </div>
@@ -552,8 +657,16 @@ async function handleClearBorder() {
           </div>
         </div>
         <div v-show="activeCollapse === 'rankdisplay'" class="collapse-content">
+          <div class="input-row" style="margin-bottom: 8px;">
+            <select v-model="spoofQueue" class="select-input">
+              <option value="RANKED_TFT">云顶之弈</option>
+              <option value="RANKED_SOLO_5x5">单双排位</option>
+              <option value="RANKED_FLEX_SR">灵活排位</option>
+            </select>
+          </div>
           <div class="input-row">
             <select v-model="spoofTier" class="select-input">
+              <option value="UNRANKED">未定级</option>
               <option value="CHALLENGER">最强王者</option>
               <option value="GRANDMASTER">傲世宗师</option>
               <option value="MASTER">超凡大师</option>
@@ -565,7 +678,8 @@ async function handleClearBorder() {
               <option value="BRONZE">英勇黄铜</option>
               <option value="IRON">坚韧黑铁</option>
             </select>
-            <select v-model="spoofDivision" class="select-input">
+            <select v-model="spoofDivision" class="select-input" :disabled="['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier)">
+              <option v-if="['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier)" value="NA">-</option>
               <option value="I">I</option>
               <option value="II">II</option>
               <option value="III">III</option>
@@ -1028,5 +1142,111 @@ async function handleClearBorder() {
 
 .margin-top {
   margin-top: 12px;
+}
+
+/* 皮肤选择网格 */
+.skin-loading {
+  font-size: 0.82rem;
+  color: #909399;
+  text-align: center;
+  padding: 12px 0;
+}
+
+.skin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 8px 0 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.skin-grid::-webkit-scrollbar {
+  width: 4px;
+}
+
+.skin-grid::-webkit-scrollbar-thumb {
+  background: #dcdfe6;
+  border-radius: 2px;
+}
+
+.skin-card {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.15s;
+  background: #f5f7fa;
+}
+
+.skin-card:hover {
+  border-color: #c0c4cc;
+  transform: translateY(-1px);
+}
+
+.skin-card.active {
+  border-color: #6c5ce7;
+  box-shadow: 0 0 0 1px #6c5ce7;
+}
+
+.skin-img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+  border-radius: 6px 6px 0 0;
+}
+
+.skin-name {
+  font-size: 0.72rem;
+  color: #606266;
+  padding: 4px 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Toast 通知 */
+.toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: white;
+  z-index: 9999;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+}
+
+.toast-success {
+  background-color: #67c23a;
+}
+
+.toast-error {
+  background-color: #f56c6c;
+}
+
+.toast-enter-active {
+  transition: all 0.25s ease-out;
+}
+
+.toast-leave-active {
+  transition: all 0.2s ease-in;
+}
+
+.toast-enter-from {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-12px);
+}
+
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-8px);
 }
 </style>

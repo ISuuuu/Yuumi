@@ -132,6 +132,14 @@ pub struct FunctionsConfig {
     pub auto_set_summoner_spell_mid: Vec<i32>,
     pub auto_set_summoner_spell_bot: Vec<i32>,
     pub auto_set_summoner_spell_sup: Vec<i32>,
+
+    // 对局信息保留 & LCU 实时查询
+    #[serde(default)]
+    pub enable_reserve_gameinfo: bool,
+    #[serde(default)]
+    pub lcu_realtime_enabled: bool,
+    #[serde(default)]
+    pub lcu_user_id: String,
 }
 
 impl Default for FunctionsConfig {
@@ -175,6 +183,9 @@ impl Default for FunctionsConfig {
             auto_set_summoner_spell_mid: Vec::new(),
             auto_set_summoner_spell_bot: Vec::new(),
             auto_set_summoner_spell_sup: Vec::new(),
+            enable_reserve_gameinfo: false,
+            lcu_realtime_enabled: false,
+            lcu_user_id: String::new(),
         }
     }
 }

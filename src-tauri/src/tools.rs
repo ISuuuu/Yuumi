@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use tauri::State;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::{build_auth_header, AppState};
 
@@ -204,7 +205,168 @@ pub async fn apply_rune_page(
     }
 }
 
+// ─── 英雄皮肤数据 ───
+
+#[derive(serde::Serialize)]
+pub struct SkinEntry {
+    pub id: i32,
+    pub name: String,
+    pub load_screen_path: String,
+}
+
+/// 根据英雄 ID 获取皮肤列表（从 champions-minimal 提取英雄名，构造 loadscreen 路径）
+#[tauri::command]
+pub async fn get_champion_skins(
+    champion_id: i32,
+    app_state: State<'_, AppState>,
+) -> Result<Vec<SkinEntry>, String> {
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
+    let auth = build_auth_header(&lcu.token);
+    let base = format!("https://127.0.0.1:{}", lcu.port);
+
+    // 1. 从 champions-minimal 获取英雄内部名 (alias)
+    let url = format!("{}/lol-champions/v1/inventories/0/champions-minimal", base);
+    let resp = lcu.http_client.get(&url)
+        .header("Authorization", &auth)
+        .send().await.map_err(|e| e.to_string())?;
+
+    let champs: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
+
+    let champ = champs.iter().find(|c| c.get("id").and_then(|v| v.as_i64()) == Some(champion_id as i64));
+    let (champ_name, display_name) = match champ {
+        Some(c) => {
+            let alias = c.get("alias").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            (alias, name)
+        }
+        None => return Err(format!("未找到英雄 ID: {}", champion_id)),
+    };
+
+    if champ_name.is_empty() {
+        return Err(format!("英雄 {} 无内部名称", champion_id));
+    }
+
+    // 2. 构造皮肤列表（基底 + 最多 30 个皮肤编号）
+    let mut skins = Vec::new();
+
+    // 基底皮肤
+    skins.push(SkinEntry {
+        id: champion_id * 1000,
+        name: format!("{} (默认)", display_name),
+        load_screen_path: format!(
+            "/lol-game-data/assets/ASSETS/Characters/{}/Skins/Base/{}LoadScreen.jpg",
+            champ_name, champ_name
+        ),
+    });
+
+    // 编号皮肤（001 ~ 030）
+    for i in 1..=30 {
+        let skin_id = champion_id * 1000 + i;
+        let num = format!("{:03}", i);
+        let path = format!(
+            "/lol-game-data/assets/ASSETS/Characters/{}/Skins/{}/{}{}LoadScreen.jpg",
+            champ_name, num, champ_name, num
+        );
+        skins.push(SkinEntry {
+            id: skin_id,
+            name: format!("皮肤 #{}", i),
+            load_screen_path: path,
+        });
+    }
+
+    Ok(skins)
+}
+
+// ─── OP.GG 数据代理 ───
+
+/// 从 OP.GG API 获取英雄梯队/出装数据（代理请求，避免前端 CORS）
+#[tauri::command]
+pub async fn fetch_opgg_data(
+    region: String,
+    mode: String,
+    tier: String,
+    champion_id: Option<i32>,
+    position: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let url = match champion_id {
+        Some(id) => {
+            let pos = position.unwrap_or_else(|| "none".into());
+            if mode == "arena" {
+                format!("https://lol-api-champion.op.gg/api/{}/champions/{}", region, id)
+            } else {
+                format!("https://lol-api-champion.op.gg/api/{}/champions/{}/{}/{}", region, mode, id, pos)
+            }
+        }
+        None => format!("https://lol-api-champion.op.gg/api/{}/champions/{}", region, mode),
+    };
+
+    let resp = client
+        .get(&url)
+        .query(&[("tier", tier.as_str())])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(data)
+}
+
 // ─── 修复 LCU 客户端窗口 ───
+
+/// 清除本地游戏资源缓存（头像、装备、技能、符文、强化图标）
+#[tauri::command]
+pub async fn clear_game_cache() -> Result<String, String> {
+    let cache_dir = dirs::config_dir()
+        .ok_or("无法获取 AppData 路径")?
+        .join("Yuumi")
+        .join("cache");
+
+    if !cache_dir.exists() {
+        return Ok("缓存目录不存在，无需清除".to_string());
+    }
+
+    let mut count = 0u32;
+    for entry in std::fs::read_dir(&cache_dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.is_dir() {
+            if std::fs::remove_dir_all(&path).is_ok() {
+                count += 1;
+            }
+        } else if path.is_file() {
+            if std::fs::remove_file(&path).is_ok() {
+                count += 1;
+            }
+        }
+    }
+
+    Ok(format!("已清除 {} 个缓存文件/目录", count))
+}
+
+/// 打开日志文件夹
+#[tauri::command]
+pub async fn open_log_folder(app: tauri::AppHandle) -> Result<String, String> {
+    let log_dir = dirs::config_dir()
+        .ok_or("无法获取 AppData 路径")?
+        .join("Yuumi")
+        .join("logs");
+
+    if !log_dir.exists() {
+        let _ = std::fs::create_dir_all(&log_dir);
+    }
+
+    app.opener()
+        .open_path(log_dir.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| e.to_string())?;
+
+    Ok("已打开日志文件夹".to_string())
+}
 
 /// 获取当前 LCU 客户端缩放比例（用于窗口修复）
 #[tauri::command]
