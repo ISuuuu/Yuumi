@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { fetchConfig, updateConfig, lcuRequest } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
+import ChampionPicker from "../components/ChampionPicker.vue";
+import SpellPicker from "../components/SpellPicker.vue";
 
 const config = ref<AppConfig | null>(null);
 const loading = ref(false);
@@ -14,16 +16,21 @@ function toggleCollapse(panelName: string) {
   activeCollapse.value = activeCollapse.value === panelName ? null : panelName;
 }
 
-// 自动选人/禁人/技能的输入框值
-const hoverChampsInput = ref("");
-const banChampsInput = ref("");
-const spellsInput = ref("");
-
 // 个人主页状态项
 const statusInput = ref("");
 const skinIdInput = ref<number | null>(null);
 const spoofTier = ref("CHALLENGER");
 const spoofDivision = ref("I");
+const bgChampion = ref<number[]>([]);
+
+// 监听背景英雄点选，自动设为该英雄默认皮肤 ID (例如 103 -> 103000)
+watch(bgChampion, (newVal) => {
+  if (newVal && newVal.length > 0) {
+    skinIdInput.value = newVal[0] * 1000;
+  } else {
+    skinIdInput.value = null;
+  }
+});
 
 // 观战输入项
 const spectateSummonerName = ref("");
@@ -37,37 +44,20 @@ const GAME_MODES: Record<number, string> = {
 onMounted(async () => {
   try {
     config.value = await fetchConfig();
-    if (config.value) {
-      // 初始化输入框
-      hoverChampsInput.value = config.value.Functions.AutoSelectChampion?.join(", ") || "";
-      banChampsInput.value = config.value.Functions.AutoBanChampion?.join(", ") || "";
-      spellsInput.value = config.value.Functions.AutoSetSummonerSpell?.join(", ") || "";
-    }
   } catch (e) {
     console.error("加载其他功能配置失败:", e);
   }
 });
 
+// 英雄/技能选择变化时自动保存
+function onPickerChange() {
+  triggerAutoSave();
+}
+
 // 自动保存设置函数
 async function triggerAutoSave() {
   if (!config.value) return;
   try {
-    // 将输入框的逗号分隔字符串更新回 config 数据结构
-    config.value.Functions.AutoSelectChampion = hoverChampsInput.value
-      .split(/[,，\s]+/)
-      .map(s => parseInt(s.trim()))
-      .filter(n => !isNaN(n));
-      
-    config.value.Functions.AutoBanChampion = banChampsInput.value
-      .split(/[,，\s]+/)
-      .map(s => parseInt(s.trim()))
-      .filter(n => !isNaN(n));
-      
-    config.value.Functions.AutoSetSummonerSpell = spellsInput.value
-      .split(/[,，\s]+/)
-      .map(s => parseInt(s.trim()))
-      .filter(n => !isNaN(n));
-
     await updateConfig(config.value);
   } catch (e) {
     console.error("自动保存设置失败:", e);
@@ -331,9 +321,7 @@ async function handleClearBorder() {
             </div>
             <span class="toggle-desc">预选环节自动点亮设定英雄</span>
           </div>
-          <div class="input-row">
-            <input v-model="hoverChampsInput" placeholder="输入预选英雄 ID (如 157, 238)，按逗号分隔优先级..." class="text-input" @change="triggerAutoSave" />
-          </div>
+          <ChampionPicker v-model="config.Functions.AutoSelectChampion" :maxCount="1" @update:modelValue="onPickerChange" />
         </div>
       </div>
 
@@ -359,9 +347,7 @@ async function handleClearBorder() {
             </div>
             <span class="toggle-desc">禁用环节自动禁用设定英雄</span>
           </div>
-          <div class="input-row">
-            <input v-model="banChampsInput" placeholder="输入禁用英雄 ID (如 157, 238)..." class="text-input" @change="triggerAutoSave" />
-          </div>
+          <ChampionPicker v-model="config.Functions.AutoBanChampion" :maxCount="1" @update:modelValue="onPickerChange" />
         </div>
       </div>
 
@@ -387,9 +373,7 @@ async function handleClearBorder() {
             </div>
             <span class="toggle-desc">锁定英雄后自动写入配置好的技能组</span>
           </div>
-          <div class="input-row">
-            <input v-model="spellsInput" placeholder="输入两个召唤师技能 ID (如闪现是 4, 传送是 12，以逗号分隔)..." class="text-input" @change="triggerAutoSave" />
-          </div>
+          <SpellPicker v-model="config.Functions.AutoSetSummonerSpell" :maxCount="2" @update:modelValue="onPickerChange" />
         </div>
       </div>
 
@@ -542,8 +526,13 @@ async function handleClearBorder() {
           </div>
         </div>
         <div v-show="activeCollapse === 'profilebg'" class="collapse-content">
-          <div class="input-row">
-            <input v-model.number="skinIdInput" type="number" placeholder="输入背景皮肤 ID (如 103001 为阿狸皮肤)..." class="text-input" />
+          <div class="input-row align-center margin-bottom">
+            <span class="toggle-desc">通过选择英雄快速设置默认背景：</span>
+          </div>
+          <ChampionPicker v-model="bgChampion" :maxCount="1" />
+          <div class="input-row margin-top">
+            <label class="delay-label">当前背景皮肤 ID:</label>
+            <input v-model.number="skinIdInput" type="number" placeholder="输入背景皮肤 ID (如 103000 为安妮)..." class="text-input" />
             <button class="apply-btn" @click="handleApplyBackground" :disabled="loading || skinIdInput === null">应用</button>
           </div>
         </div>
@@ -637,7 +626,7 @@ async function handleClearBorder() {
 
 <style scoped>
 .tools-view {
-  padding: 1.5rem;
+  padding: 1.5rem 1.5rem 1.5rem 0.6rem;
   background-color: #fafbfc;
   min-height: 100%;
 }
@@ -1035,5 +1024,9 @@ async function handleClearBorder() {
 @keyframes slideDown {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.margin-top {
+  margin-top: 12px;
 }
 </style>

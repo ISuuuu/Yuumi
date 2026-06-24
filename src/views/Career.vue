@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from "vue";
+import { ref, watch, computed, inject, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import { fetchCurrentSummoner, fetchMatchHistory, lcuRequest } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
@@ -11,6 +11,10 @@ const matches = ref<MatchDisplay[]>([]);
 const rankedQueues = ref<any[]>([]);
 const loading = ref(false);
 const error = ref("");
+const copied = ref(false);
+
+// 从 App.vue 注入 Career → Search 跳转状态
+const navigateSearchPayload = inject<Ref<{ name: string; gameId: number | null } | null>>("navigateSearchPayload")!;
 
 const TIER_MAP: Record<string, string> = {
   NONE: "无段位",
@@ -86,6 +90,53 @@ function formatHighestRank(queue: any) {
 function formatPrevSeasonRank(queue: any) {
   if (!queue || !queue.previousSeasonEndTier || queue.previousSeasonEndTier === "NONE") return "--";
   return TIER_MAP[queue.previousSeasonEndTier] || queue.previousSeasonEndTier;
+}
+
+// 复制完整 Riot ID
+async function copyRiotId() {
+  if (!summoner.value) return;
+  const fullId = `${summoner.value.gameName || summoner.value.displayName}#${summoner.value.tagLine}`;
+  try {
+    await navigator.clipboard.writeText(fullId);
+    copied.value = true;
+    setTimeout(() => { copied.value = false; }, 1500);
+  } catch {
+    // fallback
+    const ta = document.createElement("textarea");
+    ta.value = fullId;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    copied.value = true;
+    setTimeout(() => { copied.value = false; }, 1500);
+  }
+}
+
+// 点击对局卡片 → 跳转到战绩查询页面并自动搜索
+function goToMatchDetail(gameId: number) {
+  if (!summoner.value) return;
+  const name = summoner.value.gameName || summoner.value.displayName;
+  const fullName = summoner.value.tagLine
+    ? `${name}#${summoner.value.tagLine}`
+    : name;
+  navigateSearchPayload.value = { name: fullName, gameId };
+}
+
+// 点击历史战绩 → 跳转到战绩查询页面并搜索当前召唤师
+function goToHistory() {
+  if (!summoner.value) return;
+  const name = summoner.value.gameName || summoner.value.displayName;
+  const fullName = summoner.value.tagLine
+    ? `${name}#${summoner.value.tagLine}`
+    : name;
+  // gameId 设为 -1 表示只搜索不指定对局
+  navigateSearchPayload.value = { name: fullName, gameId: -1 };
+}
+
+// 召唤师技能图标：直接使用后端解析的 URL（后端已含完整 LCU 路径）
+function getSpellIcon(m: MatchDisplay, slot: 1 | 2): string {
+  return slot === 1 ? m.spell1IconUrl : m.spell2IconUrl;
 }
 
 // 自动加载逻辑
@@ -172,16 +223,21 @@ const statsSummary = computed(() => {
 
         <div class="summoner-info">
           <div class="name-row">
-            <h1 class="display-name">{{ summoner.displayName }}</h1>
-            <span class="challenge-level">0</span>
+            <h1 class="display-name">{{ summoner.gameName || summoner.displayName }}</h1>
+            <button class="copy-riot-id-btn" @click="copyRiotId" :title="`复制: ${summoner.gameName || summoner.displayName}#${summoner.tagLine}`">
+              <span v-if="copied" class="copied-text">✓ 已复制</span>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
           </div>
           <span class="tagline"># {{ summoner.tagLine }}</span>
         </div>
 
         <div class="header-actions">
-          <button class="action-btn" @click="loadSummoner" :disabled="loading">回到我</button>
           <button class="action-btn" @click="loadSummoner" :disabled="loading">刷新</button>
-          <button class="action-btn" @click="loadSummoner" :disabled="loading">历史战绩</button>
+          <button class="action-btn" @click="goToHistory" :disabled="loading">历史战绩</button>
         </div>
       </div>
 
@@ -276,6 +332,8 @@ const statsSummary = computed(() => {
           v-for="m in matches"
           :key="m.gameId"
           :class="['match-card', m.win ? 'win' : 'lose']"
+          @click="goToMatchDetail(m.gameId)"
+          style="cursor: pointer;"
         >
           <!-- 1. 英雄头像、等级、技能、符文 -->
           <div class="champ-panel">
@@ -285,10 +343,10 @@ const statsSummary = computed(() => {
             </div>
             <div class="spells-runes">
               <div class="spell-slot">
-                <LcuImage :src="m.spell1IconUrl" class="mini-icon" alt="s1" />
+                <LcuImage :src="getSpellIcon(m, 1)" class="mini-icon" alt="s1" />
               </div>
               <div class="spell-slot">
-                <LcuImage :src="m.spell2IconUrl" class="mini-icon" alt="s2" />
+                <LcuImage :src="getSpellIcon(m, 2)" class="mini-icon" alt="s2" />
               </div>
               <div class="rune-slot">
                 <LcuImage :src="m.runeIconUrl" class="mini-icon circular" alt="rune" />
@@ -362,7 +420,7 @@ const statsSummary = computed(() => {
 
 <style scoped>
 .career {
-  padding: 1.5rem;
+  padding: 1.5rem 1.5rem 1.5rem 0.6rem;
   background-color: #fafbfc;
   min-height: 100%;
 }
@@ -405,6 +463,7 @@ const statsSummary = computed(() => {
 .summoner-header {
   display: flex;
   align-items: center;
+  gap: 1.2rem;
   padding: 1.5rem;
   background: white;
   border: 1px solid #ebeef5;
@@ -415,50 +474,47 @@ const statsSummary = computed(() => {
 
 .profile-icon-wrapper {
   position: relative;
-  width: 72px;
-  height: 72px;
-  margin-right: 1.2rem;
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+}
+
+.gauge-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, white 33px, transparent 34px),
+              conic-gradient(#2ecc71 calc(var(--progress) * 1%), #e2e5e9 0);
 }
 
 .avatar-container {
-  width: 64px;
-  height: 64px;
+  position: absolute;
+  inset: 5px;
   border-radius: 50%;
   overflow: hidden;
-  position: absolute;
-  top: 4px;
-  left: 4px;
 }
 
 .profile-avatar {
   width: 100%;
   height: 100%;
   object-fit: cover;
-}
-
-.gauge-ring {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, white 82%, transparent 83% 100%),
-              conic-gradient(#2ecc71 calc(var(--progress) * 1%), #e2e5e9 0);
+  display: block;
 }
 
 .level-badge {
   position: absolute;
-  bottom: -2px;
+  bottom: -4px;
   left: 50%;
   transform: translateX(-50%);
   background-color: #2ecc71;
   color: white;
   font-size: 0.72rem;
   font-weight: bold;
-  padding: 2px 8px;
+  padding: 1px 8px;
   border-radius: 10px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  z-index: 1;
+  white-space: nowrap;
 }
 
 .summoner-info {
@@ -480,25 +536,52 @@ const statsSummary = computed(() => {
   margin: 0;
 }
 
-.challenge-level {
-  font-size: 0.75rem;
-  font-weight: bold;
-  color: #909399;
-  background-color: #f0f2f5;
-  border: 1px solid #dcdfe6;
-  border-radius: 4px;
-  padding: 1px 6px;
-}
-
 .tagline {
   font-size: 0.9rem;
   color: #909399;
   margin-top: 4px;
 }
 
+.copy-riot-id-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  color: #909399;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.copy-riot-id-btn:hover {
+  background: #f5f7fa;
+  color: #606266;
+  border-color: #c0c4cc;
+}
+
+.copy-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.copied-text {
+  font-size: 0.65rem;
+  color: #2ecc71;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .header-actions {
   display: flex;
+  flex-direction: column;
   gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .action-btn {
@@ -683,11 +766,13 @@ const statsSummary = computed(() => {
   padding: 10px 16px;
   border-radius: 8px;
   border-left: 4px solid;
-  transition: transform 0.15s;
+  transition: transform 0.15s, box-shadow 0.2s;
+  cursor: pointer;
 }
 
 .match-card:hover {
   transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
 .match-card.win {

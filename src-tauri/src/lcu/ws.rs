@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::protocol::Message, Connector, MaybeTlsStream, WebSocketStream};
 
-const WS_SUBSCRIBE_MSG: &str = r#"[5, "OnJsonApiEvent"]"#;
+const WS_SUBSCRIBE_MSG: &str = r#"[5, "OnJsonApiEvent", {}, {}]"#;
 
 /// 前端关心的核心事件 URI 前缀列表。
 /// 仅这些路径会被推送给前端，避免高频无关事件淹没。

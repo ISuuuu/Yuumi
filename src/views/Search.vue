@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, inject, watch, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import { fetchMatchHistory, lcuRequest } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
@@ -21,15 +21,73 @@ const gameDataAssets = ref<any>(null);
 
 // 分页相关
 const currentPageNum = ref(1);
-const matchesPerPage = 8;
+const matchesPerPage = 10;
+
+// 搜索历史
+const searchHistory = ref<string[]>([]);
+const showHistory = ref(false);
+
+function loadSearchHistory() {
+  try {
+    const saved = localStorage.getItem("yuumi_search_history");
+    if (saved) searchHistory.value = JSON.parse(saved);
+  } catch { /* ignore */ }
+}
+
+function saveToHistory(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  // 去重，最新的放最前面
+  searchHistory.value = [trimmed, ...searchHistory.value.filter((h: string) => h !== trimmed)].slice(0, 20);
+  localStorage.setItem("yuumi_search_history", JSON.stringify(searchHistory.value));
+}
+
+function removeFromHistory(name: string) {
+  searchHistory.value = searchHistory.value.filter((h: string) => h !== name);
+  localStorage.setItem("yuumi_search_history", JSON.stringify(searchHistory.value));
+}
+
+function selectHistory(name: string) {
+  searchName.value = name;
+  showHistory.value = false;
+  doSearch();
+}
+
+function hideHistoryDelayed() {
+  setTimeout(() => { showHistory.value = false; }, 200);
+}
+
+// 过滤后的历史记录（根据当前输入）
+const filteredHistory = computed(() => {
+  const q = searchName.value.trim().toLowerCase();
+  if (!q) return searchHistory.value;
+  return searchHistory.value.filter((h: string) => h.toLowerCase().includes(q));
+});
+
+// 从 App.vue 注入 Career → Search 跳转状态
+const navigateSearchPayload = inject<Ref<{ name: string; gameId: number | null } | null>>("navigateSearchPayload")!;
 
 onMounted(async () => {
+  loadSearchHistory();
   try {
     gameDataAssets.value = await invoke("get_game_data_assets");
   } catch (e) {
     console.error("加载静态资源数据映射失败:", e);
   }
 });
+
+// 监听 Career → Search 跳转：自动填入名称并搜索，然后选中指定对局
+watch(navigateSearchPayload, async (payload) => {
+  if (!payload || !payload.name || payload.gameId === null) return;
+  searchName.value = payload.name;
+  await doSearch();
+  // doSearch 完成后自动选中 Career 传来的对局（-1 表示只搜索不选中）
+  if (payload.gameId > 0 && matches.value.length > 0) {
+    selectMatch(payload.gameId);
+  }
+  // 清除跳转状态，避免后续重复触发
+  navigateSearchPayload.value = null;
+}, { immediate: true });
 
 async function doSearch() {
   if (!searchName.value.trim()) return;
@@ -43,7 +101,25 @@ async function doSearch() {
 
   try {
     const name = searchName.value.trim();
-    const resp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners?name=${encodeURIComponent(name)}`);
+    let resp;
+    const summonerId = pendingSummonerId.value;
+    pendingSummonerId.value = 0;
+
+    if (summonerId) {
+      // 通过数字 summonerId 直接查询（从对局详情点击其他玩家时使用）
+      resp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners/${summonerId}`);
+    } else if (name.includes("#")) {
+      const hashIndex = name.indexOf("#");
+      const gameName = name.slice(0, hashIndex);
+      const tagLine = name.slice(hashIndex + 1);
+      resp = await lcuRequest<any>(
+        "GET",
+        `/lol-summoner/v1/alias/lookup?gameName=${encodeURIComponent(gameName)}&tagLine=${encodeURIComponent(tagLine)}`
+      );
+    } else {
+      resp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners?name=${encodeURIComponent(name)}`);
+    }
+
     if (!resp.success || !resp.data) {
       error.value = resp.error || "未找到该召唤师";
       return;
@@ -63,6 +139,9 @@ async function doSearch() {
       xpUntilNextLevel: data.xpUntilNextLevel ?? 0,
       profileIconUrl: `/lol-game-data/assets/v1/profile-icons/${data.profileIconId ?? 29}.jpg`,
     };
+
+    // 搜索成功后保存到历史记录
+    saveToHistory(name);
 
     if (summoner.value.puuid) {
       await loadMatchHistoryList();
@@ -120,8 +199,7 @@ async function handleNextPage() {
 
 // 静态映射查找
 function getSpellUrl(spellId: number) {
-  const path = gameDataAssets.value?.spells?.[spellId];
-  return path || "";
+  return gameDataAssets.value?.spells?.[spellId] || "";
 }
 
 function getRuneUrl(runeId: number) {
@@ -131,8 +209,7 @@ function getRuneUrl(runeId: number) {
 
 function getItemUrl(itemId: number) {
   if (!itemId) return "";
-  const path = gameDataAssets.value?.items?.[itemId];
-  return path || `/lol-game-data/assets/v1/items/${itemId}.png`;
+  return gameDataAssets.value?.items?.[itemId] || "";
 }
 
 function copyGameId(gameId: number) {
@@ -140,19 +217,30 @@ function copyGameId(gameId: number) {
   alert(`📋 游戏 ID: ${gameId} 已复制到剪贴板`);
 }
 
+// 点击对局中的其他召唤师名称 → 在当前页面搜索（用 summonerId 避免 400/404/422 错误）
+const pendingSummonerId = ref<number>(0);
+
+function searchPlayerBySummonerId(summonerId: number, displayName: string) {
+  if (!summonerId) return;
+  pendingSummonerId.value = summonerId;
+  searchName.value = displayName || String(summonerId);
+  doSearch();
+}
+
 // 整理后的对局详情
 const gameDetails = computed(() => {
   if (!selectedGame.value) return null;
   const g = selectedGame.value;
 
-  const playerMap: Record<number, { name: string; puuid: string }> = {};
+  const playerMap: Record<number, { name: string; puuid: string; summonerId: number }> = {};
   if (g.participantIdentities) {
     for (const identity of g.participantIdentities) {
       const pId = identity.participantId;
       const player = identity.player;
       playerMap[pId] = {
         name: player?.summonerName || player?.gameName || "未知",
-        puuid: player?.puuid || ""
+        puuid: player?.puuid || "",
+        summonerId: player?.summonerId ?? 0
       };
     }
   }
@@ -163,7 +251,7 @@ const gameDetails = computed(() => {
   if (g.participants) {
     for (const p of g.participants) {
       const pId = p.participantId;
-      const nameInfo = playerMap[pId] || { name: "未知", puuid: "" };
+      const nameInfo = playerMap[pId] || { name: "未知", puuid: "", summonerId: 0 };
       const stats = p.stats || {};
       
       const itemUrls = [
@@ -186,6 +274,7 @@ const gameDetails = computed(() => {
         runeUrl: getRuneUrl(stats.perk0),
         name: nameInfo.name,
         puuid: nameInfo.puuid,
+        summonerId: nameInfo.summonerId,
         level: stats.champLevel,
         kills: stats.kills ?? 0,
         deaths: stats.deaths ?? 0,
@@ -207,9 +296,14 @@ const gameDetails = computed(() => {
   }
 
   const isBlueWin = bluePlayers[0]?.win ?? false;
-  
+
   const blueKills = bluePlayers.reduce((sum, p) => sum + p.kills, 0);
   const redKills = redPlayers.reduce((sum, p) => sum + p.kills, 0);
+
+  // 从 teams 数据中提取团队目标统计
+  const teamsData: any[] = g.teams || [];
+  const blueTeamRaw = teamsData.find((t: any) => t.teamId === 100) || {};
+  const redTeamRaw = teamsData.find((t: any) => t.teamId === 200) || {};
 
   const queueNames: Record<number, string> = {
     420: "排位单双排", 430: "匹配模式", 440: "排位灵活组排", 450: "极地大乱斗",
@@ -248,12 +342,22 @@ const gameDetails = computed(() => {
     blue: {
       players: bluePlayers,
       kills: blueKills,
-      win: isBlueWin
+      win: isBlueWin,
+      towerKills: blueTeamRaw.towerKills ?? 0,
+      inhibitorKills: blueTeamRaw.inhibitorKills ?? 0,
+      baronKills: blueTeamRaw.baronKills ?? 0,
+      dragonKills: blueTeamRaw.dragonKills ?? 0,
+      riftHeraldKills: blueTeamRaw.riftHeraldKills ?? 0,
     },
     red: {
       players: redPlayers,
       kills: redKills,
-      win: !isBlueWin
+      win: !isBlueWin,
+      towerKills: redTeamRaw.towerKills ?? 0,
+      inhibitorKills: redTeamRaw.inhibitorKills ?? 0,
+      baronKills: redTeamRaw.baronKills ?? 0,
+      dragonKills: redTeamRaw.dragonKills ?? 0,
+      riftHeraldKills: redTeamRaw.riftHeraldKills ?? 0,
     }
   };
 });
@@ -274,6 +378,8 @@ const gameDetails = computed(() => {
             v-model="searchName"
             placeholder="输入召唤师名称（如 你好#5201）"
             @keyup.enter="doSearch"
+            @focus="showHistory = true"
+            @blur="hideHistoryDelayed"
             :disabled="searching"
             class="search-input"
           />
@@ -283,6 +389,19 @@ const gameDetails = computed(() => {
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
           </button>
+          <!-- 搜索历史下拉框 -->
+          <div v-if="showHistory && filteredHistory.length > 0" class="history-dropdown">
+            <div
+              v-for="item in filteredHistory"
+              :key="item"
+              class="history-item"
+              @mousedown.prevent="selectHistory(item)"
+            >
+              <span class="history-icon">🕐</span>
+              <span class="history-text">{{ item }}</span>
+              <span class="history-delete" @mousedown.prevent.stop="removeFromHistory(item)" title="删除">✕</span>
+            </div>
+          </div>
         </div>
         
         <button class="tab-btn active">生涯</button>
@@ -373,9 +492,14 @@ const gameDetails = computed(() => {
                   <span :class="['team-result-label', team.win ? 'win-text' : 'lose-text']">
                     {{ team.win ? '胜方' : '败方' }}
                   </span>
-                  
+
                   <div class="team-objectives">
-                    <span class="obj-item"><span class="obj-icon">⚔️</span> {{ team.kills }} 击杀</span>
+                    <span class="obj-item"><span class="obj-icon">⚔️</span> {{ team.kills }}</span>
+                    <span class="obj-item"><span class="obj-icon">🏰</span> {{ team.towerKills }}</span>
+                    <span class="obj-item"><span class="obj-icon">💎</span> {{ team.inhibitorKills }}</span>
+                    <span class="obj-item"><span class="obj-icon">👾</span> {{ team.baronKills }}</span>
+                    <span class="obj-item"><span class="obj-icon">🐉</span> {{ team.dragonKills }}</span>
+                    <span class="obj-item"><span class="obj-icon">🦀</span> {{ team.riftHeraldKills }}</span>
                   </div>
                 </div>
 
@@ -388,18 +512,24 @@ const gameDetails = computed(() => {
                         <LcuImage :src="p.championIconUrl" class="row-avatar" alt="champ" />
                         <span class="row-level-overlay">{{ p.level }}</span>
                       </div>
-                      <div class="row-spells">
-                        <LcuImage :src="p.spell1Url" class="row-spell" alt="s1" />
-                        <LcuImage :src="p.spell2Url" class="row-spell" alt="s2" />
-                      </div>
-                      <div class="row-rune">
-                        <LcuImage :src="p.runeUrl" class="row-rune-img" alt="rune" />
+                      <div class="row-spell-rune-row">
+                        <div class="row-spell-col">
+                          <LcuImage :src="p.spell1Url" class="row-spell" alt="s1" />
+                          <LcuImage :src="p.spell2Url" class="row-spell" alt="s2" />
+                        </div>
+                        <div class="row-rune">
+                          <LcuImage :src="p.runeUrl" class="row-rune-img" alt="rune" />
+                        </div>
                       </div>
                     </div>
 
-                    <!-- 名字 -->
+                    <!-- 名字（可点击搜索） -->
                     <div class="player-name-col">
-                      <span :class="['row-name', { 'highlight-user': summoner && p.puuid === summoner.puuid }]">
+                      <span
+                        :class="['row-name', { 'highlight-user': summoner && p.puuid === summoner.puuid }]"
+                        @click="searchPlayerBySummonerId(p.summonerId, p.name)"
+                        :title="`搜索 ${p.name}`"
+                      >
                         {{ p.name }}
                       </span>
                     </div>
@@ -457,7 +587,7 @@ const gameDetails = computed(() => {
 
 <style scoped>
 .search-view {
-  padding: 1.5rem;
+  padding: 1.5rem 1.5rem 1.5rem 0.6rem;
   background-color: #fafbfc;
   min-height: 100%;
 }
@@ -515,6 +645,65 @@ const gameDetails = computed(() => {
   display: flex;
   flex: 1;
   max-width: 400px;
+}
+
+/* 搜索历史下拉框 */
+.history-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #dcdfe6;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  z-index: 100;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  gap: 8px;
+}
+
+.history-item:hover {
+  background: #f5f7fa;
+}
+
+.history-icon {
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.history-text {
+  flex: 1;
+  font-size: 0.85rem;
+  color: #303133;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-delete {
+  font-size: 0.72rem;
+  color: #c0c4cc;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.history-delete:hover {
+  color: #f56c6c;
+  background: #fef0f0;
 }
 
 .search-input {
@@ -599,9 +788,9 @@ const gameDetails = computed(() => {
 /* 分栏大布局 */
 .panel-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 260px 1fr;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
 }
 
 /* 左侧迷你列表 */
@@ -609,6 +798,7 @@ const gameDetails = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  height: 100%;
 }
 
 .mini-match-list {
@@ -864,8 +1054,22 @@ const gameDetails = computed(() => {
 }
 
 .team-objectives {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   color: #606266;
   font-weight: 500;
+  font-size: 0.8rem;
+}
+
+.obj-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.obj-icon {
+  font-size: 0.85rem;
 }
 
 /* 玩家列表 Table 行 */
@@ -891,19 +1095,20 @@ const gameDetails = computed(() => {
 .player-avatar-col {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 110px;
+  gap: 8px;
+  width: 130px;
 }
 
 .row-avatar-box {
   position: relative;
-  width: 32px;
-  height: 32px;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
 }
 
 .row-avatar {
-  width: 32px;
-  height: 32px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
   overflow: hidden;
   border: 1px solid #dcdfe6;
@@ -913,38 +1118,46 @@ const gameDetails = computed(() => {
   position: absolute;
   bottom: -2px;
   right: -2px;
-  width: 12px;
-  height: 12px;
-  line-height: 10px;
+  width: 15px;
+  height: 15px;
+  line-height: 13px;
   background: #202124;
   color: white;
   border-radius: 50%;
-  font-size: 0.55rem;
+  font-size: 0.62rem;
   font-weight: bold;
   text-align: center;
   border: 1px solid #fff;
 }
 
-.row-spells {
+.row-spell-rune-row {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  gap: 3px;
+}
+
+.row-spell-col {
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
 }
 
 .row-spell {
-  width: 13px;
-  height: 13px;
-  border-radius: 1px;
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  border: 1px solid rgba(0,0,0,0.08);
 }
 
 .row-rune {
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .row-rune-img {
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
 }
 
@@ -961,11 +1174,21 @@ const gameDetails = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   color: #555;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.row-name:hover {
+  color: #6c5ce7;
 }
 
 .highlight-user {
   color: #2ecc71 !important;
   font-weight: 800;
+}
+
+.highlight-user:hover {
+  color: #27ae60 !important;
 }
 
 /* 3. 装备区 */
@@ -982,10 +1205,10 @@ const gameDetails = computed(() => {
 }
 
 .row-item-slot {
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   background: rgba(0,0,0,0.03);
-  border-radius: 2px;
+  border-radius: 3px;
   overflow: hidden;
   border: 1px solid rgba(0,0,0,0.05);
 }
@@ -997,9 +1220,9 @@ const gameDetails = computed(() => {
 }
 
 .row-ward-slot {
-  width: 20px;
-  height: 20px;
-  border-radius: 2px;
+  width: 28px;
+  height: 28px;
+  border-radius: 3px;
   overflow: hidden;
   border: 1px solid #e6a23c;
   background-color: rgba(230,162,60,0.03);

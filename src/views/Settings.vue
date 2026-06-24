@@ -632,7 +632,7 @@ function handleOpenGithub() {
 
 <style scoped>
 .settings-view {
-  padding: 1.5rem;
+  padding: 1.5rem 1.5rem 1.5rem 0.6rem;
   background-color: #fafbfc;
   min-height: 100%;
 }

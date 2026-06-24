@@ -160,13 +160,7 @@ impl LcuMatchGame {
         let item_icon_urls: Vec<String> = item_ids
             .iter()
             .filter(|&&id| id > 0)
-            .map(|id| {
-                assets
-                    .items
-                    .get(id)
-                    .cloned()
-                    .unwrap_or_else(|| format!("/lol-game-data/assets/v1/items/{}.png", id))
-            })
+            .filter_map(|id| assets.items.get(id).cloned())
             .collect();
 
         MatchDisplay {
@@ -341,11 +335,16 @@ pub async fn get_match_history(
     let history: LcuMatchHistoryResponse = resp.json().await.map_err(|e| e.to_string())?;
 
     let assets = app_state.game_data.read().await;
+    let limit = match (beg_index, end_index) {
+        (Some(b), Some(e)) if e > b => (e - b) as usize,
+        _ => usize::MAX,
+    };
     let displays: Vec<MatchDisplay> = history
         .games
         .games
         .iter()
         .filter(|g| !g.participants.is_empty())
+        .take(limit)
         .map(|g| g.to_display(&assets))
         .collect();
 
