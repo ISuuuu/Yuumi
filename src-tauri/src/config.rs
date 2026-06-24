@@ -24,6 +24,11 @@ pub struct GeneralConfig {
     pub github_proxy_addr: String,
     pub enable_opgg_proxy: bool,
     pub opgg_proxy_addr: String,
+
+    // SignalR 远程反代
+    pub enable_signalr_hub: bool,
+    pub signalr_server_url: String,
+    pub signalr_user_id: String,
 }
 
 impl Default for GeneralConfig {
@@ -39,6 +44,9 @@ impl Default for GeneralConfig {
             github_proxy_addr: "127.0.0.1:10809".into(),
             enable_opgg_proxy: false,
             opgg_proxy_addr: "127.0.0.1:10809".into(),
+            enable_signalr_hub: false,
+            signalr_server_url: String::new(),
+            signalr_user_id: String::new(),
         }
     }
 }

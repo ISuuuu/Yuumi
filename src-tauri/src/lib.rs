@@ -2,6 +2,7 @@ pub mod agents;
 pub mod config;
 pub mod lcu;
 pub mod parsers;
+pub mod signalr;
 pub mod tools;
 pub mod upload;
 
@@ -25,6 +26,8 @@ pub struct AppState {
     pub bp_session_tx: mpsc::Sender<agents::auto_bp::ChampSelectSession>,
     /// 游戏流程 agent 的事件发送端
     pub gameflow_tx: mpsc::Sender<agents::auto_match::GameflowEvent>,
+    /// 上传队列（可用于外部手动触发上传）
+    pub upload_queue: Arc<upload::UploadQueue>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -36,29 +39,52 @@ pub fn run() {
         .setup(|app| {
             // 加载配置
             let app_config = config::AppConfig::load();
+            let app_config_arc = Arc::new(RwLock::new(app_config));
             log::info!("配置已加载");
 
             // 创建 agent 通信 channels
             let (bp_tx, bp_rx) = mpsc::channel::<agents::auto_bp::ChampSelectSession>(32);
             let (gameflow_tx, gameflow_rx) = mpsc::channel::<agents::auto_match::GameflowEvent>(32);
 
+            // 创建上传队列
+            let upload_queue = Arc::new(upload::UploadQueue::new(app.handle().clone()));
+            let upload_trigger = upload::UploadTrigger::new(upload_queue.clone());
+
             // 初始化全局状态
             let lcu_state: Arc<RwLock<Option<LcuClient>>> = Arc::new(RwLock::new(None));
             let state = AppState {
                 lcu_client: lcu_state.clone(),
-                config: Arc::new(RwLock::new(app_config)),
+                config: app_config_arc.clone(),
                 bp_session_tx: bp_tx,
                 gameflow_tx,
+                upload_queue,
             };
             app.manage(state);
 
             // 启动 Agents
             agents::auto_bp::start(app.handle().clone(), bp_rx);
-            agents::auto_match::start(app.handle().clone(), gameflow_rx);
+            agents::auto_match::start(app.handle().clone(), gameflow_rx, upload_trigger);
 
             // 启动 LCU 进程监测
             let app_handle = app.handle().clone();
             lcu::monitor::start(app_handle, lcu_state);
+
+            // 条件启动 SignalR Hub 远程反代
+            {
+                let cfg_snapshot = app_config_arc.blocking_read();
+                let general = &cfg_snapshot.general;
+                if general.enable_signalr_hub
+                    && !general.signalr_server_url.is_empty()
+                    && !general.signalr_user_id.is_empty()
+                {
+                    log::info!("启动 SignalR Hub 远程反代");
+                    signalr::start(
+                        app.handle().clone(),
+                        general.signalr_server_url.clone(),
+                        general.signalr_user_id.clone(),
+                    );
+                }
+            }
 
             // 开发模式下自动打开 DevTools
             #[cfg(debug_assertions)]
