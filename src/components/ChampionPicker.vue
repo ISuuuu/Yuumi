@@ -348,9 +348,9 @@ function clearAll() {
   transition: all 0.2s;
 }
 .select-btn:hover {
-  background: #6c5ce7;
+  background: var(--primary-color);
   color: white;
-  border-color: #6c5ce7;
+  border-color: var(--primary-color);
 }
 
 .clear-btn {
@@ -463,9 +463,9 @@ function clearAll() {
   background: #f5f7fa;
 }
 .search-input:focus {
-  border-color: #6c5ce7;
+  border-color: var(--primary-color);
   background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.15);
+  box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
 }
 
 /* 加载中 */
@@ -484,7 +484,7 @@ function clearAll() {
   width: 28px;
   height: 28px;
   border: 3px solid #e8e8ec;
-  border-top-color: #6c5ce7;
+  border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 1s infinite linear;
 }
@@ -536,8 +536,8 @@ function clearAll() {
   transform: translateY(-2px);
 }
 .champ-cell.selected {
-  border-color: #6c5ce7;
-  background: #f0eef9;
+  border-color: var(--primary-color);
+  background: var(--primary-color-alpha-15);
 }
 
 .champ-icon {
@@ -562,7 +562,7 @@ function clearAll() {
   font-weight: 500;
 }
 .champ-cell.selected .champ-name {
-  color: #6c5ce7;
+  color: var(--primary-color);
   font-weight: 600;
 }
 
@@ -571,7 +571,7 @@ function clearAll() {
   position: absolute;
   top: 2px;
   right: 2px;
-  background: #6c5ce7;
+  background: var(--primary-color);
   color: white;
   width: 14px;
   height: 14px;
@@ -604,7 +604,7 @@ function clearAll() {
 
 .confirm-btn {
   padding: 8px 24px;
-  background: #6c5ce7;
+  background: var(--primary-color);
   color: white;
   border: none;
   border-radius: 8px;
@@ -612,11 +612,11 @@ function clearAll() {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 6px rgba(108, 92, 231, 0.3);
+  box-shadow: 0 2px 6px var(--primary-color-alpha-30);
 }
 .confirm-btn:hover {
-  background: #5b4cc4;
-  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.4);
+  background: var(--primary-color-hover);
+  box-shadow: 0 4px 12px var(--primary-color-alpha-40);
 }
 
 /* 渐变过渡动画 */

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, inject, watch, type Ref } from "vue";
+import { ref, computed, onMounted, onUnmounted, inject, watch, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import { fetchMatchHistory, lcuRequest } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 const store = useLcuStore();
 const navigateTo = inject<(page: string) => void>("navigateTo")!;
@@ -90,14 +91,45 @@ const filteredHistory = computed(() => {
 // 从 App.vue 注入 Career → Search 跳转状态
 const navigateSearchPayload = inject<Ref<{ name: string; gameId: number | null } | null>>("navigateSearchPayload")!;
 
+let unlistenGameDataReady: (() => void) | null = null;
+
 onMounted(async () => {
   loadSearchHistory();
   try {
-    gameDataAssets.value = await invoke("get_game_data_assets");
+    unlistenGameDataReady = await listen("game-data-ready", async () => {
+      try {
+        gameDataAssets.value = await invoke("get_game_data_assets");
+      } catch (e) {
+        console.error("收到就绪事件后加载静态资源映射失败:", e);
+      }
+    });
   } catch (e) {
-    console.error("加载静态资源数据映射失败:", e);
+    console.error("订阅 game-data-ready 事件失败:", e);
   }
 });
+
+onUnmounted(() => {
+  if (unlistenGameDataReady) {
+    unlistenGameDataReady();
+  }
+});
+
+// 监听 LCU 连接状态，当连接成功后重新拉取静态资源映射
+watch(
+  () => store.isConnected,
+  async (connected) => {
+    if (connected) {
+      try {
+        gameDataAssets.value = await invoke("get_game_data_assets");
+      } catch (e) {
+        console.error("加载静态资源数据映射失败:", e);
+      }
+    } else {
+      gameDataAssets.value = null;
+    }
+  },
+  { immediate: true }
+);
 
 // 监听 Career → Search 跳转：自动填入名称并搜索，然后选中指定对局
 watch(navigateSearchPayload, async (payload) => {
@@ -763,7 +795,7 @@ const gameDetails = computed(() => {
 }
 
 .search-input:focus {
-  border-color: #6c5ce7;
+  border-color: var(--primary-color);
 }
 
 .search-trigger-btn {
@@ -797,9 +829,9 @@ const gameDetails = computed(() => {
 }
 
 .tab-btn.active {
-  background-color: #6c5ce7;
+  background-color: var(--primary-color);
   color: white;
-  border-color: #6c5ce7;
+  border-color: var(--primary-color);
 }
 
 .dropdown-select {
@@ -854,9 +886,9 @@ const gameDetails = computed(() => {
 }
 
 .queue-dropdown-item.active {
-  color: #6c5ce7;
+  color: var(--primary-color);
   font-weight: 600;
-  background: #f0efff;
+  background: var(--primary-color-alpha-15);
 }
 
 .checkbox-wrapper {
@@ -1034,7 +1066,7 @@ const gameDetails = computed(() => {
   width: 36px;
   height: 36px;
   border: 3px solid #e2e5e9;
-  border-top-color: #6c5ce7;
+  border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   margin-bottom: 12px;
@@ -1263,7 +1295,7 @@ const gameDetails = computed(() => {
 }
 
 .row-name:hover {
-  color: #6c5ce7;
+  color: var(--primary-color);
 }
 
 .highlight-user {
