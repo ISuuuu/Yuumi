@@ -238,7 +238,7 @@ fn secs_to_str(total_secs: u64) -> String {
 
 /// Unix 秒时间戳 → (年, 月, 日, 时, 分) — UTC
 /// 注：简化实现，生产环境建议使用 chrono
-fn unix_secs_to_ymdhm(secs: u64) -> (u32, u32, u32, u32, u32) {
+pub fn unix_secs_to_ymdhm(secs: u64) -> (u32, u32, u32, u32, u32) {
     const SECS_PER_DAY: u64 = 86400;
     let days = secs / SECS_PER_DAY;
     let remaining = secs % SECS_PER_DAY;
