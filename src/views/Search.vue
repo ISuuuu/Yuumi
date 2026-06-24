@@ -7,11 +7,34 @@ import LcuImage from "../components/LcuImage.vue";
 import { invoke } from "@tauri-apps/api/core";
 
 const store = useLcuStore();
+const navigateTo = inject<(page: string) => void>("navigateTo")!;
 const searchName = ref("");
 const searching = ref(false);
 const error = ref("");
 const summoner = ref<SummonerDisplay | null>(null);
 const matches = ref<MatchDisplay[]>([]);
+
+// 游戏模式筛选
+const selectedQueue = ref<number | null>(null); // null = 全部
+const QUEUE_OPTIONS = [
+  { id: null, label: '全部' },
+  { id: 2400, label: '海克斯大乱斗' },
+  { id: 450, label: '极地大乱斗' },
+  { id: 430, label: '匹配模式' },
+  { id: 420, label: '单双排位' },
+  { id: 440, label: '灵活排位' },
+];
+const showQueueDropdown = ref(false);
+
+const filteredMatches = computed(() => {
+  if (selectedQueue.value === null) return matches.value;
+  return matches.value.filter((m: MatchDisplay) => m.queueId === selectedQueue.value);
+});
+
+function selectQueue(id: number | null) {
+  selectedQueue.value = id;
+  showQueueDropdown.value = false;
+}
 
 // 对局详情相关
 const selectedGameId = ref<number | null>(null);
@@ -197,19 +220,31 @@ async function handleNextPage() {
   await loadMatchHistoryList();
 }
 
+// 物品图标路径前缀（LCU 内置 CDN）
+const ITEM_CDN = "/lol-game-data/assets";
+
 // 静态映射查找
 function getSpellUrl(spellId: number) {
-  return gameDataAssets.value?.spells?.[spellId] || "";
+  const path = gameDataAssets.value?.spells?.[spellId];
+  if (!path) return "";
+  return path.startsWith("/") ? path : "/" + path;
 }
 
 function getRuneUrl(runeId: number) {
   const path = gameDataAssets.value?.runes?.[runeId];
-  return path || "";
+  if (!path) return "";
+  return path.startsWith("/") ? path : "/" + path;
 }
 
 function getItemUrl(itemId: number) {
   if (!itemId) return "";
-  return gameDataAssets.value?.items?.[itemId] || "";
+  // 优先从预加载的 assets 映射中查找
+  const mapped = gameDataAssets.value?.items?.[itemId];
+  if (mapped) {
+    return mapped.startsWith("/") ? mapped : "/" + mapped;
+  }
+  // 回退：直接构造 LCU CDN 路径
+  return `${ITEM_CDN}/ASSETS/Items/Icons2D/${itemId}.png`;
 }
 
 function copyGameId(gameId: number) {
@@ -404,13 +439,23 @@ const gameDetails = computed(() => {
           </div>
         </div>
         
-        <button class="tab-btn active">生涯</button>
-        
-        <div class="dropdown-select">
-          <span>全部</span>
-          <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="tab-btn active" @click="navigateTo('career')">生涯</button>
+
+        <div class="dropdown-select" @click="showQueueDropdown = !showQueueDropdown">
+          <span>{{ QUEUE_OPTIONS.find(q => q.id === selectedQueue)?.label || '全部' }}</span>
+          <svg :class="['arrow-icon', { expanded: showQueueDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="6 9 12 15 18 9"/>
           </svg>
+          <div v-if="showQueueDropdown" class="queue-dropdown-menu" @click.stop>
+            <div
+              v-for="q in QUEUE_OPTIONS"
+              :key="q.id ?? -1"
+              :class="['queue-dropdown-item', { active: selectedQueue === q.id }]"
+              @click="selectQueue(q.id)"
+            >
+              {{ q.label }}
+            </div>
+          </div>
         </div>
 
         <label class="checkbox-wrapper">
@@ -427,7 +472,7 @@ const gameDetails = computed(() => {
         <div class="left-match-list-panel">
           <div class="mini-match-list">
             <div
-              v-for="m in matches"
+              v-for="m in filteredMatches"
               :key="m.gameId"
               :class="['mini-match-card', m.win ? 'win' : 'lose', { selected: selectedGameId === m.gameId }]"
               @click="selectMatch(m.gameId)"
@@ -622,7 +667,7 @@ const gameDetails = computed(() => {
 }
 
 .search-container {
-  max-width: 1080px;
+  max-width: 1000px;
   margin: 0 auto;
   animation: fadeIn 0.3s ease-out;
 }
@@ -768,11 +813,50 @@ const gameDetails = computed(() => {
   font-size: 0.88rem;
   color: #606266;
   cursor: pointer;
+  position: relative;
 }
 
 .arrow-icon {
   width: 14px;
   height: 14px;
+  transition: transform 0.2s;
+}
+
+.arrow-icon.expanded {
+  transform: rotate(180deg);
+}
+
+/* 模式筛选下拉菜单 */
+.queue-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: white;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  min-width: 140px;
+  padding: 4px 0;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.queue-dropdown-item {
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  color: #606266;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.queue-dropdown-item:hover {
+  background: #f5f7fa;
+}
+
+.queue-dropdown-item.active {
+  color: #6c5ce7;
+  font-weight: 600;
+  background: #f0efff;
 }
 
 .checkbox-wrapper {
@@ -788,8 +872,8 @@ const gameDetails = computed(() => {
 /* 分栏大布局 */
 .panel-layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 16px;
+  grid-template-columns: 200px 1fr;
+  gap: 12px;
   align-items: stretch;
 }
 
@@ -1081,9 +1165,9 @@ const gameDetails = computed(() => {
 .player-row {
   display: flex;
   align-items: center;
-  padding: 8px 16px;
+  padding: 6px 14px;
   border-bottom: 1px solid #f0f2f5;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: #333;
 }
 
@@ -1095,20 +1179,20 @@ const gameDetails = computed(() => {
 .player-avatar-col {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 130px;
+  gap: 6px;
+  width: 120px;
 }
 
 .row-avatar-box {
   position: relative;
-  width: 46px;
-  height: 46px;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
 }
 
 .row-avatar {
-  width: 46px;
-  height: 46px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   overflow: hidden;
   border: 1px solid #dcdfe6;
@@ -1118,13 +1202,13 @@ const gameDetails = computed(() => {
   position: absolute;
   bottom: -2px;
   right: -2px;
-  width: 15px;
-  height: 15px;
-  line-height: 13px;
+  width: 14px;
+  height: 14px;
+  line-height: 12px;
   background: #202124;
   color: white;
   border-radius: 50%;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: bold;
   text-align: center;
   border: 1px solid #fff;
@@ -1163,9 +1247,9 @@ const gameDetails = computed(() => {
 
 /* 2. 名字区 */
 .player-name-col {
-  width: 140px;
+  width: 120px;
   min-width: 0;
-  padding-right: 8px;
+  padding-right: 6px;
 }
 
 .row-name {
@@ -1195,8 +1279,9 @@ const gameDetails = computed(() => {
 .player-items-col {
   display: flex;
   align-items: center;
-  gap: 4px;
-  flex: 1;
+  gap: 3px;
+  width: 190px;
+  flex-shrink: 0;
 }
 
 .row-items-grid {
@@ -1205,8 +1290,8 @@ const gameDetails = computed(() => {
 }
 
 .row-item-slot {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   background: rgba(0,0,0,0.03);
   border-radius: 3px;
   overflow: hidden;
@@ -1220,8 +1305,8 @@ const gameDetails = computed(() => {
 }
 
 .row-ward-slot {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 3px;
   overflow: hidden;
   border: 1px solid #e6a23c;
@@ -1230,28 +1315,28 @@ const gameDetails = computed(() => {
 
 /* 4. KDA */
 .player-kda-col {
-  width: 75px;
+  width: 70px;
   text-align: center;
   font-weight: 600;
 }
 
 /* 5. 补兵 */
 .player-cs-col {
-  width: 45px;
+  width: 42px;
   text-align: center;
   color: #606266;
 }
 
 /* 6. 金币 */
 .player-gold-col {
-  width: 60px;
+  width: 55px;
   text-align: right;
   color: #606266;
 }
 
 /* 7. 伤害 */
 .player-damage-col {
-  width: 65px;
+  width: 60px;
   text-align: right;
   font-weight: 700;
   color: #2c3e50;

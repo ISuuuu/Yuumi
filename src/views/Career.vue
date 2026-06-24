@@ -13,6 +13,28 @@ const loading = ref(false);
 const error = ref("");
 const copied = ref(false);
 
+// 游戏模式筛选
+const selectedQueue = ref<number | null>(null);
+const QUEUE_OPTIONS = [
+  { id: null, label: '全部' },
+  { id: 2400, label: '海克斯大乱斗' },
+  { id: 450, label: '极地大乱斗' },
+  { id: 430, label: '匹配模式' },
+  { id: 420, label: '单双排位' },
+  { id: 440, label: '灵活排位' },
+];
+const showQueueDropdown = ref(false);
+
+const filteredMatches = computed(() => {
+  if (selectedQueue.value === null) return matches.value;
+  return matches.value.filter((m: MatchDisplay) => m.queueId === selectedQueue.value);
+});
+
+function selectQueue(id: number | null) {
+  selectedQueue.value = id;
+  showQueueDropdown.value = false;
+}
+
 // 从 App.vue 注入 Career → Search 跳转状态
 const navigateSearchPayload = inject<Ref<{ name: string; gameId: number | null } | null>>("navigateSearchPayload")!;
 
@@ -317,19 +339,29 @@ const statsSummary = computed(() => {
 
         <div class="summary-actions">
           <button class="summary-action-btn">最近队友</button>
-          <div class="dropdown-trigger">
-            <span>全部</span>
-            <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <div class="dropdown-trigger" @click="showQueueDropdown = !showQueueDropdown">
+            <span>{{ QUEUE_OPTIONS.find(q => q.id === selectedQueue)?.label || '全部' }}</span>
+            <svg :class="['arrow-icon', { expanded: showQueueDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="6 9 12 15 18 9"/>
             </svg>
+            <div v-if="showQueueDropdown" class="queue-dropdown-menu" @click.stop>
+              <div
+                v-for="q in QUEUE_OPTIONS"
+                :key="q.id ?? -1"
+                :class="['queue-dropdown-item', { active: selectedQueue === q.id }]"
+                @click="selectQueue(q.id)"
+              >
+                {{ q.label }}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- 战绩对局历史列表 -->
-      <div v-if="matches.length > 0" class="match-history-list">
+      <div v-if="filteredMatches.length > 0" class="match-history-list">
         <div
-          v-for="m in matches"
+          v-for="m in filteredMatches"
           :key="m.gameId"
           :class="['match-card', m.win ? 'win' : 'lose']"
           @click="goToMatchDetail(m.gameId)"
@@ -746,6 +778,49 @@ const statsSummary = computed(() => {
   font-size: 0.8rem;
   color: #606266;
   cursor: pointer;
+  position: relative;
+}
+
+.dropdown-trigger .arrow-icon {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.2s;
+}
+
+.dropdown-trigger .arrow-icon.expanded {
+  transform: rotate(180deg);
+}
+
+/* 模式筛选下拉菜单 */
+.queue-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: white;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  min-width: 130px;
+  padding: 4px 0;
+}
+
+.queue-dropdown-item {
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  color: #606266;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.queue-dropdown-item:hover {
+  background: #f5f7fa;
+}
+
+.queue-dropdown-item.active {
+  color: #6c5ce7;
+  font-weight: 600;
+  background: #f0efff;
 }
 
 .arrow-icon {
