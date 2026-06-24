@@ -23,3 +23,31 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+
+# HTTP 客户端（忽略 SSL）
+reqwest = { version = "0.12", features = ["json"] }
+http = "1"
+
+# WebSocket
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures-util = "0.3"
+
+# 进程检测
+sysinfo = "0.33"
+
+# 编码
+base64 = "0.22"
+
+# TLS（WebSocket 用）
+native-tls = "0.2"
+tokio-native-tls = "0.3"
+
+# 路径
+dirs = "6"
+
+# 日志
+log = "0.4"
+env_logger = "0.11"
