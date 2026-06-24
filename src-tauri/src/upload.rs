@@ -21,9 +21,9 @@ impl UploadQueue {
         let (tx, rx) = mpsc::channel::<u64>(64);
         let enqueued = Arc::new(Mutex::new(HashSet::new()));
 
-        // 启动后台 Worker
+        // 启动后台 Worker（使用 Tauri 异步运行时，避免 setup 阶段无 Tokio runtime）
         let enqueued_clone = enqueued.clone();
-        tokio::spawn(upload_worker(app_handle, rx, enqueued_clone));
+        tauri::async_runtime::spawn(upload_worker(app_handle, rx, enqueued_clone));
 
         Self { tx, enqueued }
     }
