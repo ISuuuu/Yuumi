@@ -108,7 +108,7 @@ pub struct OpggBuildEvent {
 // ─── 启动 BP Agent ───
 
 pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSession>) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut selection = ChampionSelection::default();
 
         while let Some(session) = session_rx.recv().await {

@@ -26,7 +26,7 @@ const ALLOWED_PREFIXES: &[&str] = &[
 /// 启动 SignalR Hub 连接。
 /// 连接到远程服务器的 `/lcuHub`，支持远程 LCU 查询和状态上报。
 pub fn start(app_handle: AppHandle, server_url: String, user_id: String) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         loop {
             log::info!(
                 "正在连接 SignalR Hub: {}/lcuHub?userId={}",

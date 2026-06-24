@@ -25,7 +25,7 @@ pub fn start(
     mut rx: mpsc::Receiver<GameflowEvent>,
     upload_trigger: crate::upload::UploadTrigger,
 ) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut lobby_created = false;
         let mut upload_trigger = upload_trigger;
 

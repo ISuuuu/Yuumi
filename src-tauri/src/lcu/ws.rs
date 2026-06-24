@@ -19,7 +19,7 @@ const WATCHED_URIS: &[&str] = &[
 /// 建立 LCU WebSocket 连接并在后台监听事件。
 /// 每当收到匹配的事件，通过 Tauri emit 推送给前端。
 pub fn connect(app_handle: AppHandle, port: u16, token: String) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         loop {
             log::info!("正在连接 LCU WebSocket (port={})...", port);
 

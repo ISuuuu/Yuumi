@@ -14,7 +14,7 @@ const PROCESS_NAME: &str = "LeagueClientUx.exe";
 /// 若存在则从命令行参数中提取 --app-port 和 --remoting-auth-token，
 /// 更新全局 LcuClient 状态并广播事件。
 pub fn start(app_handle: AppHandle, lcu_state: Arc<RwLock<Option<LcuClient>>>) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut sys = System::new_all();
         let mut was_connected = false;
 
