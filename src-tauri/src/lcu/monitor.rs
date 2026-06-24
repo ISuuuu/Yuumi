@@ -161,21 +161,22 @@ pub fn start(
             let mut lock = lcu_state.write().await;
 
             match lcu_info {
-                Some((port, token)) => {
+                Some((pid, port, token)) => {
                     let needs_reconnect = match lock.as_ref() {
-                        Some(client) => client.port != port || client.token != token,
+                        Some(client) => client.pid != pid || client.port != port || client.token != token,
                         None => true,
                     };
 
                     if needs_reconnect {
-                        log::info!("检测到 LCU: port={}, 建立新连接", port);
+                        log::info!("检测到 LCU: pid={}, port={}, 建立新连接", pid, port);
 
                         match reqwest::Client::builder()
-                            .danger_accept_invalid_certs(true)
-                            .build()
+                             .danger_accept_invalid_certs(true)
+                             .build()
                         {
                             Ok(http_client) => {
                                 let client = LcuClient {
+                                    pid,
                                     port,
                                     token: token.clone(),
                                     http_client,
@@ -187,6 +188,7 @@ pub fn start(
 
                                 // 异步加载游戏资源映射（不阻塞监控循环）
                                 let gd = game_data.clone();
+                                let pid_for_gd = pid;
                                 let port_for_gd = port;
                                 let token_for_gd = token.clone();
                                 tauri::async_runtime::spawn(async move {
@@ -196,6 +198,7 @@ pub fn start(
                                     {
                                         Ok(http) => {
                                             let tmp_lcu = LcuClient {
+                                                pid: pid_for_gd,
                                                 port: port_for_gd,
                                                 token: token_for_gd,
                                                 http_client: http,
@@ -245,7 +248,7 @@ pub fn start(
 ///
 /// LCU 启动时会在安装目录写入 lockfile，格式为：
 /// `name:pid:port:password:protocol`
-fn find_via_lockfile(sys: &System) -> Option<(u16, String)> {
+fn find_via_lockfile(sys: &System) -> Option<(u32, u16, String)> {
     // 找到 LeagueClientUx.exe 进程，获取其可执行文件所在目录
     let exe_dir = find_lcu_exe_dir(sys)?;
 
@@ -268,16 +271,17 @@ fn find_via_lockfile(sys: &System) -> Option<(u16, String)> {
         return None;
     }
 
+    let pid: u32 = parts[1].parse().ok()?;
     let port: u16 = parts[2].parse().ok()?;
     let password = parts[3].to_string();
 
-    log::debug!("从 lockfile 读取: port={}, token=***", port);
-    Some((port, password))
+    log::debug!("从 lockfile 读取: pid={}, port={}, token=***", pid, port);
+    Some((pid, port, password))
 }
 
 /// 方式二：从进程命令行参数提取（备用）
-fn find_via_cmdline(sys: &System) -> Option<(u16, String)> {
-    for (_, process) in sys.processes() {
+fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String)> {
+    for (pid, process) in sys.processes() {
         let name = process.name().to_string_lossy().to_lowercase();
         if name == "leagueclientux.exe" || name == "leagueclientux" {
             let cmd: Vec<String> = process.cmd().iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
@@ -305,7 +309,7 @@ fn find_via_cmdline(sys: &System) -> Option<(u16, String)> {
             
             // 只有成功提取到了合规的凭据才返回，避免因遇到无权/僵尸同名进程导致提前退出
             if let (Some(p), Some(t)) = (port, token) {
-                return Some((p, t));
+                return Some((pid.as_u32(), p, t));
             }
         }
     }

@@ -142,3 +142,93 @@ export const setSummonerSpells = (spell1Id: number, spell2Id: number) =>
     "/lol-champ-select/v1/session/my-selection",
     { spell1Id, spell2Id }
   );
+
+// ─── 应用配置（读写）───
+// 字段名使用 PascalCase，与 Rust serde(rename_all = "PascalCase") 一致
+
+export interface GeneralConfig {
+  LolPath: string[];
+  EnableStartLolWithApp: boolean;
+  EnableCloseToTray: boolean | null;
+  EnableGameStartMinimize: boolean;
+  EnableCheckUpdate: boolean;
+  LogLevel: number;
+  EnableGithubProxy: boolean;
+  GithubProxyAddr: string;
+  EnableOpggProxy: boolean;
+  OpggProxyAddr: string;
+  EnableSignalrHub: boolean;
+  SignalrServerUrl: string;
+  SignalrUserId: string;
+}
+
+export interface PersonalizationConfig {
+  MicaEnabled: boolean;
+  DpiScale: string;
+  Language: string;
+  WinCardColor: string;
+  LoseCardColor: string;
+  RemakeCardColor: string;
+  LightDeathsNumberColor: string;
+  DarkDeathsNumberColor: string;
+}
+
+export interface FunctionsConfig {
+  CareerGamesNumber: number;
+  ApiConcurrencyNumber: number;
+  GameInfoFilter: boolean;
+  ShowTierInGameInfo: boolean;
+  AutoShowOpgg: boolean;
+  EnableOpggOnTop: boolean;
+  EnableAutoAcceptMatching: boolean;
+  EnableAutoReconnect: boolean;
+  EnableAutoCreateLobby: boolean;
+  DefaultGameMode: number;
+  AutoAcceptMatchingDelay: number;
+  EnableAutoSelectTimeoutCompleted: boolean;
+  EnableRandomSkin: boolean;
+  EnableAutoSelectChampion: boolean;
+  AutoSelectChampion: number[];
+  AutoSelectChampionTop: number[];
+  AutoSelectChampionJug: number[];
+  AutoSelectChampionMid: number[];
+  AutoSelectChampionBot: number[];
+  AutoSelectChampionSup: number[];
+  EnableAutoBanChampion: boolean;
+  AutoBanChampion: number[];
+  AutoBanChampionTop: number[];
+  AutoBanChampionJug: number[];
+  AutoBanChampionMid: number[];
+  AutoBanChampionBot: number[];
+  AutoBanChampionSup: number[];
+  AutoBanDelay: number;
+  PretendBan: boolean;
+  AutoAcceptCeilSwap: boolean;
+  AutoAcceptChampTrade: boolean;
+  EnableAutoSetSpells: boolean;
+  AutoSetSummonerSpell: number[];
+  AutoSetSummonerSpellTop: number[];
+  AutoSetSummonerSpellJug: number[];
+  AutoSetSummonerSpellMid: number[];
+  AutoSetSummonerSpellBot: number[];
+  AutoSetSummonerSpellSup: number[];
+}
+
+export interface OtherConfig {
+  LastNoticeSha: string;
+  SearchHistory: string;
+}
+
+export interface AppConfig {
+  General: GeneralConfig;
+  Personalization: PersonalizationConfig;
+  Functions: FunctionsConfig;
+  Other: OtherConfig;
+}
+
+/** 获取完整应用配置 */
+export const fetchConfig = () => invoke<AppConfig>("get_config");
+
+/** 更新完整应用配置 */
+export const updateConfig = (config: AppConfig) =>
+  invoke<void>("update_config", { newConfig: config });
