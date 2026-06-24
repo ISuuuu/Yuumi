@@ -8,5 +8,9 @@ fn main() {
         .install_default()
         .expect("failed to install rustls ring crypto provider");
 
+    // 读取配置并初始化日志（在 Tauri 启动前，确保尽早写日志）
+    let config = yuumi_lib::config::AppConfig::load();
+    yuumi_lib::logging::init(config.general.log_level);
+
     yuumi_lib::run()
 }

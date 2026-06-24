@@ -325,16 +325,16 @@ function onThemeColorInput(e: Event) {
         <div class="collapse-header" @click="toggleCollapse('apiaddr')">
           <div class="collapse-left">
             <h3 class="card-title">对局上传 API 地址</h3>
-            <span class="card-desc">用于上传对局历史数据的 URL 端点</span>
+            <span class="card-desc">用于上传对局历史数据的 URL 端点，留空则不上传</span>
           </div>
           <div class="collapse-right">
-            <span class="status-preview truncate">{{ config.General.SignalrServerUrl || '未设置' }}</span>
+            <span class="status-preview truncate">{{ config.General.UploadApiUrl || '未设置' }}</span>
             <svg :class="['arrow-icon', { expanded: activeCollapse === 'apiaddr' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </div>
         </div>
         <div v-show="activeCollapse === 'apiaddr'" class="collapse-content">
           <div class="input-row">
-            <input v-model="config.General.SignalrServerUrl" placeholder="https://your-signalr-server.com/" class="text-input" @change="autoSave" />
+            <input v-model="config.General.UploadApiUrl" placeholder="http://example.com" class="text-input" @change="autoSave" />
           </div>
         </div>
       </div>

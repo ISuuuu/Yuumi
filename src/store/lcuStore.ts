@@ -133,5 +133,10 @@ export async function initLcuListeners() {
     }
   });
 
+  // 对局结束自动上传成功事件（由 Rust UploadQueue worker 触发）
+  await listen<{ gameId: number }>("upload-success", (event) => {
+    console.log(`[lcuStore] upload-success: gameId=${event.payload.gameId}`);
+  });
+
   console.log("[lcuStore] all listeners registered");
 }
