@@ -25,3 +25,6 @@ dist-ssr
 
 # Tauri
 src-tauri/target/
+
+# 参考文档（不入库）
+File/
