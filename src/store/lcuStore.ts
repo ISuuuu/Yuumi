@@ -8,6 +8,7 @@ export type GamePhase =
   | "Matchmaking"
   | "ReadyCheck"
   | "ChampSelect"
+  | "GameStart"
   | "InProgress"
   | "EndOfGame"
   | string;
@@ -31,6 +32,7 @@ export const useLcuStore = defineStore("lcu", () => {
     wsConnected.value = v;
   }
   function setGamePhase(v: GamePhase) {
+    console.log("[lcuStore] setGamePhase:", v, "prev:", gamePhase.value);
     gamePhase.value = v;
   }
   function setChampSelectSession(v: any | null) {
@@ -69,18 +71,30 @@ export const useLcuStore = defineStore("lcu", () => {
   };
 });
 
+// 防止重复注册
+let _listenersInitialized = false;
+
 /**
  * 初始化全局 LCU 事件监听。
  * 在应用启动时调用一次，将 Tauri 事件映射到 Pinia store。
  */
-export function initLcuListeners() {
+export async function initLcuListeners() {
+  if (_listenersInitialized) {
+    console.warn("[lcuStore] initLcuListeners already called, skipping");
+    return;
+  }
+  _listenersInitialized = true;
+
   const store = useLcuStore();
 
-  listen("lcu-client-started", () => {
+  // 必须 await listen()，否则监听器可能还未注册就开始接收事件
+  await listen("lcu-client-started", () => {
+    console.log("[lcuStore] lcu-client-started");
     store.setConnected(true);
   });
 
-  listen("lcu-client-ended", () => {
+  await listen("lcu-client-ended", () => {
+    console.log("[lcuStore] lcu-client-ended");
     store.setConnected(false);
     store.setWsConnected(false);
     store.setGamePhase("None");
@@ -88,18 +102,27 @@ export function initLcuListeners() {
     store.setReadyCheck(null);
   });
 
-  listen("lcu-ws-connected", () => {
+  await listen("lcu-ws-connected", () => {
+    console.log("[lcuStore] lcu-ws-connected");
     store.setWsConnected(true);
   });
 
-  listen("lcu-ws-disconnected", () => {
+  await listen("lcu-ws-disconnected", () => {
+    console.log("[lcuStore] lcu-ws-disconnected");
     store.setWsConnected(false);
   });
 
-  listen<any>("lcu-ws-event", (event) => {
+  // Rust 侧 WS 连接失败时的错误信息（对应 try_connect 返回 Err）
+  await listen<string>("lcu-ws-error", (event) => {
+    console.error("[lcuStore] lcu-ws-error:", event.payload);
+  });
+
+  await listen<any>("lcu-ws-event", (event) => {
     const payload = event.payload;
     const uri: string = payload?.uri ?? "";
     const data = payload?.data;
+
+    console.log("[lcuStore] lcu-ws-event uri:", uri, "data:", data);
 
     if (uri.startsWith("/lol-gameflow/v1/gameflow-phase")) {
       store.setGamePhase(data);
@@ -109,4 +132,6 @@ export function initLcuListeners() {
       store.setReadyCheck(data);
     }
   });
+
+  console.log("[lcuStore] all listeners registered");
 }

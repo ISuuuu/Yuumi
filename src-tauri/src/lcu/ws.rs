@@ -1,14 +1,23 @@
+use std::sync::Arc;
+
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConfig, DigitallySignedStruct, Error as TlsError, SignatureScheme};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::net::TcpStream;
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::protocol::Message, Connector, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    connect_async_tls_with_config,
+    tungstenite::{client::ClientRequestBuilder, http, Message},
+    Connector,
+};
 
-const WS_SUBSCRIBE_MSG: &str = r#"[5, "OnJsonApiEvent", {}, {}]"#;
+// ── 订阅消息（对齐 Python: [5, "OnJsonApiEvent"]，2 个元素）────────────────
+const SUBSCRIBE_MSG: &str = r#"[5, "OnJsonApiEvent"]"#;
 
-/// 前端关心的核心事件 URI 前缀列表。
-/// 仅这些路径会被推送给前端，避免高频无关事件淹没。
+/// 前端关心的事件 URI 前缀列表。
+/// 等同于 Python LcuWebSocket 里 subscribes 的 uri 过滤。
 const WATCHED_URIS: &[&str] = &[
     "/lol-gameflow/v1/gameflow-phase",
     "/lol-champ-select/v1/session",
@@ -16,23 +25,68 @@ const WATCHED_URIS: &[&str] = &[
     "/lol-matchmaking/v1/ready-check",
 ];
 
-/// 建立 LCU WebSocket 连接并在后台监听事件。
-/// 每当收到匹配的事件，通过 Tauri emit 推送给前端。
+// ── 等价于 Python ssl=False：完全不验证任何证书 ───────────────────────────
+#[derive(Debug)]
+struct NoVerifier;
+
+impl ServerCertVerifier for NoVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, TlsError> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        // 接受所有签名算法
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+/// 启动 LCU WebSocket 连接并在后台持续监听。
+/// 对齐 Python: aiohttp.ClientSession.ws_connect(address, ssl=False) → [5, event] 订阅
 pub fn connect(app_handle: AppHandle, port: u16, token: String) {
     tauri::async_runtime::spawn(async move {
         loop {
-            log::info!("正在连接 LCU WebSocket (port={})...", port);
+            log::info!("[WS] 正在连接 LCU WebSocket (port={})...", port);
 
             match try_connect(port, &token).await {
                 Ok(ws_stream) => {
-                    log::info!("LCU WebSocket 已连接");
+                    log::info!("[WS] LCU WebSocket 已连接");
                     let _ = app_handle.emit("lcu-ws-connected", ());
                     handle_messages(ws_stream, &app_handle).await;
-                    log::warn!("LCU WebSocket 断开，将在 2 秒后重连");
+                    log::warn!("[WS] LCU WebSocket 断开，2 秒后重连");
                     let _ = app_handle.emit("lcu-ws-disconnected", ());
                 }
                 Err(e) => {
-                    log::warn!("LCU WebSocket 连接失败: {}，将在 2 秒后重连", e);
+                    let msg = e.to_string();
+                    log::warn!("[WS] 连接失败: {}，2 秒后重试", msg);
+                    // 把错误发到前端，方便调试
+                    let _ = app_handle.emit("lcu-ws-error", &msg);
                 }
             }
 
@@ -41,60 +95,83 @@ pub fn connect(app_handle: AppHandle, port: u16, token: String) {
     });
 }
 
-/// 尝试建立一次 WebSocket 连接
+/// 建立 WSS 连接。
+/// 对齐 Python:
+///   session = aiohttp.ClientSession(auth=BasicAuth('riot', token), headers={...})
+///   ws = await session.ws_connect(address, ssl=False)
 async fn try_connect(
     port: u16,
     token: &str,
-) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<dyn std::error::Error + Send + Sync>>
-{
-    let ws_url = format!("wss://127.0.0.1:{}/", port);
+) -> Result<
+    tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    // rustls ClientConfig，NoVerifier = Python ssl=False
+    let tls_config = ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoVerifier))
+        .with_no_client_auth();
 
-    // 忽略 SSL 校验的 TLS connector
-    let native_tls_connector = native_tls::TlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .build()?;
-    let tls_connector = Connector::NativeTls(native_tls_connector);
+    let connector = Connector::Rustls(Arc::new(tls_config));
 
-    // Basic Auth header
+    // Basic Auth header（对齐 Python: BasicAuth('riot', token)）
     let credentials = format!("riot:{}", token);
     let encoded = base64::engine::general_purpose::STANDARD.encode(&credentials);
     let auth_value = format!("Basic {}", encoded);
 
-    let request = http::Request::builder()
-        .uri(&ws_url)
-        .header("Authorization", auth_value)
-        .body(())?;
+    // 使用 ClientRequestBuilder 构造 WebSocket 握手请求，
+    // 它会自动生成 Sec-WebSocket-Key / Version / Connection / Upgrade 等必要头，
+    // 同时支持添加 Authorization 自定义头。
+    // （直接用 Request::builder() 不会自动添加 WebSocket 头，会导致握手失败）
+    let url: http::Uri = format!("wss://127.0.0.1:{}/", port).parse()?;
+    let request = ClientRequestBuilder::new(url)
+        .with_header("Authorization", auth_value)
+        .with_header("Content-Type", "application/json")
+        .with_header("Accept", "application/json");
 
     let (ws_stream, _) =
-        connect_async_tls_with_config(request, None, false, Some(tls_connector)).await?;
+        connect_async_tls_with_config(request, None, false, Some(connector)).await?;
 
     Ok(ws_stream)
 }
 
-/// 处理 WebSocket 消息流：订阅事件、过滤并广播
+/// 处理 WebSocket 消息流。
+/// 对齐 Python:
+///   await ws.send_json([5, event])   ← 订阅
+///   data = json.loads(msg.data)[2]   ← 取第 3 个元素
+///   self.matchUri(data)              ← URI 过滤
 async fn handle_messages(
-    ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    ws_stream: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
     app_handle: &AppHandle,
 ) {
     let (mut write, mut read) = ws_stream.split();
 
-    // 订阅 OnJsonApiEvent
-    if let Err(e) = write.send(Message::Text(WS_SUBSCRIBE_MSG.into())).await {
-        log::error!("发送订阅消息失败: {}", e);
+    // 发送订阅（对齐 Python: await ws.send_json([5, event])）
+    if let Err(e) = write
+        .send(Message::Text(SUBSCRIBE_MSG.to_string().into()))
+        .await
+    {
+        log::error!("[WS] 发送订阅消息失败: {}", e);
         return;
     }
+    log::info!("[WS] 已发送订阅: {}", SUBSCRIBE_MSG);
 
     while let Some(msg_result) = read.next().await {
         match msg_result {
             Ok(Message::Text(text)) => {
-                process_event(&text, app_handle);
+                // 对齐 Python: json.loads(msg.data)[2]
+                process_event(text.as_str(), app_handle);
             }
             Ok(Message::Close(_)) => {
-                log::info!("WebSocket 收到关闭帧");
+                log::info!("[WS] 收到关闭帧");
                 break;
             }
             Err(e) => {
-                log::error!("WebSocket 读取错误: {}", e);
+                log::error!("[WS] 读取错误: {}", e);
                 break;
             }
             _ => {}
@@ -102,15 +179,16 @@ async fn handle_messages(
     }
 }
 
-/// 解析 LCU WebSocket 事件，过滤后广播给前端。
-/// LCU WAMP 格式: [8, { "uri": "/...", "data": ... }, ...]
+/// 解析 LCU 事件并广播给前端。
+/// LCU WAMP 格式: [8, "OnJsonApiEvent_xxx", { "uri": "...", "eventType": "...", "data": ... }]
+/// 对齐 Python matchUri：检查 uri 和 eventType
 fn process_event(text: &str, app_handle: &AppHandle) {
     let value: Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(_) => return,
     };
 
-    // WAMP 事件格式: [8, { "uri": "...", "data": ... }]
+    // 取 arr[2]（对齐 Python: json.loads(msg.data)[2]）
     let arr = match value.as_array() {
         Some(a) if a.len() >= 3 && a[0].as_u64() == Some(8) => a,
         _ => return,
@@ -123,33 +201,25 @@ fn process_event(text: &str, app_handle: &AppHandle) {
         None => return,
     };
 
-    // 只广播前端关心的事件
+    // 只广播前端关心的 URI（对齐 Python matchUri 的 uri 过滤）
     let should_emit = WATCHED_URIS.iter().any(|prefix| uri.starts_with(prefix));
-
     if should_emit {
-        log::debug!("LCU 事件: {}", uri);
+        log::debug!("[WS] 事件: {}", uri);
         let _ = app_handle.emit("lcu-ws-event", event_data.clone());
     }
 
-    // 选人会话事件：解析并转发给 BP Agent
+    // ── 内部 Agent 转发 ──────────────────────────────────────────────────
+    let state = app_handle.state::<crate::AppState>();
+
     if uri.starts_with("/lol-champ-select/v1/session") {
         if let Some(data) = event_data.get("data") {
-            match serde_json::from_value::<crate::agents::auto_bp::ChampSelectSession>(data.clone())
+            if let Ok(session) =
+                serde_json::from_value::<crate::agents::auto_bp::ChampSelectSession>(data.clone())
             {
-                Ok(session) => {
-                    let state = app_handle.state::<crate::AppState>();
-                    // 非阻塞发送，channel 满时丢弃旧数据
-                    let _ = state.bp_session_tx.try_send(session);
-                }
-                Err(e) => {
-                    log::debug!("解析选人会话数据失败: {}", e);
-                }
+                let _ = state.bp_session_tx.try_send(session);
             }
         }
     }
-
-    // 游戏流程事件：转发给 auto_match Agent
-    let state = app_handle.state::<crate::AppState>();
 
     if uri.starts_with("/lol-gameflow/v1/gameflow-phase") {
         if let Some(phase) = event_data.get("data").and_then(|v| v.as_str()) {
@@ -163,18 +233,14 @@ fn process_event(text: &str, app_handle: &AppHandle) {
 
     if uri.starts_with("/lol-matchmaking/v1/ready-check") {
         if let Some(data) = event_data.get("data") {
-            match serde_json::from_value::<crate::agents::auto_match::ReadyCheckData>(data.clone())
+            if let Ok(ready_check) =
+                serde_json::from_value::<crate::agents::auto_match::ReadyCheckData>(data.clone())
             {
-                Ok(ready_check) => {
-                    let _ = state
-                        .gameflow_tx
-                        .try_send(crate::agents::auto_match::GameflowEvent::ReadyCheck(
-                            ready_check,
-                        ));
-                }
-                Err(e) => {
-                    log::debug!("解析 ReadyCheck 数据失败: {}", e);
-                }
+                let _ = state
+                    .gameflow_tx
+                    .try_send(crate::agents::auto_match::GameflowEvent::ReadyCheck(
+                        ready_check,
+                    ));
             }
         }
     }

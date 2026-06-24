@@ -1,9 +1,43 @@
 use futures_util::{SinkExt, StreamExt};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConfig, DigitallySignedStruct, Error as TlsError, SignatureScheme};
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use tokio::sync::RwLock;
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::protocol::Message, Connector};
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::client::ClientRequestBuilder, tungstenite::protocol::Message, Connector};
+
+#[derive(Debug)]
+struct NoVerifier;
+
+impl ServerCertVerifier for NoVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, TlsError> {
+        Ok(ServerCertVerified::assertion())
+    }
+    fn verify_tls12_signature(
+        &self, _message: &[u8], _cert: &CertificateDer<'_>, _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+    fn verify_tls13_signature(
+        &self, _message: &[u8], _cert: &CertificateDer<'_>, _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
 
 /// SignalR 消息终止符
 const RECORD_SEPARATOR: char = '\x1e';
@@ -68,12 +102,15 @@ async fn try_connect(
         user_id
     );
 
-    let native_tls_connector = native_tls::TlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .build()?;
-    let tls_connector = Connector::NativeTls(native_tls_connector);
+    let tls_config = ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoVerifier))
+        .with_no_client_auth();
+    let tls_connector = Connector::Rustls(Arc::new(tls_config));
 
-    let request = http::Request::builder().uri(&ws_url).body(())?;
+    // 使用 ClientRequestBuilder 确保生成 Sec-WebSocket-Key 等必要头
+    let url: http::Uri = ws_url.parse()?;
+    let request = ClientRequestBuilder::new(url);
 
     let (ws_stream, _) =
         connect_async_tls_with_config(request, None, false, Some(tls_connector)).await?;
