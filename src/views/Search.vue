@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, watch, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
-import { fetchMatchHistory, lcuRequest } from "../api/lcu";
+import { fetchMatchHistory, lcuRequest, batchUploadMatches } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 import { invoke } from "@tauri-apps/api/core";
@@ -10,6 +10,17 @@ import { listen } from "@tauri-apps/api/event";
 const store = useLcuStore();
 const navigateTo = inject<(page: string) => void>("navigateTo")!;
 const searchName = ref("");
+
+// Toast 通知
+const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
+  message: '', type: 'success', visible: false
+});
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  if (toastTimer) clearTimeout(toastTimer);
+  toast.value = { message, type, visible: true };
+  toastTimer = setTimeout(() => { toast.value.visible = false; }, 3000);
+}
 const searching = ref(false);
 const error = ref("");
 const summoner = ref<SummonerDisplay | null>(null);
@@ -26,6 +37,10 @@ const QUEUE_OPTIONS = [
   { id: 440, label: '灵活排位' },
 ];
 const showQueueDropdown = ref(false);
+
+// 上传相关
+const uploadEnabled = ref(true);
+const uploadedGameIds = ref(new Set<number>());
 
 const filteredMatches = computed(() => {
   if (selectedQueue.value === null) return matches.value;
@@ -153,6 +168,7 @@ async function doSearch() {
   selectedGame.value = null;
   selectedGameId.value = null;
   currentPageNum.value = 1;
+  uploadedGameIds.value = new Set();
 
   try {
     const name = searchName.value.trim();
@@ -195,8 +211,11 @@ async function doSearch() {
       profileIconUrl: `/lol-game-data/assets/v1/profile-icons/${data.profileIconId ?? 29}.jpg`,
     };
 
-    // 搜索成功后保存到历史记录
-    saveToHistory(name);
+    // 搜索成功后保存到历史记录（用 gameName#tagLine 格式，方便下次直接查询）
+    const gn = summoner.value.gameName || summoner.value.displayName || name;
+    const tl = summoner.value.tagLine;
+    const historyKey = tl ? `${gn}#${tl}` : gn;
+    saveToHistory(historyKey);
 
     if (summoner.value.puuid) {
       await loadMatchHistoryList();
@@ -218,6 +237,32 @@ async function loadMatchHistoryList() {
     // 默认载入第一局对局的详情
     if (matches.value.length > 0) {
       selectMatch(matches.value[0].gameId);
+    }
+
+    // 自动批量上传当前页对局（去重 + fire-and-forget）
+    if (uploadEnabled.value && matches.value.length > 0) {
+      const newIds = matches.value
+        .map((m: MatchDisplay) => m.gameId)
+        .filter((id: number) => !uploadedGameIds.value.has(id));
+      if (newIds.length > 0) {
+        newIds.forEach((id: number) => uploadedGameIds.value.add(id));
+        console.log(`[upload] 开始批量上传 ${newIds.length} 场对局:`, newIds);
+        batchUploadMatches(newIds).then((result: { successCount: number; failedCount: number; error: string | null }) => {
+          console.log(`[upload] 批量上传结果: 成功=${result.successCount}, 失败=${result.failedCount}, error=${result.error}`);
+          if (result.error && result.successCount === 0) {
+            showToast(`上传失败: ${result.error}`, 'error');
+          } else if (result.successCount > 0) {
+            showToast(`已上传 ${result.successCount} 场对局`);
+          } else {
+            showToast('所有对局已存在，无需上传');
+          }
+        }).catch((e: any) => {
+          console.error("[upload] 批量上传异常:", e);
+          showToast(`上传异常: ${e?.message || e}`, 'error');
+        });
+      } else {
+        console.log("[upload] 当前页对局均已上传过，跳过");
+      }
     }
   } catch (e) {
     console.error("抓取战绩列表失败:", e);
@@ -284,13 +329,13 @@ function copyGameId(gameId: number) {
   alert(`📋 游戏 ID: ${gameId} 已复制到剪贴板`);
 }
 
-// 点击对局中的其他召唤师名称 → 在当前页面搜索（用 summonerId 避免 400/404/422 错误）
+// 点击对局中的其他召唤师名称 → 用 name#tag 格式搜索
 const pendingSummonerId = ref<number>(0);
 
-function searchPlayerBySummonerId(summonerId: number, displayName: string) {
-  if (!summonerId) return;
-  pendingSummonerId.value = summonerId;
-  searchName.value = displayName || String(summonerId);
+function searchPlayerByName(name: string) {
+  if (!name) return;
+  pendingSummonerId.value = 0;
+  searchName.value = name;
   doSearch();
 }
 
@@ -304,8 +349,10 @@ const gameDetails = computed(() => {
     for (const identity of g.participantIdentities) {
       const pId = identity.participantId;
       const player = identity.player;
+      const baseName = player?.gameName || player?.summonerName || "未知";
+      const tag = player?.tagLine;
       playerMap[pId] = {
-        name: player?.summonerName || player?.gameName || "未知",
+        name: tag ? `${baseName}#${tag}` : baseName,
         puuid: player?.puuid || "",
         summonerId: player?.summonerId ?? 0
       };
@@ -432,6 +479,11 @@ const gameDetails = computed(() => {
 
 <template>
   <div class="search-view">
+    <!-- Toast -->
+    <Transition name="toast">
+      <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">{{ toast.message }}</div>
+    </Transition>
+
     <div v-if="!store.isConnected" class="tip-container">
       <div class="offline-logo">🔍</div>
       <p class="tip">请先启动英雄联盟客户端</p>
@@ -491,8 +543,8 @@ const gameDetails = computed(() => {
         </div>
 
         <label class="checkbox-wrapper">
-          <input type="checkbox" checked />
-          <span>Upload matches</span>
+          <input type="checkbox" v-model="uploadEnabled" />
+          <span>上传战绩</span>
         </label>
       </div>
 
@@ -604,7 +656,7 @@ const gameDetails = computed(() => {
                     <div class="player-name-col">
                       <span
                         :class="['row-name', { 'highlight-user': summoner && p.puuid === summoner.puuid }]"
-                        @click="searchPlayerBySummonerId(p.summonerId, p.name)"
+                        @click="searchPlayerByName(p.name)"
                         :title="`搜索 ${p.name}`"
                       >
                         {{ p.name }}
@@ -1378,4 +1430,18 @@ const gameDetails = computed(() => {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Toast 通知 */
+.toast {
+  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+  padding: 10px 24px; border-radius: 8px; font-size: 0.88rem;
+  font-weight: 600; color: white; z-index: 9999;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); pointer-events: none;
+}
+.toast-success { background-color: #67c23a; }
+.toast-error { background-color: #f56c6c; }
+.toast-enter-active { transition: all 0.25s ease-out; }
+.toast-leave-active { transition: all 0.2s ease-in; }
+.toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+.toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 </style>

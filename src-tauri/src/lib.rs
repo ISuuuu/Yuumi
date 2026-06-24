@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod config;
 pub mod lcu;
+pub mod logging;
 pub mod parsers;
 pub mod signalr;
 pub mod tools;
@@ -47,8 +48,6 @@ impl AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -137,6 +136,8 @@ pub fn run() {
             update_config,
             get_lcu_connection_info,
             get_game_data_assets,
+            upload::upload_single_match,
+            upload::batch_upload_matches,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

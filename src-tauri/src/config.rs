@@ -29,6 +29,10 @@ pub struct GeneralConfig {
     pub enable_signalr_hub: bool,
     pub signalr_server_url: String,
     pub signalr_user_id: String,
+
+    // 对局上传
+    #[serde(default)]
+    pub upload_api_url: String,
 }
 
 impl Default for GeneralConfig {
@@ -47,6 +51,7 @@ impl Default for GeneralConfig {
             enable_signalr_hub: false,
             signalr_server_url: String::new(),
             signalr_user_id: String::new(),
+            upload_api_url: String::new(),
         }
     }
 }
