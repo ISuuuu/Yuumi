@@ -19,6 +19,11 @@ export const useLcuStore = defineStore("lcu", () => {
   const champSelectSession = ref<any | null>(null);
   const readyCheck = ref<any | null>(null);
 
+  // 共享的状态用于页面跳转和跨页面数据传递
+  const currentPage = ref("home");
+  const searchQuery = ref("");
+  const selectedGameId = ref<number | null>(null);
+
   function setConnected(v: boolean) {
     isConnected.value = v;
   }
@@ -34,6 +39,15 @@ export const useLcuStore = defineStore("lcu", () => {
   function setReadyCheck(v: any | null) {
     readyCheck.value = v;
   }
+  function setCurrentPage(v: string) {
+    currentPage.value = v;
+  }
+  function setSearchQuery(v: string) {
+    searchQuery.value = v;
+  }
+  function setSelectedGameId(v: number | null) {
+    selectedGameId.value = v;
+  }
 
   return {
     isConnected,
@@ -41,11 +55,17 @@ export const useLcuStore = defineStore("lcu", () => {
     gamePhase,
     champSelectSession,
     readyCheck,
+    currentPage,
+    searchQuery,
+    selectedGameId,
     setConnected,
     setWsConnected,
     setGamePhase,
     setChampSelectSession,
     setReadyCheck,
+    setCurrentPage,
+    setSearchQuery,
+    setSelectedGameId,
   };
 });
 

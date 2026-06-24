@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from "vue";
+import { ref, onMounted, watch, computed, provide } from "vue";
 import { useLcuStore, initLcuListeners } from "./store/lcuStore";
 import { fetchCurrentSummoner, lcuRequest } from "./api/lcu";
 import type { SummonerDisplay } from "./api/lcu";
@@ -17,6 +17,11 @@ const currentPage = ref("home");
 const isSidebarExpanded = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
 const platformId = ref("");
+
+// 用于 Career → Search 跳转的共享状态
+const navigateSearchPayload = ref<{ name: string; gameId: number | null } | null>(null);
+
+provide("navigateSearchPayload", navigateSearchPayload);
 
 const PLATFORM_MAP: Record<string, string> = {
   HN1: "艾欧尼亚", HN2: "祖安", HN3: "诺克萨斯", HN4: "班德尔城", HN5: "皮尔特沃夫",
@@ -68,6 +73,20 @@ watch(() => store.isConnected, (connected) => {
     platformId.value = "";
   }
 }, { immediate: true });
+
+// 监听 Career → Search 跳转
+watch(navigateSearchPayload, (payload) => {
+  if (payload && payload.gameId !== null) {
+    currentPage.value = "search";
+  }
+});
+
+// 进入选人/游戏中时自动跳转到对局信息页
+watch(() => store.gamePhase, (phase: string) => {
+  if (phase === "ChampSelect" || phase === "InProgress") {
+    currentPage.value = "gameinfo";
+  }
+});
 
 function handleReconnect() {
   initLcuListeners();
@@ -199,48 +218,53 @@ function handleReconnect() {
 
     <!-- 右侧内容区域 -->
     <main class="content-wrapper">
-      <Home v-if="currentPage === 'home'" @navigate="navigate" />
-      <Career v-else-if="currentPage === 'career'" />
-      <Search v-else-if="currentPage === 'search'" />
-      <GameInfo v-else-if="currentPage === 'gameinfo'" />
-      <TFT v-else-if="currentPage === 'tft'" />
-      <Settings v-else-if="currentPage === 'settings'" />
-      <Tools v-else-if="currentPage === 'tools'" />
+      <!-- Search 用 v-show 保持状态，切页面不清空数据 -->
+      <div v-show="currentPage === 'search'" style="height:100%;overflow-y:auto;">
+        <Search />
+      </div>
+      <template v-if="currentPage !== 'search'">
+        <Home v-if="currentPage === 'home'" @navigate="navigate" />
+        <Career v-else-if="currentPage === 'career'" />
+        <GameInfo v-else-if="currentPage === 'gameinfo'" />
+        <TFT v-else-if="currentPage === 'tft'" />
+        <Settings v-else-if="currentPage === 'settings'" />
+        <Tools v-else-if="currentPage === 'tools'" />
 
-      <!-- 内建 OP.GG 占位页面 -->
-      <div v-else-if="currentPage === 'opgg'" class="placeholder-view">
-        <div class="view-header">
-          <h2>OP.GG 辅助模块</h2>
-        </div>
-        <div class="view-card">
-          <div class="avatar-circle op-icon">OP</div>
-          <h3>OP.GG 数据反代已成功建立</h3>
-          <p>Yuumi 已在后台为您开启 OP.GG 数据加速反代，保证国服和外服战绩的流畅拉取。</p>
-          <div class="status-box">
-            <span class="dot online"></span>
-            <span>OP.GG 代理地址: 127.0.0.1:10809</span>
+        <!-- 内建 OP.GG 占位页面 -->
+        <div v-else-if="currentPage === 'opgg'" class="placeholder-view">
+          <div class="view-header">
+            <h2>OP.GG 辅助模块</h2>
           </div>
-          <p class="hint">您可以在系统设置中开启“对局自动上传战绩”，该功能将静默安全地同步数据。</p>
+          <div class="view-card">
+            <div class="avatar-circle op-icon">OP</div>
+            <h3>OP.GG 数据反代已成功建立</h3>
+            <p>Yuumi 已在后台为您开启 OP.GG 数据加速反代，保证国服和外服战绩的流畅拉取。</p>
+            <div class="status-box">
+              <span class="dot online"></span>
+              <span>OP.GG 代理地址: 127.0.0.1:10809</span>
+            </div>
+            <p class="hint">您可以在系统设置中开启"对局自动上传战绩"，该功能将静默安全地同步数据。</p>
+          </div>
         </div>
-      </div>
 
-      <!-- 内建 公告 占位页面 -->
-      <div v-else-if="currentPage === 'notice'" class="placeholder-view">
-        <div class="view-header">
-          <h2>系统公告</h2>
+        <!-- 内建 公告 占位页面 -->
+        <div v-else-if="currentPage === 'notice'" class="placeholder-view">
+          <div class="view-header">
+            <h2>系统公告</h2>
+          </div>
+          <div class="changelog-card">
+            <div class="version-tag">v0.1.0</div>
+            <h3>Yuumi 辅助工具重构完成</h3>
+            <p class="date">发布时间: 2026-06-24</p>
+            <ul class="changelog-list">
+              <li>✨ <strong>全新 1:1 Seraphine 风格重构</strong>：支持垂直折叠侧边栏，带来极致沉浸式的原生大厅体验。</li>
+              <li>🚀 <strong>Rust (Tauri v2) 高效重写</strong>：用 Rust 重构底层 LCU 数据抓取，内存降低 80%，响应即刻响应。</li>
+              <li>⚙️ <strong>对局选人自动化</strong>：自动接受对局、极速自动 Ban/Pick，支持分路配置候选英雄。</li>
+              <li>📊 <strong>数据看板美化</strong>：全面美化生涯战绩、单场表现分析以及选人面板 10 人近期段位和胜率展现。</li>
+            </ul>
+          </div>
         </div>
-        <div class="changelog-card">
-          <div class="version-tag">v0.1.0</div>
-          <h3>Yuumi 辅助工具重构完成</h3>
-          <p class="date">发布时间: 2026-06-24</p>
-          <ul class="changelog-list">
-            <li>✨ <strong>全新 1:1 Seraphine 风格重构</strong>：支持垂直折叠侧边栏，带来极致沉浸式的原生大厅体验。</li>
-            <li>🚀 <strong>Rust (Tauri v2) 高效重写</strong>：用 Rust 重构底层 LCU 数据抓取，内存降低 80%，响应即刻响应。</li>
-            <li>⚙️ <strong>对局选人自动化</strong>：自动接受对局、极速自动 Ban/Pick，支持分路配置候选英雄。</li>
-            <li>📊 <strong>数据看板美化</strong>：全面美化生涯战绩、单场表现分析以及选人面板 10 人近期段位和胜率展现。</li>
-          </ul>
-        </div>
-      </div>
+      </template>
     </main>
   </div>
 </template>
