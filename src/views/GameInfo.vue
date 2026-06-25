@@ -107,6 +107,15 @@ async function loadAllPlayers() {
 async function loadFromGameflowSession() {
   loading.value = true;
   error.value = "";
+
+  // 保底获取当前玩家 summonerId（onMounted 可能还没拿到）
+  if (!currentSummonerId.value) {
+    try {
+      const s = await fetchCurrentSummoner();
+      if (s?.summonerId) currentSummonerId.value = s.summonerId;
+    } catch { /* ignore */ }
+  }
+
   try {
     const resp = await lcuRequest<any>("GET", "/lol-gameflow/v1/session");
     if (!resp.success || !resp.data?.gameData) {
@@ -119,6 +128,7 @@ async function loadFromGameflowSession() {
     if (!teamOne || !teamTwo) return;
 
     // 用当前玩家 summonerId 判断哪队是己方
+    console.log("[GameInfo] currentSummonerId:", currentSummonerId.value);
     const isTeamOne = teamOne.some((p: any) => p.summonerId === currentSummonerId.value);
     const allyTeam = isTeamOne ? teamOne : teamTwo;
     const enemyTeam = isTeamOne ? teamTwo : teamOne;
@@ -194,28 +204,7 @@ watch(activeTab, () => loadAllPlayers());
 <template>
   <div class="game-info">
     <div class="page-header">
-      <h2 class="page-title">
-        🎮 对局信息
-        <span v-if="isGameActive" class="title-phase">
-          · {{ store.gamePhase === 'ChampSelect' ? '选人阶段' :
-               store.gamePhase === 'InProgress' ? '游戏中' :
-               store.gamePhase === 'GameStart' ? '加载中' : '' }}
-        </span>
-      </h2>
-      <div class="header-right">
-        <span :class="['phase-badge', store.gamePhase.toLowerCase()]">
-          {{ store.gamePhase === 'ChampSelect' ? '选人阶段' :
-             store.gamePhase === 'InProgress' ? '游戏中' :
-             store.gamePhase === 'GameStart' ? '加载中' :
-             store.gamePhase === 'ReadyCheck' ? '准备确认' :
-             store.gamePhase === 'Lobby' ? '房间大厅' :
-             store.gamePhase === 'Matchmaking' ? '匹配中' :
-             store.gamePhase === 'EndOfGame' ? '对局结束' : '等待中' }}
-        </span>
-        <button class="refresh-btn" @click="refreshState" :disabled="loading">
-          {{ loading ? "加载中..." : "刷新数据" }}
-        </button>
-      </div>
+      <h2 class="page-title">🎮 对局信息</h2>
     </div>
 
     <div v-if="!store.isConnected" class="tip-container">
@@ -334,7 +323,7 @@ watch(activeTab, () => loadAllPlayers());
 <style scoped>
 .game-info {
   padding: 1.5rem 1.5rem 1.5rem 0.6rem;
-  background-color: #fafbfc;
+  background-color: transparent;
   min-height: 100%;
 }
 
@@ -347,43 +336,39 @@ watch(activeTab, () => loadAllPlayers());
 .page-title {
   font-size: 1.4rem;
   font-weight: 800;
-  color: #303133;
+  color: var(--text-color);
   margin: 0;
+  letter-spacing: 0.5px;
 }
 .title-phase {
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   font-weight: 500;
-  color: #909399;
+  color: var(--text-dimmed);
   margin-left: 2px;
 }
 .header-right { display: flex; align-items: center; gap: 10px; }
 
 .phase-badge {
   padding: 4px 12px; border-radius: 12px;
-  font-size: 0.82rem; font-weight: 600; color: white;
+  font-size: 0.78rem; font-weight: 600; color: white;
+  box-shadow: var(--shadow-sm);
 }
-.phase-badge.champselect { background: #1976d2; }
-.phase-badge.inprogress { background: #388e3c; }
-.phase-badge.gamestart { background: #388e3c; }
-.phase-badge.readycheck { background: #f57c00; }
-.phase-badge.lobby { background: #7b1fa2; }
-.phase-badge.matchmaking { background: #0097a7; }
-.phase-badge.endofgame { background: #616161; }
-.phase-badge.none { background: #9e9e9e; }
+.phase-badge.champselect { background: var(--primary-color); box-shadow: 0 4px 10px var(--primary-color-alpha-30); }
+.phase-badge.inprogress { background: var(--win-color); box-shadow: 0 4px 10px var(--win-glow); }
+.phase-badge.gamestart { background: var(--win-color); box-shadow: 0 4px 10px var(--win-glow); }
+.phase-badge.readycheck { background: #fbbf24; color: #000; box-shadow: 0 4px 10px rgba(251, 191, 36, 0.2); }
+.phase-badge.lobby { background: #a855f7; box-shadow: 0 4px 10px rgba(168, 85, 247, 0.2); }
+.phase-badge.matchmaking { background: #06b6d4; box-shadow: 0 4px 10px rgba(6, 182, 212, 0.2); }
+.phase-badge.endofgame { background: var(--text-dimmed); }
+.phase-badge.none { background: rgba(0, 0, 0, 0.05); color: var(--text-muted); }
 
-.refresh-btn {
-  padding: 6px 14px; border: 1px solid #dcdfe6; border-radius: 6px;
-  background: white; color: #606266; font-size: 0.82rem; cursor: pointer;
-}
-.refresh-btn:hover { background: #f5f7fa; }
-.refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .tip-container {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 6rem 2rem; color: #909399;
+  padding: 6rem 2rem; color: var(--text-muted);
 }
 .offline-logo { font-size: 3rem; margin-bottom: 1rem; }
-.tip { font-size: 1rem; color: #8c8c8c; margin: 0; }
+.tip { font-size: 0.95rem; color: var(--text-dimmed); margin: 0; }
 
 /* 左右分栏 */
 .game-layout {
@@ -395,20 +380,22 @@ watch(activeTab, () => loadAllPlayers());
 
 /* 左侧面板 */
 .left-panel {
-  background: white; border: 1px solid #ebeef5;
-  border-radius: 12px; overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+  background: var(--card-bg); border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg); overflow: hidden;
+  box-shadow: var(--shadow-sm);
   display: flex; flex-direction: column;
   height: 100%;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
-.team-tabs { display: flex; border-bottom: 1px solid #ebeef5; }
+.team-tabs { display: flex; border-bottom: 1px solid var(--border-color); }
 .tab-btn {
-  flex: 1; padding: 12px; border: none; background: #fafbfc;
-  font-size: 0.88rem; font-weight: 600; color: #606266; cursor: pointer;
+  flex: 1; padding: 12px; border: none; background: rgba(0, 0, 0, 0.01);
+  font-size: 0.82rem; font-weight: 600; color: var(--text-muted); cursor: pointer;
   border-bottom: 2px solid transparent; transition: all 0.2s;
 }
-.tab-btn:hover { background: #f0f2f5; }
-.tab-btn.active { color: #1976d2; background: white; border-bottom-color: #1976d2; }
+.tab-btn:hover { background: rgba(0, 0, 0, 0.03); }
+.tab-btn.active { color: var(--primary-color); background: transparent; border-bottom-color: var(--primary-color); }
 
 .player-list {
   display: flex; flex-direction: column; flex: 1;
@@ -416,11 +403,11 @@ watch(activeTab, () => loadAllPlayers());
 
 .player-card {
   display: flex; align-items: center; gap: 12px;
-  padding: 14px 14px; border-bottom: 1px solid #f0f0f0;
+  padding: 14px 14px; border-bottom: 1px solid var(--border-color);
   flex: 1; transition: background 0.15s;
 }
 .player-card:last-child { border-bottom: none; }
-.player-card:hover { background: #f8f9fb; }
+.player-card:hover { background: rgba(0, 0, 0, 0.02); }
 
 /* 左侧：头像区域 */
 .pc-avatar-area {
@@ -428,38 +415,40 @@ watch(activeTab, () => loadAllPlayers());
 }
 .pc-avatar {
   width: 48px; height: 48px; border-radius: 50%;
-  overflow: hidden; border: 2px solid #dcdfe6;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  overflow: hidden; border: 2px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
 }
-.pc-avatar-empty { border-color: #e4e7eb; }
+.pc-avatar-empty { border-color: var(--border-color); }
 .pc-avatar-placeholder {
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-  background: #f0f2f5; font-size: 1rem; color: #c0c4cc;
+  background: rgba(0, 0, 0, 0.04); font-size: 1rem; color: var(--text-dimmed);
 }
 .pc-level {
   position: absolute; top: -4px; right: -4px;
-  background: #2ecc71; color: white; font-size: 0.6rem; font-weight: 700;
+  background: var(--primary-color); color: white; font-size: 0.6rem; font-weight: 700;
   padding: 1px 6px; border-radius: 8px; white-space: nowrap;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  box-shadow: 0 2px 6px var(--primary-color-alpha-40);
 }
 
 .pc-info { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 4px; }
 .pc-name {
-  font-size: 0.9rem; font-weight: 600; color: #303133;
+  font-size: 0.85rem; font-weight: 600; color: var(--text-color);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.pc-tag { font-size: 0.78rem; color: #909399; font-weight: 400; }
+.pc-tag { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; }
 .pc-ranks { display: flex; gap: 8px; flex-wrap: wrap; }
 .pc-rank-item {
-  font-size: 0.75rem; color: #606266; background: #f5f7fa;
-  padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+  font-size: 0.72rem; color: var(--text-muted); background: rgba(0, 0, 0, 0.02);
+  padding: 2px 8px; border-radius: 4px; white-space: nowrap; border: 1px solid var(--border-color);
 }
 
 /* 右侧：5 列战绩 */
 .right-panel {
-  background: white; border: 1px solid #ebeef5;
-  border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+  background: var(--card-bg); border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
   overflow: hidden; height: 100%;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 .columns-container {
   display: grid;
@@ -468,7 +457,7 @@ watch(activeTab, () => loadAllPlayers());
 }
 
 .player-column {
-  border-right: 1px solid #f0f0f0;
+  border-right: 1px solid var(--border-color);
   display: flex; flex-direction: column;
   overflow-y: auto;
 }
@@ -476,33 +465,33 @@ watch(activeTab, () => loadAllPlayers());
 
 .col-header {
   display: flex; align-items: center; gap: 8px;
-  padding: 10px 10px; border-bottom: 1px solid #ebeef5;
-  background: #fafbfc; flex-shrink: 0;
+  padding: 10px 10px; border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.01); flex-shrink: 0;
 }
 .col-champ-avatar {
   width: 30px; height: 30px; border-radius: 50%;
-  overflow: hidden; border: 1px solid #dcdfe6; flex-shrink: 0;
+  overflow: hidden; border: 1px solid var(--border-color); flex-shrink: 0;
 }
 .col-champ-placeholder {
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-  background: #e0e0e0; font-size: 0.7rem; color: #999;
+  background: rgba(0, 0, 0, 0.04); font-size: 0.7rem; color: var(--text-dimmed);
 }
 .col-name {
-  font-size: 0.82rem; font-weight: 600; color: #303133;
+  font-size: 0.78rem; font-weight: 600; color: var(--text-color);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 .col-loading { display: flex; align-items: center; justify-content: center; flex: 1; }
 .mini-spinner {
-  width: 20px; height: 20px; border: 2px solid #e2e5e9;
-  border-top-color: #1976d2; border-radius: 50%;
+  width: 20px; height: 20px; border: 2px solid rgba(0, 0, 0, 0.06);
+  border-top-color: var(--primary-color); border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .col-empty {
   text-align: center; padding: 2rem 0.5rem;
-  font-size: 0.78rem; color: #c0c4cc;
+  font-size: 0.75rem; color: var(--text-dimmed);
 }
 
 .col-matches {
@@ -511,14 +500,14 @@ watch(activeTab, () => loadAllPlayers());
 
 .col-match {
   display: flex; align-items: center; gap: 8px;
-  padding: 0 10px; border-bottom: 1px solid #f8f8f8;
+  padding: 0 10px; border-bottom: 1px solid var(--border-color);
   flex: 1;
 }
 .col-match:last-child { border-bottom: none; }
 
 /* 胜/败背景色 */
-.col-match.win { background: #f0f9eb; }
-.col-match.lose { background: #fef0f0; }
+.col-match.win { background: var(--win-bg); }
+.col-match.lose { background: var(--loss-bg); }
 
 /* 头像区域 */
 .cm-champ {
@@ -526,14 +515,14 @@ watch(activeTab, () => loadAllPlayers());
 }
 .cm-champ-img {
   width: 34px; height: 34px; border-radius: 50%;
-  overflow: hidden; border: 1px solid #dcdfe6;
+  overflow: hidden; border: 1px solid var(--border-color);
 }
 .cm-level {
   position: absolute; bottom: -2px; right: -2px;
   width: 13px; height: 13px; line-height: 11px;
-  background: #202124; color: white; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9); color: var(--text-color); border-radius: 50%;
   font-size: 0.58rem; font-weight: bold; text-align: center;
-  border: 1px solid #fff;
+  border: 1px solid var(--border-color);
 }
 
 /* 右侧详情 */
@@ -541,12 +530,12 @@ watch(activeTab, () => loadAllPlayers());
   display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px;
 }
 .cm-mode {
-  font-size: 0.75rem; font-weight: 600; color: #303133;
+  font-size: 0.72rem; font-weight: 600; color: var(--text-color);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .cm-bottom {
   display: flex; justify-content: space-between; align-items: center; gap: 4px;
 }
-.cm-kda { font-size: 0.75rem; font-weight: 600; color: #606266; }
-.cm-date { font-size: 0.68rem; color: #bbb; white-space: nowrap; }
+.cm-kda { font-size: 0.72rem; font-weight: 600; color: var(--text-muted); }
+.cm-date { font-size: 0.65rem; color: var(--text-dimmed); white-space: nowrap; }
 </style>

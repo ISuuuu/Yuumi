@@ -1080,7 +1080,7 @@ async function handleToggleLockGameSettings() {
 <style scoped>
 .tools-view {
   padding: 1.5rem 1.5rem 1.5rem 0.6rem;
-  background-color: #fafbfc;
+  background-color: transparent;
   min-height: 100%;
 }
 
@@ -1090,19 +1090,19 @@ async function handleToggleLockGameSettings() {
   align-items: center;
   justify-content: center;
   padding: 8rem 2rem;
-  color: #909399;
+  color: var(--text-muted);
 }
 
 .tip {
-  font-size: 1rem;
-  color: #8c8c8c;
+  font-size: 0.95rem;
+  color: var(--text-dimmed);
   margin-top: 12px;
 }
 
 .loading-spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #e2e5e9;
+  border: 3px solid rgba(0, 0, 0, 0.05);
   border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -1119,28 +1119,31 @@ async function handleToggleLockGameSettings() {
 }
 
 .page-title {
-  font-size: 1.8rem;
+  font-size: 1.4rem;
   font-weight: 800;
-  color: #2c3e50;
+  color: var(--text-color);
   margin: 0 0 1.5rem;
+  letter-spacing: 0.5px;
 }
 
 .group-header {
-  font-size: 1.05rem;
+  font-size: 0.9rem;
   font-weight: bold;
-  color: #303133;
+  color: var(--text-muted);
   margin: 2rem 0 0.8rem 4px;
 }
 
 /* 卡片 Item 通用样式 (Seraphine 风格) */
 .card-item, .collapse-item {
-  background: #ffffff;
-  border: 1px solid #ebeef5;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   margin-bottom: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
   overflow: hidden;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .card-item {
@@ -1157,8 +1160,9 @@ async function handleToggleLockGameSettings() {
 }
 
 .card-item:hover, .collapse-item:hover {
-  border-color: #dcdfe6;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  border-color: var(--primary-color-alpha-30);
+  background-color: var(--card-bg-hover);
+  box-shadow: var(--shadow-md);
 }
 
 .card-left, .collapse-left {
@@ -1172,7 +1176,7 @@ async function handleToggleLockGameSettings() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #909399;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -1188,15 +1192,15 @@ async function handleToggleLockGameSettings() {
 }
 
 .card-title {
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: bold;
-  color: #303133;
+  color: var(--text-color);
   margin: 0;
 }
 
 .card-desc {
   font-size: 0.78rem;
-  color: #909399;
+  color: var(--text-muted);
   margin-top: 4px;
   line-height: 1.4;
 }
@@ -1208,54 +1212,53 @@ async function handleToggleLockGameSettings() {
 }
 
 .status-preview {
-  font-size: 0.82rem;
-  color: #606266;
+  font-size: 0.78rem;
+  color: var(--text-dimmed);
   margin-right: 10px;
 }
 
 /* 按钮样式 */
 .action-btn {
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.183);
-  color: #2c3e50;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
   padding: 6px 20px;
   border-radius: 6px;
   font-size: 0.82rem;
-  font-weight: bold;
+  font-weight: 600;
   cursor: pointer;
   outline: none;
-  transition: all 0.15s cubic-bezier(0.25, 0.8, 0.25, 1);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .action-btn:hover {
-  background: rgba(249, 249, 249, 0.85);
-  border-color: rgba(0, 0, 0, 0.12);
-  border-bottom-color: rgba(0, 0, 0, 0.24);
+  background: var(--primary-color-alpha-15);
+  border-color: var(--primary-color);
   transform: translateY(-0.5px);
 }
 
 .action-btn:active {
-  background: rgba(243, 243, 243, 0.6);
-  border-bottom-color: rgba(0, 0, 0, 0.08);
+  background: var(--primary-color-alpha-30);
   transform: translateY(0.5px);
 }
 
 .action-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.3;
   cursor: not-allowed;
   transform: none !important;
   box-shadow: none !important;
 }
 
 .text-danger {
-  color: #f56c6c !important;
+  color: var(--loss-color) !important;
 }
 
 .text-danger:hover {
-  background-color: #fef0f0;
-  border-color: #fde2e2;
+  background-color: var(--loss-bg);
+  border-color: var(--loss-border);
 }
 
 /* 精致 Switch 开关样式 */
@@ -1266,9 +1269,9 @@ async function handleToggleLockGameSettings() {
 }
 
 .switch-text {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: bold;
-  color: #303133;
+  color: var(--text-color);
   user-select: none;
 }
 
@@ -1282,11 +1285,11 @@ async function handleToggleLockGameSettings() {
 }
 
 .mini-switch.off {
-  background-color: #e4e7eb;
+  background-color: rgba(0, 0, 0, 0.06);
 }
 
 .mini-switch.on {
-  background-color: #2fc25b;
+  background-color: var(--win-color);
 }
 
 .mini-slider {
@@ -1315,14 +1318,14 @@ async function handleToggleLockGameSettings() {
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
-  background-color: #ffffff;
+  background-color: transparent;
 }
 
 .arrow-icon {
   width: 18px;
   height: 18px;
   transition: transform 0.2s;
-  color: #909399;
+  color: var(--text-dimmed);
 }
 
 .arrow-icon.expanded {
@@ -1330,10 +1333,10 @@ async function handleToggleLockGameSettings() {
 }
 
 .collapse-content {
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid var(--border-color);
   padding: 12px 24px 18px 56px;
   animation: slideDown 0.2s ease-out;
-  background-color: #fafbfc;
+  background-color: rgba(0, 0, 0, 0.01);
   border-bottom-left-radius: 8px;
   border-bottom-right-radius: 8px;
 }
@@ -1344,7 +1347,7 @@ async function handleToggleLockGameSettings() {
   align-items: center;
   justify-content: space-between;
   padding: 12px 0;
-  border-bottom: 1px dashed #ebeef5;
+  border-bottom: 1px dashed var(--border-color);
 }
 
 .setting-row:last-child {
@@ -1361,8 +1364,8 @@ async function handleToggleLockGameSettings() {
 }
 
 .setting-label {
-  font-size: 0.85rem;
-  color: #606266;
+  font-size: 0.82rem;
+  color: var(--text-muted);
 }
 
 .setting-picker-row {
@@ -1388,27 +1391,24 @@ async function handleToggleLockGameSettings() {
 
 .text-input, .select-input, .number-input {
   padding: 8px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.183);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   outline: none;
-  background-color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.6);
   transition: all 0.2s ease;
-  color: #303133;
+  color: var(--text-color);
 }
 
 .text-input:hover, .select-input:hover, .number-input:hover {
-  background-color: #ffffff;
-  border-color: rgba(0, 0, 0, 0.15);
+  background-color: rgba(255, 255, 255, 0.95);
+  border-color: var(--border-color-hover);
 }
 
 .text-input:focus, .select-input:focus, .number-input:focus {
-  background-color: #ffffff;
+  background-color: #fff;
   border-color: var(--primary-color);
-  border-bottom: 2px solid var(--primary-color);
-  padding-bottom: 7px;
-  box-shadow: 0 4px 12px var(--primary-color-alpha-15);
+  box-shadow: 0 0 8px var(--primary-color-alpha-15);
 }
 
 .text-input {
@@ -1424,22 +1424,17 @@ async function handleToggleLockGameSettings() {
   padding: 6px 10px;
 }
 
-.number-input:focus {
-  padding-bottom: 5px;
-}
-
 .apply-btn {
   background: var(--primary-color);
-  border: 1px solid var(--primary-color-hover);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.2);
+  border: none;
   color: white;
   padding: 8px 20px;
   border-radius: 6px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: bold;
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.25, 0.8, 0.25, 1);
-  box-shadow: 0 1px 2px var(--primary-color-alpha-15);
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 10px var(--primary-color-alpha-30);
 }
 
 .apply-btn:hover {
@@ -1449,12 +1444,11 @@ async function handleToggleLockGameSettings() {
 
 .apply-btn:active {
   color: rgba(255, 255, 255, 0.7);
-  border-bottom-color: transparent;
   transform: translateY(0.5px);
 }
 
 .apply-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
@@ -1464,31 +1458,32 @@ async function handleToggleLockGameSettings() {
 }
 
 .status-btn {
-  border: 1px solid #dcdfe6;
-  background: white;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.5);
   padding: 6px 20px;
   border-radius: 6px;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: bold;
   cursor: pointer;
+  color: var(--text-color);
   transition: all 0.2s;
 }
 
 .status-btn.online {
-  color: #67c23a;
-  border-color: #e1f3d8;
-  background-color: #f0f9eb;
+  color: var(--win-color);
+  border-color: var(--win-border);
+  background-color: var(--win-bg);
 }
 
 .status-btn.online:hover {
-  background-color: #67c23a;
+  background-color: var(--win-color);
   color: white;
 }
 
 .status-btn.away {
   color: #e6a23c;
-  border-color: #fdf6ec;
-  background-color: #fdf6ec;
+  border-color: rgba(230, 162, 60, 0.2);
+  background-color: rgba(230, 162, 60, 0.08);
 }
 
 .status-btn.away:hover {
@@ -1497,13 +1492,13 @@ async function handleToggleLockGameSettings() {
 }
 
 .status-btn.offline {
-  color: #909399;
-  border-color: #f4f4f5;
-  background-color: #f4f4f5;
+  color: var(--text-muted);
+  border-color: var(--border-color);
+  background-color: rgba(0, 0, 0, 0.02);
 }
 
 .status-btn.offline:hover {
-  background-color: #909399;
+  background-color: var(--text-dimmed);
   color: white;
 }
 
@@ -1527,19 +1522,19 @@ async function handleToggleLockGameSettings() {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  color: #909399;
-  font-size: 0.85rem;
+  color: var(--text-dimmed);
+  font-size: 0.82rem;
   padding: 1.5rem 0;
 }
 
 /* 已选择皮肤的横向精致预览框 */
 .selected-skin-preview {
   margin: 12px 0 16px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(235, 238, 245, 0.8);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 16px;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.01);
+  box-shadow: var(--shadow-sm);
 }
 
 .preview-layout {
@@ -1553,8 +1548,8 @@ async function handleToggleLockGameSettings() {
   aspect-ratio: 16 / 9;
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
@@ -1573,17 +1568,17 @@ async function handleToggleLockGameSettings() {
 }
 
 .preview-title {
-  font-size: 0.75rem;
-  color: #909399;
+  font-size: 0.72rem;
+  color: var(--text-dimmed);
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .preview-skin-name {
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 800;
-  color: #2c3e50;
+  color: var(--text-color);
 }
 
 .select-skin-btn {
@@ -1593,7 +1588,7 @@ async function handleToggleLockGameSettings() {
   border: 1px solid var(--primary-color-alpha-30);
   padding: 6px 16px;
   border-radius: 8px;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: bold;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1615,7 +1610,7 @@ async function handleToggleLockGameSettings() {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   display: flex;
@@ -1626,10 +1621,10 @@ async function handleToggleLockGameSettings() {
 
 .skin-modal-card {
   width: 480px;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: #fff;
+  border: 1px solid var(--border-color);
   border-radius: 16px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1646,14 +1641,14 @@ async function handleToggleLockGameSettings() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(235, 238, 245, 0.5);
-  background: rgba(250, 250, 252, 0.5);
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.01);
 }
 
 .skin-modal-header h3 {
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 800;
-  color: #2c3e50;
+  color: var(--text-color);
   margin: 0;
 }
 
@@ -1661,7 +1656,7 @@ async function handleToggleLockGameSettings() {
   background: none;
   border: none;
   font-size: 1.1rem;
-  color: #909399;
+  color: var(--text-muted);
   cursor: pointer;
   width: 28px;
   height: 28px;
@@ -1673,8 +1668,8 @@ async function handleToggleLockGameSettings() {
 }
 
 .modal-close-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
-  color: #303133;
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--text-color);
 }
 
 /* 轮播主体区 */
@@ -1684,22 +1679,22 @@ async function handleToggleLockGameSettings() {
   justify-content: space-between;
   padding: 24px 16px;
   position: relative;
-  background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, rgba(240,242,245,0.3) 100%);
+  background: radial-gradient(circle at center, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.05) 100%);
 }
 
 .carousel-nav-btn {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.8);
-  border: 1px solid rgba(235, 238, 245, 0.8);
-  color: #606266;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-sm);
   z-index: 2;
 }
 
@@ -1713,7 +1708,7 @@ async function handleToggleLockGameSettings() {
   border-color: var(--primary-color);
   color: white;
   transform: scale(1.1);
-  box-shadow: 0 6px 16px var(--primary-color-alpha-30);
+  box-shadow: 0 4px 12px var(--primary-color-alpha-30);
 }
 
 .skin-carousel-slide {
@@ -1730,7 +1725,7 @@ async function handleToggleLockGameSettings() {
   height: 330px;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-md);
   border: 2px solid white;
   transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
@@ -1747,9 +1742,9 @@ async function handleToggleLockGameSettings() {
 }
 
 .carousel-skin-name {
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 800;
-  color: #2c3e50;
+  color: var(--text-color);
   text-align: center;
   min-height: 24px;
 }
@@ -1765,7 +1760,7 @@ async function handleToggleLockGameSettings() {
 }
 
 .thumbnail-slider-wrapper::-webkit-scrollbar-thumb {
-  background: rgba(0,0,0,0.1);
+  background: rgba(0, 0, 0, 0.1);
   border-radius: 2px;
 }
 
@@ -1782,7 +1777,7 @@ async function handleToggleLockGameSettings() {
   overflow: hidden;
   cursor: pointer;
   opacity: 0.5;
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-color);
   transition: all 0.2s ease;
   flex-shrink: 0;
 }
@@ -1795,7 +1790,7 @@ async function handleToggleLockGameSettings() {
 }
 
 .thumbnail-dot:hover {
-  opacity: 0.8;
+  opacity: 0.85;
   transform: scale(1.05);
 }
 
@@ -1812,13 +1807,13 @@ async function handleToggleLockGameSettings() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px solid rgba(235, 238, 245, 0.5);
-  background: rgba(250, 250, 252, 0.5);
+  border-top: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.01);
 }
 
 .carousel-counter {
-  font-size: 0.85rem;
-  color: #909399;
+  font-size: 0.82rem;
+  color: var(--text-dimmed);
   font-weight: bold;
 }
 
@@ -1828,20 +1823,19 @@ async function handleToggleLockGameSettings() {
 }
 
 .cancel-action-btn {
-  background: white;
-  border: 1px solid #dcdfe6;
-  color: #606266;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
   padding: 8px 16px;
   border-radius: 8px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: bold;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .cancel-action-btn:hover {
-  background: #f5f7fa;
-  border-color: #c0c4cc;
+  background: rgba(255, 255, 255, 0.95);
 }
 
 .confirm-action-btn {
@@ -1850,7 +1844,7 @@ async function handleToggleLockGameSettings() {
   border: none;
   padding: 8px 20px;
   border-radius: 8px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: bold;
   cursor: pointer;
   transition: all 0.2s;
@@ -1870,20 +1864,20 @@ async function handleToggleLockGameSettings() {
   transform: translateX(-50%);
   padding: 10px 24px;
   border-radius: 8px;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: white;
   z-index: 9999;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-md);
   pointer-events: none;
 }
 
 .toast-success {
-  background-color: #67c23a;
+  background-color: var(--win-color);
 }
 
 .toast-error {
-  background-color: #f56c6c;
+  background-color: var(--loss-color);
 }
 
 .toast-enter-active {

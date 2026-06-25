@@ -172,6 +172,18 @@ watch(() => store.isConnected, (connected) => {
   }
 }, { immediate: true });
 
+// 对局结束后自动刷新战绩
+watch(() => store.gamePhase, (phase: string, oldPhase: string | undefined) => {
+  if (!summoner.value?.puuid) return;
+  // 从游戏相关状态 → 结束/空闲状态时刷新
+  const gamePhases = ["InProgress", "GameStart", "ChampSelect", "ReadyCheck", "PreEndOfGame"];
+  const endPhases = ["EndOfGame", "Lobby", "None"];
+  if (gamePhases.includes(oldPhase ?? "") && endPhases.includes(phase ?? "")) {
+    console.log(`[Career] 对局结束 (${oldPhase} → ${phase})，刷新战绩`);
+    loadSummoner();
+  }
+});
+
 // 提取排位队列
 const soloQueue = computed(() => {
   return rankedQueues.value.find(q => q.queueType === "RANKED_SOLO_5x5") || null;
@@ -453,7 +465,7 @@ const statsSummary = computed(() => {
 <style scoped>
 .career {
   padding: 1.5rem 1.5rem 1.5rem 0.6rem;
-  background-color: #fafbfc;
+  background-color: transparent;
   min-height: 100%;
 }
 
@@ -463,7 +475,7 @@ const statsSummary = computed(() => {
   align-items: center;
   justify-content: center;
   padding: 8rem 2rem;
-  color: #909399;
+  color: var(--text-muted);
 }
 
 .offline-logo {
@@ -472,14 +484,14 @@ const statsSummary = computed(() => {
 }
 
 .tip {
-  font-size: 1rem;
-  color: #8c8c8c;
+  font-size: 0.95rem;
+  color: var(--text-dimmed);
 }
 
 .error {
-  color: #f56c6c;
-  background: #fef0f0;
-  border: 1px solid #fde2e2;
+  color: var(--loss-color);
+  background: var(--loss-bg);
+  border: 1px solid var(--loss-border);
   padding: 10px 16px;
   border-radius: 6px;
   margin-bottom: 1rem;
@@ -497,11 +509,19 @@ const statsSummary = computed(() => {
   align-items: center;
   gap: 1.2rem;
   padding: 1.5rem;
-  background: white;
-  border: 1px solid #ebeef5;
-  border-radius: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
   margin-bottom: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  transition: all 0.25s ease;
+}
+
+.summoner-header:hover {
+  border-color: var(--primary-color-alpha-30);
+  box-shadow: var(--shadow-md);
 }
 
 .profile-icon-wrapper {
@@ -515,8 +535,9 @@ const statsSummary = computed(() => {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: radial-gradient(circle, white 33px, transparent 34px),
-              conic-gradient(#2ecc71 calc(var(--progress) * 1%), #e2e5e9 0);
+  background: radial-gradient(circle, #fff 33px, transparent 34px),
+              conic-gradient(var(--primary-color) calc(var(--progress) * 1%), rgba(0, 0, 0, 0.05) 0);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
 }
 
 .avatar-container {
@@ -538,13 +559,13 @@ const statsSummary = computed(() => {
   bottom: -4px;
   left: 50%;
   transform: translateX(-50%);
-  background-color: #2ecc71;
+  background-color: var(--primary-color);
   color: white;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: bold;
   padding: 1px 8px;
   border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  box-shadow: 0 4px 10px var(--primary-color-alpha-30);
   z-index: 1;
   white-space: nowrap;
 }
@@ -562,15 +583,15 @@ const statsSummary = computed(() => {
 }
 
 .display-name {
-  font-size: 1.6rem;
+  font-size: 1.4rem;
   font-weight: 800;
-  color: #303133;
+  color: var(--text-color);
   margin: 0;
 }
 
 .tagline {
-  font-size: 0.9rem;
-  color: #909399;
+  font-size: 0.85rem;
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
@@ -580,20 +601,20 @@ const statsSummary = computed(() => {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--border-color);
   border-radius: 6px;
-  background: white;
+  background: rgba(0, 0, 0, 0.02);
   cursor: pointer;
-  color: #909399;
+  color: var(--text-muted);
   transition: all 0.2s;
   flex-shrink: 0;
   padding: 0;
 }
 
 .copy-riot-id-btn:hover {
-  background: #f5f7fa;
-  color: #606266;
-  border-color: #c0c4cc;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-color);
+  border-color: var(--primary-color);
 }
 
 .copy-icon {
@@ -603,7 +624,7 @@ const statsSummary = computed(() => {
 
 .copied-text {
   font-size: 0.65rem;
-  color: #2ecc71;
+  color: var(--win-color);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -617,31 +638,33 @@ const statsSummary = computed(() => {
 }
 
 .action-btn {
-  background: white;
-  border: 1px solid #dcdfe6;
-  color: #606266;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
   padding: 6px 16px;
   border-radius: 6px;
-  font-size: 0.85rem;
-  font-weight: 500;
+  font-size: 0.82rem;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .action-btn:hover {
-  background: #f5f7fa;
-  color: #1a73e8;
-  border-color: #c0c4cc;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text-color);
+  border-color: var(--primary-color);
 }
 
 /* 排位数据表 */
 .rank-table-wrapper {
-  background: white;
-  border: 1px solid #ebeef5;
-  border-radius: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
   overflow: hidden;
   margin-bottom: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .rank-table {
@@ -652,15 +675,15 @@ const statsSummary = computed(() => {
 
 .rank-table th, .rank-table td {
   padding: 12px 16px;
-  font-size: 0.88rem;
-  border-bottom: 1px solid #f0f0f0;
+  font-size: 0.82rem;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .rank-table th {
-  background-color: #fdfdfd;
-  color: #909399;
-  font-weight: 500;
-  border-bottom: 1.5px solid #ebeef5;
+  background-color: rgba(0, 0, 0, 0.01);
+  color: var(--text-muted);
+  font-weight: 600;
+  border-bottom: 1.5px solid var(--border-color);
 }
 
 .rank-table tr:last-child td {
@@ -668,13 +691,13 @@ const statsSummary = computed(() => {
 }
 
 .type-name {
-  font-weight: 500;
-  color: #606266;
+  font-weight: 600;
+  color: var(--text-color);
 }
 
 .rank-name {
   font-weight: bold;
-  color: #303133;
+  color: var(--primary-color);
 }
 
 /* 近期数据概览栏 */
@@ -683,16 +706,18 @@ const statsSummary = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  background-color: white;
-  border: 1px solid #ebeef5;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   margin-bottom: 1rem;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.01);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .summary-text {
-  font-size: 0.88rem;
-  color: #606266;
+  font-size: 0.82rem;
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -700,37 +725,37 @@ const statsSummary = computed(() => {
 
 .summary-title {
   font-weight: bold;
-  color: #303133;
+  color: var(--text-color);
   margin-right: 4px;
 }
 
 .win-color {
-  color: #2ecc71;
-  font-weight: 500;
+  color: var(--win-color);
+  font-weight: 600;
 }
 
 .lose-color {
-  color: #e74c3c;
-  font-weight: 500;
+  color: var(--loss-color);
+  font-weight: 600;
 }
 
 .kda-label {
-  color: #909399;
+  color: var(--text-dimmed);
   margin-left: 8px;
 }
 
 .kda-values {
-  color: #303133;
-  font-weight: 500;
+  color: var(--text-color);
+  font-weight: 600;
 }
 
 .death-red {
-  color: #e74c3c;
+  color: var(--loss-color);
 }
 
 .kda-ratio {
-  color: #909399;
-  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
 }
 
 .recent-champs {
@@ -743,7 +768,7 @@ const statsSummary = computed(() => {
   height: 24px;
   border-radius: 50%;
   overflow: hidden;
-  border: 1px solid #e1e4e8;
+  border: 1px solid var(--border-color);
 }
 
 .summary-actions {
@@ -753,32 +778,40 @@ const statsSummary = computed(() => {
 }
 
 .summary-action-btn {
-  background: white;
-  border: 1px solid #dcdfe6;
-  color: #606266;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
   padding: 4px 12px;
   border-radius: 4px;
-  font-size: 0.8rem;
-  font-weight: 500;
+  font-size: 0.78rem;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s;
 }
 
 .summary-action-btn:hover {
-  background: #f5f7fa;
+  background: rgba(255, 255, 255, 0.95);
+  border-color: var(--primary-color);
 }
 
 .dropdown-trigger {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: white;
-  border: 1px solid #dcdfe6;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
   padding: 4px 10px;
   border-radius: 4px;
-  font-size: 0.8rem;
-  color: #606266;
+  font-size: 0.78rem;
+  color: var(--text-color);
   cursor: pointer;
   position: relative;
+  transition: all 0.2s;
+}
+
+.dropdown-trigger:hover {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: var(--primary-color);
 }
 
 .dropdown-trigger .arrow-icon {
@@ -796,25 +829,28 @@ const statsSummary = computed(() => {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  background: white;
-  border: 1px solid #ebeef5;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-lg);
   z-index: 100;
   min-width: 130px;
   padding: 4px 0;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .queue-dropdown-item {
   padding: 6px 14px;
-  font-size: 0.8rem;
-  color: #606266;
+  font-size: 0.78rem;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: all 0.2s;
 }
 
 .queue-dropdown-item:hover {
-  background: #f5f7fa;
+  background: rgba(0, 0, 0, 0.02);
+  color: var(--text-color);
 }
 
 .queue-dropdown-item.active {
@@ -840,30 +876,38 @@ const statsSummary = computed(() => {
   align-items: center;
   padding: 10px 16px;
   border-radius: 8px;
-  border-left: 4px solid;
-  transition: transform 0.15s, box-shadow 0.2s;
+  border: 1px solid var(--border-color);
+  border-left: 4px solid transparent;
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
   cursor: pointer;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .match-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  transform: translateY(-1.5px);
 }
 
 .match-card.win {
-  background-color: #f0f9eb;
-  border-color: #2ecc71;
-  border-top: 1px solid #e1f3d8;
-  border-right: 1px solid #e1f3d8;
-  border-bottom: 1px solid #e1f3d8;
+  background-color: var(--win-bg);
+  border-color: var(--win-border);
+  border-left-color: var(--win-color);
+}
+
+.match-card.win:hover {
+  box-shadow: 0 6px 20px var(--win-glow);
+  border-color: var(--win-color);
 }
 
 .match-card.lose {
-  background-color: #fef0f0;
-  border-color: #f56c6c;
-  border-top: 1px solid #fde2e2;
-  border-right: 1px solid #fde2e2;
-  border-bottom: 1px solid #fde2e2;
+  background-color: var(--loss-bg);
+  border-color: var(--loss-border);
+  border-left-color: var(--loss-color);
+}
+
+.match-card.lose:hover {
+  box-shadow: 0 6px 20px var(--loss-glow);
+  border-color: var(--loss-color);
 }
 
 /* 1. 英雄面板 */
@@ -885,7 +929,7 @@ const statsSummary = computed(() => {
   height: 44px;
   border-radius: 50%;
   overflow: hidden;
-  border: 1px solid #dcdfe6;
+  border: 1.5px solid var(--border-color);
 }
 
 .level-overlay {
@@ -895,13 +939,13 @@ const statsSummary = computed(() => {
   width: 16px;
   height: 16px;
   line-height: 14px;
-  background-color: #202124;
-  color: white;
+  background-color: rgba(255, 255, 255, 0.9);
+  color: var(--text-color);
   border-radius: 50%;
   font-size: 0.65rem;
   font-weight: 700;
   text-align: center;
-  border: 1px solid #fff;
+  border: 1px solid var(--border-color);
 }
 
 .spells-runes {
@@ -914,7 +958,7 @@ const statsSummary = computed(() => {
   height: 18px;
   border-radius: 2px;
   overflow: hidden;
-  border: 1px solid #eee;
+  border: 1px solid var(--border-color);
 }
 
 .mini-icon {
@@ -936,21 +980,21 @@ const statsSummary = computed(() => {
 }
 
 .result-text {
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 800;
 }
 
 .win-text {
-  color: #2ecc71;
+  color: var(--win-color);
 }
 
 .lose-text {
-  color: #f56c6c;
+  color: var(--loss-color);
 }
 
 .queue-mode {
-  font-size: 0.78rem;
-  color: #909399;
+  font-size: 0.75rem;
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
@@ -963,13 +1007,13 @@ const statsSummary = computed(() => {
 }
 
 .kda-numbers {
-  font-size: 0.95rem;
-  color: #606266;
+  font-size: 0.88rem;
+  color: var(--text-muted);
 }
 
 .bold {
-  font-weight: bold;
-  color: #303133;
+  font-weight: 700;
+  color: var(--text-color);
 }
 
 .kda-desc {
@@ -977,14 +1021,14 @@ const statsSummary = computed(() => {
 }
 
 .kda-ratio {
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
-.kda-perfect { color: #ff9800; }
-.kda-great { color: #e91e63; }
-.kda-good { color: #2196f3; }
-.kda-normal { color: #909399; }
+.kda-perfect { color: #d97706; }
+.kda-great { color: #db2777; }
+.kda-good { color: #2563eb; }
+.kda-normal { color: var(--text-dimmed); }
 
 /* 4. 补刀面板 */
 .cs-panel {
@@ -995,15 +1039,15 @@ const statsSummary = computed(() => {
 }
 
 .cs-count {
-  font-size: 0.88rem;
-  font-weight: bold;
-  color: #606266;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-muted);
 }
 
 .cs-icon {
-  width: 16px;
-  height: 16px;
-  color: #909399;
+  width: 14px;
+  height: 14px;
+  color: var(--text-dimmed);
 }
 
 /* 5. 装备面板 */
@@ -1022,10 +1066,10 @@ const statsSummary = computed(() => {
 .item-slot, .ward-slot {
   width: 24px;
   height: 24px;
-  background-color: rgba(0, 0, 0, 0.05);
+  background-color: rgba(0, 0, 0, 0.04);
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid rgba(0,0,0,0.08);
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .item-img {
@@ -1035,8 +1079,8 @@ const statsSummary = computed(() => {
 }
 
 .ward-slot {
-  border-color: #e6a23c;
-  background-color: rgba(230, 162, 60, 0.05);
+  border-color: rgba(245, 158, 11, 0.3);
+  background-color: rgba(245, 158, 11, 0.05);
   margin-left: 2px;
 }
 
@@ -1050,15 +1094,15 @@ const statsSummary = computed(() => {
 }
 
 .gold-count {
-  font-size: 0.88rem;
-  font-weight: bold;
-  color: #606266;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-muted);
 }
 
 .gold-icon {
-  width: 14px;
-  height: 14px;
-  color: #e6a23c;
+  width: 12px;
+  height: 12px;
+  color: #fbbf24;
 }
 
 /* 7. 时间面板 */
@@ -1067,13 +1111,13 @@ const statsSummary = computed(() => {
   flex-direction: column;
   align-items: flex-end;
   min-width: 160px;
-  font-size: 0.78rem;
-  color: #909399;
+  font-size: 0.75rem;
+  color: var(--text-dimmed);
 }
 
 .map-name {
-  font-weight: 500;
-  color: #606266;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
 .match-time {

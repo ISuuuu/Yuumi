@@ -15,7 +15,8 @@
       {
         "title": "Yuumi",
         "width": 1200,
-        "height": 910
+        "height": 910,
+        "decorations": false
       }
     ],
     "security": {

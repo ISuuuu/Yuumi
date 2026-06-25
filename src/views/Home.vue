@@ -89,17 +89,19 @@ function handleChangeClient() {
   align-items: center;
   justify-content: center;
   min-height: 100%;
-  background-color: #fafbfc;
-  padding: 2rem;
+  background-color: transparent;
+  padding: 2.5rem 1.5rem;
   user-select: text;
 }
 
 .status-title {
-  font-size: 2.2rem;
+  font-size: 1.8rem;
   font-weight: 800;
-  color: #1a1a1a;
-  margin: 0 0 1.5rem;
+  color: var(--text-color);
+  margin: 0 0 1.25rem;
   text-align: center;
+  letter-spacing: 0.5px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
 }
 
 /* 连接成功 */
@@ -116,70 +118,83 @@ function handleChangeClient() {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: white;
-  border: 1px solid #dcdfe6;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
   padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.88rem;
-  color: #606266;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-color);
   cursor: pointer;
   margin-bottom: 2rem;
-  transition: all 0.2s;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  transition: all 0.25s ease;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .change-client-btn:hover {
-  background: #f5f7fa;
-  color: #1a73e8;
-  border-color: #c0c4cc;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text-color);
+  border-color: var(--primary-color);
+  box-shadow: 0 4px 12px var(--primary-color-alpha-15);
+  transform: translateY(-1px);
 }
 
 .btn-icon {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 .details-box {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
-  font-size: 0.9rem;
-  color: #8c8c8c;
-  background: #fafafa;
-  padding: 1.5rem 2rem;
-  border-radius: 8px;
+  gap: 10px;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  background: var(--card-bg);
+  padding: 1.5rem;
+  border-radius: var(--radius-lg);
   width: 100%;
   max-width: 500px;
-  box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
-  border: 1px solid #f0f0f0;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-color);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  transition: all 0.3s ease;
+}
+
+.details-box:hover {
+  border-color: var(--primary-color-alpha-30);
+  box-shadow: var(--shadow-lg);
 }
 
 .detail-row {
   display: flex;
-  justify-content: center;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   white-space: nowrap;
 }
 
 .detail-name {
-  color: #888888;
+  color: var(--text-dimmed);
 }
 
 .detail-value {
-  color: #888888;
-  font-weight: 500;
+  color: var(--text-color);
+  font-weight: 600;
 }
 
 .token-row {
   word-break: break-all;
   white-space: normal;
+  display: block;
+  line-height: 1.4;
 }
 
 .details-loading {
-  font-size: 0.9rem;
-  color: #909399;
+  font-size: 0.85rem;
+  color: var(--text-dimmed);
 }
 
 /* 离线状态 */
@@ -193,40 +208,52 @@ function handleChangeClient() {
 }
 
 .offline-icon {
-  font-size: 4rem;
-  margin-bottom: 1rem;
+  font-size: 3rem;
+  margin-bottom: 1.25rem;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.05));
+  animation: float 3s ease-in-out infinite;
 }
 
 .offline-desc {
-  color: #606266;
+  color: var(--text-muted);
   line-height: 1.6;
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   margin-bottom: 2rem;
 }
 
 .loading-ring {
   display: flex;
   align-items: center;
-  gap: 10px;
-  color: #909399;
-  font-size: 0.88rem;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  background: var(--card-bg);
+  padding: 10px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
 }
 
 .ring-dot {
-  width: 8px;
-  height: 8px;
-  background-color: #909399;
+  width: 14px;
+  height: 14px;
+  border: 2.5px solid rgba(0, 0, 0, 0.06);
+  border-top-color: var(--primary-color);
   border-radius: 50%;
-  animation: pulse 1.2s infinite ease-in-out;
+  animation: spin 0.8s linear infinite;
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes pulse {
-  0%, 100% { transform: scale(0.8); opacity: 0.5; }
-  50% { transform: scale(1.3); opacity: 1; }
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

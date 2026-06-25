@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 
 export type GamePhase =
   | "None"
@@ -19,6 +20,8 @@ export const useLcuStore = defineStore("lcu", () => {
   const gamePhase = ref<GamePhase>("None");
   const champSelectSession = ref<any | null>(null);
   const readyCheck = ref<any | null>(null);
+  // lcu-client-started 事件计数器，用于触发 App.vue 重新加载状态
+  const connectionVersion = ref(0);
 
   // 共享的状态用于页面跳转和跨页面数据传递
   const currentPage = ref("home");
@@ -57,6 +60,7 @@ export const useLcuStore = defineStore("lcu", () => {
     gamePhase,
     champSelectSession,
     readyCheck,
+    connectionVersion,
     currentPage,
     searchQuery,
     selectedGameId,
@@ -91,6 +95,7 @@ export async function initLcuListeners() {
   await listen("lcu-client-started", () => {
     console.log("[lcuStore] lcu-client-started");
     store.setConnected(true);
+    store.connectionVersion++;
   });
 
   await listen("lcu-client-ended", () => {
@@ -139,4 +144,15 @@ export async function initLcuListeners() {
   });
 
   console.log("[lcuStore] all listeners registered");
+
+  // 页面刷新后从后端同步当前连接状态（后端 AppState 持久，前端 store 会丢失）
+  try {
+    const info = await invoke<{ pid: number; port: number; token: string } | null>("get_lcu_connection_info");
+    if (info && info.pid > 0) {
+      console.log("[lcuStore] 从后端恢复连接状态: pid=", info.pid, "port=", info.port);
+      store.setConnected(true);
+    }
+  } catch (e) {
+    console.warn("[lcuStore] 同步连接状态失败:", e);
+  }
 }
