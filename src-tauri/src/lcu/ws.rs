@@ -7,6 +7,7 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, Error as TlsError, SignatureScheme};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::watch;
 use tokio_tungstenite::{
     connect_async_tls_with_config,
     tungstenite::{client::ClientRequestBuilder, http, Message},
@@ -68,29 +69,100 @@ impl ServerCertVerifier for NoVerifier {
 }
 
 /// 启动 LCU WebSocket 连接并在后台持续监听。
-/// 对齐 Python: aiohttp.ClientSession.ws_connect(address, ssl=False) → [5, event] 订阅
+/// 每次调用会取消前一个仍在运行的连接循环，避免旧 port/token 的僵尸重试。
 pub fn connect(app_handle: AppHandle, port: u16, token: String) {
+    // 取消上一次 WS 循环
+    let cancel_rx = {
+        let state = app_handle.state::<crate::AppState>();
+        let mut old_tx = state.ws_cancel_tx.lock().unwrap();
+        // 发送取消信号给旧循环
+        if let Some(tx) = old_tx.take() {
+            let _ = tx.send(true);
+        }
+        let (tx, rx) = watch::channel(false);
+        *old_tx = Some(tx);
+        rx
+    };
+
     tauri::async_runtime::spawn(async move {
+        let mut cancel_rx = cancel_rx;
         loop {
+            // 在尝试连接前检查是否已被取消
+            if *cancel_rx.borrow() {
+                log::info!("[WS] 循环已被取消（新的连接已启动）");
+                return;
+            }
+
             log::info!("[WS] 正在连接 LCU WebSocket (port={})...", port);
 
-            match try_connect(port, &token).await {
-                Ok(ws_stream) => {
-                    log::info!("[WS] LCU WebSocket 已连接");
-                    let _ = app_handle.emit("lcu-ws-connected", ());
-                    handle_messages(ws_stream, &app_handle).await;
-                    log::warn!("[WS] LCU WebSocket 断开，2 秒后重连");
-                    let _ = app_handle.emit("lcu-ws-disconnected", ());
+            tokio::select! {
+                result = try_connect(port, &token) => {
+                    match result {
+                        Ok(ws_stream) => {
+                            log::info!("[WS] LCU WebSocket 已连接");
+                            let _ = app_handle.emit("lcu-ws-connected", ());
+
+                            // 初始主动获取一次当前游戏阶段以触发自动化状态对齐
+                            let app_clone = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let state = app_clone.state::<crate::AppState>();
+                                let lcu_lock = state.lcu_client.read().await;
+                                if let Some(lcu) = lcu_lock.as_ref() {
+                                    let url = format!(
+                                        "https://127.0.0.1:{}/lol-gameflow/v1/gameflow-phase",
+                                        lcu.port
+                                    );
+                                    let auth = crate::build_auth_header(&lcu.token);
+                                    if let Ok(resp) = lcu
+                                        .http_client
+                                        .get(&url)
+                                        .header("Authorization", auth)
+                                        .send()
+                                        .await
+                                    {
+                                        if let Ok(phase) = resp.text().await {
+                                            let phase = phase.trim_matches('"');
+                                            log::info!("[WS] 获取到初始游戏阶段: {}", phase);
+                                            let _ = state.gameflow_tx.try_send(
+                                                crate::agents::auto_match::GameflowEvent::PhaseChanged(
+                                                    phase.to_string(),
+                                                ),
+                                            );
+                                        }
+                                    }
+                                }
+                            });
+
+                            tokio::select! {
+                                _ = handle_messages(ws_stream, &app_handle) => {}
+                                _ = cancel_rx.changed() => {
+                                    log::info!("[WS] 连接中收到取消信号，断开");
+                                    return;
+                                }
+                            }
+                            log::warn!("[WS] LCU WebSocket 断开，2 秒后重连");
+                            let _ = app_handle.emit("lcu-ws-disconnected", ());
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            log::warn!("[WS] 连接失败: {}，2 秒后重试", msg);
+                            let _ = app_handle.emit("lcu-ws-error", &msg);
+                        }
+                    }
                 }
-                Err(e) => {
-                    let msg = e.to_string();
-                    log::warn!("[WS] 连接失败: {}，2 秒后重试", msg);
-                    // 把错误发到前端，方便调试
-                    let _ = app_handle.emit("lcu-ws-error", &msg);
+                _ = cancel_rx.changed() => {
+                    log::info!("[WS] 循环已被取消（新的连接已启动）");
+                    return;
                 }
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {}
+                _ = cancel_rx.changed() => {
+                    log::info!("[WS] 等待重连期间收到取消信号");
+                    return;
+                }
+            }
         }
     });
 }

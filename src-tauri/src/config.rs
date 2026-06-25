@@ -58,6 +58,10 @@ impl Default for GeneralConfig {
 
 // ─── 个性化设置 ───
 
+fn default_true() -> bool {
+    true
+}
+
 fn default_theme_color() -> String {
     "#6c5ce7".into()
 }
@@ -152,6 +156,8 @@ pub struct FunctionsConfig {
     pub lcu_realtime_enabled: bool,
     #[serde(default)]
     pub lcu_user_id: String,
+    #[serde(default = "default_true")]
+    pub upload_enabled: bool,
 }
 
 impl Default for FunctionsConfig {
@@ -198,6 +204,7 @@ impl Default for FunctionsConfig {
             enable_reserve_gameinfo: false,
             lcu_realtime_enabled: false,
             lcu_user_id: String::new(),
+            upload_enabled: true,
         }
     }
 }

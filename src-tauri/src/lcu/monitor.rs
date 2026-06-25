@@ -174,6 +174,7 @@ pub fn start(
 
                         match reqwest::Client::builder()
                              .danger_accept_invalid_certs(true)
+                             .no_proxy()
                              .build()
                         {
                             Ok(http_client) => {
@@ -197,6 +198,7 @@ pub fn start(
                                 tauri::async_runtime::spawn(async move {
                                     match reqwest::Client::builder()
                                         .danger_accept_invalid_certs(true)
+                                        .no_proxy()
                                         .build()
                                     {
                                         Ok(http) => {

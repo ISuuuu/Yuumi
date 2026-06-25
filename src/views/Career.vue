@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, computed, inject, type Ref } from "vue";
+import { ref, watch, computed, inject, onMounted, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
-import { fetchCurrentSummoner, fetchMatchHistory, lcuRequest } from "../api/lcu";
+import { fetchCurrentSummoner, fetchMatchHistory, lcuRequest, fetchConfig } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 
@@ -12,6 +12,7 @@ const rankedQueues = ref<any[]>([]);
 const loading = ref(false);
 const error = ref("");
 const copied = ref(false);
+const careerGamesNumber = ref(20); // 默认值，启动时从配置读取
 
 // 游戏模式筛选
 const selectedQueue = ref<number | null>(null);
@@ -83,7 +84,7 @@ async function loadRankedStats(puuid: string) {
 
 async function loadMatches(puuid: string) {
   try {
-    matches.value = await fetchMatchHistory(puuid, 0, 20);
+    matches.value = await fetchMatchHistory(puuid, 0, careerGamesNumber.value);
   } catch (e) {
     console.error("获取战绩历史失败:", e);
   }
@@ -160,6 +161,16 @@ function goToHistory() {
 function getSpellIcon(m: MatchDisplay, slot: 1 | 2): string {
   return slot === 1 ? m.spell1IconUrl : m.spell2IconUrl;
 }
+
+// 读取配置中的对局数量
+onMounted(async () => {
+  try {
+    const cfg = await fetchConfig();
+    careerGamesNumber.value = cfg.Functions?.CareerGamesNumber ?? 20;
+  } catch (e) {
+    console.warn("加载 CareerGamesNumber 配置失败，使用默认值 20:", e);
+  }
+});
 
 // 自动加载逻辑
 watch(() => store.isConnected, (connected) => {
@@ -522,6 +533,9 @@ const statsSummary = computed(() => {
 .summoner-header:hover {
   border-color: var(--primary-color-alpha-30);
   box-shadow: var(--shadow-md);
+  background-color: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .profile-icon-wrapper {
@@ -650,9 +664,11 @@ const statsSummary = computed(() => {
 }
 
 .action-btn:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: #ffffff;
   color: var(--text-color);
   border-color: var(--primary-color);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* 排位数据表 */
@@ -665,6 +681,15 @@ const statsSummary = computed(() => {
   box-shadow: var(--shadow-sm);
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
+  transition: all 0.25s ease;
+}
+
+.rank-table-wrapper:hover {
+  background-color: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary-color-alpha-30);
 }
 
 .rank-table {
@@ -713,6 +738,15 @@ const statsSummary = computed(() => {
   box-shadow: var(--shadow-sm);
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
+  transition: all 0.25s ease;
+}
+
+.recent-summary-bar:hover {
+  background-color: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary-color-alpha-30);
 }
 
 .summary-text {
@@ -790,8 +824,10 @@ const statsSummary = computed(() => {
 }
 
 .summary-action-btn:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: #ffffff;
   border-color: var(--primary-color);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .dropdown-trigger {
@@ -810,8 +846,10 @@ const statsSummary = computed(() => {
 }
 
 .dropdown-trigger:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: #ffffff;
   border-color: var(--primary-color);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .dropdown-trigger .arrow-icon {
@@ -886,6 +924,8 @@ const statsSummary = computed(() => {
 
 .match-card:hover {
   transform: translateY(-1.5px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .match-card.win {
@@ -897,6 +937,7 @@ const statsSummary = computed(() => {
 .match-card.win:hover {
   box-shadow: 0 6px 20px var(--win-glow);
   border-color: var(--win-color);
+  background-color: rgba(16, 185, 129, 0.12);
 }
 
 .match-card.lose {
@@ -908,6 +949,7 @@ const statsSummary = computed(() => {
 .match-card.lose:hover {
   box-shadow: 0 6px 20px var(--loss-glow);
   border-color: var(--loss-color);
+  background-color: rgba(239, 68, 68, 0.11);
 }
 
 /* 1. 英雄面板 */

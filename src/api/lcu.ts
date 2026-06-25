@@ -217,6 +217,7 @@ export interface FunctionsConfig {
   EnableReserveGameinfo: boolean;
   LcuRealtimeEnabled: boolean;
   LcuUserId: string;
+  UploadEnabled: boolean;
 }
 
 export interface OtherConfig {
