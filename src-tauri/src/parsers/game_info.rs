@@ -77,6 +77,22 @@ pub async fn get_game_player_summaries(
 
     let auth = build_auth_header(&lcu.token);
     let base = format!("https://127.0.0.1:{}", lcu.port);
+    // 如果资源尚未加载完成，且 LCU 已连接，进行等待以防止解析出来的图片/装备路径为空（最多等 5 秒）
+    let mut check_count = 0;
+    while check_count < 50 {
+        {
+            let assets = app_state.game_data.read().await;
+            if !assets.spells.is_empty() {
+                break;
+            }
+        }
+        if app_state.lcu().await.is_err() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        check_count += 1;
+    }
+
     let assets = app_state.game_data.read().await.clone();
 
     // 并发查询所有玩家

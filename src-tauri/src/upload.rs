@@ -137,10 +137,10 @@ impl UploadTrigger {
         if !matches!(phase, "EndOfGame" | "Lobby" | "None") {
             return;
         }
-        // 前一阶段必须是游戏相关状态
+        // 前一阶段必须是实际游戏运行状态（排除选人/确认阶段以避免秒退或拒绝匹配触发上传）
         if !matches!(
             prev.as_str(),
-            "InProgress" | "GameStart" | "ChampSelect" | "ReadyCheck" | "PreEndOfGame" | "Reconnect"
+            "InProgress" | "GameStart" | "PreEndOfGame" | "Reconnect"
         ) {
             return;
         }
@@ -722,12 +722,12 @@ fn build_upload_payload(
 ) -> UploadPayload {
     let game_creation_iso = game_detail
         .game_creation
-        .map(|ms| {
-            let secs = ms / 1000;
-            let (y, m, d, h, min) = crate::parsers::match_parser::unix_secs_to_ymdhm(secs);
-            format!("{:04}-{:02}-{:02}T{:02}:{:02}:00", y, m, d, h, min)
+        .and_then(|ms| {
+            let secs = (ms / 1000) as i64;
+            chrono::DateTime::from_timestamp(secs, 0)
+                .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%dT%H:%M:%S").to_string())
         })
-        .unwrap_or_else(|| "1970-01-01T00:00:00".to_string());
+        .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string());
 
     let match_info = MatchInfo {
         match_id: game_detail.game_id.unwrap_or(0),

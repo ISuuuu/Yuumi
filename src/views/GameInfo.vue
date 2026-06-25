@@ -3,15 +3,18 @@ import { ref, watch, computed, onMounted } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import {
   getGameflowPhase, getChampSelectSession, fetchMatchHistory,
-  fetchCurrentSummoner, lcuRequest,
+  fetchCurrentSummoner, lcuRequest, fetchConfig,
 } from "../api/lcu";
-import type { MatchDisplay } from "../api/lcu";
+import type { MatchDisplay, AppConfig } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 
 const store = useLcuStore();
 const loading = ref(false);
 const error = ref("");
 const activeTab = ref<"my" | "their">("my");
+
+// 应用配置（用于获取对局卡片颜色）
+const appConfig = ref<AppConfig | null>(null);
 
 // 当前登录玩家的 summonerId，用于 InProgress 阶段分离己方/敌方
 const currentSummonerId = ref<number>(0);
@@ -22,6 +25,10 @@ interface PlayerData {
   matches: MatchDisplay[];
   ranked: { solo: any; flex: any };
   loading: boolean;
+  avgKda?: number;
+  winRate?: number;
+  winCount?: number;
+  lossesCount?: number;
 }
 const playerData = ref<Record<number, PlayerData>>({});
 
@@ -87,7 +94,48 @@ async function loadPlayerData(cellId: number, summonerId: number) {
       flex = rankedResp.data.queues.find((q: any) => q.queueType === "RANKED_FLEX_SR") || null;
     }
 
-    playerData.value[cellId] = { info, matches, ranked: { solo, flex }, loading: false };
+    let avgKda = 0;
+    let winRate = 0;
+    let winCount = 0;
+    let lossesCount = 0;
+
+    if (matches && matches.length > 0) {
+      let totalKills = 0;
+      let totalDeaths = 0;
+      let totalAssists = 0;
+      let remakeCount = 0;
+
+      matches.forEach((m: MatchDisplay) => {
+        if (m.remake) {
+          remakeCount++;
+        } else {
+          totalKills += m.kills ?? 0;
+          totalDeaths += m.deaths ?? 0;
+          totalAssists += m.assists ?? 0;
+          if (m.win) {
+            winCount++;
+          } else {
+            lossesCount++;
+          }
+        }
+      });
+
+      const validMatches = matches.length - remakeCount;
+      winRate = validMatches > 0 ? Math.round((winCount / validMatches) * 100) : 0;
+      const deathsForCalc = totalDeaths === 0 ? 1 : totalDeaths;
+      avgKda = (totalKills + totalAssists) / deathsForCalc;
+    }
+
+    playerData.value[cellId] = {
+      info,
+      matches,
+      ranked: { solo, flex },
+      loading: false,
+      avgKda,
+      winRate,
+      winCount,
+      lossesCount,
+    };
   } catch {
     playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: false };
   }
@@ -162,11 +210,46 @@ function getChampionIcon(id: number): string {
   return id > 0 ? `/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
 }
 
+/** 获取对局卡片颜色样式 */
+function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
+  if (!appConfig.value?.Personalization) return {};
+
+  const colors = appConfig.value.Personalization;
+  let color = '';
+
+  if (m.remake) {
+    color = colors.RemakeCardColor || '';
+  } else if (m.win) {
+    color = colors.WinCardColor || '';
+  } else {
+    color = colors.LoseCardColor || '';
+  }
+
+  if (color) {
+    // 处理不同的颜色格式
+    if (color.startsWith('#') && color.length === 9) {
+      // #AARRGGBB 格式：转换为 rgba()
+      const alpha = parseInt(color.slice(1, 3), 16) / 255;
+      const r = parseInt(color.slice(3, 5), 16);
+      const g = parseInt(color.slice(5, 7), 16);
+      const b = parseInt(color.slice(7, 9), 16);
+      return { background: `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})` };
+    } else if (color.startsWith('#') && color.length === 7) {
+      // #RRGGBB 格式：添加半透明背景
+      return { background: `${color}1a` }; // 1a = 约 10% 透明度
+    }
+    // 其他格式（rgba 等）直接使用
+    return { background: color };
+  }
+  return {};
+}
+
 function formatRank(q: any): string {
   if (!q || !q.tier || q.tier === "NONE") return "";
   const tier = TIER_MAP[q.tier] || q.tier;
   const div = q.rank && q.rank !== "NA" ? q.rank : "";
-  return `${tier}${div}`;
+  const lp = q.leaguePoints !== undefined ? ` ${q.leaguePoints} LP` : "";
+  return `${tier}${div}${lp}`;
 }
 
 onMounted(async () => {
@@ -175,6 +258,12 @@ onMounted(async () => {
     const s = await fetchCurrentSummoner();
     if (s?.summonerId) currentSummonerId.value = s.summonerId;
   } catch { /* ignore */ }
+
+  // 获取应用配置（用于对局卡片颜色）
+  try {
+    appConfig.value = await fetchConfig();
+  } catch { /* ignore */ }
+
   refreshState();
 });
 
@@ -197,6 +286,21 @@ watch(() => store.champSelectSession, (session: any) => {
     loadAllPlayers();
   }
 }, { deep: true });
+
+function getKdaClass(kda: number | undefined): string {
+  if (kda === undefined) return "kda-gray";
+  if (kda >= 5.0) return "kda-orange";
+  if (kda >= 4.0) return "kda-blue";
+  if (kda >= 3.0) return "kda-green";
+  return "kda-gray";
+}
+
+function getWinRateClass(rate: number | undefined): string {
+  if (rate === undefined) return "wr-low";
+  if (rate >= 70) return "wr-high";
+  if (rate >= 50) return "wr-medium";
+  return "wr-low";
+}
 
 watch(activeTab, () => loadAllPlayers());
 </script>
@@ -236,10 +340,10 @@ watch(activeTab, () => loadAllPlayers());
             class="player-card"
           >
             <div class="pc-avatar-area">
-              <!-- 选人阶段：选了英雄才显示英雄头像；未选则只显示等级 -->
-              <template v-if="p.championId">
+              <!-- 选人阶段：选了英雄或预选了英雄才显示英雄头像 -->
+              <template v-if="p.championId || p.championPickIntent">
                 <div class="pc-avatar">
-                  <LcuImage :src="getChampionIcon(p.championId)" alt="champ" />
+                  <LcuImage :src="getChampionIcon(p.championId || p.championPickIntent)" alt="champ" />
                 </div>
               </template>
               <template v-else>
@@ -252,17 +356,31 @@ watch(activeTab, () => loadAllPlayers());
               </div>
             </div>
             <div class="pc-info">
-              <span class="pc-name">
-                {{ playerData[p.cellId]?.info?.gameName || playerData[p.cellId]?.info?.displayName || p.displayName || '未知' }}
-                <span v-if="playerData[p.cellId]?.info?.tagLine" class="pc-tag">#{{ playerData[p.cellId].info.tagLine }}</span>
-              </span>
+              <div class="pc-name-row">
+                <span class="pc-name">
+                  {{ playerData[p.cellId]?.info?.gameName || playerData[p.cellId]?.info?.displayName || p.displayName || '未知' }}
+                  <span v-if="playerData[p.cellId]?.info?.tagLine" class="pc-tag">#{{ playerData[p.cellId].info.tagLine }}</span>
+                </span>
+                <span v-if="playerData[p.cellId]?.winRate !== undefined" :class="['pc-winrate-badge', getWinRateClass(playerData[p.cellId].winRate)]">
+                  {{ playerData[p.cellId].winRate }}% 胜率
+                </span>
+              </div>
+              
+              <div class="pc-meta-row">
+                <span v-if="playerData[p.cellId]?.avgKda !== undefined" :class="['pc-kda-badge', getKdaClass(playerData[p.cellId].avgKda)]">
+                  KDA: {{ playerData[p.cellId]?.avgKda?.toFixed(2) ?? '0.00' }}
+                </span>
+              </div>
+
               <div class="pc-ranks">
-                <span class="pc-rank-item" :title="'单/双排'">
-                  🏆 {{ formatRank(playerData[p.cellId]?.ranked?.solo) || '无段位' }}
-                </span>
-                <span class="pc-rank-item" :title="'灵活排位'">
-                  🎯 {{ formatRank(playerData[p.cellId]?.ranked?.flex) || '无段位' }}
-                </span>
+                <div class="pc-rank-line" :title="'单/双排'">
+                  <span class="rank-icon-wrapper">🏆</span>
+                  <span class="rank-text">{{ formatRank(playerData[p.cellId]?.ranked?.solo) || '单双排: 无段位' }}</span>
+                </div>
+                <div class="pc-rank-line" :title="'灵活排位'">
+                  <span class="rank-icon-wrapper">🎯</span>
+                  <span class="rank-text">{{ formatRank(playerData[p.cellId]?.ranked?.flex) || '灵活排: 无段位' }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -279,11 +397,15 @@ watch(activeTab, () => loadAllPlayers());
             class="player-column"
           >
             <div class="col-header">
-              <div class="col-champ-avatar">
-                <LcuImage v-if="p.championId" :src="getChampionIcon(p.championId)" alt="champ" />
-                <div v-else class="col-champ-placeholder">?</div>
+              <div class="col-header-top">
+                <div class="col-header-info">
+                  <span class="col-name">{{ playerData[p.cellId]?.info?.gameName || p.displayName || `玩家${i+1}` }}</span>
+                  <span v-if="playerData[p.cellId]?.winRate !== undefined" class="col-summary">
+                    近10局: <span class="summary-wins">{{ playerData[p.cellId].winCount }}胜</span>
+                    <span class="summary-losses">{{ playerData[p.cellId].lossesCount }}负</span>
+                  </span>
+                </div>
               </div>
-              <span class="col-name">{{ playerData[p.cellId]?.info?.gameName || p.displayName || `玩家${i+1}` }}</span>
             </div>
 
             <template v-if="playerData[p.cellId]?.loading">
@@ -292,20 +414,29 @@ watch(activeTab, () => loadAllPlayers());
               </div>
             </template>
             <template v-else-if="playerData[p.cellId]?.matches?.length">
-              <div
-                v-for="m in playerData[p.cellId].matches"
-                :key="m.gameId"
-                :class="['col-match', m.win ? 'win' : 'lose']"
-              >
-                <div class="cm-champ">
-                  <LcuImage :src="m.championIconUrl" class="cm-champ-img" alt="champ" />
-                  <span class="cm-level">{{ m.champLevel }}</span>
-                </div>
-                <div class="cm-detail">
-                  <span class="cm-mode">{{ m.name }}</span>
-                  <div class="cm-bottom">
-                    <span class="cm-kda">{{ m.kills }}/{{ m.deaths }}/{{ m.assists }}</span>
-                    <span class="cm-date">{{ m.shortTime }}</span>
+              <div class="col-matches-list">
+                <div
+                  v-for="m in playerData[p.cellId].matches"
+                  :key="m.gameId"
+                  :class="['col-match', m.remake ? 'remake' : (m.win ? 'win' : 'lose')]"
+                  :style="getMatchCardStyle(m)"
+                >
+                  <div class="cm-champ">
+                    <LcuImage :src="m.championIconUrl" class="cm-champ-img" alt="champ" />
+                    <span class="cm-level">{{ m.champLevel }}</span>
+                  </div>
+                  <div class="cm-detail">
+                    <div class="cm-top-row">
+                      <span class="cm-mode">{{ m.name.replace("排位赛 ", "") }}</span>
+                    </div>
+                    <div class="cm-bottom">
+                      <span class="cm-kda">
+                        <span class="k">{{ m.kills }}</span>/
+                        <span class="d">{{ m.deaths }}</span>/
+                        <span class="a">{{ m.assists }}</span>
+                      </span>
+                      <span class="cm-date">{{ m.shortTime.split(' ')[0] }}</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -322,16 +453,21 @@ watch(activeTab, () => loadAllPlayers());
 
 <style scoped>
 .game-info {
-  padding: 1.5rem 1.5rem 1.5rem 0.6rem;
+  padding: 1rem 1.5rem 1rem 0.6rem;
   background-color: transparent;
-  min-height: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 1.2rem;
+  margin-bottom: 1rem;
+  flex-shrink: 0;
 }
 .page-title {
   font-size: 1.4rem;
@@ -340,32 +476,11 @@ watch(activeTab, () => loadAllPlayers());
   margin: 0;
   letter-spacing: 0.5px;
 }
-.title-phase {
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--text-dimmed);
-  margin-left: 2px;
-}
-.header-right { display: flex; align-items: center; gap: 10px; }
-
-.phase-badge {
-  padding: 4px 12px; border-radius: 12px;
-  font-size: 0.78rem; font-weight: 600; color: white;
-  box-shadow: var(--shadow-sm);
-}
-.phase-badge.champselect { background: var(--primary-color); box-shadow: 0 4px 10px var(--primary-color-alpha-30); }
-.phase-badge.inprogress { background: var(--win-color); box-shadow: 0 4px 10px var(--win-glow); }
-.phase-badge.gamestart { background: var(--win-color); box-shadow: 0 4px 10px var(--win-glow); }
-.phase-badge.readycheck { background: #fbbf24; color: #000; box-shadow: 0 4px 10px rgba(251, 191, 36, 0.2); }
-.phase-badge.lobby { background: #a855f7; box-shadow: 0 4px 10px rgba(168, 85, 247, 0.2); }
-.phase-badge.matchmaking { background: #06b6d4; box-shadow: 0 4px 10px rgba(6, 182, 212, 0.2); }
-.phase-badge.endofgame { background: var(--text-dimmed); }
-.phase-badge.none { background: rgba(0, 0, 0, 0.05); color: var(--text-muted); }
-
 
 .tip-container {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 6rem 2rem; color: var(--text-muted);
+  flex: 1;
 }
 .offline-logo { font-size: 3rem; margin-bottom: 1rem; }
 .tip { font-size: 0.95rem; color: var(--text-dimmed); margin: 0; }
@@ -373,80 +488,236 @@ watch(activeTab, () => loadAllPlayers());
 /* 左右分栏 */
 .game-layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 280px 1fr;
   gap: 16px;
-  height: calc(100vh - 100px);
+  flex: 1;
+  min-height: 0;
 }
 
 /* 左侧面板 */
 .left-panel {
-  background: var(--card-bg); border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg); overflow: hidden;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
   box-shadow: var(--shadow-sm);
-  display: flex; flex-direction: column;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
 }
-.team-tabs { display: flex; border-bottom: 1px solid var(--border-color); }
-.tab-btn {
-  flex: 1; padding: 12px; border: none; background: rgba(0, 0, 0, 0.01);
-  font-size: 0.82rem; font-weight: 600; color: var(--text-muted); cursor: pointer;
-  border-bottom: 2px solid transparent; transition: all 0.2s;
+.team-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.02);
 }
-.tab-btn:hover { background: rgba(0, 0, 0, 0.03); }
-.tab-btn.active { color: var(--primary-color); background: transparent; border-bottom-color: var(--primary-color); }
+.tab-btn {
+  flex: 1;
+  padding: 14px;
+  border: none;
+  background: transparent;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease-in-out;
+}
+.tab-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--text-color);
+}
+.tab-btn.active {
+  color: var(--primary-color);
+  border-bottom-color: var(--primary-color);
+  background: rgba(255, 255, 255, 0.05);
+}
 
 .player-list {
-  display: flex; flex-direction: column; flex: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 12px;
+  gap: 10px;
+  overflow: hidden;
 }
 
+/* 玩家卡片卡片化升级 */
 .player-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 14px; border-bottom: 1px solid var(--border-color);
-  flex: 1; transition: background 0.15s;
+  flex: 1;
+  min-height: 0;
+  max-height: 140px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  transition: all 0.2s ease-in-out;
+  box-sizing: border-box;
 }
-.player-card:last-child { border-bottom: none; }
-.player-card:hover { background: rgba(0, 0, 0, 0.02); }
+.player-card:hover {
+  background: rgba(255, 255, 255, 0.03);
+  transform: translateY(-2px);
+  border-color: rgba(var(--primary-color-rgb, 59, 130, 246), 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
 
 /* 左侧：头像区域 */
 .pc-avatar-area {
-  position: relative; flex-shrink: 0;
+  position: relative;
+  flex-shrink: 0;
 }
 .pc-avatar {
-  width: 48px; height: 48px; border-radius: 50%;
-  overflow: hidden; border: 2px solid var(--border-color);
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid var(--border-color);
   box-shadow: var(--shadow-sm);
 }
-.pc-avatar-empty { border-color: var(--border-color); }
+.pc-avatar-empty {
+  border-color: var(--border-color);
+}
 .pc-avatar-placeholder {
-  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.04); font-size: 1rem; color: var(--text-dimmed);
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.04);
+  font-size: 1rem;
+  color: var(--text-dimmed);
 }
 .pc-level {
-  position: absolute; top: -4px; right: -4px;
-  background: var(--primary-color); color: white; font-size: 0.6rem; font-weight: 700;
-  padding: 1px 6px; border-radius: 8px; white-space: nowrap;
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  background: var(--primary-color);
+  color: white;
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  white-space: nowrap;
   box-shadow: 0 2px 6px var(--primary-color-alpha-40);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.pc-info { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 4px; }
-.pc-name {
-  font-size: 0.85rem; font-weight: 600; color: var(--text-color);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.pc-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 4px;
 }
-.pc-tag { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; }
-.pc-ranks { display: flex; gap: 8px; flex-wrap: wrap; }
-.pc-rank-item {
-  font-size: 0.72rem; color: var(--text-muted); background: rgba(0, 0, 0, 0.02);
-  padding: 2px 8px; border-radius: 4px; white-space: nowrap; border: 1px solid var(--border-color);
+.pc-name-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+}
+.pc-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pc-tag {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* 胜率徽章 */
+.pc-winrate-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.pc-winrate-badge.wr-high {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+.pc-winrate-badge.wr-medium {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+}
+.pc-winrate-badge.wr-low {
+  color: #6b7280;
+  background: rgba(107, 114, 128, 0.1);
+}
+
+.pc-meta-row {
+  display: flex;
+  align-items: center;
+}
+
+/* KDA 均值徽章 */
+.pc-kda-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.pc-kda-badge.kda-orange {
+  color: #f97316;
+  background: rgba(249, 115, 22, 0.12);
+  border: 1px solid rgba(249, 115, 22, 0.2);
+  font-weight: 700;
+}
+.pc-kda-badge.kda-blue {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.15);
+}
+.pc-kda-badge.kda-green {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+}
+.pc-kda-badge.kda-gray {
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* 排位段位格栅化 */
+.pc-ranks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.pc-rank-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.rank-icon-wrapper {
+  font-size: 0.75rem;
+}
+.rank-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 右侧：5 列战绩 */
 .right-panel {
-  background: var(--card-bg); border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
-  overflow: hidden; height: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  height: 100%;
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
 }
@@ -458,84 +729,202 @@ watch(activeTab, () => loadAllPlayers());
 
 .player-column {
   border-right: 1px solid var(--border-color);
-  display: flex; flex-direction: column;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
-.player-column:last-child { border-right: none; }
+.player-column:last-child {
+  border-right: none;
+}
 
 .col-header {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 10px; border-bottom: 1px solid var(--border-color);
-  background: rgba(0, 0, 0, 0.01); flex-shrink: 0;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.02);
+  flex-shrink: 0;
 }
-.col-champ-avatar {
-  width: 30px; height: 30px; border-radius: 50%;
-  overflow: hidden; border: 1px solid var(--border-color); flex-shrink: 0;
+.col-header-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.col-champ-placeholder {
-  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.04); font-size: 0.7rem; color: var(--text-dimmed);
+.col-header-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
 }
 .col-name {
-  font-size: 0.78rem; font-weight: 600; color: var(--text-color);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.col-summary {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.summary-wins {
+  color: #3b82f6;
+  font-weight: bold;
+}
+.summary-losses {
+  color: #ef4444;
+  font-weight: bold;
 }
 
-.col-loading { display: flex; align-items: center; justify-content: center; flex: 1; }
+.col-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
 .mini-spinner {
-  width: 20px; height: 20px; border: 2px solid rgba(0, 0, 0, 0.06);
-  border-top-color: var(--primary-color); border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(0, 0, 0, 0.06);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .col-empty {
-  text-align: center; padding: 2rem 0.5rem;
-  font-size: 0.75rem; color: var(--text-dimmed);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  font-size: 0.75rem;
+  color: var(--text-dimmed);
 }
 
-.col-matches {
-  display: flex; flex-direction: column; flex: 1;
+.col-matches-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 6px;
+  padding: 6px 6px;
+  box-sizing: border-box;
 }
 
 .col-match {
-  display: flex; align-items: center; gap: 8px;
-  padding: 0 10px; border-bottom: 1px solid var(--border-color);
   flex: 1;
+  min-height: 0;
+  max-height: 72px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  margin: 0;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+  transition: all 0.2s ease-in-out;
+  box-sizing: border-box;
 }
-.col-match:last-child { border-bottom: none; }
 
-/* 胜/败背景色 */
-.col-match.win { background: var(--win-bg); }
-.col-match.lose { background: var(--loss-bg); }
+/* 胜/败/重赛 玻璃渐变色背景 */
+.col-match.win {
+  border-color: rgba(59, 130, 246, 0.12);
+}
+.col-match.win:hover {
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.1);
+  transform: translateY(-1px);
+}
+
+.col-match.lose {
+  border-color: rgba(239, 68, 68, 0.12);
+}
+.col-match.lose:hover {
+  border-color: rgba(239, 68, 68, 0.3);
+  box-shadow: 0 4px 10px rgba(239, 68, 68, 0.1);
+  transform: translateY(-1px);
+}
+
+.col-match.remake {
+  border-color: rgba(107, 114, 128, 0.12);
+}
 
 /* 头像区域 */
 .cm-champ {
-  position: relative; width: 34px; height: 34px; flex-shrink: 0;
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
 }
 .cm-champ-img {
-  width: 34px; height: 34px; border-radius: 50%;
-  overflow: hidden; border: 1px solid var(--border-color);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
 }
 .cm-level {
-  position: absolute; bottom: -2px; right: -2px;
-  width: 13px; height: 13px; line-height: 11px;
-  background: rgba(255, 255, 255, 0.9); color: var(--text-color); border-radius: 50%;
-  font-size: 0.58rem; font-weight: bold; text-align: center;
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 13px;
+  height: 13px;
+  line-height: 11px;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text-color);
+  border-radius: 50%;
+  font-size: 0.55rem;
+  font-weight: bold;
+  text-align: center;
   border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
 }
 
 /* 右侧详情 */
 .cm-detail {
-  display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+.cm-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 .cm-mode {
-  font-size: 0.72rem; font-weight: 600; color: var(--text-color);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
 .cm-bottom {
-  display: flex; justify-content: space-between; align-items: center; gap: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
 }
-.cm-kda { font-size: 0.72rem; font-weight: 600; color: var(--text-muted); }
-.cm-date { font-size: 0.65rem; color: var(--text-dimmed); white-space: nowrap; }
+.cm-kda {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+}
+.cm-kda .d {
+  color: #ef4444; /* 强调死亡数 */
+}
+.cm-date {
+  font-size: 0.65rem;
+  color: var(--text-dimmed);
+  white-space: nowrap;
+}
 </style>

@@ -28,8 +28,9 @@ pub fn start(
 ) {
     tauri::async_runtime::spawn(async move {
         let mut lobby_created = false;
-        let mut last_phase = String::new();
+        let mut last_phase = get_current_phase(&app_handle).await.unwrap_or_default();
         let mut upload_trigger = upload_trigger;
+        let mut ready_check_accepted = false;  // 跟踪是否已接受匹配
 
         while let Some(event) = rx.recv().await {
             let cfg = {
@@ -40,6 +41,10 @@ pub fn start(
 
             match event {
                 GameflowEvent::PhaseChanged(phase) => {
+                    // 阶段变化时重置接受标记
+                    if phase != "ReadyCheck" {
+                        ready_check_accepted = false;
+                    }
                     handle_phase_change(
                         &app_handle,
                         &phase,
@@ -51,7 +56,9 @@ pub fn start(
                     .await;
                 }
                 GameflowEvent::ReadyCheck(data) => {
-                    handle_ready_check(&app_handle, &data, &cfg).await;
+                    if last_phase == "ReadyCheck" {
+                        handle_ready_check(&app_handle, &data, &cfg, &mut ready_check_accepted).await;
+                    }
                 }
                 GameflowEvent::ResetLobbyState => {
                     log::info!("收到重置大厅创建状态指令，重置为 false");
@@ -216,17 +223,18 @@ async fn try_create_default_lobby(
 /// 匹配准备检查处理
 async fn handle_ready_check(
     app_handle: &AppHandle,
-    data: &ReadyCheckData,
+    _data: &ReadyCheckData,
     cfg: &FunctionsConfig,
+    ready_check_accepted: &mut bool,
 ) {
     if !cfg.enable_auto_accept_matching {
         return;
     }
 
-    if let Some(ref response) = data.player_response {
-        if response != "None" && response != "Pending" {
-            return;
-        }
+    // 如果已经接受过，跳过
+    if *ready_check_accepted {
+        log::debug!("已接受匹配，跳过重复请求");
+        return;
     }
 
     let delay = cfg.auto_accept_matching_delay;
@@ -234,8 +242,92 @@ async fn handle_ready_check(
         tokio::time::sleep(std::time::Duration::from_millis(delay as u64)).await;
     }
 
+    // 先获取当前 ready check 状态（参考 Python 实现）
+    match get_ready_check_status(app_handle).await {
+        Some(status) => {
+            // 检查玩家响应状态
+            if let Some(ref response) = status.player_response {
+                if response == "Accepted" || response == "Declined" {
+                    log::debug!("玩家已响应匹配: {}", response);
+                    *ready_check_accepted = true;
+                    return;
+                }
+            }
+            // 检查是否有错误
+            if let Some(ref error_code) = status.error_code {
+                log::warn!("Ready check 错误: {}", error_code);
+                return;
+            }
+        }
+        None => {
+            log::debug!("无法获取 ready check 状态，跳过");
+            return;
+        }
+    }
+
     log::info!("自动接受匹配");
-    lcu_post(app_handle, "/lol-matchmaking/v1/ready-check/accept").await;
+    if lcu_post(app_handle, "/lol-matchmaking/v1/ready-check/accept").await {
+        *ready_check_accepted = true;
+    }
+}
+
+/// 获取当前 ready check 状态
+async fn get_ready_check_status(app_handle: &AppHandle) -> Option<ReadyCheckStatus> {
+    let state = app_handle.state::<crate::AppState>();
+    let lock = state.lcu_client.read().await;
+    let lcu = lock.as_ref()?;
+
+    let url = format!(
+        "https://127.0.0.1:{}/lol-matchmaking/v1/ready-check",
+        lcu.port
+    );
+    let auth = crate::build_auth_header(&lcu.token);
+
+    let resp = lcu
+        .http_client
+        .get(&url)
+        .header("Authorization", auth)
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    resp.json::<ReadyCheckStatus>().await.ok()
+}
+
+/// 获取当前游戏阶段
+async fn get_current_phase(app_handle: &AppHandle) -> Option<String> {
+    let state = app_handle.state::<crate::AppState>();
+    let lock = state.lcu_client.read().await;
+    let lcu = lock.as_ref()?;
+
+    let url = format!(
+        "https://127.0.0.1:{}/lol-gameflow/v1/gameflow-phase",
+        lcu.port
+    );
+    let auth = crate::build_auth_header(&lcu.token);
+
+    let resp = lcu
+        .http_client
+        .get(&url)
+        .header("Authorization", auth)
+        .send()
+        .await
+        .ok()?;
+
+    let text = resp.text().await.ok()?;
+    Some(text.trim_matches('"').to_string())
+}
+
+/// Ready check 状态响应
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadyCheckStatus {
+    player_response: Option<String>,
+    error_code: Option<String>,
 }
 
 /// 通用 LCU POST 请求
