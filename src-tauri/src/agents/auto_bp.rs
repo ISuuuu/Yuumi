@@ -199,7 +199,7 @@ async fn do_auto_show(
     if selection.is_champion_showed {
         return;
     }
-    if !cfg.enable_auto_select_champion {
+    if !cfg.enable_auto_hover_champion {
         return;
     }
 
@@ -255,7 +255,7 @@ async fn do_auto_complete(
     cfg: &FunctionsConfig,
     selection: &mut ChampionSelection,
 ) {
-    if !cfg.enable_auto_select_timeout_completed || selection.is_champion_picked_completed {
+    if !cfg.auto_select_confirm_on_timeout || selection.is_champion_picked_completed {
         return;
     }
 

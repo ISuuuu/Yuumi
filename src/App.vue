@@ -4,7 +4,7 @@ import { useLcuStore, initLcuListeners } from "./store/lcuStore";
 import { storeToRefs } from "pinia";
 import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
 import { updateThemeColor } from "./utils/theme";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -132,19 +132,39 @@ async function openOpggWindow() {
     await existing.setFocus();
     return;
   }
-  const mainPos = await getCurrentWindow().outerPosition();
-  const mainSize = await getCurrentWindow().innerSize();
-  new WebviewWindow("opgg", {
-    url: "opgg.html",
-    title: "OP.GG",
-    width: 760,
-    height: 820,
-    x: mainPos.x + mainSize.width + 2,
-    y: mainPos.y,
-    decorations: true,
-    resizable: true,
-    center: false,
-  });
+  // 获取当前窗口所在屏幕（显示器），将 OP.GG 窗口放置在屏幕右侧
+  const monitor = await currentMonitor();
+  if (monitor) {
+    // Monitor 的 position/size 是物理像素，需要转为逻辑像素
+    const pos = monitor.position.toLogical(monitor.scaleFactor);
+    const size = monitor.size.toLogical(monitor.scaleFactor);
+    new WebviewWindow("opgg", {
+      url: "opgg.html",
+      title: "OP.GG",
+      width: 760,
+      height: 820,
+      x: pos.x + size.width - 760 - 2,
+      y: pos.y + 2,
+      decorations: true,
+      resizable: true,
+      center: false,
+    });
+  } else {
+    // 兜底：获取不到屏幕信息时，放在主窗口右侧
+    const mainPos = await getCurrentWindow().outerPosition();
+    const mainSize = await getCurrentWindow().innerSize();
+    new WebviewWindow("opgg", {
+      url: "opgg.html",
+      title: "OP.GG",
+      width: 760,
+      height: 820,
+      x: mainPos.x + mainSize.width + 2,
+      y: mainPos.y,
+      decorations: true,
+      resizable: true,
+      center: false,
+    });
+  }
 }
 
 async function loadLcuState(retryCount = 0) {
@@ -236,9 +256,13 @@ async function loadLcuState(retryCount = 0) {
 watch(() => store.isConnected, (connected) => {
   if (connected) {
     loadLcuState();
+    // 客户端连接成功后自动跳转到生涯页面
+    currentPage.value = "career";
   } else {
     summoner.value = null;
     platformId.value = "";
+    // 断开连接时回到首页
+    currentPage.value = "home";
   }
 }, { immediate: true });
 
@@ -1113,7 +1137,7 @@ body {
   font-weight: 600; color: white; z-index: 9999;
   box-shadow: var(--shadow-md); pointer-events: none;
 }
-.toast-success { background-color: var(--win-color); }
+.toast-success { background-color: var(--primary-color); }
 .toast-error { background-color: var(--loss-color); }
 .toast-enter-active { transition: all 0.25s ease-out; }
 .toast-leave-active { transition: all 0.2s ease-in; }

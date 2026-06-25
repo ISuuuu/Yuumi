@@ -113,7 +113,6 @@ pub struct FunctionsConfig {
     pub enable_auto_create_lobby: bool,
     pub default_game_mode: u32,
     pub auto_accept_matching_delay: u32,
-    pub enable_auto_select_timeout_completed: bool,
     pub enable_random_skin: bool,
 
     // 自动选人（通用 + 分路）
@@ -156,6 +155,13 @@ pub struct FunctionsConfig {
     pub lcu_realtime_enabled: bool,
     #[serde(default)]
     pub lcu_user_id: String,
+    // 自动亮起英雄（仅预选，不锁定）
+    #[serde(default)]
+    pub enable_auto_hover_champion: bool,
+    // 倒计时结束时自动确认选择（配合 hover 模式）
+    #[serde(default = "default_true")]
+    pub auto_select_confirm_on_timeout: bool,
+
     #[serde(default = "default_true")]
     pub upload_enabled: bool,
 }
@@ -174,7 +180,6 @@ impl Default for FunctionsConfig {
             enable_auto_create_lobby: false,
             default_game_mode: 2400,
             auto_accept_matching_delay: 0,
-            enable_auto_select_timeout_completed: false,
             enable_random_skin: false,
             enable_auto_select_champion: false,
             auto_select_champion: Vec::new(),
@@ -203,6 +208,8 @@ impl Default for FunctionsConfig {
             auto_set_summoner_spell_sup: Vec::new(),
             enable_reserve_gameinfo: false,
             lcu_realtime_enabled: false,
+            enable_auto_hover_champion: false,
+            auto_select_confirm_on_timeout: true,
             lcu_user_id: String::new(),
             upload_enabled: true,
         }

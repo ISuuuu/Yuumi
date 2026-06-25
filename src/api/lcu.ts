@@ -187,7 +187,8 @@ export interface FunctionsConfig {
   EnableAutoCreateLobby: boolean;
   DefaultGameMode: number;
   AutoAcceptMatchingDelay: number;
-  EnableAutoSelectTimeoutCompleted: boolean;
+  EnableAutoHoverChampion: boolean;
+  AutoSelectConfirmOnTimeout: boolean;
   EnableRandomSkin: boolean;
   EnableAutoSelectChampion: boolean;
   AutoSelectChampion: number[];

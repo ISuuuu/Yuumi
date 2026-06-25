@@ -80,6 +80,14 @@ watch(() => store.isConnected, (connected) => {
       </div>
     </div>
 
+    <!-- 连接成功后猫咪移到窗体右下角 -->
+    <img
+      v-if="store.isConnected"
+      src="/logo.png"
+      class="connected-logo"
+      alt="Yuumi"
+    />
+
     <!-- 未连接状态 -->
     <div v-else class="connection-offline">
       <img src="/logo.png" class="offline-logo" alt="Yuumi" />
@@ -116,6 +124,7 @@ watch(() => store.isConnected, (connected) => {
 
 <style scoped>
 .home-view {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -180,6 +189,7 @@ watch(() => store.isConnected, (connected) => {
 .details-box {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 10px;
   font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
   font-size: 0.82rem;
@@ -194,6 +204,7 @@ watch(() => store.isConnected, (connected) => {
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
   transition: all 0.3s ease;
+  text-align: center;
 }
 
 .details-box:hover {
@@ -204,6 +215,7 @@ watch(() => store.isConnected, (connected) => {
 .detail-row {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   white-space: nowrap;
 }
@@ -220,7 +232,6 @@ watch(() => store.isConnected, (connected) => {
 .token-row {
   word-break: break-all;
   white-space: normal;
-  display: block;
   line-height: 1.4;
 }
 
@@ -364,5 +375,60 @@ watch(() => store.isConnected, (connected) => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.connected-logo {
+  position: absolute;
+  bottom: 40px;
+  right: 40px;
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  opacity: 0.85;
+  filter: drop-shadow(0 4px 12px rgba(108, 92, 231, 0.2));
+  animation: logo-enter 0.6s ease-out, logo-float 3s ease-in-out 1.2s infinite;
+  transition: opacity 0.3s ease, filter 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  cursor: default;
+}
+
+.connected-logo:hover {
+  opacity: 1;
+  filter: drop-shadow(0 6px 20px rgba(108, 92, 231, 0.4));
+  animation: logo-enter 0.6s ease-out, logo-wiggle 0.5s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+.connected-logo:active {
+  animation: logo-bounce 0.35s ease;
+  filter: drop-shadow(0 2px 8px rgba(108, 92, 231, 0.5));
+}
+
+@keyframes logo-enter {
+  from {
+    opacity: 0;
+    transform: translate(16px, 16px);
+  }
+  to {
+    opacity: 0.85;
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes logo-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes logo-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-6deg); }
+  75% { transform: rotate(6deg); }
+}
+
+@keyframes logo-bounce {
+  0% { transform: scale(1); }
+  30% { transform: scale(0.85); }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); }
 }
 </style>
