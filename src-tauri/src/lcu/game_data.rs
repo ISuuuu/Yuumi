@@ -18,6 +18,7 @@ pub struct GameDataAssets {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct IdEntry {
     id: Option<i32>,
     #[serde(rename = "iconPath")]
