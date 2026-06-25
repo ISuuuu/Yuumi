@@ -1,8 +1,13 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
+use tokio::time::{sleep, Duration};
 
 use crate::{build_auth_header, LcuClient};
+
+/// 游戏资源加载重试次数和间隔
+const GAME_DATA_RETRIES: u32 = 3;
+const GAME_DATA_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 /// LCU 连接后预加载的游戏资源路径映射（ID → iconPath / name）。
 #[derive(Debug, Clone, Default)]
@@ -27,9 +32,40 @@ struct IdEntry {
     name: Option<String>,
 }
 
-/// 从 LCU 预加载所有游戏资源路径。
+/// 从 LCU 预加载所有游戏资源路径（带重试）。
 /// 在 LCU 连接成功后、写入 AppState.game_data 之前调用。
 pub async fn fetch_game_data_assets(lcu: &LcuClient) -> GameDataAssets {
+    let mut last_assets = GameDataAssets::default();
+
+    for attempt in 1..=GAME_DATA_RETRIES {
+        last_assets = fetch_game_data_assets_inner(lcu).await;
+
+        let is_empty = last_assets.items.is_empty()
+            && last_assets.spells.is_empty()
+            && last_assets.runes.is_empty()
+            && last_assets.champions.is_empty();
+
+        if !is_empty {
+            return last_assets;
+        }
+
+        if attempt < GAME_DATA_RETRIES {
+            log::warn!(
+                "游戏资源加载为空 ({}/{})，{}秒后重试...",
+                attempt,
+                GAME_DATA_RETRIES,
+                GAME_DATA_RETRY_DELAY.as_secs()
+            );
+            sleep(GAME_DATA_RETRY_DELAY).await;
+        }
+    }
+
+    log::warn!("游戏资源在 {} 次尝试后仍为空", GAME_DATA_RETRIES);
+    last_assets
+}
+
+/// 从 LCU 预加载所有游戏资源路径（单次尝试）。
+async fn fetch_game_data_assets_inner(lcu: &LcuClient) -> GameDataAssets {
     let auth = build_auth_header(&lcu.token);
     let base = format!("https://127.0.0.1:{}", lcu.port);
 

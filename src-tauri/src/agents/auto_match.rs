@@ -76,13 +76,11 @@ async fn handle_phase_change(
 ) {
     log::info!("游戏阶段: {}", phase);
 
-    // 仅在真正阶段转换时重置 lobby_created（防止 "None" 重复事件导致重置）
-    if phase != last_phase.as_str() {
-        if phase == "None" {
-            *lobby_created = false;
-        }
-        *last_phase = phase.to_string();
+    // 进入 "None" 空闲状态时重置大厅创建标志（允许 WS 重连后重新创建）
+    if phase == "None" {
+        *lobby_created = false;
     }
+    *last_phase = phase.to_string();
 
     // 空闲状态 → 自动创建预设大厅
     if phase == "None" && cfg.enable_auto_create_lobby {
@@ -175,8 +173,8 @@ async fn try_create_default_lobby(
                         return;
                     }
                     let status = resp.status().as_u16();
-                    if status < 500 {
-                        log::warn!("创建大厅失败 (HTTP {})，停止重试", status);
+                    if status == 409 {
+                        log::info!("创建大厅返回 409 (Conflict)，可能已在房间中，停止重试");
                         *lobby_created = true;
                         return;
                     }

@@ -73,9 +73,25 @@ export interface MatchDisplay {
   itemIconUrls: string[];
 }
 
-/** 获取当前召唤师信息（Rust 解析层清洗后） */
-export const fetchCurrentSummoner = () =>
-  invoke<SummonerDisplay>("get_current_summoner");
+/** 获取当前召唤师信息（Rust 解析层清洗后，404 时自动重试） */
+export async function fetchCurrentSummoner(maxRetries = 15): Promise<SummonerDisplay> {
+  for (let i = 0; i <= maxRetries; i++) {
+    try {
+      return await invoke<SummonerDisplay>("get_current_summoner");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("404") && i < maxRetries) {
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
+      }
+      if (msg.includes("404")) {
+        throw new Error("未登录：请在英雄联盟客户端中登录您的账号");
+      }
+      throw e;
+    }
+  }
+  throw new Error("获取召唤师信息失败");
+}
 
 /** 获取战绩列表（Rust 解析层清洗后） */
 export const fetchMatchHistory = (puuid: string, begIndex?: number, endIndex?: number) =>
