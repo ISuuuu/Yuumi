@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, inject, onMounted, type Ref } from "vue";
+import { ref, watch, computed, inject, onMounted, onUnmounted, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import { fetchCurrentSummoner, fetchMatchHistory, lcuRequest, fetchConfig } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
@@ -170,7 +170,16 @@ onMounted(async () => {
   } catch (e) {
     console.warn("加载 CareerGamesNumber 配置失败，使用默认值 20:", e);
   }
+  document.addEventListener("click", onDocClick);
 });
+
+onUnmounted(() => {
+  document.removeEventListener("click", onDocClick);
+});
+
+function onDocClick() {
+  showQueueDropdown.value = false;
+}
 
 // 自动加载逻辑
 watch(() => store.isConnected, (connected) => {
@@ -256,28 +265,30 @@ const statsSummary = computed(() => {
 
       <!-- 召唤师信息卡片 -->
       <div v-if="summoner" class="summoner-header">
-        <div class="profile-icon-wrapper">
-          <!-- 外层进度条圆环 -->
-          <div class="gauge-ring" :style="{ '--progress': summoner.percentCompleteForNextLevel }"></div>
-          <div class="avatar-container">
-            <LcuImage :src="summoner.profileIconUrl" class="profile-avatar" alt="avatar" />
+        <div class="profile-center">
+          <div class="profile-icon-wrapper">
+            <!-- 外层进度条圆环 -->
+            <div class="gauge-ring" :style="{ '--progress': summoner.percentCompleteForNextLevel }"></div>
+            <div class="avatar-container">
+              <LcuImage :src="summoner.profileIconUrl" class="profile-avatar" alt="avatar" />
+            </div>
+            <!-- 等级角标 -->
+            <div class="level-badge">{{ summoner.summonerLevel }}</div>
           </div>
-          <!-- 等级角标 -->
-          <div class="level-badge">{{ summoner.summonerLevel }}</div>
-        </div>
 
-        <div class="summoner-info">
-          <div class="name-row">
-            <h1 class="display-name">{{ summoner.gameName || summoner.displayName }}</h1>
-            <button class="copy-riot-id-btn" @click="copyRiotId" :title="`复制: ${summoner.gameName || summoner.displayName}#${summoner.tagLine}`">
-              <span v-if="copied" class="copied-text">✓ 已复制</span>
-              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-              </svg>
-            </button>
+          <div class="summoner-info">
+            <div class="name-row">
+              <h1 class="display-name">{{ summoner.gameName || summoner.displayName }}</h1>
+              <button class="copy-riot-id-btn" @click="copyRiotId" :title="`复制: ${summoner.gameName || summoner.displayName}#${summoner.tagLine}`">
+                <span v-if="copied" class="copied-text">✓ 已复制</span>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+              </button>
+            </div>
+            <span class="tagline"># {{ summoner.tagLine }}</span>
           </div>
-          <span class="tagline"># {{ summoner.tagLine }}</span>
         </div>
 
         <div class="header-actions">
@@ -362,7 +373,7 @@ const statsSummary = computed(() => {
 
         <div class="summary-actions">
           <button class="summary-action-btn">最近队友</button>
-          <div class="dropdown-trigger" @click="showQueueDropdown = !showQueueDropdown">
+          <div class="dropdown-trigger" @click.stop="showQueueDropdown = !showQueueDropdown">
             <span>{{ QUEUE_OPTIONS.find(q => q.id === selectedQueue)?.label || '全部' }}</span>
             <svg :class="['arrow-icon', { expanded: showQueueDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="6 9 12 15 18 9"/>
@@ -397,13 +408,15 @@ const statsSummary = computed(() => {
               <div class="level-overlay">{{ m.champLevel }}</div>
             </div>
             <div class="spells-runes">
-              <div class="spell-slot">
-                <LcuImage :src="getSpellIcon(m, 1)" class="mini-icon" alt="s1" />
+              <div class="spells-col">
+                <div class="spell-slot">
+                  <LcuImage :src="getSpellIcon(m, 1)" class="mini-icon" alt="s1" />
+                </div>
+                <div class="spell-slot">
+                  <LcuImage :src="getSpellIcon(m, 2)" class="mini-icon" alt="s2" />
+                </div>
               </div>
-              <div class="spell-slot">
-                <LcuImage :src="getSpellIcon(m, 2)" class="mini-icon" alt="s2" />
-              </div>
-              <div class="rune-slot">
+              <div v-if="m.queueId !== 2400" class="rune-slot">
                 <LcuImage :src="m.runeIconUrl" class="mini-icon circular" alt="rune" />
               </div>
             </div>
@@ -516,26 +529,30 @@ const statsSummary = computed(() => {
 
 /* 召唤师头部卡片 */
 .summoner-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 1.2rem;
   padding: 1.5rem;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   margin-bottom: 1.5rem;
   box-shadow: var(--shadow-sm);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
   transition: all 0.25s ease;
+}
+
+.profile-center {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  justify-content: center;
+  grid-column: 2;
 }
 
 .summoner-header:hover {
   border-color: var(--primary-color-alpha-30);
   box-shadow: var(--shadow-md);
   background-color: #ffffff;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 .profile-icon-wrapper {
@@ -647,8 +664,8 @@ const statsSummary = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-left: auto;
-  flex-shrink: 0;
+  grid-column: 3;
+  justify-self: end;
 }
 
 .action-btn {
@@ -667,8 +684,6 @@ const statsSummary = computed(() => {
   background: #ffffff;
   color: var(--text-color);
   border-color: var(--primary-color);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 /* 排位数据表 */
@@ -679,15 +694,11 @@ const statsSummary = computed(() => {
   overflow: hidden;
   margin-bottom: 1.5rem;
   box-shadow: var(--shadow-sm);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
   transition: all 0.25s ease;
 }
 
 .rank-table-wrapper:hover {
   background-color: #ffffff;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   box-shadow: var(--shadow-md);
   border-color: var(--primary-color-alpha-30);
 }
@@ -736,15 +747,13 @@ const statsSummary = computed(() => {
   border-radius: 8px;
   margin-bottom: 1rem;
   box-shadow: var(--shadow-sm);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
   transition: all 0.25s ease;
+  position: relative;
+  z-index: 10;
 }
 
 .recent-summary-bar:hover {
   background-color: #ffffff;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   box-shadow: var(--shadow-md);
   border-color: var(--primary-color-alpha-30);
 }
@@ -826,8 +835,6 @@ const statsSummary = computed(() => {
 .summary-action-btn:hover {
   background: #ffffff;
   border-color: var(--primary-color);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 .dropdown-trigger {
@@ -848,8 +855,6 @@ const statsSummary = computed(() => {
 .dropdown-trigger:hover {
   background: #ffffff;
   border-color: var(--primary-color);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 .dropdown-trigger .arrow-icon {
@@ -906,32 +911,26 @@ const statsSummary = computed(() => {
 .match-history-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .match-card {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  border-radius: 8px;
+  padding: 14px 20px;
+  border-radius: 10px;
   border: 1px solid var(--border-color);
-  border-left: 4px solid transparent;
   transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
   cursor: pointer;
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .match-card:hover {
-  transform: translateY(-1.5px);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  box-shadow: var(--shadow-md);
 }
 
 .match-card.win {
   background-color: var(--win-bg);
   border-color: var(--win-border);
-  border-left-color: var(--win-color);
 }
 
 .match-card.win:hover {
@@ -943,7 +942,6 @@ const statsSummary = computed(() => {
 .match-card.lose {
   background-color: var(--loss-bg);
   border-color: var(--loss-border);
-  border-left-color: var(--loss-color);
 }
 
 .match-card.lose:hover {
@@ -956,19 +954,19 @@ const statsSummary = computed(() => {
 .champ-panel {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 100px;
+  gap: 12px;
+  min-width: 120px;
 }
 
 .champ-avatar-box {
   position: relative;
-  width: 44px;
-  height: 44px;
+  width: 52px;
+  height: 52px;
 }
 
 .champ-avatar {
-  width: 44px;
-  height: 44px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   overflow: hidden;
   border: 1.5px solid var(--border-color);
@@ -978,13 +976,13 @@ const statsSummary = computed(() => {
   position: absolute;
   bottom: -2px;
   right: -2px;
-  width: 16px;
-  height: 16px;
-  line-height: 14px;
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
   background-color: rgba(255, 255, 255, 0.9);
   color: var(--text-color);
   border-radius: 50%;
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: 700;
   text-align: center;
   border: 1px solid var(--border-color);
@@ -992,13 +990,20 @@ const statsSummary = computed(() => {
 
 .spells-runes {
   display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.spells-col {
+  display: flex;
+  flex-direction: column;
   gap: 2px;
 }
 
 .spell-slot, .rune-slot {
-  width: 18px;
-  height: 18px;
-  border-radius: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
   overflow: hidden;
   border: 1px solid var(--border-color);
 }
@@ -1018,11 +1023,11 @@ const statsSummary = computed(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-width: 90px;
+  min-width: 100px;
 }
 
 .result-text {
-  font-size: 0.9rem;
+  font-size: 1rem;
   font-weight: 800;
 }
 
@@ -1035,7 +1040,7 @@ const statsSummary = computed(() => {
 }
 
 .queue-mode {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: var(--text-muted);
   margin-top: 2px;
 }
@@ -1045,11 +1050,11 @@ const statsSummary = computed(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-width: 110px;
+  min-width: 130px;
 }
 
 .kda-numbers {
-  font-size: 0.88rem;
+  font-size: 1rem;
   color: var(--text-muted);
 }
 
@@ -1063,7 +1068,7 @@ const statsSummary = computed(() => {
 }
 
 .kda-ratio {
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   font-weight: 700;
 }
 
@@ -1076,19 +1081,19 @@ const statsSummary = computed(() => {
 .cs-panel {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-width: 70px;
+  gap: 5px;
+  min-width: 75px;
 }
 
 .cs-count {
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: var(--text-muted);
 }
 
 .cs-icon {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   color: var(--text-dimmed);
 }
 
@@ -1106,8 +1111,8 @@ const statsSummary = computed(() => {
 }
 
 .item-slot, .ward-slot {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   background-color: rgba(0, 0, 0, 0.04);
   border-radius: 4px;
   overflow: hidden;
@@ -1130,20 +1135,20 @@ const statsSummary = computed(() => {
 .gold-panel {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-width: 80px;
+  gap: 5px;
+  min-width: 85px;
   justify-content: flex-end;
 }
 
 .gold-count {
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: var(--text-muted);
 }
 
 .gold-icon {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   color: #fbbf24;
 }
 
@@ -1152,8 +1157,8 @@ const statsSummary = computed(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  min-width: 160px;
-  font-size: 0.75rem;
+  min-width: 170px;
+  font-size: 0.82rem;
   color: var(--text-dimmed);
 }
 

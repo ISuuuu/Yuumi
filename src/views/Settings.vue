@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import { updateThemeColor } from "../utils/theme";
@@ -25,6 +24,16 @@ function toggleCollapse(panelName: string) {
   activeCollapse.value = activeCollapse.value === panelName ? null : panelName;
 }
 
+// 自定义下拉状态
+const showLogLevelDropdown = ref(false);
+const showDpiDropdown = ref(false);
+const showLangDropdown = ref(false);
+function closeAllDropdowns() {
+  showLogLevelDropdown.value = false;
+  showDpiDropdown.value = false;
+  showLangDropdown.value = false;
+}
+
 // ─── 自动保存（防抖 500ms）───
 let saveDebounce: ReturnType<typeof setTimeout> | null = null;
 function autoSave() {
@@ -41,6 +50,7 @@ function autoSave() {
 }
 
 onMounted(async () => {
+  document.addEventListener("click", closeAllDropdowns);
   try {
     config.value = await fetchConfig();
     if (config.value && config.value.Personalization && config.value.Personalization.ThemeColor) {
@@ -49,6 +59,10 @@ onMounted(async () => {
   } catch (e) {
     console.error("加载系统配置失败:", e);
   }
+});
+
+onUnmounted(() => {
+  document.removeEventListener("click", closeAllDropdowns);
 });
 
 // 自动检测客户端路径（追加到列表）
@@ -129,16 +143,6 @@ async function handleOpenLogFolder() {
   } catch (e: any) {
     showToast('打开日志文件夹失败', 'error');
   }
-}
-
-async function handleProvideFeedback() {
-  try { await openUrl("https://github.com/xzmkim/lolhelper/issues"); }
-  catch { showToast('打开链接失败', 'error'); }
-}
-
-async function handleOpenGithub() {
-  try { await openUrl("https://github.com/xzmkim/lolhelper"); }
-  catch { showToast('打开链接失败', 'error'); }
 }
 
 function onThemeColorInput(e: Event) {
@@ -411,18 +415,22 @@ function onThemeColorInput(e: Event) {
       <!-- 4. 日志 -->
       <div class="group-header">日志</div>
 
-      <div class="collapse-item border-bottom">
+      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showLogLevelDropdown }]">
         <div class="collapse-header" @click="toggleCollapse('loglevel')">
           <div class="collapse-left">
             <h3 class="card-title">日志等级</h3>
             <span class="card-desc">修改 Yuumi 记录日志的等级（重启后生效）</span>
           </div>
           <div class="collapse-right">
-            <select v-model.number="config.General.LogLevel" class="select-input" @change="autoSave" @click.stop>
-              <option :value="0">Debug</option>
-              <option :value="1">Info</option>
-              <option :value="2">Error</option>
-            </select>
+            <div class="dropdown-trigger" @click.stop="showLogLevelDropdown = !showLogLevelDropdown">
+              <span>{{ config.General.LogLevel === 0 ? 'Debug' : config.General.LogLevel === 1 ? 'Info' : 'Error' }}</span>
+              <svg :class="['arrow-icon', { expanded: showLogLevelDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              <div v-if="showLogLevelDropdown" class="dropdown-menu" @click.stop>
+                <div :class="['dropdown-item', { active: config.General.LogLevel === 0 }]" @click="config.General.LogLevel = 0; autoSave(); showLogLevelDropdown = false">Debug</div>
+                <div :class="['dropdown-item', { active: config.General.LogLevel === 1 }]" @click="config.General.LogLevel = 1; autoSave(); showLogLevelDropdown = false">Info</div>
+                <div :class="['dropdown-item', { active: config.General.LogLevel === 2 }]" @click="config.General.LogLevel = 2; autoSave(); showLogLevelDropdown = false">Error</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -527,7 +535,7 @@ function onThemeColorInput(e: Event) {
       </div>
 
       <!-- 界面缩放 -->
-      <div class="collapse-item border-bottom">
+      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showDpiDropdown }]">
         <div class="collapse-header" @click="toggleCollapse('dpiscale')">
           <div class="collapse-left">
             <h3 class="card-title">界面缩放</h3>
@@ -540,17 +548,22 @@ function onThemeColorInput(e: Event) {
         </div>
         <div v-show="activeCollapse === 'dpiscale'" class="collapse-content">
           <div class="input-row">
-            <select v-model="config.Personalization.DpiScale" class="select-input" @change="autoSave">
-              <option value="Auto">跟随系统设置</option>
-              <option value="100">100%</option><option value="125">125%</option>
-              <option value="150">150%</option>
-            </select>
+            <div class="dropdown-trigger" @click.stop="showDpiDropdown = !showDpiDropdown">
+              <span>{{ config.Personalization.DpiScale === 'Auto' ? '跟随系统设置' : config.Personalization.DpiScale + '%' }}</span>
+              <svg :class="['arrow-icon', { expanded: showDpiDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              <div v-if="showDpiDropdown" class="dropdown-menu" @click.stop>
+                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === 'Auto' }]" @click="config.Personalization.DpiScale = 'Auto'; autoSave(); showDpiDropdown = false">跟随系统设置</div>
+                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '100' }]" @click="config.Personalization.DpiScale = '100'; autoSave(); showDpiDropdown = false">100%</div>
+                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '125' }]" @click="config.Personalization.DpiScale = '125'; autoSave(); showDpiDropdown = false">125%</div>
+                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '150' }]" @click="config.Personalization.DpiScale = '150'; autoSave(); showDpiDropdown = false">150%</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- 语言 -->
-      <div class="collapse-item">
+      <div :class="['collapse-item', { 'has-dropdown-open': showLangDropdown }]">
         <div class="collapse-header" @click="toggleCollapse('lang')">
           <div class="collapse-left">
             <h3 class="card-title">语言</h3>
@@ -567,12 +580,16 @@ function onThemeColorInput(e: Event) {
         </div>
         <div v-show="activeCollapse === 'lang'" class="collapse-content">
           <div class="input-row">
-            <select v-model="config.Personalization.Language" class="select-input" @change="autoSave">
-              <option value="Auto">跟随系统设置</option>
-              <option value="zh_CN">简体中文</option>
-              <option value="zh_TW">繁體中文</option>
-              <option value="en_US">English</option>
-            </select>
+            <div class="dropdown-trigger" @click.stop="showLangDropdown = !showLangDropdown">
+              <span>{{ config.Personalization.Language === 'Auto' ? '跟随系统设置' : config.Personalization.Language === 'zh_CN' ? '简体中文' : config.Personalization.Language === 'zh_TW' ? '繁體中文' : 'English' }}</span>
+              <svg :class="['arrow-icon', { expanded: showLangDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              <div v-if="showLangDropdown" class="dropdown-menu" @click.stop>
+                <div :class="['dropdown-item', { active: config.Personalization.Language === 'Auto' }]" @click="config.Personalization.Language = 'Auto'; autoSave(); showLangDropdown = false">跟随系统设置</div>
+                <div :class="['dropdown-item', { active: config.Personalization.Language === 'zh_CN' }]" @click="config.Personalization.Language = 'zh_CN'; autoSave(); showLangDropdown = false">简体中文</div>
+                <div :class="['dropdown-item', { active: config.Personalization.Language === 'zh_TW' }]" @click="config.Personalization.Language = 'zh_TW'; autoSave(); showLangDropdown = false">繁體中文</div>
+                <div :class="['dropdown-item', { active: config.Personalization.Language === 'en_US' }]" @click="config.Personalization.Language = 'en_US'; autoSave(); showLangDropdown = false">English</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -618,26 +635,10 @@ function onThemeColorInput(e: Event) {
       <!-- 7. 关于 -->
       <div class="group-header">关于</div>
 
-      <div class="card-item border-bottom">
-        <div class="card-left">
-          <h3 class="card-title">提供反馈</h3>
-          <span class="card-desc">通过提供反馈帮助我们改善 Yuumi</span>
-        </div>
-        <div class="card-right">
-          <button class="feedback-btn" @click="handleProvideFeedback">提供反馈</button>
-        </div>
-      </div>
-
       <div class="card-item">
         <div class="card-left">
           <h3 class="card-title">关于</h3>
-          <span class="card-desc">版权所有 © 2026, xzmkim. 当前版本 1.5.42</span>
-        </div>
-        <div class="card-right">
-          <button class="github-btn" @click="handleOpenGithub">
-            <svg class="github-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-            查看 GitHub
-          </button>
+          <span class="card-desc">当前版本 0.1.0</span>
         </div>
       </div>
     </div>
@@ -680,8 +681,6 @@ function onThemeColorInput(e: Event) {
   align-items: center;
   gap: 6px;
   box-shadow: var(--shadow-sm);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
 }
 .action-btn:hover, .github-btn:hover {
   background: rgba(255, 255, 255, 0.95);
@@ -725,8 +724,6 @@ function onThemeColorInput(e: Event) {
 
 .card-item, .collapse-item {
   background: var(--card-bg);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
   padding: 16px 24px;
   display: flex;
   align-items: center;
@@ -736,14 +733,15 @@ function onThemeColorInput(e: Event) {
   margin-bottom: 8px;
   box-shadow: var(--shadow-sm);
   transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+  position: relative;
+}
+.collapse-item.has-dropdown-open {
+  z-index: 10;
 }
 .card-item:hover, .collapse-item:hover {
-  transform: translateY(-1.5px);
   box-shadow: var(--shadow-md);
   border-color: var(--primary-color-alpha-30);
   background-color: #ffffff;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 .card-left { display: flex; flex-direction: column; flex: 1; }
@@ -764,7 +762,7 @@ function onThemeColorInput(e: Event) {
   transition: background-color 0.25s; padding: 0 8px;
 }
 .toggle-switch.off { background-color: rgba(0, 0, 0, 0.06); justify-content: flex-end; }
-.toggle-switch.on { background-color: var(--win-color); justify-content: flex-start; }
+.toggle-switch.on { background-color: var(--primary-color); justify-content: flex-start; }
 .toggle-text { font-size: 0.75rem; font-weight: bold; color: white; }
 .toggle-switch.off .toggle-text { color: var(--text-dimmed); }
 .toggle-slider {
@@ -868,45 +866,61 @@ function onThemeColorInput(e: Event) {
   box-shadow: 0 0 8px var(--primary-color-alpha-15);
 }
 
-.select-input {
+.dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: var(--text-color);
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s;
   min-width: 140px;
-  padding: 8px 32px 8px 12px;
+}
+.dropdown-trigger:hover {
+  background: #ffffff;
+  border-color: var(--primary-color);
+}
+.dropdown-trigger .arrow-icon {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  transition: transform 0.2s;
+}
+.dropdown-trigger .arrow-icon.expanded {
+  transform: rotate(180deg);
+}
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: #ffffff;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  font-size: 0.82rem;
-  outline: none;
-  background-color: rgba(255, 255, 255, 0.6);
-  color: var(--text-color);
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 14px;
-  box-shadow: var(--shadow-sm);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  min-width: 100%;
+  padding: 4px 0;
+}
+.dropdown-item {
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
   cursor: pointer;
+  transition: all 0.2s;
 }
-.select-input:hover {
-  background-color: rgba(255, 255, 255, 0.85);
-  border-color: var(--primary-color-alpha-40);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.08);
-}
-.select-input:focus {
-  background-color: #fff;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-}
-.select-input:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  background-color: rgba(240, 240, 240, 0.4);
-}
-.select-input option {
-  background-color: #fff;
+.dropdown-item:hover {
+  background: rgba(0, 0, 0, 0.02);
   color: var(--text-color);
+}
+.dropdown-item.active {
+  color: var(--primary-color);
+  font-weight: 600;
+  background: var(--primary-color-alpha-15);
 }
 
 .number-input {
@@ -961,7 +975,7 @@ function onThemeColorInput(e: Event) {
   font-weight: 600; color: white; z-index: 9999;
   box-shadow: var(--shadow-md); pointer-events: none;
 }
-.toast-success { background-color: var(--win-color); }
+.toast-success { background-color: var(--primary-color); }
 .toast-error { background-color: var(--loss-color); }
 .toast-enter-active { transition: all 0.25s ease-out; }
 .toast-leave-active { transition: all 0.2s ease-in; }

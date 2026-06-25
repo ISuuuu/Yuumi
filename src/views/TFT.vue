@@ -113,7 +113,6 @@ const selectedComp = ref<number | null>(null);
 .comp-card:hover {
   background: var(--card-bg-hover);
   border-color: var(--border-color-hover);
-  transform: translateY(-1.5px);
   box-shadow: var(--shadow-md);
 }
 .comp-card.selected {

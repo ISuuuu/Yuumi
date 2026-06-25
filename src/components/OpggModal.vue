@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { lcuRequest, fetchConfig } from "../api/lcu";
 import LcuImage from "./LcuImage.vue";
 import opggIcon from "../assets/opgg.svg";
+import tierIcon1 from "../assets/tier/tier-1.svg";
+import tierIcon2 from "../assets/tier/tier-2.svg";
+import tierIcon3 from "../assets/tier/tier-3.svg";
+import tierIcon4 from "../assets/tier/tier-4.svg";
 
 const emit = defineEmits<{ close: [] }>();
 
@@ -13,6 +17,18 @@ const mode = ref("ranked");
 const tier = ref("emerald_plus");
 const position = ref("MID");
 const view = ref<"tier" | "build">("tier");
+
+// 自定义下拉状态
+const showRegionDropdown = ref(false);
+const showModeDropdown = ref(false);
+const showTierDropdown = ref(false);
+const showPositionDropdown = ref(false);
+function closeAllDropdowns() {
+  showRegionDropdown.value = false;
+  showModeDropdown.value = false;
+  showTierDropdown.value = false;
+  showPositionDropdown.value = false;
+}
 
 const REGIONS = [
   { value: "kr", label: "韩服" },
@@ -84,22 +100,71 @@ const POSITIONS = [
   { value: "SUPPORT", label: "辅助" },
 ];
 
+// 梯队徽章颜色（深色文字，用于 Tier 标签）
 const TIER_COLORS: Record<string, string> = {
-  "1": "#ff6b6b", "2": "#ffa94d", "3": "#ffd43b",
-  "4": "#51cf66", "5": "#339af0", "": "#adb5bd",
+  "0": "#5B8DB8",
+  "1": "#5B8DB8", // T1 蓝
+  "2": "#5BA8A3", // T2 青
+  "3": "#B89B52", // T3 金
+  "4": "#7D8185", // T4 灰
+  "5": "#7D8185",
+  "":  "#7D8185",
 };
 
+// 梯队卡片行背景色
+const TIER_CARD_BG: Record<string, string> = {
+  "0": "#CDE5F8",
+  "1": "#CDE5F8", // T1 蓝
+  "2": "#CDECEA", // T2 青
+  "3": "#F4EAD1", // T3 暖
+  "4": "#E5E8EC", // T4 灰
+  "5": "#E5E8EC",
+  "":  "transparent",
+};
+
+// 出装标题栏复用同样配色
 const TIER_BG_COLORS: Record<string, string> = {
-  "1": "#fff5f5", "2": "#fff9db", "3": "#fffbeb",
-  "4": "#ebfbee", "5": "#e7f5ff", "": "#f8f9fa",
+  "0": "#CDE5F8",
+  "1": "#CDE5F8",
+  "2": "#CDECEA",
+  "3": "#F4EAD1",
+  "4": "#E5E8EC",
+  "5": "#E5E8EC",
+  "":  "#f8f9fa",
 };
 
 const TIER_BORDER_COLORS: Record<string, string> = {
-  "1": "#ffe3e3", "2": "#ffe8cc", "3": "#fff3bf",
-  "4": "#d3f9d8", "5": "#d0ebff", "": "rgba(0, 0, 0, 0.04)",
+  "0": "rgba(0, 0, 0, 0.095)",
+  "1": "rgba(0, 0, 0, 0.095)",
+  "2": "rgba(0, 0, 0, 0.095)",
+  "3": "rgba(0, 0, 0, 0.095)",
+  "4": "rgba(0, 0, 0, 0.095)",
+  "5": "rgba(0, 0, 0, 0.095)",
+  "":  "rgba(0, 0, 0, 0.095)",
+};
+
+const TIER_CARD_BORDER: Record<string, string> = {
+  "0": "rgba(0, 0, 0, 0.095)",
+  "1": "rgba(0, 0, 0, 0.095)",
+  "2": "rgba(0, 0, 0, 0.095)",
+  "3": "rgba(0, 0, 0, 0.095)",
+  "4": "rgba(0, 0, 0, 0.095)",
+  "5": "rgba(0, 0, 0, 0.095)",
+  "":  "rgba(0, 0, 0, 0.095)",
+};
+
+// Tier 等级图标（盾牌 + 数字）
+const TIER_ICONS: Record<string, string> = {
+  "0": tierIcon1,
+  "1": tierIcon1,
+  "2": tierIcon2,
+  "3": tierIcon3,
+  "4": tierIcon4,
+  "5": tierIcon4,
 };
 
 onMounted(async () => {
+  document.addEventListener("click", closeAllDropdowns);
   try {
     gameDataAssets.value = await invoke("get_game_data_assets");
   } catch (e) {
@@ -137,6 +202,10 @@ onMounted(async () => {
   } else {
     fetchTierList();
   }
+});
+
+onUnmounted(() => {
+  document.removeEventListener("click", closeAllDropdowns);
 });
 
 watch([region, mode, tier, position], () => {
@@ -210,6 +279,7 @@ async function fetchTierList() {
               tier: p?.stats?.tier_data?.tier,
               rank: p?.stats?.tier_data?.rank,
               position: pos,
+              counters: (p?.counters || []).map((ct: any) => ct.champion_id),
             };
           })
           .sort((a: any, b: any) => (a.rank || 999) - (b.rank || 999));
@@ -375,24 +445,39 @@ async function setRunePage() {
       </div>
       <div class="opgg-header-right">
         <span v-if="opggVersion" class="opgg-version">游戏版本: {{ opggVersion }}</span>
-        <button class="close-btn" @click="emit('close')">&times;</button>
       </div>
     </div>
 
     <!-- 筛选栏 -->
     <div class="opgg-filters">
-      <select v-model="region" class="filter-select">
-        <option v-for="r in REGIONS" :key="r.value" :value="r.value">{{ r.label }}</option>
-      </select>
-      <select v-model="mode" class="filter-select">
-        <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
-      </select>
-      <select v-model="tier" class="filter-select">
-        <option v-for="t in TIERS" :key="t.value" :value="t.value">{{ t.label }}</option>
-      </select>
-      <select v-if="mode === 'ranked'" v-model="position" class="filter-select">
-        <option v-for="p in POSITIONS" :key="p.value" :value="p.value">{{ p.label }}</option>
-      </select>
+      <div class="filter-trigger" @click.stop="showRegionDropdown = !showRegionDropdown">
+        <span>{{ REGIONS.find(r => r.value === region)?.label || region }}</span>
+        <svg :class="['filter-arrow', { expanded: showRegionDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        <div v-if="showRegionDropdown" class="filter-menu" @click.stop>
+          <div v-for="r in REGIONS" :key="r.value" :class="['filter-item', { active: region === r.value }]" @click="region = r.value; showRegionDropdown = false">{{ r.label }}</div>
+        </div>
+      </div>
+      <div class="filter-trigger" @click.stop="showModeDropdown = !showModeDropdown">
+        <span>{{ MODES.find(m => m.value === mode)?.label || mode }}</span>
+        <svg :class="['filter-arrow', { expanded: showModeDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        <div v-if="showModeDropdown" class="filter-menu" @click.stop>
+          <div v-for="m in MODES" :key="m.value" :class="['filter-item', { active: mode === m.value }]" @click="mode = m.value; showModeDropdown = false">{{ m.label }}</div>
+        </div>
+      </div>
+      <div class="filter-trigger" @click.stop="showTierDropdown = !showTierDropdown">
+        <span>{{ TIERS.find(t => t.value === tier)?.label || tier }}</span>
+        <svg :class="['filter-arrow', { expanded: showTierDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        <div v-if="showTierDropdown" class="filter-menu" @click.stop>
+          <div v-for="t in TIERS" :key="t.value" :class="['filter-item', { active: tier === t.value }]" @click="tier = t.value; showTierDropdown = false">{{ t.label }}</div>
+        </div>
+      </div>
+      <div v-if="mode === 'ranked'" class="filter-trigger" @click.stop="showPositionDropdown = !showPositionDropdown">
+        <span>{{ POSITIONS.find(p => p.value === position)?.label || position }}</span>
+        <svg :class="['filter-arrow', { expanded: showPositionDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        <div v-if="showPositionDropdown" class="filter-menu" @click.stop>
+          <div v-for="p in POSITIONS" :key="p.value" :class="['filter-item', { active: position === p.value }]" @click="position = p.value; showPositionDropdown = false">{{ p.label }}</div>
+        </div>
+      </div>
     </div>
 
     <!-- 加载 / 错误 -->
@@ -400,40 +485,44 @@ async function setRunePage() {
     <div v-else-if="error" class="opgg-center error-text">{{ error }}</div>
 
     <!-- 梯队列表 -->
-    <div v-else-if="view === 'tier'" class="opgg-body">
-      <table class="tier-table">
-        <thead>
-          <tr>
-            <th class="col-rank">#</th>
-            <th class="col-champ">英雄</th>
-            <th class="col-tier">Tier</th>
-            <th>胜率</th>
-            <th>登场率</th>
-            <th>禁用率</th>
-            <th>KDA</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(c, i) in tierData" :key="c.id" class="tier-row" @click="fetchBuild(c.id)">
-            <td class="col-rank">{{ i + 1 }}</td>
-            <td class="col-champ">
-              <div class="champ-cell">
-                <LcuImage :src="getChampIcon(c.id)" class="champ-icon" />
-                <span>{{ c.name }}</span>
-              </div>
-            </td>
-            <td class="col-tier">
-              <span class="tier-badge" :style="{ background: TIER_COLORS[c.tier] || '#adb5bd' }">
-                {{ c.tier || '-' }}
-              </span>
-            </td>
-            <td>{{ pct(c.win_rate) }}</td>
-            <td>{{ pct(c.pick_rate) }}</td>
-            <td>{{ pct(c.ban_rate) }}</td>
-            <td>{{ fmtKda(c.kda) }}</td>
-          </tr>
-        </tbody>
-      </table>
+    <div v-else-if="view === 'tier'" class="opgg-body tier-list-body">
+      <!-- 表头 -->
+      <div class="tier-header">
+        <span class="tier-h-rank">#</span>
+        <span class="tier-h-champ">英雄</span>
+        <span class="tier-h-spacer"></span>
+        <span class="tier-h-tier">Tier</span>
+        <span class="tier-h-stat">胜率</span>
+        <span class="tier-h-stat">登场率</span>
+        <span class="tier-h-stat">禁用率</span>
+        <span class="tier-h-stat">KDA</span>
+        <span class="tier-h-counters">劣势对抗</span>
+      </div>
+      <!-- 卡片列表 -->
+      <div class="tier-cards">
+        <div v-for="(c, i) in tierData" :key="c.id"
+             class="tier-card"
+             :style="{
+               background: TIER_CARD_BG[String(c.tier)] || 'transparent',
+               borderColor: TIER_CARD_BORDER[String(c.tier)] || 'rgba(0, 0, 0, 0.095)'
+             }"
+             @click="fetchBuild(c.id)">
+          <span class="tier-c-rank">{{ i + 1 }}</span>
+          <LcuImage :src="getChampIcon(c.id)" class="tier-c-icon" />
+          <span class="tier-c-name">{{ championsMap.get(c.id) || c.name }}</span>
+          <span class="tier-c-spacer"></span>
+          <img v-if="TIER_ICONS[String(c.tier)]" :src="TIER_ICONS[String(c.tier)]" class="tier-c-icon-svg" alt="" />
+          <span v-else class="tier-c-tier-badge">{{ c.tier || '-' }}</span>
+          <span class="tier-c-stat">{{ pct(c.win_rate) }}</span>
+          <span class="tier-c-stat">{{ pct(c.pick_rate) }}</span>
+          <span class="tier-c-stat">{{ pct(c.ban_rate) }}</span>
+          <span class="tier-c-stat">{{ fmtKda(c.kda) }}</span>
+          <div class="tier-c-counters">
+            <LcuImage v-for="cid in (c.counters || []).slice(0, 3)" :key="cid"
+                      :src="getChampIcon(cid)" class="tier-counter-icon" />
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 出装详情 -->
@@ -726,14 +815,6 @@ async function setRunePage() {
 .tab-btn.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
 .tab-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.close-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 6px;
-  background: none; border: none; font-size: 1.3rem;
-  color: var(--text-muted); cursor: pointer; transition: all 0.15s;
-}
-.close-btn:hover { background: rgba(0, 0, 0, 0.04); color: var(--text-color); }
-
 .opgg-filters {
   display: flex; gap: 6px; padding: 8px 16px;
   border-bottom: 1px solid var(--border-color);
@@ -742,34 +823,62 @@ async function setRunePage() {
   background: var(--bg-color);
 }
 
-.filter-select {
-  padding: 4px 24px 4px 8px; border: 1px solid var(--border-color);
-  border-radius: 6px; font-size: 0.78rem; background: rgba(255, 255, 255, 0.6);
-  color: var(--text-color); outline: none; flex-shrink: 0; min-width: 0;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 6px center;
-  background-size: 11px;
-  box-shadow: var(--shadow-sm);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  cursor: pointer;
-}
-.filter-select:hover {
-  background-color: rgba(255, 255, 255, 0.85);
-  border-color: var(--primary-color-alpha-40);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-}
-.filter-select:focus {
-  background-color: #fff;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px var(--primary-color-alpha-15);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-}
-.filter-select option {
-  background-color: #fff;
+.filter-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  background: rgba(255, 255, 255, 0.5);
   color: var(--text-color);
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.filter-trigger:hover {
+  background: #ffffff;
+  border-color: var(--primary-color);
+}
+.filter-arrow {
+  width: 11px; height: 11px;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.filter-arrow.expanded {
+  transform: rotate(180deg);
+}
+.filter-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  min-width: max-content;
+  padding: 4px 0;
+}
+.filter-item {
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.filter-item:hover {
+  background: rgba(0, 0, 0, 0.02);
+  color: var(--text-color);
+}
+.filter-item.active {
+  color: var(--primary-color);
+  font-weight: 600;
+  background: var(--primary-color-alpha-15);
 }
 
 .opgg-body {
@@ -792,32 +901,50 @@ async function setRunePage() {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* 梯队表格 */
-.tier-table {
-  width: 100%; border-collapse: collapse; font-size: 0.78rem;
-}
-.tier-table th {
-  position: sticky; top: 0; background: var(--bg-color);
-  padding: 8px 10px; text-align: left; font-weight: 600;
-  color: var(--text-muted); border-bottom: 1px solid var(--border-color);
-  font-size: 0.72rem; text-transform: uppercase;
-}
-.tier-table td { padding: 7px 10px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); }
-.tier-row { cursor: pointer; transition: background 0.1s; }
-.tier-row:hover { background: rgba(0, 0, 0, 0.02); }
+/* 梯队卡片列表（Python Seraphine 风格） */
+.tier-list-body { padding: 8px 10px; }
 
-.col-rank { width: 32px; text-align: center; color: var(--text-dimmed); }
-.col-champ { min-width: 90px; }
-.col-tier { width: 44px; }
-
-.champ-cell { display: flex; align-items: center; gap: 6px; }
-.champ-icon { width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--border-color); }
-
-.tier-badge {
-  display: inline-block; padding: 1px 6px; border-radius: 4px;
-  color: white; font-weight: 700; font-size: 0.7rem;
-  text-align: center;
+.tier-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; margin-bottom: 3px;
+  font-size: 0.72rem; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border-color);
 }
+.tier-h-rank { width: 30px; text-align: center; flex-shrink: 0; }
+.tier-h-champ { flex: 1; }
+.tier-h-spacer { flex: 1; }
+.tier-h-tier { width: 50px; text-align: center; flex-shrink: 0; }
+.tier-h-stat { width: 65px; text-align: center; flex-shrink: 0; }
+
+.tier-cards {
+  display: flex; flex-direction: column; gap: 3px;
+}
+
+.tier-card {
+  display: flex; align-items: center; gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.095);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: filter 0.15s;
+  font-size: 0.78rem; color: var(--text-muted);
+}
+.tier-card:hover { filter: brightness(0.93); }
+
+.tier-c-rank { width: 30px; text-align: center; flex-shrink: 0; color: var(--text-dimmed); }
+.tier-c-icon { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--border-color); flex-shrink: 0; }
+.tier-c-name { flex-shrink: 0; font-weight: 500; color: var(--text-color); }
+.tier-c-spacer { flex: 1; }
+.tier-c-tier-badge {
+  width: 50px; text-align: center; flex-shrink: 0;
+  font-weight: 700; font-size: 0.7rem;
+}
+.tier-c-icon-svg { width: 24px; height: 24px; flex-shrink: 0; }
+.tier-c-stat { width: 65px; text-align: center; flex-shrink: 0; }
+.tier-h-counters { width: 90px; text-align: center; flex-shrink: 0; }
+.tier-c-counters { display: flex; align-items: center; gap: 3px; flex-shrink: 0; width: 90px; justify-content: center; }
+.tier-counter-icon { width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.095); }
 
 /* ── 出装详情页 ── */
 
@@ -1153,7 +1280,7 @@ async function setRunePage() {
   z-index: 9999;
 }
 .toast-message.success {
-  background: #2fbc5d;
+  background: var(--primary-color);
 }
 .toast-message.error {
   background: #f03e3e;

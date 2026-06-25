@@ -28,6 +28,7 @@ const matches = ref<MatchDisplay[]>([]);
 
 // 游戏模式筛选
 const selectedQueue = ref<number | null>(null); // null = 全部
+const showQueueDropdown = ref(false);
 const QUEUE_OPTIONS = [
   { id: null, label: '全部' },
   { id: 2400, label: '海克斯大乱斗' },
@@ -124,6 +125,7 @@ let unlistenGameDataReady: (() => void) | null = null;
 
 onMounted(async () => {
   loadSearchHistory();
+  document.addEventListener("click", onDocClick);
   // 从配置文件加载上传开关状态
   try {
     const cfg = await fetchConfig();
@@ -145,10 +147,15 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  document.removeEventListener("click", onDocClick);
   if (unlistenGameDataReady) {
     unlistenGameDataReady();
   }
 });
+
+function onDocClick() {
+  showQueueDropdown.value = false;
+}
 
 // 监听 LCU 连接状态，当连接成功后重新拉取静态资源映射
 watch(
@@ -565,13 +572,22 @@ const gameDetails = computed(() => {
         
         <button class="tab-btn active" @click="navigateTo('career')">生涯</button>
 
-        <select
-          class="queue-select"
-          :value="selectedQueue ?? ''"
-          @change="onQueueChange"
-        >
-          <option v-for="q in QUEUE_OPTIONS" :key="q.id ?? -1" :value="q.id ?? ''">{{ q.label }}</option>
-        </select>
+        <div class="dropdown-trigger" @click.stop="showQueueDropdown = !showQueueDropdown">
+          <span>{{ QUEUE_OPTIONS.find(q => q.id === selectedQueue)?.label || '全部' }}</span>
+          <svg :class="['arrow-icon', { expanded: showQueueDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+          <div v-if="showQueueDropdown" class="queue-dropdown-menu" @click.stop>
+            <div
+              v-for="q in QUEUE_OPTIONS"
+              :key="q.id ?? -1"
+              :class="['queue-dropdown-item', { active: selectedQueue === q.id }]"
+              @click="selectQueue(q.id); showQueueDropdown = false"
+            >
+              {{ q.label }}
+            </div>
+          </div>
+        </div>
 
         <label class="checkbox-wrapper">
           <input type="checkbox" :checked="uploadEnabled" @change="onUploadToggle" />
@@ -696,7 +712,7 @@ const gameDetails = computed(() => {
                           <LcuImage :src="p.spell1Url" class="row-spell" alt="s1" />
                           <LcuImage :src="p.spell2Url" class="row-spell" alt="s2" />
                         </div>
-                        <div class="row-rune">
+                        <div v-if="selectedGame?.queueId !== 2400" class="row-rune">
                           <LcuImage :src="p.runeUrl" class="row-rune-img" alt="rune" />
                         </div>
                       </div>
@@ -836,7 +852,7 @@ const gameDetails = computed(() => {
   top: 100%;
   left: 0;
   right: 0;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 255, 255, 0.92);
   border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0 0 8px 8px;
@@ -846,19 +862,23 @@ const gameDetails = computed(() => {
   overflow-y: auto;
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
+  padding: 4px 0;
 }
 
 .history-item {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
+  padding: 6px 14px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.2s;
   gap: 8px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 
 .history-item:hover {
   background: rgba(0, 0, 0, 0.02);
+  color: var(--text-color);
 }
 
 .history-icon {
@@ -931,13 +951,13 @@ const gameDetails = computed(() => {
 }
 
 .tab-btn {
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.5);
   border: 1px solid var(--border-color);
-  color: var(--text-muted);
+  color: var(--text-color);
   padding: 0 16px;
   border-radius: 6px;
   font-size: 0.82rem;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
   height: 32px;
@@ -946,53 +966,87 @@ const gameDetails = computed(() => {
 }
 
 .tab-btn:hover {
-  background: rgba(0, 0, 0, 0.02);
+  background: #ffffff;
   color: var(--text-color);
+  border-color: var(--primary-color);
 }
 
 .tab-btn.active {
-  background-color: #f1f5f9;
+  background-color: rgba(255, 255, 255, 0.5);
   color: var(--text-color);
-  border-color: #cbd5e1;
-  font-weight: 700;
+  border-color: var(--border-color);
+  font-weight: 600;
   box-shadow: none;
 }
 
-.queue-select {
+.tab-btn.active:hover {
+  background: #ffffff;
+  border-color: var(--primary-color);
+}
+
+.dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: rgba(255, 255, 255, 0.5);
   border: 1px solid var(--border-color);
-  padding: 0 32px 0 12px;
+  padding: 4px 10px;
   border-radius: 6px;
   font-size: 0.82rem;
   color: var(--text-color);
   cursor: pointer;
-  outline: none;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 14px;
-  box-shadow: var(--shadow-sm);
+  position: relative;
+  transition: all 0.2s;
   height: 32px;
 }
 
-.queue-select:hover {
-  background-color: rgba(255, 255, 255, 0.85);
-  border-color: var(--primary-color-alpha-40);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-}
-
-.queue-select:focus {
-  background-color: #fff;
+.dropdown-trigger:hover {
+  background: #ffffff;
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px var(--primary-color-alpha-15);
 }
 
-.queue-select option {
-  background-color: #fff;
+.dropdown-trigger .arrow-icon {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.2s;
+}
+
+.dropdown-trigger .arrow-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.queue-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  min-width: 130px;
+  padding: 4px 0;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+}
+
+.queue-dropdown-item {
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.queue-dropdown-item:hover {
+  background: rgba(0, 0, 0, 0.02);
   color: var(--text-color);
+}
+
+.queue-dropdown-item.active {
+  color: var(--primary-color);
+  font-weight: 600;
+  background: var(--primary-color-alpha-15);
 }
 
 .checkbox-wrapper {
@@ -1070,7 +1124,7 @@ const gameDetails = computed(() => {
 .mini-avatar {
   width: 36px;
   height: 36px;
-  border-radius: 6px;
+  border-radius: 50%;
   overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0.05);
   margin-right: 10px;
@@ -1644,7 +1698,7 @@ const gameDetails = computed(() => {
   font-weight: 600; color: white; z-index: 9999;
   box-shadow: var(--shadow-md); pointer-events: none;
 }
-.toast-success { background-color: var(--win-color); }
+.toast-success { background-color: var(--primary-color); }
 .toast-error { background-color: var(--loss-color); }
 .toast-enter-active { transition: all 0.25s ease-out; }
 .toast-leave-active { transition: all 0.2s ease-in; }

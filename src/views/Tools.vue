@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from "vue";
+import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { fetchConfig, updateConfig, lcuRequest } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
@@ -36,6 +36,21 @@ const skinIdInput = ref<number | null>(null);
 const spoofQueue = ref("RANKED_SOLO_5x5");
 const spoofTier = ref("CHALLENGER");
 const spoofDivision = ref("I");
+
+// 自定义下拉状态
+const showGameModeDropdown = ref(false);
+const showSpoofQueueDropdown = ref(false);
+const showSpoofTierDropdown = ref(false);
+const showSpoofDivisionDropdown = ref(false);
+function closeAllDropdowns() {
+  showGameModeDropdown.value = false;
+  showSpoofQueueDropdown.value = false;
+  showSpoofTierDropdown.value = false;
+  showSpoofDivisionDropdown.value = false;
+}
+const currentGameModeName = computed(() => GAME_MODES.find(m => m.id === config.value?.Functions?.DefaultGameMode)?.name || '未知');
+const SPOOF_QUEUE_LABELS: Record<string, string> = { RANKED_TFT: '云顶之弈', RANKED_SOLO_5x5: '单双排位', RANKED_FLEX_SR: '灵活排位' };
+const SPOOF_TIER_LABELS: Record<string, string> = { UNRANKED: '未定级', CHALLENGER: '最强王者', GRANDMASTER: '傲世宗师', MASTER: '超凡大师', DIAMOND: '璀璨钻石', EMERALD: '流光翡翠', PLATINUM: '华贵铂金', GOLD: '荣耀黄金', SILVER: '不屈白银', BRONZE: '英勇黄铜', IRON: '坚韧黑铁' };
 const bgChampion = ref<number[]>([]);
 
 // 皮肤列表（选英雄后加载）
@@ -173,12 +188,17 @@ const GAME_MODES: { id: number; name: string }[] = [
 ];
 
 onMounted(async () => {
+  document.addEventListener("click", closeAllDropdowns);
   try {
     config.value = await fetchConfig();
     await checkGameSettingsLock();
   } catch (e) {
     console.error("加载其他功能配置失败:", e);
   }
+});
+
+onUnmounted(() => {
+  document.removeEventListener("click", closeAllDropdowns);
 });
 
 // 英雄/技能选择变化时自动保存
@@ -458,11 +478,9 @@ async function handleToggleLockGameSettings() {
             <input type="number" v-model.number="config.Functions.AutoAcceptMatchingDelay" class="number-input" min="0" max="11" @change="triggerAutoSave" />
           </div>
           <div class="setting-row justify-end">
-            <div class="switch-container">
-              <span class="switch-text">{{ config.Functions.EnableAutoAcceptMatching ? '开' : '关' }}</span>
-              <div :class="['mini-switch', config.Functions.EnableAutoAcceptMatching ? 'on' : 'off']" @click="config.Functions.EnableAutoAcceptMatching = !config.Functions.EnableAutoAcceptMatching; triggerAutoSave()">
-                <span class="mini-slider"></span>
-              </div>
+            <div :class="['toggle-switch', config.Functions.EnableAutoAcceptMatching ? 'on' : 'off']" @click="config.Functions.EnableAutoAcceptMatching = !config.Functions.EnableAutoAcceptMatching; triggerAutoSave()">
+              <span class="toggle-text">{{ config.Functions.EnableAutoAcceptMatching ? '开' : '关' }}</span>
+              <span class="toggle-slider"></span>
             </div>
           </div>
         </div>
@@ -499,20 +517,16 @@ async function handleToggleLockGameSettings() {
         <div v-show="activeCollapse === 'autoswap'" class="collapse-content">
           <div class="setting-row">
             <span class="setting-label">自动接受楼层交换请求:</span>
-            <div class="switch-container">
-              <span class="switch-text">{{ config.Functions.AutoAcceptCeilSwap ? '开' : '关' }}</span>
-              <div :class="['mini-switch', config.Functions.AutoAcceptCeilSwap ? 'on' : 'off']" @click="config.Functions.AutoAcceptCeilSwap = !config.Functions.AutoAcceptCeilSwap; triggerAutoSave()">
-                <span class="mini-slider"></span>
-              </div>
+            <div :class="['toggle-switch', config.Functions.AutoAcceptCeilSwap ? 'on' : 'off']" @click="config.Functions.AutoAcceptCeilSwap = !config.Functions.AutoAcceptCeilSwap; triggerAutoSave()">
+              <span class="toggle-text">{{ config.Functions.AutoAcceptCeilSwap ? '开' : '关' }}</span>
+              <span class="toggle-slider"></span>
             </div>
           </div>
           <div class="setting-row">
             <span class="setting-label">自动接受英雄交换请求:</span>
-            <div class="switch-container">
-              <span class="switch-text">{{ config.Functions.AutoAcceptChampTrade ? '开' : '关' }}</span>
-              <div :class="['mini-switch', config.Functions.AutoAcceptChampTrade ? 'on' : 'off']" @click="config.Functions.AutoAcceptChampTrade = !config.Functions.AutoAcceptChampTrade; triggerAutoSave()">
-                <span class="mini-slider"></span>
-              </div>
+            <div :class="['toggle-switch', config.Functions.AutoAcceptChampTrade ? 'on' : 'off']" @click="config.Functions.AutoAcceptChampTrade = !config.Functions.AutoAcceptChampTrade; triggerAutoSave()">
+              <span class="toggle-text">{{ config.Functions.AutoAcceptChampTrade ? '开' : '关' }}</span>
+              <span class="toggle-slider"></span>
             </div>
           </div>
         </div>
@@ -534,7 +548,7 @@ async function handleToggleLockGameSettings() {
             </div>
           </div>
           <div class="collapse-right">
-            <span class="status-preview">{{ config.Functions.EnableAutoSelectChampion ? '已启用' : '未启用' }}</span>
+            <span class="status-preview">{{ config.Functions.EnableAutoHoverChampion ? '已启用' : '未启用' }}</span>
             <svg :class="['arrow-icon', { expanded: activeCollapse === 'autohover' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="6 9 12 15 18 9"/>
             </svg>
@@ -542,12 +556,17 @@ async function handleToggleLockGameSettings() {
         </div>
         <div v-show="activeCollapse === 'autohover'" class="collapse-content">
           <div class="setting-row">
-            <span class="setting-label">预选环节自动点亮设定英雄:</span>
-            <div class="switch-container">
-              <span class="switch-text">{{ config.Functions.EnableAutoSelectChampion ? '开' : '关' }}</span>
-              <div :class="['mini-switch', config.Functions.EnableAutoSelectChampion ? 'on' : 'off']" @click="config.Functions.EnableAutoSelectChampion = !config.Functions.EnableAutoSelectChampion; triggerAutoSave()">
-                <span class="mini-slider"></span>
-              </div>
+            <span class="setting-label">启用自动亮起:</span>
+            <div :class="['toggle-switch', config.Functions.EnableAutoHoverChampion ? 'on' : 'off']" @click="config.Functions.EnableAutoHoverChampion = !config.Functions.EnableAutoHoverChampion; triggerAutoSave()">
+              <span class="toggle-text">{{ config.Functions.EnableAutoHoverChampion ? '开' : '关' }}</span>
+              <span class="toggle-slider"></span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">在结束时确认选择:</span>
+            <div :class="['toggle-switch', config.Functions.AutoSelectConfirmOnTimeout ? 'on' : 'off']" @click="config.Functions.AutoSelectConfirmOnTimeout = !config.Functions.AutoSelectConfirmOnTimeout; triggerAutoSave()">
+              <span class="toggle-text">{{ config.Functions.AutoSelectConfirmOnTimeout ? '开' : '关' }}</span>
+              <span class="toggle-slider"></span>
             </div>
           </div>
           <div class="setting-picker-row">
@@ -582,11 +601,9 @@ async function handleToggleLockGameSettings() {
         <div v-show="activeCollapse === 'autoban'" class="collapse-content">
           <div class="setting-row">
             <span class="setting-label">禁用环节自动禁用设定英雄:</span>
-            <div class="switch-container">
-              <span class="switch-text">{{ config.Functions.EnableAutoBanChampion ? '开' : '关' }}</span>
-              <div :class="['mini-switch', config.Functions.EnableAutoBanChampion ? 'on' : 'off']" @click="config.Functions.EnableAutoBanChampion = !config.Functions.EnableAutoBanChampion; triggerAutoSave()">
-                <span class="mini-slider"></span>
-              </div>
+            <div :class="['toggle-switch', config.Functions.EnableAutoBanChampion ? 'on' : 'off']" @click="config.Functions.EnableAutoBanChampion = !config.Functions.EnableAutoBanChampion; triggerAutoSave()">
+              <span class="toggle-text">{{ config.Functions.EnableAutoBanChampion ? '开' : '关' }}</span>
+              <span class="toggle-slider"></span>
             </div>
           </div>
           <div class="setting-picker-row">
@@ -621,11 +638,9 @@ async function handleToggleLockGameSettings() {
         <div v-show="activeCollapse === 'autospells'" class="collapse-content">
           <div class="setting-row">
             <span class="setting-label">锁定英雄后自动写入配置好的技能组:</span>
-            <div class="switch-container">
-              <span class="switch-text">{{ config.Functions.EnableAutoSetSpells ? '开' : '关' }}</span>
-              <div :class="['mini-switch', config.Functions.EnableAutoSetSpells ? 'on' : 'off']" @click="config.Functions.EnableAutoSetSpells = !config.Functions.EnableAutoSetSpells; triggerAutoSave()">
-                <span class="mini-slider"></span>
-              </div>
+            <div :class="['toggle-switch', config.Functions.EnableAutoSetSpells ? 'on' : 'off']" @click="config.Functions.EnableAutoSetSpells = !config.Functions.EnableAutoSetSpells; triggerAutoSave()">
+              <span class="toggle-text">{{ config.Functions.EnableAutoSetSpells ? '开' : '关' }}</span>
+              <span class="toggle-slider"></span>
             </div>
           </div>
           <div class="setting-picker-row">
@@ -652,17 +667,15 @@ async function handleToggleLockGameSettings() {
           </div>
         </div>
         <div class="card-right">
-          <div class="switch-container">
-            <span class="switch-text">{{ config.Functions.EnableAutoReconnect ? '开' : '关' }}</span>
-            <div :class="['mini-switch', config.Functions.EnableAutoReconnect ? 'on' : 'off']" @click="config.Functions.EnableAutoReconnect = !config.Functions.EnableAutoReconnect; triggerAutoSave()">
-              <span class="mini-slider"></span>
-            </div>
+          <div :class="['toggle-switch', config.Functions.EnableAutoReconnect ? 'on' : 'off']" @click="config.Functions.EnableAutoReconnect = !config.Functions.EnableAutoReconnect; triggerAutoSave()">
+            <span class="toggle-text">{{ config.Functions.EnableAutoReconnect ? '开' : '关' }}</span>
+            <span class="toggle-slider"></span>
           </div>
         </div>
       </div>
 
       <!-- 自动创建大厅 -->
-      <div class="collapse-item border-bottom">
+      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showGameModeDropdown }]">
         <div class="collapse-header" @click="toggleCollapse('createlobby')">
           <div class="collapse-left">
             <div class="icon-container">
@@ -691,18 +704,20 @@ async function handleToggleLockGameSettings() {
         <div v-show="activeCollapse === 'createlobby'" class="collapse-content">
           <div class="setting-row">
             <span class="setting-label">客户端引导就绪后自动拉入指定大厅房间:</span>
-            <div class="switch-container">
-              <span class="switch-text">{{ config.Functions.EnableAutoCreateLobby ? '开' : '关' }}</span>
-              <div :class="['mini-switch', config.Functions.EnableAutoCreateLobby ? 'on' : 'off']" @click="config.Functions.EnableAutoCreateLobby = !config.Functions.EnableAutoCreateLobby; triggerAutoSave()">
-                <span class="mini-slider"></span>
-              </div>
+            <div :class="['toggle-switch', config.Functions.EnableAutoCreateLobby ? 'on' : 'off']" @click="config.Functions.EnableAutoCreateLobby = !config.Functions.EnableAutoCreateLobby; triggerAutoSave()">
+              <span class="toggle-text">{{ config.Functions.EnableAutoCreateLobby ? '开' : '关' }}</span>
+              <span class="toggle-slider"></span>
             </div>
           </div>
           <div class="setting-row">
             <span class="setting-label">默认游戏模式:</span>
-            <select v-model.number="config.Functions.DefaultGameMode" class="select-input" @change="triggerAutoSave" :disabled="!config.Functions.EnableAutoCreateLobby">
-              <option v-for="mode in GAME_MODES" :key="mode.id" :value="mode.id">{{ mode.name }}</option>
-            </select>
+            <div class="dropdown-trigger" :class="{ disabled: !config.Functions.EnableAutoCreateLobby }" @click.stop="config.Functions.EnableAutoCreateLobby && (showGameModeDropdown = !showGameModeDropdown)">
+              <span>{{ currentGameModeName }}</span>
+              <svg :class="['arrow-icon', { expanded: showGameModeDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              <div v-if="showGameModeDropdown" class="dropdown-menu" @click.stop>
+                <div v-for="mode in GAME_MODES" :key="mode.id" :class="['dropdown-item', { active: config.Functions.DefaultGameMode === mode.id }]" @click="config.Functions.DefaultGameMode = mode.id; triggerAutoSave(); showGameModeDropdown = false">{{ mode.name }}</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -755,11 +770,9 @@ async function handleToggleLockGameSettings() {
           </div>
         </div>
         <div class="card-right">
-          <div class="switch-container">
-            <span class="switch-text">{{ isGameSettingsLocked ? '开' : '关' }}</span>
-            <div :class="['mini-switch', isGameSettingsLocked ? 'on' : 'off']" @click="handleToggleLockGameSettings">
-              <span class="mini-slider"></span>
-            </div>
+          <div :class="['toggle-switch', isGameSettingsLocked ? 'on' : 'off']" @click="handleToggleLockGameSettings">
+            <span class="toggle-text">{{ isGameSettingsLocked ? '开' : '关' }}</span>
+            <span class="toggle-slider"></span>
           </div>
         </div>
       </div>
@@ -888,7 +901,7 @@ async function handleToggleLockGameSettings() {
       </div>
 
       <!-- 段位展示 -->
-      <div class="collapse-item border-bottom">
+      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showSpoofQueueDropdown || showSpoofTierDropdown || showSpoofDivisionDropdown }]">
         <div class="collapse-header" @click="toggleCollapse('rankdisplay')">
           <div class="collapse-left">
             <div class="icon-container">
@@ -914,35 +927,33 @@ async function handleToggleLockGameSettings() {
         <div v-show="activeCollapse === 'rankdisplay'" class="collapse-content">
           <div class="setting-row">
             <span class="setting-label">选择排位队列模式:</span>
-            <select v-model="spoofQueue" class="select-input">
-              <option value="RANKED_TFT">云顶之弈</option>
-              <option value="RANKED_SOLO_5x5">单双排位</option>
-              <option value="RANKED_FLEX_SR">灵活排位</option>
-            </select>
+            <div class="dropdown-trigger" @click.stop="showSpoofQueueDropdown = !showSpoofQueueDropdown">
+              <span>{{ SPOOF_QUEUE_LABELS[spoofQueue] || spoofQueue }}</span>
+              <svg :class="['arrow-icon', { expanded: showSpoofQueueDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              <div v-if="showSpoofQueueDropdown" class="dropdown-menu" @click.stop>
+                <div :class="['dropdown-item', { active: spoofQueue === 'RANKED_TFT' }]" @click="spoofQueue = 'RANKED_TFT'; showSpoofQueueDropdown = false">云顶之弈</div>
+                <div :class="['dropdown-item', { active: spoofQueue === 'RANKED_SOLO_5x5' }]" @click="spoofQueue = 'RANKED_SOLO_5x5'; showSpoofQueueDropdown = false">单双排位</div>
+                <div :class="['dropdown-item', { active: spoofQueue === 'RANKED_FLEX_SR' }]" @click="spoofQueue = 'RANKED_FLEX_SR'; showSpoofQueueDropdown = false">灵活排位</div>
+              </div>
+            </div>
           </div>
           <div class="setting-row">
             <span class="setting-label">段位与级数等级:</span>
             <div class="rank-select-group">
-              <select v-model="spoofTier" class="select-input">
-                <option value="UNRANKED">未定级</option>
-                <option value="CHALLENGER">最强王者</option>
-                <option value="GRANDMASTER">傲世宗师</option>
-                <option value="MASTER">超凡大师</option>
-                <option value="DIAMOND">璀璨钻石</option>
-                <option value="EMERALD">流光翡翠</option>
-                <option value="PLATINUM">华贵铂金</option>
-                <option value="GOLD">荣耀黄金</option>
-                <option value="SILVER">不屈白银</option>
-                <option value="BRONZE">英勇黄铜</option>
-                <option value="IRON">坚韧黑铁</option>
-              </select>
-              <select v-model="spoofDivision" class="select-input" :disabled="['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier)">
-                <option v-if="['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier)" value="NA">-</option>
-                <option value="I">I</option>
-                <option value="II">II</option>
-                <option value="III">III</option>
-                <option value="IV">IV</option>
-              </select>
+              <div class="dropdown-trigger" @click.stop="showSpoofTierDropdown = !showSpoofTierDropdown">
+                <span>{{ SPOOF_TIER_LABELS[spoofTier] || spoofTier }}</span>
+                <svg :class="['arrow-icon', { expanded: showSpoofTierDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                <div v-if="showSpoofTierDropdown" class="dropdown-menu" @click.stop>
+                  <div v-for="t in ['UNRANKED','CHALLENGER','GRANDMASTER','MASTER','DIAMOND','EMERALD','PLATINUM','GOLD','SILVER','BRONZE','IRON']" :key="t" :class="['dropdown-item', { active: spoofTier === t }]" @click="spoofTier = t; showSpoofTierDropdown = false">{{ SPOOF_TIER_LABELS[t] }}</div>
+                </div>
+              </div>
+              <div class="dropdown-trigger" :class="{ disabled: ['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier) }" @click.stop="!['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier) && (showSpoofDivisionDropdown = !showSpoofDivisionDropdown)">
+                <span>{{ ['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier) ? '-' : spoofDivision }}</span>
+                <svg :class="['arrow-icon', { expanded: showSpoofDivisionDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                <div v-if="showSpoofDivisionDropdown" class="dropdown-menu" @click.stop>
+                  <div v-for="d in ['I','II','III','IV']" :key="d" :class="['dropdown-item', { active: spoofDivision === d }]" @click="spoofDivision = d; showSpoofDivisionDropdown = false">{{ d }}</div>
+                </div>
+              </div>
               <button class="apply-btn" @click="handleApplyRankSpoof" :disabled="loading">应用</button>
             </div>
           </div>
@@ -1131,27 +1142,30 @@ async function handleToggleLockGameSettings() {
 }
 
 .group-header {
-  font-size: 0.9rem;
-  font-weight: bold;
+  font-size: 0.8rem;
+  font-weight: 700;
   color: var(--text-muted);
-  margin: 2rem 0 0.8rem 4px;
+  margin: 1.8rem 0 0.6rem 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* 卡片 Item 通用样式 (Seraphine 风格) */
 .card-item, .collapse-item {
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  margin-bottom: 12px;
+  border-radius: 12px;
+  margin-bottom: 8px;
   box-shadow: var(--shadow-sm);
-  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
-  overflow: hidden;
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+  position: relative;
+}
+.collapse-item.has-dropdown-open {
+  z-index: 10;
 }
 
 .card-item {
-  padding: 18px 24px;
+  padding: 16px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1164,9 +1178,9 @@ async function handleToggleLockGameSettings() {
 }
 
 .card-item:hover, .collapse-item:hover {
-  border-color: var(--primary-color-alpha-30);
-  background-color: var(--card-bg-hover);
   box-shadow: var(--shadow-md);
+  border-color: var(--primary-color-alpha-30);
+  background-color: #ffffff;
 }
 
 .card-left, .collapse-left {
@@ -1234,8 +1248,6 @@ async function handleToggleLockGameSettings() {
   outline: none;
   transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
   box-shadow: var(--shadow-sm);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .action-btn:hover {
@@ -1265,64 +1277,34 @@ async function handleToggleLockGameSettings() {
   border-color: var(--loss-border);
 }
 
-/* 精致 Switch 开关样式 */
-.switch-container {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* 统一 Toggle 开关样式 (与设置页一致) */
+.toggle-switch {
+  display: flex; align-items: center; width: 58px; height: 28px;
+  border-radius: 14px; cursor: pointer; position: relative;
+  transition: background-color 0.25s; padding: 0 8px;
 }
-
-.switch-text {
-  font-size: 0.82rem;
-  font-weight: bold;
-  color: var(--text-color);
-  user-select: none;
+.toggle-switch.off { background-color: rgba(0, 0, 0, 0.06); justify-content: flex-end; }
+.toggle-switch.on { background-color: var(--primary-color); justify-content: flex-start; }
+.toggle-text { font-size: 0.75rem; font-weight: bold; color: white; }
+.toggle-switch.off .toggle-text { color: var(--text-dimmed); }
+.toggle-slider {
+  width: 22px; height: 22px; background-color: white;
+  border-radius: 50%; position: absolute; top: 3px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  transition: left 0.25s, right 0.25s;
 }
-
-.mini-switch {
-  width: 44px;
-  height: 22px;
-  border-radius: 11px;
-  cursor: pointer;
-  position: relative;
-  transition: background-color 0.2s ease;
-}
-
-.mini-switch.off {
-  background-color: rgba(0, 0, 0, 0.06);
-}
-
-.mini-switch.on {
-  background-color: var(--win-color);
-}
-
-.mini-slider {
-  width: 18px;
-  height: 18px;
-  background-color: white;
-  border-radius: 50%;
-  position: absolute;
-  top: 2px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  transition: transform 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-
-.mini-switch.on .mini-slider {
-  transform: translateX(24px);
-}
-
-.mini-switch.off .mini-slider {
-  transform: translateX(2px);
-}
+.toggle-switch.on .toggle-slider { right: 3px; }
+.toggle-switch.off .toggle-slider { left: 3px; }
 
 /* 手风琴折叠样式 */
 .collapse-header {
-  padding: 18px 24px;
+  padding: 14px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
   background-color: transparent;
+  border-radius: 12px 12px 0 0;
 }
 
 .arrow-icon {
@@ -1337,12 +1319,12 @@ async function handleToggleLockGameSettings() {
 }
 
 .collapse-content {
-  border-top: 1px solid var(--border-color);
-  padding: 12px 24px 18px 56px;
+  border-top: 1px dashed var(--border-color);
+  padding: 14px 20px 16px 56px;
   animation: slideDown 0.2s ease-out;
   background-color: rgba(0, 0, 0, 0.01);
-  border-bottom-left-radius: 8px;
-  border-bottom-right-radius: 8px;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
 }
 
 /* 新增设置行级样式 */
@@ -1419,45 +1401,71 @@ async function handleToggleLockGameSettings() {
   flex: 1;
 }
 
-.select-input {
-  min-width: 140px;
-  padding: 8px 32px 8px 12px;
+.dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.5);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
   font-size: 0.82rem;
-  outline: none;
-  background-color: rgba(255, 255, 255, 0.6);
   color: var(--text-color);
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 14px;
-  box-shadow: var(--shadow-sm);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
+  position: relative;
+  transition: all 0.2s;
+  min-width: 140px;
 }
-.select-input:hover {
-  background-color: rgba(255, 255, 255, 0.85);
-  border-color: var(--primary-color-alpha-40);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.08);
-}
-.select-input:focus {
-  background-color: #fff;
+.dropdown-trigger:hover {
+  background: #ffffff;
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
 }
-.select-input:disabled {
+.dropdown-trigger.disabled {
   opacity: 0.6;
   cursor: not-allowed;
   background-color: rgba(240, 240, 240, 0.4);
 }
-.select-input option {
-  background-color: #fff;
+.dropdown-trigger.disabled:hover {
+  background: rgba(240, 240, 240, 0.4);
+  border-color: var(--border-color);
+}
+.dropdown-trigger .arrow-icon {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  transition: transform 0.2s;
+}
+.dropdown-trigger .arrow-icon.expanded {
+  transform: rotate(180deg);
+}
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  min-width: 100%;
+  padding: 4px 0;
+}
+.dropdown-item {
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.dropdown-item:hover {
+  background: rgba(0, 0, 0, 0.02);
   color: var(--text-color);
+}
+.dropdown-item.active {
+  color: var(--primary-color);
+  font-weight: 600;
+  background: var(--primary-color-alpha-15);
 }
 
 .number-input {
@@ -1939,7 +1947,7 @@ async function handleToggleLockGameSettings() {
 }
 
 .toast-success {
-  background-color: var(--win-color);
+  background-color: var(--primary-color);
 }
 
 .toast-error {
