@@ -291,11 +291,19 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String)> {
         let name = process.name().to_string_lossy().to_lowercase();
         if name == "leagueclientux.exe" || name == "leagueclientux" {
             let cmd: Vec<String> = process.cmd().iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
-            let cmd_str = cmd.join(" ");
+            let mut cmd_str = cmd.join(" ");
+
+            #[cfg(target_os = "windows")]
+            if cmd_str.is_empty() {
+                if let Some(win_cmd) = get_cmdline_windows(pid.as_u32()) {
+                    cmd_str = win_cmd;
+                }
+            }
+
             log::info!("找到 LCU 进程，命令行整句为: {}", cmd_str);
 
             if cmd_str.is_empty() {
-                log::warn!("LCU 进程命令行为空（可能需要管理员权限）");
+                log::warn!("LCU 进程命令行为空");
                 continue;
             }
 
@@ -327,31 +335,38 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String)> {
     None
 }
 
-/// 方式三：通过 WMIC 获取命令行参数（对应 Seraphine getPortTokenServerByPidViaWmic，需要管理员权限）
+/// 方式三：通过 WMIC 获取命令行参数（对应 Seraphine getPortTokenServerByPidViaWmic）
 fn find_via_wmic() -> Option<(u32, u16, String)> {
-    let output = std::process::Command::new("wmic")
-        .args(["process", "WHERE", "name='LeagueClientUx.exe'", "GET", "commandline"])
-        .output()
-        .ok()?;
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let output = std::process::Command::new("wmic")
+            .args(["process", "WHERE", "name='LeagueClientUx.exe'", "GET", "commandline"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW: 阻止黑窗口/终端闪烁
+            .output()
+            .ok()?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // 提取 --app-port=
-    let port = regex_find_number(&stdout, r"--app-port=(\d+)")?;
-    // 提取 --remoting-auth-token=
-    let token = regex_find_value(&stdout, r"--remoting-auth-token=(\S+)")?;
+        // 提取 --app-port=
+        let port = regex_find_number(&stdout, r"--app-port=(\d+)")?;
+        // 提取 --remoting-auth-token=
+        let token = regex_find_value(&stdout, r#"--remoting-auth-token=([^"\s]+)"#)?;
 
-    log::info!("从 WMIC 解析结果: port={}, token=***", port);
+        log::info!("从 WMIC 解析结果: port={}, token=***", port);
 
-    // WMIC 不返回 PID，从进程列表中查找
-    let sys = System::new_all();
-    for (pid, process) in sys.processes() {
-        let name = process.name().to_string_lossy().to_lowercase();
-        if name == "leagueclientux.exe" || name == "leagueclientux" {
-            return Some((pid.as_u32(), port, token));
+        // WMIC 不返回 PID，从进程列表中查找
+        let sys = System::new_all();
+        for (pid, process) in sys.processes() {
+            let name = process.name().to_string_lossy().to_lowercase();
+            if name == "leagueclientux.exe" || name == "leagueclientux" {
+                return Some((pid.as_u32(), port, token));
+            }
         }
+        Some((0, port, token))
     }
-    Some((0, port, token))
+    #[cfg(not(target_os = "windows"))]
+    None
 }
 
 fn regex_find_number(haystack: &str, pattern: &str) -> Option<u16> {
@@ -378,4 +393,94 @@ fn find_lcu_exe_dir(sys: &System) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Windows 专用的底层命令行查询方法，使用 NtQueryInformationProcess (ProcessCommandLineInformation) 绕过普通权限限制
+#[cfg(target_os = "windows")]
+fn get_cmdline_windows(pid: u32) -> Option<String> {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    struct UNICODE_STRING {
+        length: u16,
+        maximum_length: u16,
+        buffer: *mut u16,
+    }
+
+    extern "system" {
+        fn OpenProcess(
+            desired_access: u32,
+            inherit_handle: i32,
+            process_id: u32,
+        ) -> *mut c_void;
+        
+        fn CloseHandle(handle: *mut c_void) -> i32;
+
+        fn NtQueryInformationProcess(
+            process_handle: *mut c_void,
+            process_information_class: u32,
+            process_information: *mut c_void,
+            process_information_length: u32,
+            return_length: *mut u32,
+        ) -> i32;
+    }
+
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const PROCESS_COMMAND_LINE_INFORMATION: u32 = 60;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+
+        let mut return_length: u32 = 0;
+        let _status = NtQueryInformationProcess(
+            handle,
+            PROCESS_COMMAND_LINE_INFORMATION,
+            std::ptr::null_mut(),
+            0,
+            &mut return_length,
+        );
+
+        if return_length == 0 {
+            CloseHandle(handle);
+            return None;
+        }
+
+        let mut buffer: Vec<u8> = vec![0; return_length as usize];
+        let status = NtQueryInformationProcess(
+            handle,
+            PROCESS_COMMAND_LINE_INFORMATION,
+            buffer.as_mut_ptr() as *mut c_void,
+            return_length,
+            &mut return_length,
+        );
+
+        CloseHandle(handle);
+
+        if status < 0 {
+            return None;
+        }
+
+        let unicode_str = *(buffer.as_ptr() as *const UNICODE_STRING);
+        
+        let offset = unicode_str.buffer as usize - buffer.as_ptr() as usize;
+        if offset + (unicode_str.length as usize) <= buffer.len() {
+            let u16_slice = std::slice::from_raw_parts(
+                unicode_str.buffer,
+                (unicode_str.length / 2) as usize
+            );
+            return Some(String::from_utf16_lossy(u16_slice));
+        } else {
+            let header_size = std::mem::size_of::<UNICODE_STRING>();
+            if header_size + (unicode_str.length as usize) <= buffer.len() {
+                let ptr = buffer.as_ptr().add(header_size) as *const u16;
+                let u16_slice = std::slice::from_raw_parts(ptr, (unicode_str.length / 2) as usize);
+                return Some(String::from_utf16_lossy(u16_slice));
+            }
+        }
+        None
+    }
 }
