@@ -9,6 +9,9 @@ use crate::LcuClient;
 use super::game_data::GameDataAssets;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// Readiness probe: how many times to retry, and interval between retries.
+const PROBE_MAX_RETRIES: u32 = 5;
+const PROBE_INTERVAL: Duration = Duration::from_secs(2);
 
 #[cfg(target_os = "windows")]
 mod win_privilege {
@@ -160,89 +163,114 @@ pub fn start(
             }
 
 
-            let mut lock = lcu_state.write().await;
+            // ── 阶段 1: 只读检查是否需要重连（不持有写锁）──
+            let needs_reconnect = {
+                let lock = lcu_state.read().await;
+                match &lcu_info {
+                    Some((pid, port, token)) => {
+                        match lock.as_ref() {
+                            Some(client) => {
+                                client.pid != *pid
+                                    || client.port != *port
+                                    || client.token != *token
+                            }
+                            None => true,
+                        }
+                    }
+                    None => false,
+                }
+            };
+            // 读锁已释放
 
             match lcu_info {
                 Some((pid, port, token)) => {
-                    let needs_reconnect = match lock.as_ref() {
-                        Some(client) => client.pid != pid || client.port != port || client.token != token,
-                        None => true,
-                    };
-
                     if needs_reconnect {
-                        log::info!("检测到 LCU: pid={}, port={}, 建立新连接", pid, port);
+                        // ── 阶段 2: 在获取写锁之前探测 LCU HTTP 是否就绪 ──
+                        log::info!("检测到 LCU: pid={}, port={}, 等待 HTTP 服务器就绪...", pid, port);
 
-                        match reqwest::Client::builder()
-                             .danger_accept_invalid_certs(true)
-                             .no_proxy()
-                             .build()
-                        {
-                            Ok(http_client) => {
-                                let client = LcuClient {
-                                    pid,
-                                    port,
-                                    token: token.clone(),
-                                    http_client,
-                                };
-                                *lock = Some(client);
-                                was_connected = true;
-                                // 释放 lcu_state 写锁后再加载游戏资源
-                                drop(lock);
-
-                                // 异步加载游戏资源映射（不阻塞监控循环）
-                                let gd = game_data.clone();
-                                let pid_for_gd = pid;
-                                let port_for_gd = port;
-                                let token_for_gd = token.clone();
-                                let app_handle_for_gd = app_handle.clone();
-                                tauri::async_runtime::spawn(async move {
-                                    match reqwest::Client::builder()
-                                        .danger_accept_invalid_certs(true)
-                                        .no_proxy()
-                                        .build()
+                        if let Err(msg) = probe_lcu_readiness(port, &token).await {
+                            log::warn!("LCU 就绪探测失败，跳过本轮: {}", msg);
+                            // 不写入状态，下个轮询周期自动重试
+                        } else {
+                            // ── 阶段 3: 探测通过，构建客户端并提交状态 ──
+                            match reqwest::Client::builder()
+                                 .danger_accept_invalid_certs(true)
+                                 .no_proxy()
+                                 .build()
+                            {
+                                Ok(http_client) => {
+                                    let client = LcuClient {
+                                        pid,
+                                        port,
+                                        token: token.clone(),
+                                        http_client,
+                                    };
+                                    // 写锁仅短暂持有
                                     {
-                                        Ok(http) => {
-                                            let tmp_lcu = LcuClient {
-                                                pid: pid_for_gd,
-                                                port: port_for_gd,
-                                                token: token_for_gd,
-                                                http_client: http,
-                                            };
-                                            let assets = super::game_data::fetch_game_data_assets(&tmp_lcu).await;
-                                            *gd.write().await = assets;
-                                            log::info!("游戏资源已更新");
-                                            let _ = app_handle_for_gd.emit("game-data-ready", ());
-                                        }
-                                        Err(e) => log::error!("加载游戏资源失败: {}", e),
+                                        let mut lock = lcu_state.write().await;
+                                        *lock = Some(client);
                                     }
-                                });
+                                    was_connected = true;
 
-                                let _ = app_handle.emit(
-                                    "lcu-client-started",
-                                    serde_json::json!({ "port": port }),
-                                );
+                                    // 异步加载游戏资源映射（不阻塞监控循环）
+                                    let gd = game_data.clone();
+                                    let app_handle_for_gd = app_handle.clone();
+                                    let token_for_gd = token.clone();
+                                    tauri::async_runtime::spawn(async move {
+                                        match reqwest::Client::builder()
+                                            .danger_accept_invalid_certs(true)
+                                            .no_proxy()
+                                            .build()
+                                        {
+                                            Ok(http) => {
+                                                let tmp_lcu = LcuClient {
+                                                    pid,
+                                                    port,
+                                                    token: token_for_gd.clone(),
+                                                    http_client: http,
+                                                };
+                                                let assets = super::game_data::fetch_game_data_assets(&tmp_lcu).await;
+                                                *gd.write().await = assets;
+                                                log::info!("游戏资源已更新");
+                                                let _ = app_handle_for_gd.emit("game-data-ready", ());
+                                            }
+                                            Err(e) => log::error!("加载游戏资源失败: {}", e),
+                                        }
+                                    });
 
-                                super::ws::connect(app_handle.clone(), port, token);
-                            }
-                            Err(e) => {
-                                log::error!("创建 HTTP 客户端失败: {}", e);
+                                    let _ = app_handle.emit(
+                                        "lcu-client-started",
+                                        serde_json::json!({ "port": port }),
+                                    );
+
+                                    super::ws::connect(app_handle.clone(), port, token);
+                                }
+                                Err(e) => {
+                                    log::error!("创建 HTTP 客户端失败: {}", e);
+                                }
                             }
                         }
                     }
                 }
                 None => {
+                    // ── 断开处理 ──
                     if was_connected {
                         log::info!("LCU 已断开");
-                        *lock = None;
+                        {
+                            let mut lock = lcu_state.write().await;
+                            *lock = None;
+                        }
                         was_connected = false;
-                        // 清空游戏资源
                         let gd = game_data.clone();
                         tauri::async_runtime::spawn(async move {
                             *gd.write().await = GameDataAssets::default();
                         });
                         let _ = app_handle.emit("lcu-client-ended", ());
-                    } else if lock.is_some() {
-                        *lock = None;
+                    } else {
+                        let mut lock = lcu_state.write().await;
+                        if lock.is_some() {
+                            *lock = None;
+                        }
                     }
                 }
             }
@@ -393,6 +421,62 @@ fn find_lcu_exe_dir(sys: &System) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// 探测 LCU HTTP 服务器是否真正可接受请求。
+/// 在 monitor 写入共享状态之前调用，防止在服务器尚未就绪时触发前端 API 调用。
+/// 最多重试 `PROBE_MAX_RETRIES` 次，间隔 `PROBE_INTERVAL`。
+async fn probe_lcu_readiness(port: u16, token: &str) -> Result<(), String> {
+    let auth = crate::build_auth_header(token);
+    let url = format!("https://127.0.0.1:{}/system/v1/builds", port);
+
+    let http = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .no_proxy()
+        .build()
+        .map_err(|e| format!("创建探测 HTTP 客户端失败: {}", e))?;
+
+    for attempt in 1..=PROBE_MAX_RETRIES {
+        match http
+            .get(&url)
+            .header("Authorization", &auth)
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                log::info!(
+                    "LCU HTTP 服务器就绪 (第 {}/{} 次探测)",
+                    attempt, PROBE_MAX_RETRIES
+                );
+                return Ok(());
+            }
+            Ok(resp) => {
+                log::debug!(
+                    "LCU 探测未就绪: HTTP {} (第 {}/{} 次)",
+                    resp.status(),
+                    attempt,
+                    PROBE_MAX_RETRIES
+                );
+            }
+            Err(e) => {
+                log::debug!(
+                    "LCU 探测失败: {} (第 {}/{} 次)",
+                    e,
+                    attempt,
+                    PROBE_MAX_RETRIES
+                );
+            }
+        }
+        if attempt < PROBE_MAX_RETRIES {
+            sleep(PROBE_INTERVAL).await;
+        }
+    }
+
+    Err(format!(
+        "LCU HTTP 服务器在 {} 次探测后仍未就绪",
+        PROBE_MAX_RETRIES
+    ))
 }
 
 /// Windows 专用的底层命令行查询方法，使用 NtQueryInformationProcess (ProcessCommandLineInformation) 绕过普通权限限制

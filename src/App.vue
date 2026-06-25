@@ -20,7 +20,7 @@ import LcuImage from "./components/LcuImage.vue";
 import opggIcon from "./assets/opgg.svg";
 
 const store = useLcuStore();
-const { gamePhase, connectionVersion } = storeToRefs(store);
+const { gamePhase } = storeToRefs(store);
 const currentPage = ref("home");
 const pageHistory: string[] = [];
 const isSidebarExpanded = ref(false);
@@ -78,10 +78,6 @@ const regionName = computed(() => {
 
 onMounted(async () => {
   await initLcuListeners();
-  // 直接触发一次 loadLcuState，不依赖 watcher 的时序
-  // loadLcuState 内部已有 1 秒延迟 + 重试机制
-  console.log("[App] onMounted 完成，直接调用 loadLcuState");
-  loadLcuState();
 
   // 监听系统托盘菜单导航事件
   await listen<string>("tray-navigate", (event: { payload: string }) => {
@@ -167,32 +163,17 @@ async function openOpggWindow() {
   }
 }
 
-async function loadLcuState(retryCount = 0) {
-  console.log(`[loadLcuState] 开始 (retry=${retryCount}, isConnected=${store.isConnected})`);
+async function loadLcuState() {
+  console.log(`[loadLcuState] 开始, isConnected=${store.isConnected}`);
+  if (!store.isConnected) return;
 
-  // 如果未连接，等待 1 秒后重试（后端可能还在初始化）
-  if (!store.isConnected) {
-    if (retryCount < 3) {
-      console.log(`[loadLcuState] 未连接，1 秒后重试 (${retryCount + 1}/3)`);
-      setTimeout(() => loadLcuState(retryCount + 1), 1000);
-    } else {
-      console.log("[loadLcuState] 多次重试仍未连接，放弃");
-      summoner.value = null;
-      platformId.value = "";
-    }
-    return;
-  }
-
-  // 首次调用时等待 1 秒，让 LCU API 就绪（尤其游戏中启动时）
-  if (retryCount === 0) {
-    await new Promise(r => setTimeout(r, 1000));
-  }
+  // 等待 1 秒，让 LCU API 完全就绪
+  await new Promise(r => setTimeout(r, 1000));
 
   // 每一步独立 try-catch，互不影响
 
   // 1. 获取当前召唤师数据
   try {
-    console.log("[loadLcuState] 获取召唤师数据...");
     summoner.value = await fetchCurrentSummoner();
     console.log("[loadLcuState] 召唤师:", summoner.value?.displayName);
   } catch (e) {
@@ -211,15 +192,12 @@ async function loadLcuState(retryCount = 0) {
 
   // 3. 同步拉取当前 LCU 对局状态（游戏中重启时关键，必须执行）
   try {
-    console.log("[loadLcuState] 获取游戏阶段...");
     const phaseResp = await lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase");
-    console.log("[loadLcuState] gameflow-phase resp:", JSON.stringify(phaseResp));
     if (phaseResp.success && phaseResp.data) {
-      console.log("[loadLcuState] setGamePhase:", phaseResp.data);
       store.setGamePhase(phaseResp.data);
     }
   } catch (e) {
-    console.error("[loadLcuState] 获取游戏阶段失败:", e);
+    console.warn("[loadLcuState] 获取游戏阶段失败:", e);
   }
 
   // 4. 同步拉取对局 Session
@@ -242,12 +220,6 @@ async function loadLcuState(retryCount = 0) {
     }
   } catch (e) {
     console.warn("[loadLcuState] 加载配置失败:", e);
-  }
-
-  // 如果召唤师数据加载失败且是首次调用，触发重试
-  if (!summoner.value && retryCount < 3) {
-    console.log(`[loadLcuState] 召唤师数据为空，2 秒后重试 (${retryCount + 1}/3)`);
-    setTimeout(() => loadLcuState(retryCount + 1), 2000);
   }
 
   console.log("[loadLcuState] 完成, gamePhase=", store.gamePhase, "summoner=", summoner.value?.displayName);
@@ -274,10 +246,7 @@ watch(navigateSearchPayload, (payload) => {
 });
 
 // lcu-client-started 事件触发时重新加载（游戏中重启等场景）
-watch(connectionVersion, () => {
-  console.log("[App] connectionVersion 变化，重新加载 LCU 状态");
-  loadLcuState();
-});
+// isConnected watcher 已覆盖此场景，无需额外监听
 
 // 游戏阶段变化 → 更新窗口标题 + 自动跳转对局信息页
 watch(gamePhase, (phase: string) => {

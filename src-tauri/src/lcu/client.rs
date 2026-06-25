@@ -1,8 +1,14 @@
 use base64::Engine;
 use serde_json::Value;
 use tauri::State;
+use tokio::time::{sleep, Duration};
 
 use crate::{build_auth_header, AppState};
+
+/// 传输层错误的最大重试次数（对应 Python @retry(count=5)）。
+/// 仅对连接拒绝/超时等传输层错误重试，HTTP 状态码错误不重试。
+const MAX_RETRIES: u32 = 3;
+const RETRY_DELAY: Duration = Duration::from_millis(500);
 
 /// 统一的 LCU API 调用命令。
 /// 前端通过 invoke("call_lcu_api", { method, path, body }) 调用。
@@ -24,38 +30,54 @@ pub async fn call_lcu_api(
     // Basic Auth: base64("riot:<token>")
     let auth_value = build_auth_header(&lcu.token);
 
-    let mut req = match method.to_uppercase().as_str() {
-        "GET" => lcu.http_client.get(&url),
-        "POST" => lcu.http_client.post(&url),
-        "PUT" => lcu.http_client.put(&url),
-        "PATCH" => lcu.http_client.patch(&url),
-        "DELETE" => lcu.http_client.delete(&url),
-        other => return Err(format!("不支持的 HTTP 方法: {}", other)),
-    };
+    let mut last_err = String::new();
 
-    req = req.header("Authorization", auth_value);
+    for attempt in 1..=MAX_RETRIES {
+        let mut req = match method.to_uppercase().as_str() {
+            "GET" => lcu.http_client.get(&url),
+            "POST" => lcu.http_client.post(&url),
+            "PUT" => lcu.http_client.put(&url),
+            "PATCH" => lcu.http_client.patch(&url),
+            "DELETE" => lcu.http_client.delete(&url),
+            other => return Err(format!("不支持的 HTTP 方法: {}", other)),
+        };
 
-    if let Some(json_body) = body {
-        req = req.json(&json_body);
-    }
+        req = req.header("Authorization", &auth_value);
 
-    let response = req.send().await.map_err(|e| e.to_string())?;
-    let status = response.status();
-    let text = response.text().await.map_err(|e| e.to_string())?;
-
-    if status.is_success() {
-        // 部分 LCU 接口成功时不返回 Body
-        if text.is_empty() {
-            return Ok(Value::Null);
+        if let Some(ref json_body) = body {
+            req = req.json(json_body);
         }
-        serde_json::from_str(&text).map_err(|e| format!("JSON 解析失败: {}", e))
-    } else {
-        Err(format!(
-            "LCU 返回错误 [{}]: {}",
-            status.as_u16(),
-            text
-        ))
+
+        match req.send().await {
+            Ok(response) => {
+                let status = response.status();
+                let text = response.text().await.map_err(|e| e.to_string())?;
+
+                if status.is_success() {
+                    if text.is_empty() {
+                        return Ok(Value::Null);
+                    }
+                    return serde_json::from_str(&text)
+                        .map_err(|e| format!("JSON 解析失败: {}", e));
+                } else {
+                    // HTTP 状态码错误不重试，直接返回
+                    return Err(format!("LCU 返回错误 [{}]: {}", status.as_u16(), text));
+                }
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                log::debug!(
+                    "LCU API 请求失败 ({}/{}): {} - {}",
+                    attempt, MAX_RETRIES, path, last_err
+                );
+                if attempt < MAX_RETRIES {
+                    sleep(RETRY_DELAY).await;
+                }
+            }
+        }
     }
+
+    Err(last_err)
 }
 
 /// 获取 LCU 静态资源（图片等），返回 data URL。
