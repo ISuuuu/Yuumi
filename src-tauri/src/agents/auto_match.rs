@@ -82,6 +82,26 @@ async fn handle_phase_change(
     }
     *last_phase = phase.to_string();
 
+    // 当不在选人阶段时，重置 BP 代理的状态追踪，防止下一局选人时状态残留失效
+    if phase != "ChampSelect" {
+        let state = app_handle.state::<crate::AppState>();
+        let reset_session = crate::agents::auto_bp::ChampSelectSession {
+            actions: Vec::new(),
+            local_player_cell_id: -1,
+            my_team: Vec::new(),
+            bans: crate::agents::auto_bp::ChampSelectBans {
+                my_team_bans: Vec::new(),
+                their_team_bans: Vec::new(),
+            },
+            pick_order_swaps: Vec::new(),
+            trades: Vec::new(),
+            timer: None,
+            bench_enabled: false,
+            queue_id: None,
+        };
+        let _ = state.bp_session_tx.try_send(reset_session);
+    }
+
     // 空闲状态 → 自动创建预设大厅
     if phase == "None" && cfg.enable_auto_create_lobby {
         try_create_default_lobby(app_handle, cfg, lobby_created).await;

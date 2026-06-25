@@ -112,6 +112,13 @@ pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSe
         let mut selection = ChampionSelection::default();
 
         while let Some(session) = session_rx.recv().await {
+            // 收到重置信号时，重置 BP 跟踪状态并进入下一次循环
+            if session.local_player_cell_id == -1 {
+                log::info!("收到重置选人代理状态的信号");
+                selection = ChampionSelection::default();
+                continue;
+            }
+
             let cfg = {
                 let app_state = app_handle.state::<crate::AppState>();
                 let cfg_lock = app_state.config.read().await;
