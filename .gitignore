@@ -28,3 +28,6 @@ src-tauri/target/
 
 # 参考文档（不入库）
 File/
+
+# 调试文件
+lcu_debug.txt

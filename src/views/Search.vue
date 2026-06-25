@@ -717,7 +717,7 @@ const gameDetails = computed(() => {
 <style scoped>
 .search-view {
   padding: 1.5rem 1.5rem 1.5rem 0.6rem;
-  background-color: #fafbfc;
+  background-color: transparent;
   min-height: 100%;
 }
 
@@ -727,7 +727,7 @@ const gameDetails = computed(() => {
   align-items: center;
   justify-content: center;
   padding: 8rem 2rem;
-  color: #909399;
+  color: var(--text-muted);
 }
 
 .offline-logo {
@@ -736,18 +736,18 @@ const gameDetails = computed(() => {
 }
 
 .tip {
-  font-size: 1rem;
-  color: #8c8c8c;
+  font-size: 0.95rem;
+  color: var(--text-dimmed);
 }
 
 .error {
-  color: #f56c6c;
-  background: #fef0f0;
-  border: 1px solid #fde2e2;
+  color: var(--loss-color);
+  background: var(--loss-bg);
+  border: 1px solid var(--loss-border);
   padding: 8px 16px;
   border-radius: 6px;
   margin-bottom: 1rem;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
 }
 
 .search-container {
@@ -761,12 +761,14 @@ const gameDetails = computed(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: white;
-  border: 1px solid #ebeef5;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
   padding: 10px 16px;
   border-radius: 12px;
   margin-bottom: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .search-input-wrapper {
@@ -782,14 +784,16 @@ const gameDetails = computed(() => {
   top: 100%;
   left: 0;
   right: 0;
-  background: white;
-  border: 1px solid #dcdfe6;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0 0 8px 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  box-shadow: var(--shadow-lg);
   z-index: 100;
   max-height: 260px;
   overflow-y: auto;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .history-item {
@@ -802,7 +806,7 @@ const gameDetails = computed(() => {
 }
 
 .history-item:hover {
-  background: #f5f7fa;
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .history-icon {
@@ -813,8 +817,8 @@ const gameDetails = computed(() => {
 
 .history-text {
   flex: 1;
-  font-size: 0.85rem;
-  color: #303133;
+  font-size: 0.82rem;
+  color: var(--text-color);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -822,7 +826,7 @@ const gameDetails = computed(() => {
 
 .history-delete {
   font-size: 0.72rem;
-  color: #c0c4cc;
+  color: var(--text-dimmed);
   cursor: pointer;
   padding: 2px 4px;
   border-radius: 3px;
@@ -831,23 +835,26 @@ const gameDetails = computed(() => {
 }
 
 .history-delete:hover {
-  color: #f56c6c;
-  background: #fef0f0;
+  color: var(--loss-color);
+  background: var(--loss-bg);
 }
 
 .search-input {
   width: 100%;
   padding: 8px 40px 8px 16px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.5);
   border-radius: 6px;
-  font-size: 0.88rem;
-  color: #606266;
+  font-size: 0.85rem;
+  color: var(--text-color);
   outline: none;
-  transition: border-color 0.2s;
+  transition: all 0.2s;
 }
 
 .search-input:focus {
   border-color: var(--primary-color);
+  box-shadow: 0 0 8px var(--primary-color-alpha-15);
+  background: rgba(255, 255, 255, 0.95);
 }
 
 .search-trigger-btn {
@@ -858,7 +865,7 @@ const gameDetails = computed(() => {
   background: transparent;
   border: none;
   cursor: pointer;
-  color: #909399;
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   padding: 4px;
@@ -870,34 +877,46 @@ const gameDetails = computed(() => {
 }
 
 .tab-btn {
-  background: white;
-  border: 1px solid #dcdfe6;
-  color: #606266;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
   padding: 8px 20px;
   border-radius: 6px;
-  font-size: 0.88rem;
-  font-weight: 500;
+  font-size: 0.82rem;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text-color);
 }
 
 .tab-btn.active {
   background-color: var(--primary-color);
   color: white;
   border-color: var(--primary-color);
+  box-shadow: 0 4px 10px var(--primary-color-alpha-30);
 }
 
 .dropdown-select {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: white;
-  border: 1px solid #dcdfe6;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
   padding: 8px 16px;
   border-radius: 6px;
-  font-size: 0.88rem;
-  color: #606266;
+  font-size: 0.82rem;
+  color: var(--text-color);
   cursor: pointer;
   position: relative;
+  transition: all 0.2s;
+}
+
+.dropdown-select:hover {
+  background: rgba(255, 255, 255, 0.95);
 }
 
 .arrow-icon {
@@ -915,26 +934,29 @@ const gameDetails = computed(() => {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  background: white;
-  border: 1px solid #ebeef5;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-lg);
   z-index: 100;
   min-width: 140px;
   padding: 4px 0;
   animation: fadeIn 0.15s ease-out;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .queue-dropdown-item {
   padding: 7px 14px;
-  font-size: 0.82rem;
-  color: #606266;
+  font-size: 0.78rem;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: all 0.1s;
 }
 
 .queue-dropdown-item:hover {
-  background: #f5f7fa;
+  background: rgba(0, 0, 0, 0.02);
+  color: var(--text-color);
 }
 
 .queue-dropdown-item.active {
@@ -948,8 +970,8 @@ const gameDetails = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.85rem;
-  color: #606266;
+  font-size: 0.82rem;
+  color: var(--text-muted);
   cursor: pointer;
 }
 
@@ -980,36 +1002,37 @@ const gameDetails = computed(() => {
   align-items: center;
   padding: 10px 12px;
   border-radius: 8px;
-  border-left: 4px solid;
+  border: 1px solid var(--border-color);
+  border-left: 4px solid transparent;
   cursor: pointer;
-  transition: all 0.2s;
-  background: white;
-  border-top: 1px solid #ebeef5;
-  border-right: 1px solid #ebeef5;
-  border-bottom: 1px solid #ebeef5;
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+  background: var(--card-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .mini-match-card.win {
-  border-left-color: #2ecc71;
+  border-left-color: var(--win-color);
 }
 
 .mini-match-card.win:hover {
-  background: #f0f9eb;
+  background: var(--win-bg);
+  border-color: var(--win-border);
 }
 
 .mini-match-card.lose {
-  border-left-color: #f56c6c;
+  border-left-color: var(--loss-color);
 }
 
 .mini-match-card.lose:hover {
-  background: #fef0f0;
+  background: var(--loss-bg);
+  border-color: var(--loss-border);
 }
 
 .mini-match-card.selected {
-  background: #f0f2f5 !important;
-  border-top-color: #dcdfe6;
-  border-right-color: #dcdfe6;
-  border-bottom-color: #dcdfe6;
+  background: var(--card-bg-hover) !important;
+  border-color: var(--primary-color);
+  box-shadow: var(--shadow-sm);
 }
 
 .mini-avatar {
@@ -1017,7 +1040,7 @@ const gameDetails = computed(() => {
   height: 32px;
   border-radius: 50%;
   overflow: hidden;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--border-color);
   margin-right: 10px;
   flex-shrink: 0;
 }
@@ -1030,30 +1053,30 @@ const gameDetails = computed(() => {
 }
 
 .mini-mode {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: bold;
-  color: #303133;
+  color: var(--text-color);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .mini-time {
-  font-size: 0.72rem;
-  color: #909399;
+  font-size: 0.68rem;
+  color: var(--text-dimmed);
   margin-top: 2px;
 }
 
 .mini-kda {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #606266;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
   text-align: right;
   margin-left: 8px;
 }
 
 .death-red {
-  color: #f56c6c;
+  color: var(--loss-color);
 }
 
 /* 分页 */
@@ -1066,8 +1089,8 @@ const gameDetails = computed(() => {
 }
 
 .page-btn {
-  background: white;
-  border: 1px solid #dcdfe6;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   width: 30px;
   height: 30px;
@@ -1075,11 +1098,17 @@ const gameDetails = computed(() => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #606266;
+  color: var(--text-color);
+  transition: all 0.2s;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: var(--primary-color);
 }
 
 .page-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
@@ -1089,17 +1118,19 @@ const gameDetails = computed(() => {
 }
 
 .page-num {
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: bold;
-  color: #303133;
+  color: var(--text-color);
 }
 
 /* 右侧详情面板 */
 .right-detail-panel {
-  background: white;
-  border: 1px solid #ebeef5;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+  box-shadow: var(--shadow-sm);
   min-height: 480px;
   overflow: hidden;
 }
@@ -1110,14 +1141,14 @@ const gameDetails = computed(() => {
   align-items: center;
   justify-content: center;
   height: 480px;
-  color: #909399;
-  font-size: 0.9rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
 }
 
 .loading-spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #e2e5e9;
+  border: 3px solid rgba(0, 0, 0, 0.05);
   border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -1134,36 +1165,36 @@ const gameDetails = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding: 16px 24px;
-  border-bottom: 1px solid;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .detail-banner.win {
-  background-color: #f0f9eb;
-  border-color: #e1f3d8;
+  background-color: var(--win-bg);
+  border-color: var(--win-border);
 }
 
 .detail-banner.lose {
-  background-color: #fef0f0;
-  border-color: #fde2e2;
+  background-color: var(--loss-bg);
+  border-color: var(--loss-border);
 }
 
 .banner-result {
-  font-size: 1.6rem;
+  font-size: 1.4rem;
   font-weight: 800;
   margin: 0 0 4px;
 }
 
-.banner-result.win { color: #2ecc71; }
-.banner-result.lose { color: #f56c6c; }
+.banner-result.win { color: var(--win-color); }
+.banner-result.lose { color: var(--loss-color); }
 
 .banner-subtext {
-  font-size: 0.8rem;
-  color: #909399;
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 
 .copy-btn {
-  background: white;
-  border: 1px solid #dcdfe6;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   width: 32px;
   height: 32px;
@@ -1171,13 +1202,13 @@ const gameDetails = computed(() => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #606266;
+  color: var(--text-color);
   transition: all 0.2s;
 }
 
 .copy-btn:hover {
-  background-color: #f5f7fa;
-  border-color: #c0c4cc;
+  background-color: rgba(255, 255, 255, 0.95);
+  border-color: var(--primary-color);
 }
 
 .copy-btn svg {
@@ -1194,9 +1225,10 @@ const gameDetails = computed(() => {
 }
 
 .team-block {
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   overflow: hidden;
+  background: rgba(0, 0, 0, 0.01);
 }
 
 .team-header-bar {
@@ -1204,17 +1236,17 @@ const gameDetails = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 16px;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
 .team-header-bar.win-bar {
-  background-color: #f0f9eb;
-  border-bottom: 1px solid #e1f3d8;
+  background-color: rgba(16, 185, 129, 0.04);
+  border-bottom: 1px solid var(--win-border);
 }
 
 .team-header-bar.lose-bar {
-  background-color: #fef0f0;
-  border-bottom: 1px solid #fde2e2;
+  background-color: rgba(239, 68, 68, 0.04);
+  border-bottom: 1px solid var(--loss-border);
 }
 
 .team-result-label {
@@ -1225,9 +1257,9 @@ const gameDetails = computed(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #606266;
+  color: var(--text-muted);
   font-weight: 500;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
 }
 
 .obj-item {
@@ -1237,7 +1269,7 @@ const gameDetails = computed(() => {
 }
 
 .obj-icon {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
 /* 玩家列表 Table 行 */
@@ -1250,9 +1282,9 @@ const gameDetails = computed(() => {
   display: flex;
   align-items: center;
   padding: 6px 14px;
-  border-bottom: 1px solid #f0f2f5;
-  font-size: 0.8rem;
-  color: #333;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 
 .player-row:last-child {
@@ -1279,7 +1311,7 @@ const gameDetails = computed(() => {
   height: 40px;
   border-radius: 50%;
   overflow: hidden;
-  border: 1px solid #dcdfe6;
+  border: 1.5px solid var(--border-color);
 }
 
 .row-level-overlay {
@@ -1289,13 +1321,13 @@ const gameDetails = computed(() => {
   width: 14px;
   height: 14px;
   line-height: 12px;
-  background: #202124;
-  color: white;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-color);
   border-radius: 50%;
   font-size: 0.58rem;
   font-weight: bold;
   text-align: center;
-  border: 1px solid #fff;
+  border: 1px solid var(--border-color);
 }
 
 .row-spell-rune-row {
@@ -1314,7 +1346,7 @@ const gameDetails = computed(() => {
   width: 18px;
   height: 18px;
   border-radius: 2px;
-  border: 1px solid rgba(0,0,0,0.08);
+  border: 1px solid var(--border-color);
 }
 
 .row-rune {
@@ -1341,7 +1373,7 @@ const gameDetails = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #555;
+  color: var(--text-muted);
   cursor: pointer;
   transition: color 0.15s;
 }
@@ -1351,12 +1383,12 @@ const gameDetails = computed(() => {
 }
 
 .highlight-user {
-  color: #2ecc71 !important;
-  font-weight: 800;
+  color: var(--primary-color) !important;
+  font-weight: bold;
 }
 
 .highlight-user:hover {
-  color: #27ae60 !important;
+  color: var(--primary-color-hover) !important;
 }
 
 /* 3. 装备区 */
@@ -1376,10 +1408,10 @@ const gameDetails = computed(() => {
 .row-item-slot {
   width: 26px;
   height: 26px;
-  background: rgba(0,0,0,0.03);
+  background: rgba(0, 0, 0, 0.04);
   border-radius: 3px;
   overflow: hidden;
-  border: 1px solid rgba(0,0,0,0.05);
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .row-item-img {
@@ -1393,29 +1425,30 @@ const gameDetails = computed(() => {
   height: 26px;
   border-radius: 3px;
   overflow: hidden;
-  border: 1px solid #e6a23c;
-  background-color: rgba(230,162,60,0.03);
+  border: 1px solid rgba(230, 162, 60, 0.3);
+  background-color: rgba(230, 162, 60, 0.05);
 }
 
 /* 4. KDA */
 .player-kda-col {
   width: 70px;
   text-align: center;
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--text-muted);
 }
 
 /* 5. 补兵 */
 .player-cs-col {
   width: 42px;
   text-align: center;
-  color: #606266;
+  color: var(--text-muted);
 }
 
 /* 6. 金币 */
 .player-gold-col {
   width: 55px;
   text-align: right;
-  color: #606266;
+  color: var(--text-muted);
 }
 
 /* 7. 伤害 */
@@ -1423,7 +1456,7 @@ const gameDetails = computed(() => {
   width: 60px;
   text-align: right;
   font-weight: 700;
-  color: #2c3e50;
+  color: var(--text-color);
 }
 
 @keyframes fadeIn {
@@ -1434,12 +1467,12 @@ const gameDetails = computed(() => {
 /* Toast 通知 */
 .toast {
   position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-  padding: 10px 24px; border-radius: 8px; font-size: 0.88rem;
+  padding: 10px 24px; border-radius: 8px; font-size: 0.82rem;
   font-weight: 600; color: white; z-index: 9999;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); pointer-events: none;
+  box-shadow: var(--shadow-md); pointer-events: none;
 }
-.toast-success { background-color: #67c23a; }
-.toast-error { background-color: #f56c6c; }
+.toast-success { background-color: var(--win-color); }
+.toast-error { background-color: var(--loss-color); }
 .toast-enter-active { transition: all 0.25s ease-out; }
 .toast-leave-active { transition: all 0.2s ease-in; }
 .toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
