@@ -110,6 +110,17 @@ function hideHistoryDelayed() {
 const filteredHistory = computed(() => {
   const q = searchName.value.trim().toLowerCase();
   if (!q) return searchHistory.value;
+
+  // 如果输入框内容和当前展示的召唤师姓名完全一致（代表没有进行新的输入，仅仅是点击聚焦），则展示全部历史记录
+  if (summoner.value) {
+    const gn = summoner.value.gameName || summoner.value.displayName;
+    const tl = summoner.value.tagLine;
+    const currentRiotId = tl ? `${gn}#${tl}` : gn;
+    if (q === currentRiotId.toLowerCase()) {
+      return searchHistory.value;
+    }
+  }
+
   return searchHistory.value.filter((h: string) => h.toLowerCase().includes(q));
 });
 
@@ -540,6 +551,7 @@ const gameDetails = computed(() => {
             placeholder="输入召唤师名称（如 你好#5201）"
             @keyup.enter="doSearch"
             @focus="showHistory = true"
+            @click="showHistory = true"
             @blur="hideHistoryDelayed"
             :disabled="searching"
             class="search-input"
@@ -552,15 +564,19 @@ const gameDetails = computed(() => {
           </button>
           <!-- 搜索历史下拉框 -->
           <div v-if="showHistory && filteredHistory.length > 0" class="history-dropdown">
-            <div
-              v-for="item in filteredHistory"
-              :key="item"
-              class="history-item"
-              @mousedown.prevent="selectHistory(item)"
-            >
-              <span class="history-icon">🕐</span>
-              <span class="history-text">{{ item }}</span>
-              <span class="history-delete" @mousedown.prevent.stop="removeFromHistory(item)" title="删除">✕</span>
+            <div class="history-header">
+              <span class="history-title">🕐 最近搜索</span>
+            </div>
+            <div class="history-tags-container">
+              <div
+                v-for="item in filteredHistory"
+                :key="item"
+                class="history-tag"
+                @mousedown.prevent="selectHistory(item)"
+              >
+                <span class="history-text" :title="item">{{ item }}</span>
+                <span class="history-delete" @mousedown.prevent.stop="removeFromHistory(item)" title="删除">✕</span>
+              </div>
             </div>
           </div>
         </div>
@@ -832,6 +848,9 @@ const gameDetails = computed(() => {
   border-radius: 8px;
   margin-bottom: 1.2rem;
   box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: 50;
 }
 
 .search-input-wrapper {
@@ -847,63 +866,94 @@ const gameDetails = computed(() => {
   top: 100%;
   left: 0;
   right: 0;
-  background: rgba(255, 255, 255, 0.92);
+  background: #ffffff;
   border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0 0 8px 8px;
   box-shadow: var(--shadow-lg);
-  z-index: 100;
+  z-index: 200;
   max-height: 260px;
   overflow-y: auto;
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
-  padding: 4px 0;
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.history-item {
+.history-header {
   display: flex;
   align-items: center;
-  padding: 6px 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-  gap: 8px;
-  font-size: 0.78rem;
+  justify-content: space-between;
+  border-bottom: 1px dashed var(--border-color);
+  padding-bottom: 6px;
+  user-select: none;
+}
+
+.history-title {
+  font-size: 0.72rem;
+  font-weight: 700;
   color: var(--text-muted);
+  letter-spacing: 0.5px;
 }
 
-.history-item:hover {
+.history-tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
   background: rgba(0, 0, 0, 0.02);
-  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  max-width: 160px;
+  box-sizing: border-box;
 }
 
-.history-icon {
-  font-size: 0.75rem;
-  flex-shrink: 0;
-  opacity: 0.5;
+.history-tag:hover {
+  background: var(--primary-color-alpha-10);
+  border-color: rgba(var(--primary-color-rgb, 59, 130, 246), 0.3);
+  transform: translateY(-1px);
+}
+
+.history-tag:hover .history-text {
+  color: var(--primary-color);
 }
 
 .history-text {
-  flex: 1;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: var(--text-color);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 600;
+  transition: color 0.2s ease-in-out;
 }
 
 .history-delete {
-  font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 0.62rem;
   color: var(--text-dimmed);
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 3px;
-  transition: all 0.15s;
+  border-radius: 50%;
+  transition: all 0.15s ease-in-out;
   flex-shrink: 0;
 }
 
 .history-delete:hover {
-  color: var(--loss-color);
   background: var(--loss-bg);
+  color: var(--loss-color);
+  transform: scale(1.1);
 }
 
 .search-input {

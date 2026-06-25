@@ -561,9 +561,11 @@ async fn do_auto_pick(
         None => return,
     };
 
-    log::info!("自动选择英雄: {}", champion_id);
+    log::info!("自动选择英雄: {} (预选，不锁定)", champion_id);
 
-    if lcu_patch_action(app_handle, action.id, champion_id, true).await {
+    // 只预选英雄，不锁定（completed=false），让用户有时间反悔
+    // 如果开启了 auto_select_confirm_on_timeout，会在倒计时结束时自动锁定
+    if lcu_patch_action(app_handle, action.id, champion_id, false).await {
         selection.is_champion_picked = true;
     }
 }
