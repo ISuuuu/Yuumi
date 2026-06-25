@@ -9,8 +9,13 @@ pub mod upload;
 
 use base64::Engine;
 use std::sync::Arc;
+use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::window::Effect;
+use tauri::Emitter;
 use tauri::Manager;
-use tokio::sync::{mpsc, RwLock};
+use std::sync::Mutex;
+use tokio::sync::{mpsc, watch, RwLock, Semaphore};
 
 /// LCU 连接凭证及预配置的 HTTP Client
 pub struct LcuClient {
@@ -32,6 +37,10 @@ pub struct AppState {
     pub gameflow_tx: mpsc::Sender<agents::auto_match::GameflowEvent>,
     /// 上传队列（可用于外部手动触发上传）
     pub upload_queue: Arc<upload::UploadQueue>,
+    /// WebSocket 连接取消信号发送端（新连接时发送取消旧循环）
+    pub ws_cancel_tx: Mutex<Option<watch::Sender<bool>>>,
+    /// LCU API 并发信号量（由 config.ApiConcurrencyNumber 控制）
+    pub api_semaphore: Arc<Semaphore>,
 }
 
 impl AppState {
@@ -53,6 +62,9 @@ pub fn run() {
         .setup(|app| {
             // 加载配置
             let app_config = config::AppConfig::load();
+            let api_concurrency = app_config.functions.api_concurrency_number as usize;
+
+
             let app_config_arc = Arc::new(RwLock::new(app_config));
             log::info!("配置已加载");
 
@@ -75,6 +87,8 @@ pub fn run() {
                 bp_session_tx: bp_tx,
                 gameflow_tx,
                 upload_queue,
+                ws_cancel_tx: Mutex::new(None),
+                api_semaphore: Arc::new(Semaphore::new(api_concurrency)),
             };
             app.manage(state);
 
@@ -111,6 +125,94 @@ pub fn run() {
                 }
             }
 
+            // ─── 云母效果 (Win11 Mica) ───
+            {
+                let cfg_snapshot = app_config_arc.blocking_read();
+                if cfg_snapshot.personalization.mica_enabled {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.set_effects(tauri::utils::config::WindowEffectsConfig {
+                            effects: vec![Effect::Mica],
+                            state: None,
+                            radius: None,
+                            color: None,
+                        });
+                        log::info!("已启用云母效果 (Mica)");
+                    }
+                }
+            }
+
+            // ─── 系统托盘 ───
+            let tray_menu = MenuBuilder::new(app)
+                .item(&MenuItem::with_id(app, "home", "主页", true, None::<&str>)?)
+                .item(&MenuItem::with_id(app, "career", "生涯", true, None::<&str>)?)
+                .item(&MenuItem::with_id(app, "search", "战绩查询", true, None::<&str>)?)
+                .item(&MenuItem::with_id(app, "gameinfo", "对局信息", true, None::<&str>)?)
+                .item(&MenuItem::with_id(app, "tft", "TFT", true, None::<&str>)?)
+                .item(&MenuItem::with_id(app, "tools", "其他功能", true, None::<&str>)?)
+                .item(&PredefinedMenuItem::separator(app)?)
+                .item(&MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?)
+                .item(&PredefinedMenuItem::separator(app)?)
+                .item(&MenuItem::with_id(app, "exit", "退出", true, None::<&str>)?)
+                .build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&tray_menu)
+                .tooltip("Yuumi")
+                .on_menu_event(move |app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
+                    let id = event.id().as_ref().to_string();
+                    if id == "exit" {
+                        app.exit(0);
+                    } else {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            // 重新应用云母效果以防失效
+                            let state = app.state::<AppState>();
+                            let is_mica_enabled = {
+                                if let Ok(cfg) = state.config.try_read() {
+                                    cfg.personalization.mica_enabled
+                                } else {
+                                    false
+                                }
+                            };
+                            if is_mica_enabled {
+                                let _ = set_mica_effect(app.clone(), true);
+                            }
+                        }
+                        let _ = app.emit("tray-navigate", &id);
+                    }
+                })
+                .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: TrayIconEvent| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            // 重新应用云母效果以防失效
+                            let state = app.state::<AppState>();
+                            let is_mica_enabled = {
+                                if let Ok(cfg) = state.config.try_read() {
+                                    cfg.personalization.mica_enabled
+                                } else {
+                                    false
+                                }
+                            };
+                            if is_mica_enabled {
+                                let _ = set_mica_effect(app.clone(), true);
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -134,7 +236,12 @@ pub fn run() {
             tools::set_game_settings_readonly,
             get_config,
             update_config,
+            get_close_to_tray,
             get_lcu_connection_info,
+            detect_lol_path,
+            select_lol_folder,
+            set_mica_effect,
+            launch_lol_client,
             get_game_data_assets,
             upload::upload_single_match,
             upload::batch_upload_matches,
@@ -188,6 +295,121 @@ async fn get_lcu_connection_info(
     }
 }
 
+/// 自动检测 LOL 客户端安装路径（从运行中的 LeagueClientUx.exe 推断）
+/// 向上遍历目录，找到包含 LeagueClient.exe 或 Client.exe 的那一层作为客户端根目录
+#[tauri::command]
+fn detect_lol_path() -> Result<Option<String>, String> {
+    use sysinfo::System;
+    let mut sys = System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+    for (_pid, process) in sys.processes() {
+        let name = process.name().to_string_lossy().to_lowercase();
+        if name == "leagueclientux.exe" {
+            if let Some(exe_path) = process.exe() {
+                let mut dir = exe_path.parent();
+                while let Some(d) = dir {
+                    if d.join("LeagueClient.exe").exists() || d.join("Client.exe").exists() {
+                        return Ok(Some(d.to_string_lossy().to_string()));
+                    }
+                    dir = d.parent();
+                }
+                // 兜底：返回 exe 的上两级
+                if let Some(parent) = exe_path.parent() {
+                    if let Some(root) = parent.parent() {
+                        return Ok(Some(root.to_string_lossy().to_string()));
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// 打开原生文件夹选择对话框，返回用户选择的路径
+#[tauri::command]
+fn select_lol_folder() -> Result<Option<String>, String> {
+    let folder = rfd::FileDialog::new()
+        .set_title("选择英雄联盟客户端安装目录")
+        .pick_folder();
+    Ok(folder.map(|p| p.to_string_lossy().to_string()))
+}
+
+/// 运行时切换云母效果
+#[tauri::command]
+fn set_mica_effect(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        if enabled {
+            window.set_effects(tauri::utils::config::WindowEffectsConfig {
+                effects: vec![Effect::Mica],
+                state: None,
+                radius: None,
+                color: None,
+            }).map_err(|e| e.to_string())?;
+        } else {
+            window.set_effects(tauri::utils::config::WindowEffectsConfig {
+                effects: vec![],
+                state: None,
+                radius: None,
+                color: None,
+            }).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// 启动 LOL 客户端（指定路径或从配置中的 lol_path 查找）
+#[tauri::command]
+async fn launch_lol_client(
+    app_state: tauri::State<'_, AppState>,
+    path: Option<String>,
+) -> Result<(), String> {
+    // 先检查是否已有客户端在运行
+    {
+        use sysinfo::System;
+        let mut sys = System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let already_running = sys.processes().values().any(|p| {
+            p.name().to_string_lossy().eq_ignore_ascii_case("leagueclientux.exe")
+        });
+        if already_running {
+            log::info!("客户端已在运行，跳过启动");
+            return Ok(());
+        }
+    }
+
+    // 指定了路径则直接用
+    if let Some(p) = path {
+        for exe_name in &["LeagueClient.exe", "Client.exe"] {
+            let exe = std::path::Path::new(&p).join(exe_name);
+            if exe.exists() {
+                log::info!("启动 LOL 客户端: {:?}", exe);
+                std::process::Command::new(&exe)
+                    .spawn()
+                    .map_err(|e| format!("启动失败: {}", e))?;
+                return Ok(());
+            }
+        }
+        return Err(format!("在 {} 中未找到启动程序", p));
+    }
+
+    // 否则遍历配置路径
+    let cfg = app_state.config.read().await;
+    for p in &cfg.general.lol_path {
+        for exe_name in &["LeagueClient.exe", "Client.exe"] {
+            let exe = std::path::Path::new(p).join(exe_name);
+            if exe.exists() {
+                log::info!("启动 LOL 客户端: {:?}", exe);
+                std::process::Command::new(&exe)
+                    .spawn()
+                    .map_err(|e| format!("启动失败: {}", e))?;
+                return Ok(());
+            }
+        }
+    }
+    Err("未找到 LeagueClient.exe / Client.exe，请先在设置中配置客户端路径".to_string())
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("你好, {}! 欢迎使用 Yuumi!", name)
@@ -213,10 +435,38 @@ async fn update_config(
     new_config: config::AppConfig,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut cfg = app_state.config.write().await;
-    *cfg = new_config;
-    cfg.save();
+    let old_enable = {
+        let lock = app_state.config.read().await;
+        lock.functions.enable_auto_create_lobby
+    };
+    let old_mode = {
+        let lock = app_state.config.read().await;
+        lock.functions.default_game_mode
+    };
+
+    let enable_changed = new_config.functions.enable_auto_create_lobby != old_enable;
+    let mode_changed = new_config.functions.default_game_mode != old_mode;
+
+    {
+        let mut cfg = app_state.config.write().await;
+        *cfg = new_config;
+        cfg.save();
+    }
+
+    if enable_changed || mode_changed {
+        let _ = app_state
+            .gameflow_tx
+            .try_send(crate::agents::auto_match::GameflowEvent::ResetLobbyState);
+    }
+
     Ok(())
+}
+
+/// 读取「关闭时最小化到托盘」开关状态
+#[tauri::command]
+async fn get_close_to_tray(app_state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let cfg = app_state.config.read().await;
+    Ok(cfg.general.enable_close_to_tray.unwrap_or(false))
 }
 
 

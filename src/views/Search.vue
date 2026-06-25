@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, watch, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
-import { fetchMatchHistory, lcuRequest, batchUploadMatches } from "../api/lcu";
+import { fetchMatchHistory, lcuRequest, batchUploadMatches, fetchConfig, updateConfig } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 import { invoke } from "@tauri-apps/api/core";
@@ -36,10 +36,20 @@ const QUEUE_OPTIONS = [
   { id: 420, label: '单双排位' },
   { id: 440, label: '灵活排位' },
 ];
-const showQueueDropdown = ref(false);
 
 // 上传相关
 const uploadEnabled = ref(true);
+
+async function onUploadToggle() {
+  uploadEnabled.value = !uploadEnabled.value;
+  try {
+    const cfg = await fetchConfig();
+    cfg.Functions.UploadEnabled = uploadEnabled.value;
+    await updateConfig(cfg);
+  } catch (e) {
+    console.error("保存上传配置失败:", e);
+  }
+}
 const uploadedGameIds = ref(new Set<number>());
 
 const filteredMatches = computed(() => {
@@ -47,9 +57,13 @@ const filteredMatches = computed(() => {
   return matches.value.filter((m: MatchDisplay) => m.queueId === selectedQueue.value);
 });
 
+function onQueueChange(e: Event) {
+  const val = (e.target as HTMLSelectElement).value;
+  selectQueue(val === '' ? null : Number(val));
+}
+
 function selectQueue(id: number | null) {
   selectedQueue.value = id;
-  showQueueDropdown.value = false;
 }
 
 // 对局详情相关
@@ -110,6 +124,13 @@ let unlistenGameDataReady: (() => void) | null = null;
 
 onMounted(async () => {
   loadSearchHistory();
+  // 从配置文件加载上传开关状态
+  try {
+    const cfg = await fetchConfig();
+    uploadEnabled.value = cfg.Functions?.UploadEnabled ?? true;
+  } catch (e) {
+    console.warn("加载上传配置失败，使用默认值:", e);
+  }
   try {
     unlistenGameDataReady = await listen("game-data-ready", async () => {
       try {
@@ -271,8 +292,6 @@ async function loadMatchHistoryList() {
 
 async function selectMatch(gameId: number) {
   selectedGameId.value = gameId;
-  gameLoading.value = true;
-  selectedGame.value = null;
   try {
     const resp = await lcuRequest<any>("GET", `/lol-match-history/v1/games/${gameId}`);
     if (resp.success && resp.data) {
@@ -280,8 +299,6 @@ async function selectMatch(gameId: number) {
     }
   } catch (e) {
     console.error("拉取对局详细信息失败:", e);
-  } finally {
-    gameLoading.value = false;
   }
 }
 
@@ -293,12 +310,16 @@ async function handlePrevPage() {
 }
 
 async function handleNextPage() {
+  const prevPage = currentPageNum.value;
   currentPageNum.value++;
+  const prevMatches = matches.value;
   await loadMatchHistoryList();
+  // 如果新页没有数据，回退页码并保留原有数据
+  if (matches.value.length === 0) {
+    currentPageNum.value = prevPage;
+    matches.value = prevMatches;
+  }
 }
-
-// 物品图标路径前缀（LCU 内置 CDN）
-const ITEM_CDN = "/lol-game-data/assets";
 
 // 静态映射查找
 function getSpellUrl(spellId: number) {
@@ -315,13 +336,12 @@ function getRuneUrl(runeId: number) {
 
 function getItemUrl(itemId: number) {
   if (!itemId) return "";
-  // 优先从预加载的 assets 映射中查找
   const mapped = gameDataAssets.value?.items?.[itemId];
   if (mapped) {
     return mapped.startsWith("/") ? mapped : "/" + mapped;
   }
-  // 回退：直接构造 LCU CDN 路径
-  return `${ITEM_CDN}/ASSETS/Items/Icons2D/${itemId}.png`;
+  // 回退：LCU 标准物品图标路径（小写）
+  return `/lol-game-data/assets/v1/items/icons2d/${itemId}.png`;
 }
 
 function copyGameId(gameId: number) {
@@ -329,13 +349,13 @@ function copyGameId(gameId: number) {
   alert(`📋 游戏 ID: ${gameId} 已复制到剪贴板`);
 }
 
-// 点击对局中的其他召唤师名称 → 用 name#tag 格式搜索
+// 点击对局中的其他召唤师名称 → 在当前页面搜索（用 summonerId 避免 400/404/422 错误）
 const pendingSummonerId = ref<number>(0);
 
-function searchPlayerByName(name: string) {
-  if (!name) return;
-  pendingSummonerId.value = 0;
-  searchName.value = name;
+function searchPlayerBySummonerId(summonerId: number, displayName: string) {
+  if (!summonerId) return;
+  pendingSummonerId.value = summonerId;
+  searchName.value = displayName || String(summonerId);
   doSearch();
 }
 
@@ -420,8 +440,12 @@ const gameDetails = computed(() => {
   const redTeamRaw = teamsData.find((t: any) => t.teamId === 200) || {};
 
   const queueNames: Record<number, string> = {
-    420: "排位单双排", 430: "匹配模式", 440: "排位灵活组排", 450: "极地大乱斗",
-    900: "无限火力", 1020: "克隆模式", 1300: "极限闪击", 1700: "斗魂竞技场", 0: "自定义"
+    400: "征召模式", 420: "排位单双排", 430: "匹配模式", 440: "排位灵活组排", 490: "快速游戏",
+    450: "极地大乱斗", 2400: "海克斯大乱斗",
+    900: "无限火力", 1010: "随机无限火力", 1020: "克隆模式",
+    1300: "极限闪击", 1700: "斗魂竞技场", 1710: "斗魂竞技场",
+    1810: "捉鬼模式", 1820: "捉鬼模式", 1830: "捉鬼模式", 1840: "捉鬼模式",
+    0: "自定义模式"
   };
 
   const mapNames: Record<number, string> = {
@@ -437,22 +461,38 @@ const gameDetails = computed(() => {
 
   // 判定当前选中的对局是胜利还是失败（当前搜索的召唤师是哪一方）
   let isQueriedPlayerWin = false;
+  let queriedPlayerChampionIconUrl = "";
   if (summoner.value) {
     const queriedPuuid = summoner.value.puuid;
     const allPlayers = [...bluePlayers, ...redPlayers];
     const found = allPlayers.find(p => p.puuid === queriedPuuid);
     if (found) {
       isQueriedPlayerWin = found.win;
+      queriedPlayerChampionIconUrl = found.championIconUrl;
     }
   }
+
+  // 计算地图状态图标名（根据 mapId 和 win）
+  const resultStr = isQueriedPlayerWin ? "victory" : "defeat";
+  let mapKey = "other";
+  if (g.mapId === 11) {
+    mapKey = "sr";
+  } else if (g.mapId === 12) {
+    mapKey = "ha";
+  } else if (g.mapId === 30 || g.queueId === 1700) {
+    mapKey = "arena";
+  }
+  const mapIconUrl = `/images/${mapKey}-${resultStr}.png`;
 
   return {
     gameId: g.gameId,
     duration: durationStr,
     date: dateStr,
-    queueName: queueNames[g.queueId] || "其他模式",
+    queueName: queueNames[g.queueId] || "自定义模式",
     mapName: mapNames[g.mapId] || "未知地图",
     win: isQueriedPlayerWin,
+    queriedPlayerChampionIconUrl,
+    mapIconUrl,
     blue: {
       players: bluePlayers,
       kills: blueKills,
@@ -525,26 +565,17 @@ const gameDetails = computed(() => {
         
         <button class="tab-btn active" @click="navigateTo('career')">生涯</button>
 
-        <div class="dropdown-select" @click="showQueueDropdown = !showQueueDropdown">
-          <span>{{ QUEUE_OPTIONS.find(q => q.id === selectedQueue)?.label || '全部' }}</span>
-          <svg :class="['arrow-icon', { expanded: showQueueDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-          <div v-if="showQueueDropdown" class="queue-dropdown-menu" @click.stop>
-            <div
-              v-for="q in QUEUE_OPTIONS"
-              :key="q.id ?? -1"
-              :class="['queue-dropdown-item', { active: selectedQueue === q.id }]"
-              @click="selectQueue(q.id)"
-            >
-              {{ q.label }}
-            </div>
-          </div>
-        </div>
+        <select
+          class="queue-select"
+          :value="selectedQueue ?? ''"
+          @change="onQueueChange"
+        >
+          <option v-for="q in QUEUE_OPTIONS" :key="q.id ?? -1" :value="q.id ?? ''">{{ q.label }}</option>
+        </select>
 
         <label class="checkbox-wrapper">
-          <input type="checkbox" v-model="uploadEnabled" />
-          <span>上传战绩</span>
+          <input type="checkbox" :checked="uploadEnabled" @change="onUploadToggle" />
+          <span>Upload matches</span>
         </label>
       </div>
 
@@ -566,10 +597,10 @@ const gameDetails = computed(() => {
               </div>
               <div class="mini-info">
                 <span class="mini-mode">{{ m.name }}</span>
-                <span class="mini-time">{{ m.shortTime.split(' ')[0] }}</span>
-              </div>
-              <div class="mini-kda">
-                {{ m.kills }}/<span class="death-red">{{ m.deaths }}</span>/{{ m.assists }}
+                <span class="mini-time-kda">
+                  {{ m.shortTime.split(' ')[0] }} &nbsp;&nbsp;
+                  {{ m.kills }}/<span class="death-red">{{ m.deaths }}</span>/{{ m.assists }}
+                </span>
               </div>
             </div>
           </div>
@@ -588,23 +619,28 @@ const gameDetails = computed(() => {
 
         <!-- 右侧：对局详情 -->
         <div class="right-detail-panel">
-          <div v-if="gameLoading" class="detail-loading">
+          <div v-if="gameLoading && !gameDetails" class="detail-loading">
             <div class="loading-spinner"></div>
             <span>拉取对局详情数据中...</span>
           </div>
 
-          <div v-else-if="gameDetails" class="detail-content">
+          <div v-show="gameDetails" class="detail-content">
             <!-- 头部大 Banner -->
-            <div :class="['detail-banner', gameDetails.win ? 'win' : 'lose']">
-              <div class="banner-left">
-                <h2 :class="['banner-result', gameDetails.win ? 'win' : 'lose']">
-                  {{ gameDetails.win ? '胜利' : '失败' }}
-                </h2>
-                <span class="banner-subtext">
-                  {{ gameDetails.mapName }} · {{ gameDetails.queueName }} · {{ gameDetails.duration }} · {{ gameDetails.date }} · 游戏 ID: {{ gameDetails.gameId }}
-                </span>
+            <div v-if="gameDetails" :class="['detail-banner', gameDetails.win ? 'win' : 'lose']">
+              <div class="banner-main">
+                <div class="banner-map-icon">
+                  <img :src="gameDetails.mapIconUrl" alt="map" />
+                </div>
+                <div class="banner-left">
+                  <h2 :class="['banner-result', gameDetails.win ? 'win' : 'lose']">
+                    {{ gameDetails.win ? '胜利' : '失败' }}
+                  </h2>
+                  <span class="banner-subtext">
+                    {{ gameDetails.mapName }} · {{ gameDetails.queueName }} · {{ gameDetails.duration }} · {{ gameDetails.date }} · 游戏 ID: {{ gameDetails.gameId }}
+                  </span>
+                </div>
               </div>
-              <button class="copy-btn" @click="copyGameId(gameDetails.gameId)">
+              <button class="copy-btn" @click="copyGameId(gameDetails.gameId)" title="复制游戏 ID">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -613,9 +649,9 @@ const gameDetails = computed(() => {
             </div>
 
             <!-- 队伍详细数据 -->
-            <div class="teams-container">
+            <div v-if="gameDetails" class="teams-container">
               <!-- 胜方 / 败方 -->
-              <div v-for="team in [gameDetails.blue, gameDetails.red]" :key="team.win ? 'win' : 'lose'" class="team-block">
+              <div v-for="team in [gameDetails.blue, gameDetails.red]" :key="team.win ? 'win' : 'lose'" :class="['team-block', team.win ? 'win-block' : 'lose-block']">
                 <!-- 队头资源概览 -->
                 <div :class="['team-header-bar', team.win ? 'win-bar' : 'lose-bar']">
                   <span :class="['team-result-label', team.win ? 'win-text' : 'lose-text']">
@@ -623,18 +659,32 @@ const gameDetails = computed(() => {
                   </span>
 
                   <div class="team-objectives">
-                    <span class="obj-item"><span class="obj-icon">⚔️</span> {{ team.kills }}</span>
-                    <span class="obj-item"><span class="obj-icon">🏰</span> {{ team.towerKills }}</span>
-                    <span class="obj-item"><span class="obj-icon">💎</span> {{ team.inhibitorKills }}</span>
-                    <span class="obj-item"><span class="obj-icon">👾</span> {{ team.baronKills }}</span>
-                    <span class="obj-item"><span class="obj-icon">🐉</span> {{ team.dragonKills }}</span>
-                    <span class="obj-item"><span class="obj-icon">🦀</span> {{ team.riftHeraldKills }}</span>
+                    <span class="obj-item" title="击杀"><span class="obj-icon">⚔️</span> {{ team.kills }}</span>
+                    <span class="obj-item" title="摧毁防御塔"><span class="obj-icon">🏰</span> {{ team.towerKills }}</span>
+                    <span class="obj-item" title="摧毁水晶"><span class="obj-icon">💎</span> {{ team.inhibitorKills }}</span>
+                    <span class="obj-item" title="击杀纳什男爵"><span class="obj-icon">👾</span> {{ team.baronKills }}</span>
+                    <span class="obj-item" title="击杀巨龙"><span class="obj-icon">🐉</span> {{ team.dragonKills }}</span>
+                    <span class="obj-item" title="击杀峡谷先锋 / 虚空巢虫"><span class="obj-icon">🦀</span> {{ team.riftHeraldKills }}</span>
+                  </div>
+
+                  <div class="team-header-spacer"></div>
+
+                  <div class="team-header-right">
+                    <span class="header-items">装备</span>
+                    <span class="header-kda">KDA</span>
+                    <span class="header-cs">补CS</span>
+                    <span class="header-gold">金币</span>
+                    <span class="header-damage">伤害</span>
                   </div>
                 </div>
 
                 <!-- 玩家列表 -->
                 <div class="players-table">
-                  <div v-for="p in team.players" :key="p.participantId" class="player-row">
+                  <div
+                    v-for="p in team.players"
+                    :key="p.participantId"
+                    :class="['player-row', { 'highlight-row': summoner && p.puuid === summoner.puuid, 'win-row': team.win, 'lose-row': !team.win }]"
+                  >
                     <!-- 头像及技能/符文 -->
                     <div class="player-avatar-col">
                       <div class="row-avatar-box">
@@ -652,16 +702,18 @@ const gameDetails = computed(() => {
                       </div>
                     </div>
 
-                    <!-- 名字（可点击搜索） -->
+                    <!-- 名字（可点击搜索，机器人除外） -->
                     <div class="player-name-col">
                       <span
-                        :class="['row-name', { 'highlight-user': summoner && p.puuid === summoner.puuid }]"
-                        @click="searchPlayerByName(p.name)"
-                        :title="`搜索 ${p.name}`"
+                        :class="['row-name', { 'highlight-user': summoner && p.puuid === summoner.puuid, 'bot-player': !p.summonerId }]"
+                        @click="p.summonerId && searchPlayerBySummonerId(p.summonerId, p.name)"
+                        :title="p.summonerId ? `搜索 ${p.name}` : '机器人'"
                       >
                         {{ p.name }}
                       </span>
                     </div>
+
+                    <div class="player-spacer"></div>
 
                     <!-- 装备栏 -->
                     <div class="player-items-col">
@@ -701,7 +753,7 @@ const gameDetails = computed(() => {
               </div>
             </div>
           </div>
-          <div v-else class="detail-empty">
+          <div v-if="!gameDetails" class="detail-empty">
             <p>请在左侧选择一局对局查看详情</p>
           </div>
         </div>
@@ -716,9 +768,11 @@ const gameDetails = computed(() => {
 
 <style scoped>
 .search-view {
-  padding: 1.5rem 1.5rem 1.5rem 0.6rem;
+  padding: 1rem 1.5rem 1.5rem 0.6rem;
   background-color: transparent;
   min-height: 100%;
+  font-family: "Segoe UI", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 
 .tip-container {
@@ -751,7 +805,7 @@ const gameDetails = computed(() => {
 }
 
 .search-container {
-  max-width: 1000px;
+  max-width: 1080px;
   margin: 0 auto;
   animation: fadeIn 0.3s ease-out;
 }
@@ -761,21 +815,19 @@ const gameDetails = computed(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
   padding: 10px 16px;
-  border-radius: 12px;
-  margin-bottom: 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 1.2rem;
   box-shadow: var(--shadow-sm);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .search-input-wrapper {
   position: relative;
   display: flex;
   flex: 1;
-  max-width: 400px;
+  max-width: 600px;
 }
 
 /* 搜索历史下拉框 */
@@ -784,7 +836,7 @@ const gameDetails = computed(() => {
   top: 100%;
   left: 0;
   right: 0;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.96);
   border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0 0 8px 8px;
@@ -841,25 +893,27 @@ const gameDetails = computed(() => {
 
 .search-input {
   width: 100%;
-  padding: 8px 40px 8px 16px;
+  padding: 6px 36px 6px 12px;
   border: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.8);
   border-radius: 6px;
   font-size: 0.85rem;
   color: var(--text-color);
   outline: none;
   transition: all 0.2s;
+  text-align: center;
+  height: 32px;
 }
 
 .search-input:focus {
   border-color: var(--primary-color);
   box-shadow: 0 0 8px var(--primary-color-alpha-15);
-  background: rgba(255, 255, 255, 0.95);
+  background: #ffffff;
 }
 
 .search-trigger-btn {
   position: absolute;
-  right: 4px;
+  right: 8px;
   top: 50%;
   transform: translateY(-50%);
   background: transparent;
@@ -872,97 +926,73 @@ const gameDetails = computed(() => {
 }
 
 .search-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 
 .tab-btn {
-  background: rgba(255, 255, 255, 0.5);
+  background: #ffffff;
   border: 1px solid var(--border-color);
   color: var(--text-muted);
-  padding: 8px 20px;
+  padding: 0 16px;
   border-radius: 6px;
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .tab-btn:hover {
-  background: rgba(255, 255, 255, 0.95);
-  color: var(--text-color);
-}
-
-.tab-btn.active {
-  background-color: var(--primary-color);
-  color: white;
-  border-color: var(--primary-color);
-  box-shadow: 0 4px 10px var(--primary-color-alpha-30);
-}
-
-.dropdown-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid var(--border-color);
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.82rem;
-  color: var(--text-color);
-  cursor: pointer;
-  position: relative;
-  transition: all 0.2s;
-}
-
-.dropdown-select:hover {
-  background: rgba(255, 255, 255, 0.95);
-}
-
-.arrow-icon {
-  width: 14px;
-  height: 14px;
-  transition: transform 0.2s;
-}
-
-.arrow-icon.expanded {
-  transform: rotate(180deg);
-}
-
-/* 模式筛选下拉菜单 */
-.queue-dropdown-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  box-shadow: var(--shadow-lg);
-  z-index: 100;
-  min-width: 140px;
-  padding: 4px 0;
-  animation: fadeIn 0.15s ease-out;
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
-}
-
-.queue-dropdown-item {
-  padding: 7px 14px;
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.1s;
-}
-
-.queue-dropdown-item:hover {
   background: rgba(0, 0, 0, 0.02);
   color: var(--text-color);
 }
 
-.queue-dropdown-item.active {
-  color: var(--primary-color);
-  font-weight: 600;
-  background: var(--primary-color-alpha-15);
+.tab-btn.active {
+  background-color: #f1f5f9;
+  color: var(--text-color);
+  border-color: #cbd5e1;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.queue-select {
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-color);
+  padding: 0 32px 0 12px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: var(--text-color);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  box-shadow: var(--shadow-sm);
+  height: 32px;
+}
+
+.queue-select:hover {
+  background-color: rgba(255, 255, 255, 0.85);
+  border-color: var(--primary-color-alpha-40);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+
+.queue-select:focus {
+  background-color: #fff;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--primary-color-alpha-15);
+}
+
+.queue-select option {
+  background-color: #fff;
+  color: var(--text-color);
 }
 
 .checkbox-wrapper {
@@ -978,8 +1008,8 @@ const gameDetails = computed(() => {
 /* 分栏大布局 */
 .panel-layout {
   display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 12px;
+  grid-template-columns: 180px 1fr;
+  gap: 16px;
   align-items: stretch;
 }
 
@@ -994,53 +1024,55 @@ const gameDetails = computed(() => {
 .mini-match-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .mini-match-card {
   display: flex;
   align-items: center;
   padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-  border-left: 4px solid transparent;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
-  background: var(--card-bg);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
+  transition: all 0.2s ease;
+  background: #ffffff;
 }
 
 .mini-match-card.win {
-  border-left-color: var(--win-color);
+  background-color: #f0fdf4;
+  border-color: #dcfce7;
 }
 
 .mini-match-card.win:hover {
-  background: var(--win-bg);
-  border-color: var(--win-border);
+  background-color: #e6f7ec;
 }
 
 .mini-match-card.lose {
-  border-left-color: var(--loss-color);
+  background-color: #fdf2f2;
+  border-color: #fde8e8;
 }
 
 .mini-match-card.lose:hover {
-  background: var(--loss-bg);
-  border-color: var(--loss-border);
+  background-color: #fbebeb;
 }
 
-.mini-match-card.selected {
-  background: var(--card-bg-hover) !important;
-  border-color: var(--primary-color);
-  box-shadow: var(--shadow-sm);
+.mini-match-card.selected.win {
+  border: 2px solid #22c55e;
+}
+
+.mini-match-card.selected.lose {
+  border: 2px solid #ef4444;
 }
 
 .mini-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
   overflow: hidden;
-  border: 1px solid var(--border-color);
+  border: 1px solid rgba(0, 0, 0, 0.05);
   margin-right: 10px;
   flex-shrink: 0;
 }
@@ -1054,29 +1086,22 @@ const gameDetails = computed(() => {
 
 .mini-mode {
   font-size: 0.78rem;
-  font-weight: bold;
-  color: var(--text-color);
+  font-weight: 700;
+  color: #0f172a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.mini-time {
-  font-size: 0.68rem;
-  color: var(--text-dimmed);
+.mini-time-kda {
+  font-size: 0.72rem;
+  color: #64748b;
   margin-top: 2px;
-}
-
-.mini-kda {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  text-align: right;
-  margin-left: 8px;
 }
 
 .death-red {
   color: var(--loss-color);
+  font-weight: 600;
 }
 
 /* 分页 */
@@ -1086,14 +1111,19 @@ const gameDetails = computed(() => {
   justify-content: center;
   gap: 16px;
   margin-top: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  padding: 6px;
+  border-radius: 6px;
+  box-shadow: var(--shadow-sm);
 }
 
 .page-btn {
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  width: 30px;
-  height: 30px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1103,8 +1133,8 @@ const gameDetails = computed(() => {
 }
 
 .page-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.95);
-  border-color: var(--primary-color);
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--primary-color);
 }
 
 .page-btn:disabled {
@@ -1113,26 +1143,26 @@ const gameDetails = computed(() => {
 }
 
 .page-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 .page-num {
   font-size: 0.82rem;
-  font-weight: bold;
+  font-weight: 700;
   color: var(--text-color);
 }
 
 /* 右侧详情面板 */
 .right-detail-panel {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
-  border-radius: 12px;
-  box-shadow: var(--shadow-sm);
-  min-height: 480px;
-  overflow: hidden;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  min-height: 640px;
+}
+
+.detail-content {
+  position: relative;
 }
 
 .detail-loading, .detail-empty {
@@ -1140,9 +1170,13 @@ const gameDetails = computed(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 480px;
+  height: 640px;
   color: var(--text-muted);
   font-size: 0.85rem;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
 }
 
 .loading-spinner {
@@ -1164,40 +1198,69 @@ const gameDetails = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 12px 16px;
+  margin: 12px 12px 0 12px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
 }
 
 .detail-banner.win {
-  background-color: var(--win-bg);
-  border-color: var(--win-border);
+  background-color: #f0fdf4;
+  border-color: #dcfce7;
 }
 
 .detail-banner.lose {
-  background-color: var(--loss-bg);
-  border-color: var(--loss-border);
+  background-color: #fdf2f2;
+  border-color: #fee2e2;
+}
+
+.banner-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.banner-map-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  flex-shrink: 0;
+}
+
+.banner-map-icon img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.banner-left {
+  display: flex;
+  flex-direction: column;
 }
 
 .banner-result {
-  font-size: 1.4rem;
+  font-size: 1.25rem;
   font-weight: 800;
-  margin: 0 0 4px;
+  margin: 0 0 2px;
 }
 
-.banner-result.win { color: var(--win-color); }
-.banner-result.lose { color: var(--loss-color); }
+.banner-result.win { color: #22c55e; }
+.banner-result.lose { color: #ef4444; }
 
 .banner-subtext {
-  font-size: 0.78rem;
-  color: var(--text-muted);
+  font-size: 0.75rem;
+  color: #64748b;
 }
 
 .copy-btn {
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.8);
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1207,28 +1270,38 @@ const gameDetails = computed(() => {
 }
 
 .copy-btn:hover {
-  background-color: rgba(255, 255, 255, 0.95);
+  background-color: #ffffff;
   border-color: var(--primary-color);
+  color: var(--primary-color);
 }
 
 .copy-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 /* 队伍 block */
 .teams-container {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px;
+  gap: 12px;
+  padding: 12px;
 }
 
 .team-block {
-  border: 1px solid var(--border-color);
+  border: 1px solid rgba(0, 0, 0, 0.05);
   border-radius: 8px;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.01);
+  background: #ffffff;
+  box-shadow: var(--shadow-sm);
+}
+
+.team-block.win-block {
+  border-color: #dcfce7;
+}
+
+.team-block.lose-block {
+  border-color: #fee2e2;
 }
 
 .team-header-bar {
@@ -1236,30 +1309,32 @@ const gameDetails = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 16px;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
 }
 
 .team-header-bar.win-bar {
-  background-color: rgba(16, 185, 129, 0.04);
-  border-bottom: 1px solid var(--win-border);
+  background-color: #f0f9eb;
+  border-bottom: 1px solid #e1f3d8;
 }
 
 .team-header-bar.lose-bar {
-  background-color: rgba(239, 68, 68, 0.04);
-  border-bottom: 1px solid var(--loss-border);
+  background-color: #fef0f0;
+  border-bottom: 1px solid #fde2e2;
 }
 
 .team-result-label {
   font-weight: bold;
 }
+.win-text { color: #22c55e; }
+.lose-text { color: #ef4444; }
 
 .team-objectives {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: var(--text-muted);
+  color: #606266;
   font-weight: 500;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
 }
 
 .obj-item {
@@ -1269,7 +1344,7 @@ const gameDetails = computed(() => {
 }
 
 .obj-icon {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
 }
 
 /* 玩家列表 Table 行 */
@@ -1282,13 +1357,42 @@ const gameDetails = computed(() => {
   display: flex;
   align-items: center;
   padding: 6px 14px;
-  border-bottom: 1px solid var(--border-color);
-  font-size: 0.78rem;
-  color: var(--text-muted);
+  border-bottom: 1px solid #f0f2f5;
+  font-size: 0.8rem;
+  color: #333;
 }
 
 .player-row:last-child {
   border-bottom: none;
+}
+
+/* 玩家高亮行 */
+.player-row.highlight-row.win-row {
+  background-color: #f0fdf4 !important;
+}
+
+.player-row.highlight-row.lose-row {
+  background-color: #fdf2f2 !important;
+}
+
+.player-row.highlight-row.win-row .row-name,
+.player-row.highlight-row.win-row .row-kda-text,
+.player-row.highlight-row.win-row .row-kda-text .death-red,
+.player-row.highlight-row.win-row .row-cs-text,
+.player-row.highlight-row.win-row .row-gold-text,
+.player-row.highlight-row.win-row .row-damage-text {
+  color: #22c55e !important;
+  font-weight: 800;
+}
+
+.player-row.highlight-row.lose-row .row-name,
+.player-row.highlight-row.lose-row .row-kda-text,
+.player-row.highlight-row.lose-row .row-kda-text .death-red,
+.player-row.highlight-row.lose-row .row-cs-text,
+.player-row.highlight-row.lose-row .row-gold-text,
+.player-row.highlight-row.lose-row .row-damage-text {
+  color: #ef4444 !important;
+  font-weight: 800;
 }
 
 /* 1. 头像区 */
@@ -1297,6 +1401,7 @@ const gameDetails = computed(() => {
   align-items: center;
   gap: 6px;
   width: 120px;
+  flex-shrink: 0;
 }
 
 .row-avatar-box {
@@ -1311,7 +1416,7 @@ const gameDetails = computed(() => {
   height: 40px;
   border-radius: 50%;
   overflow: hidden;
-  border: 1.5px solid var(--border-color);
+  border: 1px solid #dcdfe6;
 }
 
 .row-level-overlay {
@@ -1321,13 +1426,13 @@ const gameDetails = computed(() => {
   width: 14px;
   height: 14px;
   line-height: 12px;
-  background: rgba(255, 255, 255, 0.9);
-  color: var(--text-color);
+  background: #202124;
+  color: white;
   border-radius: 50%;
   font-size: 0.58rem;
   font-weight: bold;
   text-align: center;
-  border: 1px solid var(--border-color);
+  border: 1px solid #fff;
 }
 
 .row-spell-rune-row {
@@ -1338,7 +1443,7 @@ const gameDetails = computed(() => {
 
 .row-spell-col {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   gap: 2px;
 }
 
@@ -1346,7 +1451,7 @@ const gameDetails = computed(() => {
   width: 18px;
   height: 18px;
   border-radius: 2px;
-  border: 1px solid var(--border-color);
+  border: 1px solid rgba(0,0,0,0.08);
 }
 
 .row-rune {
@@ -1366,6 +1471,7 @@ const gameDetails = computed(() => {
   width: 120px;
   min-width: 0;
   padding-right: 6px;
+  flex-shrink: 0;
 }
 
 .row-name {
@@ -1373,7 +1479,7 @@ const gameDetails = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-muted);
+  color: #555;
   cursor: pointer;
   transition: color 0.15s;
 }
@@ -1382,13 +1488,22 @@ const gameDetails = computed(() => {
   color: var(--primary-color);
 }
 
+.bot-player {
+  cursor: default;
+  color: #aaa;
+}
+
+.bot-player:hover {
+  color: #aaa;
+}
+
 .highlight-user {
-  color: var(--primary-color) !important;
-  font-weight: bold;
+  color: #2ecc71 !important;
+  font-weight: 800;
 }
 
 .highlight-user:hover {
-  color: var(--primary-color-hover) !important;
+  color: #27ae60 !important;
 }
 
 /* 3. 装备区 */
@@ -1408,10 +1523,10 @@ const gameDetails = computed(() => {
 .row-item-slot {
   width: 26px;
   height: 26px;
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(0,0,0,0.03);
   border-radius: 3px;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0,0,0,0.05);
 }
 
 .row-item-img {
@@ -1425,30 +1540,44 @@ const gameDetails = computed(() => {
   height: 26px;
   border-radius: 3px;
   overflow: hidden;
-  border: 1px solid rgba(230, 162, 60, 0.3);
-  background-color: rgba(230, 162, 60, 0.05);
+  border: 1px solid #e6a23c;
+  background-color: rgba(230,162,60,0.03);
 }
 
 /* 4. KDA */
 .player-kda-col {
   width: 70px;
   text-align: center;
-  font-weight: 700;
-  color: var(--text-muted);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.row-kda-text {
+  font-size: 0.8rem;
 }
 
 /* 5. 补兵 */
 .player-cs-col {
   width: 42px;
   text-align: center;
-  color: var(--text-muted);
+  color: #606266;
+  flex-shrink: 0;
+}
+
+.row-cs-text {
+  font-size: 0.8rem;
 }
 
 /* 6. 金币 */
 .player-gold-col {
   width: 55px;
   text-align: right;
-  color: var(--text-muted);
+  color: #606266;
+  flex-shrink: 0;
+}
+
+.row-gold-text {
+  font-size: 0.8rem;
 }
 
 /* 7. 伤害 */
@@ -1456,7 +1585,51 @@ const gameDetails = computed(() => {
   width: 60px;
   text-align: right;
   font-weight: 700;
-  color: var(--text-color);
+  color: #2c3e50;
+  flex-shrink: 0;
+}
+
+.row-damage-text {
+  font-size: 0.8rem;
+}
+
+.player-spacer,
+.team-header-spacer {
+  flex: 1;
+}
+
+.team-header-right {
+  display: flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #7f8c8d;
+  padding-right: 2px;
+}
+
+.header-items {
+  width: 190px;
+  text-align: center;
+}
+
+.header-kda {
+  width: 70px;
+  text-align: center;
+}
+
+.header-cs {
+  width: 42px;
+  text-align: center;
+}
+
+.header-gold {
+  width: 55px;
+  text-align: right;
+}
+
+.header-damage {
+  width: 60px;
+  text-align: right;
 }
 
 @keyframes fadeIn {

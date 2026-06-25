@@ -4,8 +4,7 @@ use serde::Deserialize;
 
 use crate::{build_auth_header, LcuClient};
 
-/// LCU 连接后预加载的游戏资源路径映射（ID → iconPath）。
-/// 仅用于图标 URL 查找，不存图片二进制。
+/// LCU 连接后预加载的游戏资源路径映射（ID → iconPath / name）。
 #[derive(Debug, Clone, Default)]
 pub struct GameDataAssets {
     /// 物品 ID → iconPath
@@ -14,6 +13,8 @@ pub struct GameDataAssets {
     pub spells: HashMap<i32, String>,
     /// 符文 (perk) ID → iconPath
     pub runes: HashMap<i32, String>,
+    /// 英雄 ID → 英雄名称
+    pub champions: HashMap<i32, String>,
 }
 
 #[derive(Deserialize)]
@@ -21,6 +22,8 @@ struct IdEntry {
     id: Option<i32>,
     #[serde(rename = "iconPath")]
     icon_path: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 /// 从 LCU 预加载所有游戏资源路径。
@@ -30,10 +33,11 @@ pub async fn fetch_game_data_assets(lcu: &LcuClient) -> GameDataAssets {
     let base = format!("https://127.0.0.1:{}", lcu.port);
 
     // 先尝试标准数组解析
-    let (items, spells, runes) = tokio::join!(
+    let (items, spells, runes, champions) = tokio::join!(
         fetch_id_map(&lcu.http_client, &base, &auth, "/lol-game-data/assets/v1/items.json"),
         fetch_id_map(&lcu.http_client, &base, &auth, "/lol-game-data/assets/v1/summoner-spells.json"),
         fetch_id_map(&lcu.http_client, &base, &auth, "/lol-game-data/assets/v1/perks.json"),
+        fetch_champion_map(&lcu.http_client, &base, &auth),
     );
 
     // 对任何为空的资源，用灵活解析器重试
@@ -53,13 +57,17 @@ pub async fn fetch_game_data_assets(lcu: &LcuClient) -> GameDataAssets {
     } else { runes };
 
     log::info!(
-        "游戏资源加载完成: 物品={}, 技能={}, 符文={}",
+        "游戏资源加载完成: 物品={}, 技能={}, 符文={}, 英雄={}",
         items.len(),
         spells.len(),
-        runes.len()
+        runes.len(),
+        champions.len(),
     );
+    if champions.is_empty() {
+        log::warn!("英雄名称映射为空！上传时 championName 将为 Unknown");
+    }
 
-    GameDataAssets { items, spells, runes }
+    GameDataAssets { items, spells, runes, champions }
 }
 
 /// GET JSON 数组 → 提取每个元素的 (id, iconPath) → HashMap
@@ -93,6 +101,45 @@ async fn fetch_id_map(
             HashMap::new()
         }
     }
+}
+
+/// 从 LCU 获取英雄 ID → 名称映射。
+/// 对齐 Python: champion-summary.json 返回数组 [{id, name, ...}, ...]
+async fn fetch_champion_map(
+    http: &reqwest::Client,
+    base: &str,
+    auth: &str,
+) -> HashMap<i32, String> {
+    // 对齐 Python: /lol-game-data/assets/v1/champion-summary.json
+    let url = format!("{}/lol-game-data/assets/v1/champion-summary.json", base);
+    match http.get(&url).header("Authorization", auth).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            // champion-summary.json 返回数组: [{id: 1, name: "Annie", ...}, ...]
+            if let Ok(arr) = resp.json::<Vec<serde_json::Value>>().await {
+                let map: HashMap<i32, String> = arr
+                    .iter()
+                    .filter_map(|entry| {
+                        let id = entry.get("id")?.as_i64()? as i32;
+                        let name = entry.get("name")?.as_str()?.to_string();
+                        if name.is_empty() { None } else { Some((id, name)) }
+                    })
+                    .collect();
+                if !map.is_empty() {
+                    log::info!("英雄名称映射加载成功: {} 条", map.len());
+                    return map;
+                }
+                log::warn!("champion-summary.json 解析后为空");
+            }
+        }
+        Ok(resp) => {
+            log::warn!("获取 champion-summary.json 失败: HTTP {}", resp.status());
+        }
+        Err(e) => {
+            log::warn!("请求 champion-summary.json 失败: {}", e);
+        }
+    }
+
+    HashMap::new()
 }
 
 /// 灵活解析：先尝试数组格式，失败则解析为 JSON Value 处理对象/嵌套格式。

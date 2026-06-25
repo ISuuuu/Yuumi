@@ -1,8 +1,27 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use serde::Deserialize;
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::{build_auth_header, AppState};
+
+static OPGG_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static OPGG_CACHE: OnceLock<Mutex<HashMap<String, serde_json::Value>>> = OnceLock::new();
+
+fn get_opgg_client() -> &'static reqwest::Client {
+    OPGG_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+fn get_opgg_cache() -> &'static Mutex<HashMap<String, serde_json::Value>> {
+    OPGG_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 
 // ─── 创建 5v5 训练营 ───
 
@@ -262,7 +281,7 @@ pub async fn get_champion_skins(
 
 // ─── OP.GG 数据代理 ───
 
-/// 从 OP.GG API 获取英雄梯队/出装数据（代理请求，避免前端 CORS）
+/// 从 OP.GG API 获取英雄梯队/出装数据（代理请求，避免前端 CORS，使用内存缓存和复用客户端）
 #[tauri::command]
 pub async fn fetch_opgg_data(
     region: String,
@@ -271,10 +290,18 @@ pub async fn fetch_opgg_data(
     champion_id: Option<i32>,
     position: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let cache_key = format!(
+        "{}_{}_{}_{:?}_{:?}",
+        region, mode, tier, champion_id, position
+    );
+
+    // 尝试从内存缓存中读取
+    if let Ok(cache) = get_opgg_cache().lock() {
+        if let Some(cached_val) = cache.get(&cache_key) {
+            log::info!("OP.GG 缓存命中: {}", cache_key);
+            return Ok(cached_val.clone());
+        }
+    }
 
     let url = match champion_id {
         Some(id) => {
@@ -288,6 +315,7 @@ pub async fn fetch_opgg_data(
         None => format!("https://lol-api-champion.op.gg/api/{}/champions/{}", region, mode),
     };
 
+    let client = get_opgg_client();
     let resp = client
         .get(&url)
         .query(&[("tier", tier.as_str())])
@@ -296,6 +324,13 @@ pub async fn fetch_opgg_data(
         .map_err(|e| e.to_string())?;
 
     let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+    // 写入内存缓存
+    if let Ok(mut cache) = get_opgg_cache().lock() {
+        log::info!("OP.GG 缓存写入: {}", cache_key);
+        cache.insert(cache_key, data.clone());
+    }
+
     Ok(data)
 }
 

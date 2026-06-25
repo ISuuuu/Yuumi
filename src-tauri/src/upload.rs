@@ -237,9 +237,18 @@ impl UploadTrigger {
 
 // ─── URL 构建（对齐 Python get_upload_url / get_batch_upload_url）───
 
+/// 确保 URL 带有协议前缀（默认 http://）
+fn ensure_scheme(url: &str) -> String {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        url.to_string()
+    } else {
+        format!("http://{}", url)
+    }
+}
+
 /// 拼接单次上传 URL（对齐 Python get_upload_url）
 fn build_upload_url(base_url: &str) -> String {
-    let mut url = base_url.trim_end_matches('/').to_string();
+    let mut url = ensure_scheme(base_url.trim_end_matches('/'));
     if !url.contains("/api/lol/upload") {
         url.push_str("/api/lol/upload");
     }
@@ -248,7 +257,7 @@ fn build_upload_url(base_url: &str) -> String {
 
 /// 拼接批量上传 URL（对齐 Python get_batch_upload_url）
 fn build_batch_upload_url(base_url: &str) -> String {
-    let mut url = base_url.trim_end_matches('/').to_string();
+    let mut url = ensure_scheme(base_url.trim_end_matches('/'));
     if url.ends_with("/api/lol/upload") {
         url.truncate(url.len() - "/api/lol/upload".len());
     }
@@ -304,7 +313,12 @@ async fn upload_single_game(app_handle: &AppHandle, game_id: u64, upload_url: &s
         .map_err(|e| format!("解析对局详情失败: {}", e))?;
 
     // 构建 Smart Split Payload
-    let payload = build_upload_payload(&game_detail, current_name.as_deref());
+    let champion_names = {
+        let state = app_handle.state::<crate::AppState>();
+        let gd = state.game_data.read().await;
+        gd.champions.clone()
+    };
+    let payload = build_upload_payload(&game_detail, current_name.as_deref(), &champion_names);
 
     log::info!(
         "对局数据构建完成: matchId={}, 内层{}人, 外层{}人",
@@ -584,6 +598,19 @@ struct RawParticipant {
     spell2_id: Option<i32>,
     #[serde(default)]
     stats: ParticipantStats,
+    // participant 层的海克斯强化数据（对齐 Python extract_hextech_ids 从 participant 读取）
+    #[serde(default)]
+    augments: Vec<i32>,
+    #[serde(default)]
+    player_augment1: i32,
+    #[serde(default)]
+    player_augment2: i32,
+    #[serde(default)]
+    player_augment3: i32,
+    #[serde(default)]
+    player_augment4: i32,
+    #[serde(default)]
+    player_augment5: i32,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
@@ -691,6 +718,7 @@ struct PlayerInfo {
 fn build_upload_payload(
     game_detail: &GameDetail,
     current_summoner_name: Option<&str>,
+    champion_names: &std::collections::HashMap<i32, String>,
 ) -> UploadPayload {
     let game_creation_iso = game_detail
         .game_creation
@@ -743,14 +771,17 @@ fn build_upload_payload(
                 .unwrap_or_else(|| "Unknown".to_string());
 
             let puuid = player.map(|pl| pl.puuid.clone()).unwrap_or_default();
-            let hextech = extract_hextech_ids(&p.stats);
+            let hextech = extract_hextech_ids(&p.stats, p);
 
             ParticipantInfo {
                 summoner_name,
                 puuid,
                 team_id: p.team_id.unwrap_or(0),
                 champion_id: p.champion_id.unwrap_or(0),
-                champion_name: String::new(),
+                champion_name: champion_names
+                    .get(&p.champion_id.unwrap_or(0))
+                    .cloned()
+                    .unwrap_or_else(|| "Unknown".to_string()),
                 summoner_spell1_id: p.spell1_id.unwrap_or(0),
                 summoner_spell2_id: p.spell2_id.unwrap_or(0),
                 hextech0: hextech[0],
@@ -861,25 +892,42 @@ fn build_upload_payload(
 }
 
 /// 对齐 Python _extract_augment_ids + extract_hextech_ids。
-/// 从 stats.augments 数组 + stats.playerAugment1~5 提取，去重后返回 5 个值。
-fn extract_hextech_ids(stats: &ParticipantStats) -> [i32; 5] {
+/// 同时从 stats 层和 participant 层提取 augments + playerAugment1~5，去重后返回 5 个值。
+fn extract_hextech_ids(stats: &ParticipantStats, participant: &RawParticipant) -> [i32; 5] {
     let mut seen = std::collections::HashSet::new();
     let mut ordered: Vec<i32> = Vec::new();
 
-    // 来源 1: augments 数组
+    // 对齐 Python: for source in (stats, participant)
+    // 来源 1: stats 层
     for &id in &stats.augments {
         if id != 0 && seen.insert(id) {
             ordered.push(id);
         }
     }
-
-    // 来源 2: playerAugment1~5
     for id in [
         stats.player_augment1,
         stats.player_augment2,
         stats.player_augment3,
         stats.player_augment4,
         stats.player_augment5,
+    ] {
+        if id != 0 && seen.insert(id) {
+            ordered.push(id);
+        }
+    }
+
+    // 来源 2: participant 层（对齐 Python 从 participant 读取）
+    for &id in &participant.augments {
+        if id != 0 && seen.insert(id) {
+            ordered.push(id);
+        }
+    }
+    for id in [
+        participant.player_augment1,
+        participant.player_augment2,
+        participant.player_augment3,
+        participant.player_augment4,
+        participant.player_augment5,
     ] {
         if id != 0 && seen.insert(id) {
             ordered.push(id);
@@ -931,6 +979,13 @@ async fn batch_upload_by_ids(
 
     let current_name = get_current_summoner_name(&lcu_client, &auth, &base).await;
 
+    // 获取英雄名称映射
+    let champion_names = {
+        let state = app_handle.state::<crate::AppState>();
+        let gd = state.game_data.read().await;
+        gd.champions.clone()
+    };
+
     // 逐个获取对局详情并构建 payload
     let mut payloads: Vec<UploadPayload> = Vec::new();
     for &game_id in game_ids {
@@ -944,7 +999,7 @@ async fn batch_upload_by_ids(
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<GameDetail>().await {
                     Ok(detail) => {
-                        payloads.push(build_upload_payload(&detail, current_name.as_deref()));
+                        payloads.push(build_upload_payload(&detail, current_name.as_deref(), &champion_names));
                     }
                     Err(e) => {
                         log::warn!("批量上传: 解析对局 {} 详情失败: {}", game_id, e);

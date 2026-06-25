@@ -9,6 +9,7 @@ use crate::config::FunctionsConfig;
 pub enum GameflowEvent {
     PhaseChanged(String),
     ReadyCheck(ReadyCheckData),
+    ResetLobbyState,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -27,6 +28,7 @@ pub fn start(
 ) {
     tauri::async_runtime::spawn(async move {
         let mut lobby_created = false;
+        let mut last_phase = String::new();
         let mut upload_trigger = upload_trigger;
 
         while let Some(event) = rx.recv().await {
@@ -43,12 +45,20 @@ pub fn start(
                         &phase,
                         &cfg,
                         &mut lobby_created,
+                        &mut last_phase,
                         &mut upload_trigger,
                     )
                     .await;
                 }
                 GameflowEvent::ReadyCheck(data) => {
                     handle_ready_check(&app_handle, &data, &cfg).await;
+                }
+                GameflowEvent::ResetLobbyState => {
+                    log::info!("收到重置大厅创建状态指令，重置为 false");
+                    lobby_created = false;
+                    if last_phase == "None" && cfg.enable_auto_create_lobby {
+                        try_create_default_lobby(&app_handle, &cfg, &mut lobby_created).await;
+                    }
                 }
             }
         }
@@ -61,18 +71,22 @@ async fn handle_phase_change(
     phase: &str,
     cfg: &FunctionsConfig,
     lobby_created: &mut bool,
+    last_phase: &mut String,
     upload_trigger: &mut crate::upload::UploadTrigger,
 ) {
     log::info!("游戏阶段: {}", phase);
 
-    // 空闲状态 → 自动创建预设大厅
-    if phase == "None" {
-        if *lobby_created {
+    // 仅在真正阶段转换时重置 lobby_created（防止 "None" 重复事件导致重置）
+    if phase != last_phase.as_str() {
+        if phase == "None" {
             *lobby_created = false;
         }
-        if cfg.enable_auto_create_lobby {
-            try_create_default_lobby(app_handle, cfg, lobby_created).await;
-        }
+        *last_phase = phase.to_string();
+    }
+
+    // 空闲状态 → 自动创建预设大厅
+    if phase == "None" && cfg.enable_auto_create_lobby {
+        try_create_default_lobby(app_handle, cfg, lobby_created).await;
     }
 
     // 游戏进行中 → 自动重连

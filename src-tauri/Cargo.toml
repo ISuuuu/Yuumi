@@ -19,7 +19,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -48,6 +48,9 @@ rustls = { version = "0.23", features = ["ring"] }
 # 路径
 dirs = "6"
 
+# 原生文件夹选择对话框
+rfd = "0.15"
+
 # 日志
-log = "0.4"
-flexi_logger = "0.29"
+log = { version = "0.4", features = ["std"] }
+chrono = "0.4"

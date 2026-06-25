@@ -206,16 +206,37 @@ struct QueueInfo {
 
 fn get_queue_info(queue_id: i32) -> QueueInfo {
     match queue_id {
+        // 召唤师峡谷
+        400 => QueueInfo { name: "征召模式", map: "召唤师峡谷" },
         420 => QueueInfo { name: "排位单双排", map: "召唤师峡谷" },
         430 => QueueInfo { name: "匹配模式", map: "召唤师峡谷" },
         440 => QueueInfo { name: "排位灵活组排", map: "召唤师峡谷" },
+        490 => QueueInfo { name: "快速游戏", map: "召唤师峡谷" },
+        // 嚎哭深渊
         450 => QueueInfo { name: "极地大乱斗", map: "嚎哭深渊" },
+        // 海克斯大乱斗
+        2400 => QueueInfo { name: "海克斯大乱斗", map: "嚎哭深渊" },
+        // 限时/特殊模式
+        800 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
+        810 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
+        820 => QueueInfo { name: "人机对战", map: "嚎哭深渊" },
+        830 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
+        840 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
+        850 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
         900 => QueueInfo { name: "无限火力", map: "召唤师峡谷" },
+        1010 => QueueInfo { name: "随机无限火力", map: "嚎哭深渊" },
         1020 => QueueInfo { name: "克隆模式", map: "召唤师峡谷" },
         1300 => QueueInfo { name: "极限闪击", map: "极限闪击" },
         1700 => QueueInfo { name: "斗魂竞技场", map: "斗魂竞技场" },
+        1710 => QueueInfo { name: "斗魂竞技场", map: "斗魂竞技场" },
+        // 捉鬼模式 (Swarm)
+        1810 => QueueInfo { name: "捉鬼模式", map: "捉鬼模式" },
+        1820 => QueueInfo { name: "捉鬼模式", map: "捉鬼模式" },
+        1830 => QueueInfo { name: "捉鬼模式", map: "捉鬼模式" },
+        1840 => QueueInfo { name: "捉鬼模式", map: "捉鬼模式" },
+        // 自定义
         0 => QueueInfo { name: "自定义模式", map: "自定义" },
-        _ => QueueInfo { name: "其他模式", map: "未知" },
+        _ => QueueInfo { name: "自定义模式", map: "自定义" },
     }
 }
 
@@ -335,6 +356,7 @@ pub async fn get_match_history(
     let history: LcuMatchHistoryResponse = resp.json().await.map_err(|e| e.to_string())?;
 
     let assets = app_state.game_data.read().await;
+    let skip = beg_index.unwrap_or(0) as usize;
     let limit = match (beg_index, end_index) {
         (Some(b), Some(e)) if e > b => (e - b) as usize,
         _ => usize::MAX,
@@ -344,6 +366,7 @@ pub async fn get_match_history(
         .games
         .iter()
         .filter(|g| !g.participants.is_empty())
+        .skip(skip)
         .take(limit)
         .map(|g| g.to_display(&assets))
         .collect();

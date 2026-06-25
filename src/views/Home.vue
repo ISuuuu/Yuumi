@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, onMounted } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import { invoke } from "@tauri-apps/api/core";
+import { fetchConfig } from "../api/lcu";
 
 const store = useLcuStore();
 const connectionDetails = ref<{ pid: number; port: number; token: string } | null>(null);
+const lolPaths = ref<string[]>([]);
+const selectedPath = ref<string>("");
 
 async function loadConnectionDetails() {
   if (store.isConnected) {
@@ -19,6 +22,30 @@ async function loadConnectionDetails() {
   }
 }
 
+async function loadPaths() {
+  try {
+    const cfg = await fetchConfig();
+    lolPaths.value = cfg.General?.LolPath || [];
+    if (lolPaths.value.length > 0) {
+      selectedPath.value = lolPaths.value[0];
+    }
+  } catch (e) {
+    console.error("加载客户端路径失败:", e);
+  }
+}
+
+async function handleLaunchClient() {
+  try {
+    await invoke("launch_lol_client", { path: selectedPath.value || null });
+  } catch (e: any) {
+    console.warn("启动客户端失败:", e);
+  }
+}
+
+onMounted(() => {
+  loadPaths();
+});
+
 watch(() => store.isConnected, (connected) => {
   if (connected) {
     loadConnectionDetails();
@@ -26,11 +53,6 @@ watch(() => store.isConnected, (connected) => {
     connectionDetails.value = null;
   }
 }, { immediate: true });
-
-function handleChangeClient() {
-  alert("🔍 正在扫描系统中的英雄联盟进程，请确保客户端已运行...");
-  loadConnectionDetails();
-}
 </script>
 
 <template>
@@ -38,14 +60,6 @@ function handleChangeClient() {
     <!-- 连接成功状态 -->
     <div v-if="store.isConnected" class="connection-success">
       <h1 class="status-title">客户端连接成功 🎉</h1>
-      
-      <button class="change-client-btn" @click="handleChangeClient">
-        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-          <line x1="9" y1="3" x2="9" y2="21"/>
-        </svg>
-        更改连接的客户端
-      </button>
 
       <div v-if="connectionDetails" class="details-box">
         <div class="detail-row">
@@ -68,12 +82,30 @@ function handleChangeClient() {
 
     <!-- 未连接状态 -->
     <div v-else class="connection-offline">
-      <div class="offline-icon">❌</div>
+      <img src="/logo.png" class="offline-logo" alt="Yuumi" />
       <h1 class="status-title">客户端未连接</h1>
       <p class="offline-desc">
         请先启动国服或外服的《英雄联盟》客户端。<br>
         系统将通过底层进程侦测服务自动捕获凭证并建立长连接。
       </p>
+      <button class="launch-btn" @click="handleLaunchClient">
+        <svg class="launch-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        启动客户端
+      </button>
+      <div v-if="lolPaths.length > 0" class="path-list">
+        <span class="path-label">客户端路径：</span>
+        <div
+          v-for="(p, i) in lolPaths"
+          :key="i"
+          :class="['path-item', { active: selectedPath === p }]"
+          @click="selectedPath = p"
+        >
+          <span class="path-radio" :class="{ checked: selectedPath === p }"></span>
+          <span class="path-text">{{ p }}</span>
+        </div>
+      </div>
       <div class="loading-ring">
         <div class="ring-dot"></div>
         <span>正在等待 LeagueClient 启动...</span>
@@ -207,10 +239,12 @@ function handleChangeClient() {
   animation: fadeIn 0.4s ease-out;
 }
 
-.offline-icon {
-  font-size: 3rem;
-  margin-bottom: 1.25rem;
-  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.05));
+.offline-logo {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  margin-bottom: 1.5rem;
+  filter: drop-shadow(0 8px 24px rgba(108, 92, 231, 0.25));
   animation: float 3s ease-in-out infinite;
 }
 
@@ -219,6 +253,81 @@ function handleChangeClient() {
   line-height: 1.6;
   font-size: 0.88rem;
   margin-bottom: 2rem;
+}
+
+.launch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--primary-color);
+  border: 1.5px solid var(--primary-color);
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 1.5rem;
+  transition: all 0.25s ease;
+}
+.launch-btn:hover {
+  background: var(--primary-color-alpha-15);
+  transform: translateY(-1px);
+}
+.launch-icon {
+  width: 14px;
+  height: 14px;
+}
+.path-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+.path-label {
+  font-size: 0.78rem;
+  color: var(--text-dimmed);
+  margin-bottom: 2px;
+}
+.path-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+  background: var(--card-bg);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.path-item:hover {
+  border-color: var(--primary-color-alpha-30);
+}
+.path-item.active {
+  border-color: var(--primary-color);
+  background: var(--primary-color-alpha-15);
+}
+.path-radio {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border-color-hover);
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+.path-radio.checked {
+  border-color: var(--primary-color);
+  background: var(--primary-color);
+  box-shadow: inset 0 0 0 3px white;
+}
+.path-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .loading-ring {

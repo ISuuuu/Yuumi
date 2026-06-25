@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl, openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import { updateThemeColor } from "../utils/theme";
@@ -51,18 +51,64 @@ onMounted(async () => {
   }
 });
 
-// 打开客户端路径
-async function handleSelectFolder() {
+// 自动检测客户端路径（追加到列表）
+async function handleDetectPath() {
   try {
-    const path = config.value?.General?.LolPath?.[0] || "";
+    const path = await invoke<string | null>("detect_lol_path");
     if (path) {
-      await openPath(path);
+      if (!config.value) return;
+      const paths = config.value.General.LolPath || [];
+      if (!paths.includes(path)) {
+        paths.push(path);
+        config.value.General.LolPath = paths;
+        await updateConfig(config.value);
+        showToast('已添加: ' + path);
+      } else {
+        showToast('该路径已存在');
+      }
     } else {
-      showToast('请先设置 LOL 客户端路径', 'error');
+      showToast('未检测到运行中的英雄联盟客户端', 'error');
     }
   } catch (e: any) {
-    showToast('打开路径失败', 'error');
+    showToast('检测失败: ' + e.toString(), 'error');
   }
+}
+
+// 手动选择客户端目录（追加到列表）
+async function handleBrowseFolder() {
+  try {
+    const path = await invoke<string | null>("select_lol_folder");
+    if (path) {
+      if (!config.value) return;
+      const paths = config.value.General.LolPath || [];
+      if (!paths.includes(path)) {
+        paths.push(path);
+        config.value.General.LolPath = paths;
+        await updateConfig(config.value);
+        showToast('已添加: ' + path);
+      } else {
+        showToast('该路径已存在');
+      }
+    }
+  } catch (e: any) {
+    showToast('选择失败: ' + e.toString(), 'error');
+  }
+}
+
+// 删除指定路径
+async function handleRemovePath(index: number) {
+  if (!config.value) return;
+  config.value.General.LolPath.splice(index, 1);
+  await updateConfig(config.value);
+}
+
+// 修改指定路径
+async function handleEditPath(index: number, e: Event) {
+  if (!config.value) return;
+  const val = (e.target as HTMLInputElement).value.trim();
+  if (!val) return;
+  config.value.General.LolPath[index] = val;
+  await updateConfig(config.value);
 }
 
 // 清除缓存
@@ -132,9 +178,7 @@ function onThemeColorInput(e: Event) {
         </div>
         <div v-show="activeCollapse === 'concurrency'" class="collapse-content">
           <div class="input-row">
-            <select v-model.number="config.Functions.ApiConcurrencyNumber" class="select-input" @change="autoSave">
-              <option v-for="n in 10" :key="n" :value="n">{{ n }} (个并发)</option>
-            </select>
+            <input type="number" v-model.number="config.Functions.ApiConcurrencyNumber" class="number-input" min="1" max="10" @change="autoSave" />
           </div>
         </div>
       </div>
@@ -152,10 +196,7 @@ function onThemeColorInput(e: Event) {
         </div>
         <div v-show="activeCollapse === 'matchcount'" class="collapse-content">
           <div class="input-row">
-            <select v-model.number="config.Functions.CareerGamesNumber" class="select-input" @change="autoSave">
-              <option :value="10">10 场</option><option :value="20">20 场</option>
-              <option :value="50">50 场</option><option :value="100">100 场</option>
-            </select>
+            <input type="number" v-model.number="config.Functions.CareerGamesNumber" class="number-input" min="1" max="100" step="5" @change="autoSave" />
           </div>
         </div>
       </div>
@@ -262,13 +303,28 @@ function onThemeColorInput(e: Event) {
       <!-- 3. 通用 -->
       <div class="group-header">通用</div>
 
-      <div class="card-item border-bottom">
-        <div class="card-left">
-          <h3 class="card-title">客户端路径</h3>
-          <span class="card-desc">设置客户端路径以及顺序</span>
+      <div class="collapse-item border-bottom">
+        <div class="collapse-header" @click="toggleCollapse('lolpath')">
+          <div class="collapse-left">
+            <h3 class="card-title">客户端路径</h3>
+            <span class="card-desc">{{ config?.General?.LolPath?.length ? `已设置 ${config.General.LolPath.length} 个路径` : '未设置' }}</span>
+          </div>
+          <div class="collapse-right">
+            <svg :class="['arrow-icon', { expanded: activeCollapse === 'lolpath' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
         </div>
-        <div class="card-right">
-          <button class="action-btn" @click="handleSelectFolder">选择文件夹</button>
+        <div v-show="activeCollapse === 'lolpath'" class="collapse-content">
+          <!-- 已保存的路径列表 -->
+          <div v-for="(path, index) in (config?.General?.LolPath || [])" :key="index" class="path-item">
+            <input class="path-input" :value="path" @change="handleEditPath(index, $event)" placeholder="客户端安装路径" />
+            <button class="path-remove-btn" @click="handleRemovePath(index)" title="删除">✕</button>
+          </div>
+          <div v-if="!config?.General?.LolPath?.length" class="path-empty">暂无已保存的客户端路径</div>
+          <!-- 操作按钮 -->
+          <div class="path-actions">
+            <button class="action-btn" @click="handleDetectPath">自动检测</button>
+            <button class="action-btn" @click="handleBrowseFolder">添加目录</button>
+          </div>
         </div>
       </div>
 
@@ -362,13 +418,7 @@ function onThemeColorInput(e: Event) {
             <span class="card-desc">修改 Yuumi 记录日志的等级（重启后生效）</span>
           </div>
           <div class="collapse-right">
-            <span class="status-preview">{{ config.General.LogLevel === 0 ? 'Debug' : config.General.LogLevel === 1 ? 'Info' : 'Error' }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'loglevel' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'loglevel'" class="collapse-content">
-          <div class="input-row">
-            <select v-model.number="config.General.LogLevel" class="select-input" @change="autoSave">
+            <select v-model.number="config.General.LogLevel" class="select-input" @change="autoSave" @click.stop>
               <option :value="0">Debug</option>
               <option :value="1">Info</option>
               <option :value="2">Error</option>
@@ -380,7 +430,7 @@ function onThemeColorInput(e: Event) {
       <div class="card-item">
         <div class="card-left">
           <h3 class="card-title">日志文件</h3>
-          <span class="card-desc">打开日志文件夹</span>
+          <span class="card-desc">&lt;exe 目录&gt;/log/</span>
         </div>
         <div class="card-right">
           <button class="action-btn" @click="handleOpenLogFolder">打开文件夹</button>
@@ -396,7 +446,7 @@ function onThemeColorInput(e: Event) {
           <span class="card-desc">窗口和表面显示半透明（仅在 Win11 上可用）</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Personalization.MicaEnabled ? 'on' : 'off']" @click="config.Personalization.MicaEnabled = !config.Personalization.MicaEnabled; autoSave()">
+          <div :class="['toggle-switch', config.Personalization.MicaEnabled ? 'on' : 'off']" @click="config.Personalization.MicaEnabled = !config.Personalization.MicaEnabled; autoSave(); invoke('set_mica_effect', { enabled: config.Personalization.MicaEnabled })">
             <span class="toggle-text">{{ config.Personalization.MicaEnabled ? '开' : '关' }}</span>
             <span class="toggle-slider"></span>
           </div>
@@ -691,13 +741,15 @@ function onThemeColorInput(e: Event) {
   transform: translateY(-1.5px);
   box-shadow: var(--shadow-md);
   border-color: var(--primary-color-alpha-30);
-  background-color: var(--card-bg-hover);
+  background-color: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .card-left { display: flex; flex-direction: column; flex: 1; }
 .card-title { font-size: 0.88rem; font-weight: bold; color: var(--text-color); margin: 0; }
 .card-desc { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
-.card-right { margin-left: 16px; display: flex; align-items: center; }
+.card-right { margin-left: auto; display: flex; align-items: center; }
 .status-preview { font-size: 0.78rem; color: var(--text-dimmed); margin-right: 10px; }
 .status-preview.truncate {
   max-width: 180px; white-space: nowrap; overflow: hidden;
@@ -731,7 +783,7 @@ function onThemeColorInput(e: Event) {
   justify-content: space-between; cursor: pointer;
 }
 .collapse-left { display: flex; flex-direction: column; flex: 1; }
-.collapse-right { margin-left: 16px; color: var(--text-dimmed); display: flex; align-items: center; }
+.collapse-right { margin-left: auto; color: var(--text-dimmed); display: flex; align-items: center; }
 .arrow-icon { width: 18px; height: 18px; transition: transform 0.2s; }
 .arrow-icon.expanded { transform: rotate(180deg); }
 .collapse-content {
@@ -741,30 +793,150 @@ function onThemeColorInput(e: Event) {
 
 .input-row { display: flex; gap: 8px; width: 100%; }
 .input-row.align-center { align-items: center; }
-.text-input, .select-input {
+
+/* 客户端路径列表 */
+.path-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 8px 12px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
+  margin-bottom: 6px;
+  background: rgba(255, 255, 255, 0.5);
+}
+.path-input {
+  font-size: 0.82rem;
+  color: var(--text-color);
+  flex: 1;
+  margin-right: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px 8px;
+  border-radius: 4px;
+  outline: none;
+  transition: all 0.2s;
+}
+.path-input:focus {
+  border-color: var(--primary-color);
+  background: rgba(255, 255, 255, 0.8);
+}
+.path-remove-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dimmed);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.path-remove-btn:hover {
+  color: var(--loss-color);
+  background: var(--loss-bg);
+}
+.path-empty {
+  font-size: 0.8rem;
+  color: var(--text-dimmed);
+  text-align: center;
+  padding: 12px 0;
+}
+.path-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.text-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
   font-size: 0.82rem;
   outline: none;
   background-color: rgba(255, 255, 255, 0.6);
   transition: all 0.2s ease;
   color: var(--text-color);
 }
-.text-input:hover, .select-input:hover {
+.text-input:hover {
   background-color: rgba(255, 255, 255, 0.95);
   border-color: var(--border-color-hover);
 }
-.text-input:focus, .select-input:focus {
+.text-input:focus {
   background-color: #fff;
   border-color: var(--primary-color);
   box-shadow: 0 0 8px var(--primary-color-alpha-15);
 }
-.text-input {
-  flex: 1;
-}
+
 .select-input {
   min-width: 140px;
+  padding: 8px 32px 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  outline: none;
+  background-color: rgba(255, 255, 255, 0.6);
+  color: var(--text-color);
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+.select-input:hover {
+  background-color: rgba(255, 255, 255, 0.85);
+  border-color: var(--primary-color-alpha-40);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.08);
+}
+.select-input:focus {
+  background-color: #fff;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+.select-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: rgba(240, 240, 240, 0.4);
+}
+.select-input option {
+  background-color: #fff;
+  color: var(--text-color);
+}
+
+.number-input {
+  width: 100px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  outline: none;
+  background-color: rgba(255, 255, 255, 0.6);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  color: var(--text-color);
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.number-input::-webkit-inner-spin-button,
+.number-input::-webkit-outer-spin-button {
+  opacity: 1;
+  height: 28px;
+}
+.number-input:hover {
+  background-color: rgba(255, 255, 255, 0.85);
+  border-color: var(--primary-color-alpha-40);
+}
+.number-input:focus {
+  background-color: #fff;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
 }
 
 .color-picker-label { font-size: 0.82rem; color: var(--text-muted); }

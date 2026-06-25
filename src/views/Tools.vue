@@ -160,11 +160,17 @@ async function checkGameSettingsLock() {
   }
 }
 
-const GAME_MODES: Record<number, string> = {
-  2400: "海克斯大乱斗", 450: "极地大乱斗", 430: "匹配模式",
-  420: "单双排位", 440: "灵活排位", 900: "无限火力",
-  1020: "克隆模式", 1300: "极限闪击", 1700: "斗魂竞技场",
-};
+const GAME_MODES: { id: number; name: string }[] = [
+  { id: 2400, name: "海克斯大乱斗" },
+  { id: 450, name: "极地大乱斗" },
+  { id: 430, name: "匹配模式" },
+  { id: 420, name: "单双排位" },
+  { id: 440, name: "灵活排位" },
+  { id: 900, name: "无限火力" },
+  { id: 1020, name: "克隆模式" },
+  { id: 1300, name: "极限闪击" },
+  { id: 1700, name: "斗魂竞技场" },
+];
 
 onMounted(async () => {
   try {
@@ -449,9 +455,7 @@ async function handleToggleLockGameSettings() {
         <div v-show="activeCollapse === 'autoaccept'" class="collapse-content">
           <div class="setting-row">
             <span class="setting-label">在对局找到后接受对局前延迟的秒数:</span>
-            <select v-model.number="config.Functions.AutoAcceptMatchingDelay" class="select-input" @change="triggerAutoSave">
-              <option v-for="n in 12" :key="n-1" :value="n-1">{{ n-1 }} 秒</option>
-            </select>
+            <input type="number" v-model.number="config.Functions.AutoAcceptMatchingDelay" class="number-input" min="0" max="11" @change="triggerAutoSave" />
           </div>
           <div class="setting-row justify-end">
             <div class="switch-container">
@@ -674,9 +678,9 @@ async function handleToggleLockGameSettings() {
           </div>
           <div class="collapse-right">
             <span class="status-preview">
-              {{ config.Functions.EnableAutoCreateLobby 
-                ? `已启用: ${GAME_MODES[config.Functions.DefaultGameMode] || '未知模式'}` 
-                : '未启用' 
+              {{ config?.Functions.EnableAutoCreateLobby
+                ? `已启用: ${GAME_MODES.find(m => m.id === config?.Functions.DefaultGameMode)?.name || '未知模式'}`
+                : '未启用'
               }}
             </span>
             <svg :class="['arrow-icon', { expanded: activeCollapse === 'createlobby' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -697,7 +701,7 @@ async function handleToggleLockGameSettings() {
           <div class="setting-row">
             <span class="setting-label">默认游戏模式:</span>
             <select v-model.number="config.Functions.DefaultGameMode" class="select-input" @change="triggerAutoSave" :disabled="!config.Functions.EnableAutoCreateLobby">
-              <option v-for="(name, id) in GAME_MODES" :key="id" :value="Number(id)">{{ name }}</option>
+              <option v-for="mode in GAME_MODES" :key="mode.id" :value="mode.id">{{ mode.name }}</option>
             </select>
           </div>
         </div>
@@ -1206,7 +1210,7 @@ async function handleToggleLockGameSettings() {
 }
 
 .card-right, .collapse-right {
-  margin-left: 16px;
+  margin-left: auto;
   display: flex;
   align-items: center;
 }
@@ -1389,10 +1393,10 @@ async function handleToggleLockGameSettings() {
   align-items: center;
 }
 
-.text-input, .select-input, .number-input {
+.text-input, .number-input {
   padding: 8px 12px;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 0.82rem;
   outline: none;
   background-color: rgba(255, 255, 255, 0.6);
@@ -1400,12 +1404,12 @@ async function handleToggleLockGameSettings() {
   color: var(--text-color);
 }
 
-.text-input:hover, .select-input:hover, .number-input:hover {
+.text-input:hover, .number-input:hover {
   background-color: rgba(255, 255, 255, 0.95);
   border-color: var(--border-color-hover);
 }
 
-.text-input:focus, .select-input:focus, .number-input:focus {
+.text-input:focus, .number-input:focus {
   background-color: #fff;
   border-color: var(--primary-color);
   box-shadow: 0 0 8px var(--primary-color-alpha-15);
@@ -1417,11 +1421,73 @@ async function handleToggleLockGameSettings() {
 
 .select-input {
   min-width: 140px;
+  padding: 8px 32px 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  outline: none;
+  background-color: rgba(255, 255, 255, 0.6);
+  color: var(--text-color);
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+.select-input:hover {
+  background-color: rgba(255, 255, 255, 0.85);
+  border-color: var(--primary-color-alpha-40);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.08);
+}
+.select-input:focus {
+  background-color: #fff;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23334155' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+.select-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: rgba(240, 240, 240, 0.4);
+}
+.select-input option {
+  background-color: #fff;
+  color: var(--text-color);
 }
 
 .number-input {
   width: 70px;
   padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  outline: none;
+  background-color: rgba(255, 255, 255, 0.6);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  color: var(--text-color);
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.number-input::-webkit-inner-spin-button,
+.number-input::-webkit-outer-spin-button {
+  opacity: 1;
+  height: 24px;
+}
+.number-input:hover {
+  background-color: rgba(255, 255, 255, 0.85);
+  border-color: var(--primary-color-alpha-40);
+}
+.number-input:focus {
+  background-color: #fff;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
 }
 
 .apply-btn {

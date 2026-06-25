@@ -5,6 +5,9 @@ import { storeToRefs } from "pinia";
 import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
 import { updateThemeColor } from "./utils/theme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { SummonerDisplay } from "./api/lcu";
 import Home from "./views/Home.vue";
 import Career from "./views/Career.vue";
@@ -14,16 +17,26 @@ import TFT from "./views/TFT.vue";
 import Settings from "./views/Settings.vue";
 import Tools from "./views/Tools.vue";
 import LcuImage from "./components/LcuImage.vue";
-import OpggModal from "./components/OpggModal.vue";
+import opggIcon from "./assets/opgg.svg";
 
 const store = useLcuStore();
 const { gamePhase, connectionVersion } = storeToRefs(store);
 const currentPage = ref("home");
 const pageHistory: string[] = [];
-const showOpgg = ref(false);
 const isSidebarExpanded = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
 const platformId = ref("");
+
+// Toast 通知
+const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
+  message: '', type: 'success', visible: false
+});
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  if (toastTimer) clearTimeout(toastTimer);
+  toast.value = { message, type, visible: true };
+  toastTimer = setTimeout(() => { toast.value.visible = false; }, 2500);
+}
 
 const PHASE_LABELS: Record<string, string> = {
   None: "空闲",
@@ -69,6 +82,31 @@ onMounted(async () => {
   // loadLcuState 内部已有 1 秒延迟 + 重试机制
   console.log("[App] onMounted 完成，直接调用 loadLcuState");
   loadLcuState();
+
+  // 监听系统托盘菜单导航事件
+  await listen<string>("tray-navigate", (event: { payload: string }) => {
+    navigate(event.payload);
+  });
+
+  // 自动启动 LOL 客户端并按需显示主窗口
+  try {
+    const cfg = await fetchConfig();
+    if (cfg.General?.EnableStartLolWithApp) {
+      invoke("launch_lol_client").catch((e: any) => console.warn("自动启动 LOL 失败:", e));
+    }
+    // 如果没有开启“游戏开始最小化”（静默启动），则在组件挂载并完成配置获取后显示窗口
+    if (!cfg.General?.EnableGameStartMinimize) {
+      await getCurrentWindow().show();
+    }
+    // 无论是否静默启动，都在配置加载完后尝试应用一次云母效果，防止窗口创建时隐藏导致 DWM 特效应用失败
+    if (cfg.Personalization?.MicaEnabled) {
+      invoke("set_mica_effect", { enabled: true }).catch((e: any) => console.warn("应用云母效果失败:", e));
+    }
+  } catch (e) {
+    console.warn("[App] 启动配置检查失败:", e);
+    // 异常情况下兜底显示窗口，保证软件可用性
+    await getCurrentWindow().show();
+  }
 });
 
 function navigate(page: string) {
@@ -86,6 +124,27 @@ function goBack() {
 
 function toggleSidebar() {
   isSidebarExpanded.value = !isSidebarExpanded.value;
+}
+
+async function openOpggWindow() {
+  const existing = await WebviewWindow.getByLabel("opgg");
+  if (existing) {
+    await existing.setFocus();
+    return;
+  }
+  const mainPos = await getCurrentWindow().outerPosition();
+  const mainSize = await getCurrentWindow().innerSize();
+  new WebviewWindow("opgg", {
+    url: "opgg.html",
+    title: "OP.GG",
+    width: 760,
+    height: 820,
+    x: mainPos.x + mainSize.width + 2,
+    y: mainPos.y,
+    decorations: true,
+    resizable: true,
+    center: false,
+  });
 }
 
 async function loadLcuState(retryCount = 0) {
@@ -214,12 +273,53 @@ watch(gamePhase, (phase: string) => {
 
 function handleReconnect() {
   initLcuListeners();
-  alert("🔄 已成功重置并重新初始化 LCU 监听服务。");
+  // 先查询当前游戏阶段，按情况处理
+  lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase").then(resp => {
+    if (!resp.success) {
+      showToast("LCU 未连接，请先启动英雄联盟客户端", "error");
+      return;
+    }
+    const phase = resp.data;
+    if (phase === "InProgress" || phase === "GameStart" || phase === "Reconnect") {
+      // 游戏中 → 调用 reconnect API
+      lcuRequest("POST", "/lol-gameflow/v1/reconnect").then(r => {
+        if (r.success) {
+          showToast("🔄 已触发游戏重连");
+        } else {
+          showToast("重连请求失败: " + (r.error || ""), "error");
+        }
+      });
+    } else {
+      showToast("LCU 监听服务已重置 (当前: " + (PHASE_LABELS[phase ?? ""] || phase) + ")");
+    }
+  }).catch(() => {
+    showToast("LCU 监听服务已重置");
+  });
+}
+
+async function handleClose() {
+  try {
+    const closeToTray = await invoke<boolean>("get_close_to_tray");
+    const win = getCurrentWindow();
+    if (closeToTray) {
+      await win.hide();
+    } else {
+      await win.close();
+    }
+  } catch (e) {
+    console.error("[handleClose] 失败，直接关闭窗口:", e);
+    await getCurrentWindow().close();
+  }
 }
 </script>
 
 <template>
   <div class="app-layout">
+    <!-- Toast -->
+    <Transition name="toast">
+      <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">{{ toast.message }}</div>
+    </Transition>
+
     <!-- 自定义标题栏 -->
     <div class="titlebar" data-tauri-drag-region>
       <div class="titlebar-left">
@@ -228,8 +328,9 @@ function handleReconnect() {
             <polyline points="15 18 9 12 15 6"/>
           </svg>
         </div>
+        <img src="/logo.png" class="titlebar-logo" alt="logo" />
         <span class="titlebar-title">
-          Yuumi
+          Yummi
           <span v-if="store.isConnected && gamePhase !== 'None'" class="titlebar-phase">
             · {{ PHASE_LABELS[gamePhase] || gamePhase }}
           </span>
@@ -242,7 +343,7 @@ function handleReconnect() {
         <div class="titlebar-btn" @click="getCurrentWindow().toggleMaximize()" title="最大化">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
         </div>
-        <div class="titlebar-btn close-btn" @click="getCurrentWindow().close()" title="关闭">
+        <div class="titlebar-btn close-btn" @click="handleClose" title="关闭">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </div>
       </div>
@@ -325,8 +426,8 @@ function handleReconnect() {
 
       <!-- 底部附加操作 -->
       <div class="sidebar-bottom">
-        <div class="nav-item" @click="showOpgg = true" title="OP.GG">
-          <span class="nav-icon text-icon">OP</span>
+        <div class="nav-item" @click="openOpggWindow" title="OP.GG">
+          <span class="nav-icon"><img :src="opggIcon" style="width:18px;height:18px;border-radius:3px" /></span>
           <span class="nav-label">OP.GG</span>
         </div>
 
@@ -424,9 +525,6 @@ function handleReconnect() {
       </template>
     </main>
     </div>
-
-    <!-- OP.GG 弹窗 -->
-    <OpggModal v-if="showOpgg" @close="showOpgg = false" />
   </div>
 </template>
 
@@ -534,13 +632,20 @@ body {
   gap: 4px;
 }
 
+.titlebar-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  margin-left: 4px;
+}
+
 .titlebar-title {
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--text-color);
   letter-spacing: 0.5px;
-  margin-left: 6px;
-  text-transform: uppercase;
+  margin-left: 2px;
+  text-transform: none;
 }
 
 .titlebar-phase {
@@ -1000,4 +1105,18 @@ body {
 .changelog-list strong {
   color: var(--text-color);
 }
+
+/* Toast */
+.toast {
+  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+  padding: 10px 24px; border-radius: 8px; font-size: 0.82rem;
+  font-weight: 600; color: white; z-index: 9999;
+  box-shadow: var(--shadow-md); pointer-events: none;
+}
+.toast-success { background-color: var(--win-color); }
+.toast-error { background-color: var(--loss-color); }
+.toast-enter-active { transition: all 0.25s ease-out; }
+.toast-leave-active { transition: all 0.2s ease-in; }
+.toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+.toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 </style>

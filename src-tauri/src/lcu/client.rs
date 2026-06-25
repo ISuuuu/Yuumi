@@ -13,6 +13,9 @@ pub async fn call_lcu_api(
     body: Option<Value>,
     app_state: State<'_, AppState>,
 ) -> Result<Value, String> {
+    // 获取并发许可
+    let _permit = app_state.api_semaphore.acquire().await.map_err(|e| e.to_string())?;
+
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
 
