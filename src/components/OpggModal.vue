@@ -9,8 +9,6 @@ import tierIcon2 from "../assets/tier/tier-2.svg";
 import tierIcon3 from "../assets/tier/tier-3.svg";
 import tierIcon4 from "../assets/tier/tier-4.svg";
 
-const emit = defineEmits<{ close: [] }>();
-
 // 筛选状态
 const region = ref("kr");
 const mode = ref("ranked");

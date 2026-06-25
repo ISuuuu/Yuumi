@@ -58,11 +58,6 @@ const filteredMatches = computed(() => {
   return matches.value.filter((m: MatchDisplay) => m.queueId === selectedQueue.value);
 });
 
-function onQueueChange(e: Event) {
-  const val = (e.target as HTMLSelectElement).value;
-  selectQueue(val === '' ? null : Number(val));
-}
-
 function selectQueue(id: number | null) {
   selectedQueue.value = id;
 }
