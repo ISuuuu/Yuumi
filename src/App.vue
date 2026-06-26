@@ -563,11 +563,11 @@ async function handleClose() {
 
 <style>
 :root {
-  --primary-color: #6c5ce7;
-  --primary-color-hover: #5b4cc4;
-  --primary-color-alpha-15: rgba(108, 92, 231, 0.15);
-  --primary-color-alpha-30: rgba(108, 92, 231, 0.3);
-  --primary-color-alpha-40: rgba(108, 92, 231, 0.4);
+  --primary-color: #009faa;
+  --primary-color-hover: #008a94;
+  --primary-color-alpha-15: rgba(0, 159, 170, 0.15);
+  --primary-color-alpha-30: rgba(0, 159, 170, 0.3);
+  --primary-color-alpha-40: rgba(0, 159, 170, 0.4);
 
   /* 纯白水晶极光主题变量 */
   --bg-color-gradient: linear-gradient(135deg, #ffffff 0%, #fcfdfe 40%, #f3f6fc 100%);

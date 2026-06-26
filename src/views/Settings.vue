@@ -226,6 +226,38 @@ function onDeathColorInput(e: Event, field: 'LightDeathsNumberColor' | 'DarkDeat
   updateDeathColor(light, dark);
 }
 
+const DEFAULT_COLORS = {
+  ThemeColor: '#009faa',
+  WinCardColor: '#2839b01b',
+  LoseCardColor: '#28d3190c',
+  RemakeCardColor: '#28a2a2a2',
+  LightDeathsNumberColor: '#ffb60000',
+  DarkDeathsNumberColor: '#ffff8d8d',
+};
+
+function resetThemeColor() {
+  if (!config.value?.Personalization) return;
+  config.value.Personalization.ThemeColor = DEFAULT_COLORS.ThemeColor;
+  updateThemeColor(DEFAULT_COLORS.ThemeColor);
+  autoSave();
+}
+
+function resetCardColors() {
+  if (!config.value?.Personalization) return;
+  config.value.Personalization.WinCardColor = DEFAULT_COLORS.WinCardColor;
+  config.value.Personalization.LoseCardColor = DEFAULT_COLORS.LoseCardColor;
+  config.value.Personalization.RemakeCardColor = DEFAULT_COLORS.RemakeCardColor;
+  autoSave();
+}
+
+function resetDeathColors() {
+  if (!config.value?.Personalization) return;
+  config.value.Personalization.LightDeathsNumberColor = DEFAULT_COLORS.LightDeathsNumberColor;
+  config.value.Personalization.DarkDeathsNumberColor = DEFAULT_COLORS.DarkDeathsNumberColor;
+  updateDeathColor(toColor6(DEFAULT_COLORS.LightDeathsNumberColor), toColor6(DEFAULT_COLORS.DarkDeathsNumberColor));
+  autoSave();
+}
+
 function onDpiScaleChange(scale: string) {
   if (!config.value?.Personalization) return;
   config.value.Personalization.DpiScale = scale;
@@ -561,6 +593,7 @@ function onDpiScaleChange(scale: string) {
           <div class="input-row align-center">
             <label class="color-picker-label">调色盘:</label>
             <input type="color" class="color-picker" :value="toColor6(config.Personalization.ThemeColor)" @input="onThemeColorInput" @change="autoSave" />
+            <button class="action-btn" @click="resetThemeColor">恢复默认</button>
           </div>
         </div>
       </div>
@@ -591,6 +624,9 @@ function onDpiScaleChange(scale: string) {
               <input type="color" :value="toColor6(config.Personalization.RemakeCardColor)" @input="config.Personalization.RemakeCardColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
             </div>
           </div>
+          <div class="reset-row">
+            <button class="action-btn" @click="resetCardColors">恢复默认</button>
+          </div>
         </div>
       </div>
 
@@ -615,6 +651,9 @@ function onDpiScaleChange(scale: string) {
               <label>深色主题下颜色:</label>
               <input type="color" :value="toColor6(config.Personalization.DarkDeathsNumberColor)" @input="onDeathColorInput($event, 'DarkDeathsNumberColor')" @change="autoSave" />
             </div>
+          </div>
+          <div class="reset-row">
+            <button class="action-btn" @click="resetDeathColors">恢复默认</button>
           </div>
         </div>
       </div>
@@ -1067,6 +1106,9 @@ function onDpiScaleChange(scale: string) {
 .color-picker-item input[type="color"] {
   border: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.6); padding: 2px;
   width: 36px; height: 24px; cursor: pointer; border-radius: 4px;
+}
+.reset-row {
+  display: flex; justify-content: flex-end; margin-top: 8px;
 }
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }

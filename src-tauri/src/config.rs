@@ -63,7 +63,7 @@ fn default_true() -> bool {
 }
 
 fn default_theme_color() -> String {
-    "#6c5ce7".into()
+    "#009faa".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,7 +92,7 @@ impl Default for PersonalizationConfig {
             remake_card_color: "#28a2a2a2".into(),
             light_deaths_number_color: "#ffb60000".into(),
             dark_deaths_number_color: "#ffff8d8d".into(),
-            theme_color: "#6c5ce7".into(),
+            theme_color: "#009faa".into(),
         }
     }
 }
