@@ -1229,11 +1229,11 @@ const gameDetails = computed(() => {
 }
 
 .mini-match-card.selected.win {
-  border: 2px solid #22c55e;
+  border: 2px solid var(--win-color);
 }
 
 .mini-match-card.selected.lose {
-  border: 2px solid #ef4444;
+  border: 2px solid var(--loss-color);
 }
 
 .mini-avatar {
@@ -1737,7 +1737,7 @@ const gameDetails = computed(() => {
   height: 26px;
   border-radius: 3px;
   overflow: hidden;
-  border: 1px solid #e6a23c;
+  border: 1px solid var(--accent-color, #e6a23c);
   background-color: rgba(230,162,60,0.03);
 }
 

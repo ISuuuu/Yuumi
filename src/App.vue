@@ -608,6 +608,11 @@ async function handleClose() {
   --loss-border: rgba(239, 68, 68, 0.18);
   --loss-glow: rgba(239, 68, 68, 0.08);
   --death-color: #ef4444; /* 死亡数字颜色，可通过设置覆盖 */
+  --accent-color: #e6a23c; /* 强调/功能色（橙色） */
+  --accent-bg: rgba(230, 162, 60, 0.08);
+  --tier-blue: #3b82f6; /* 段位/KDA 中等层级的蓝色 */
+  --tier-blue-bg: rgba(59, 130, 246, 0.1);
+  --tier-blue-border: rgba(59, 130, 246, 0.15);
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
   --radius-sm: 4px;
@@ -646,6 +651,11 @@ async function handleClose() {
   --loss-border: rgba(239, 68, 68, 0.25);
   --loss-glow: rgba(239, 68, 68, 0.1);
   --death-color: #f87171;
+  --accent-color: #f59e0b; /* 强调/功能色（橙色），暗色用琥珀色更柔和 */
+  --accent-bg: rgba(245, 158, 11, 0.12);
+  --tier-blue: #60a5fa; /* 暗色蓝色调亮一些以保证可读性 */
+  --tier-blue-bg: rgba(96, 165, 250, 0.12);
+  --tier-blue-border: rgba(96, 165, 250, 0.2);
 
   --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.2);
   --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.3);

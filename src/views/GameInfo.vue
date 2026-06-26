@@ -741,16 +741,16 @@ watch(activeTab, () => loadAllPlayers());
   white-space: nowrap;
 }
 .pc-winrate-badge.wr-high {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
+  color: var(--win-color);
+  background: var(--win-bg);
 }
 .pc-winrate-badge.wr-medium {
-  color: #3b82f6;
-  background: rgba(59, 130, 246, 0.1);
+  color: var(--tier-blue);
+  background: var(--tier-blue-bg);
 }
 .pc-winrate-badge.wr-low {
-  color: #6b7280;
-  background: rgba(107, 114, 128, 0.1);
+  color: var(--text-dimmed);
+  background: var(--hover-bg);
 }
 
 .pc-meta-row {
@@ -766,24 +766,24 @@ watch(activeTab, () => loadAllPlayers());
   border-radius: 4px;
 }
 .pc-kda-badge.kda-orange {
-  color: #f97316;
-  background: rgba(249, 115, 22, 0.12);
-  border: 1px solid rgba(249, 115, 22, 0.2);
+  color: var(--accent-color);
+  background: var(--accent-bg);
+  border: 1px solid rgba(230, 162, 60, 0.2);
   font-weight: 700;
 }
 .pc-kda-badge.kda-blue {
-  color: #3b82f6;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.15);
+  color: var(--tier-blue);
+  background: var(--tier-blue-bg);
+  border: 1px solid var(--tier-blue-border);
 }
 .pc-kda-badge.kda-green {
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.15);
+  color: var(--win-color);
+  background: var(--win-bg);
+  border: 1px solid var(--win-border);
 }
 .pc-kda-badge.kda-gray {
-  color: var(--text-muted);
-  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-dimmed);
+  background: var(--hover-bg);
 }
 
 /* 排位段位格栅化 */
@@ -868,11 +868,11 @@ watch(activeTab, () => loadAllPlayers());
   margin-top: 2px;
 }
 .summary-wins {
-  color: #3b82f6;
+  color: var(--win-color);
   font-weight: bold;
 }
 .summary-losses {
-  color: #ef4444;
+  color: var(--loss-color);
   font-weight: bold;
 }
 
@@ -929,25 +929,25 @@ watch(activeTab, () => loadAllPlayers());
 
 /* 胜/败/重赛 玻璃渐变色背景 */
 .col-match.win {
-  border-color: rgba(59, 130, 246, 0.12);
+  border-color: var(--win-border);
 }
 .col-match.win:hover {
-  border-color: rgba(59, 130, 246, 0.3);
-  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.1);
+  border-color: var(--win-color);
+  box-shadow: var(--win-glow);
   transform: translateY(-1px);
 }
 
 .col-match.lose {
-  border-color: rgba(239, 68, 68, 0.12);
+  border-color: var(--loss-border);
 }
 .col-match.lose:hover {
-  border-color: rgba(239, 68, 68, 0.3);
-  box-shadow: 0 4px 10px rgba(239, 68, 68, 0.1);
+  border-color: var(--loss-color);
+  box-shadow: var(--loss-glow);
   transform: translateY(-1px);
 }
 
 .col-match.remake {
-  border-color: rgba(107, 114, 128, 0.12);
+  border-color: var(--border-color);
 }
 
 /* 头像区域 */
