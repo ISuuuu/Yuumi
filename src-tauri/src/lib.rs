@@ -112,15 +112,21 @@ pub fn run() {
             {
                 let cfg_snapshot = app_config_arc.blocking_read();
                 let general = &cfg_snapshot.general;
-                if general.enable_signalr_hub
-                    && !general.signalr_server_url.is_empty()
-                    && !general.signalr_user_id.is_empty()
-                {
+                let functions = &cfg_snapshot.functions;
+                if functions.lcu_realtime_enabled && !general.upload_api_url.is_empty() {
+                    let server_url = general.upload_api_url.clone();
+                    let user_id = if !general.signalr_user_id.is_empty() {
+                        general.signalr_user_id.clone()
+                    } else if !functions.lcu_user_id.is_empty() {
+                        functions.lcu_user_id.clone()
+                    } else {
+                        "lcu_user_001".to_string()
+                    };
                     log::info!("启动 SignalR Hub 远程反代");
                     signalr::start(
                         app.handle().clone(),
-                        general.signalr_server_url.clone(),
-                        general.signalr_user_id.clone(),
+                        server_url,
+                        user_id,
                     );
                 }
             }
@@ -253,6 +259,7 @@ pub fn run() {
             get_game_data_assets,
             upload::upload_single_match,
             upload::batch_upload_matches,
+            signalr::get_signalr_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -442,22 +449,43 @@ async fn get_config(app_state: tauri::State<'_, AppState>) -> Result<config::App
 async fn update_config(
     new_config: config::AppConfig,
     app_state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    let old_enable = {
+    let (old_enable, old_mode, old_realtime, old_api_url, old_user_id) = {
         let lock = app_state.config.read().await;
-        lock.functions.enable_auto_create_lobby
-    };
-    let old_mode = {
-        let lock = app_state.config.read().await;
-        lock.functions.default_game_mode
+        (
+            lock.functions.enable_auto_create_lobby,
+            lock.functions.default_game_mode,
+            lock.functions.lcu_realtime_enabled,
+            lock.general.upload_api_url.clone(),
+            if !lock.general.signalr_user_id.is_empty() {
+                lock.general.signalr_user_id.clone()
+            } else if !lock.functions.lcu_user_id.is_empty() {
+                lock.functions.lcu_user_id.clone()
+            } else {
+                "lcu_user_001".to_string()
+            }
+        )
     };
 
     let enable_changed = new_config.functions.enable_auto_create_lobby != old_enable;
     let mode_changed = new_config.functions.default_game_mode != old_mode;
 
+    let new_user_id = if !new_config.general.signalr_user_id.is_empty() {
+        new_config.general.signalr_user_id.clone()
+    } else if !new_config.functions.lcu_user_id.is_empty() {
+        new_config.functions.lcu_user_id.clone()
+    } else {
+        "lcu_user_001".to_string()
+    };
+
+    let signalr_changed = new_config.functions.lcu_realtime_enabled != old_realtime
+        || new_config.general.upload_api_url != old_api_url
+        || new_user_id != old_user_id;
+
     {
         let mut cfg = app_state.config.write().await;
-        *cfg = new_config;
+        *cfg = new_config.clone();
         cfg.save();
     }
 
@@ -465,6 +493,17 @@ async fn update_config(
         let _ = app_state
             .gameflow_tx
             .try_send(crate::agents::auto_match::GameflowEvent::ResetLobbyState);
+    }
+
+    if signalr_changed {
+        if new_config.functions.lcu_realtime_enabled && !new_config.general.upload_api_url.is_empty() {
+            log::info!("配置更新，重新启动 SignalR Hub 远程反代");
+            let server_url = new_config.general.upload_api_url.clone();
+            signalr::start(app_handle, server_url, new_user_id);
+        } else {
+            log::info!("配置更新，停止 SignalR Hub 远程反代");
+            signalr::stop().await;
+        }
     }
 
     Ok(())
