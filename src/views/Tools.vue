@@ -29,6 +29,19 @@ function toggleCollapse(panelName: string) {
   activeCollapse.value = activeCollapse.value === panelName ? null : panelName;
 }
 
+// 自动选人/禁人/技能分路配置展示状态
+const hoverActiveLane = ref<'default' | 'top' | 'jug' | 'mid' | 'bot' | 'sup'>('default');
+const banActiveLane = ref<'default' | 'top' | 'jug' | 'mid' | 'bot' | 'sup'>('default');
+const spellActiveLane = ref<'default' | 'top' | 'jug' | 'mid' | 'bot' | 'sup'>('default');
+const LANE_OPTIONS = [
+  { value: 'default', label: '默认' },
+  { value: 'top', label: '上单 (Top)' },
+  { value: 'jug', label: '打野 (Jungle)' },
+  { value: 'mid', label: '中单 (Mid)' },
+  { value: 'bot', label: '下路 (Bot)' },
+  { value: 'sup', label: '辅助 (Support)' }
+] as const;
+
 // 个人主页状态项
 const statusInput = ref("");
 const skinIdInput = ref<number | null>(null);
@@ -209,6 +222,8 @@ function onPickerChange() {
 // 自动保存设置函数
 async function triggerAutoSave() {
   if (!config.value) return;
+  // 同步自动选用开关和自动亮起开关，避免后台逻辑不触发
+  config.value.Functions.EnableAutoSelectChampion = config.value.Functions.EnableAutoHoverChampion;
   try {
     await updateConfig(config.value);
   } catch (e) {
@@ -532,7 +547,7 @@ async function handleToggleLockGameSettings() {
         </div>
       </div>
 
-      <!-- 自动亮起英雄 -->
+      <!-- 自动亮起/选用英雄 -->
       <div class="collapse-item border-bottom">
         <div class="collapse-header" @click="toggleCollapse('autohover')">
           <div class="collapse-left">
@@ -543,7 +558,7 @@ async function handleToggleLockGameSettings() {
               </svg>
             </div>
             <div class="title-container">
-              <h3 class="card-title">自动亮起英雄</h3>
+              <h3 class="card-title">自动选用/预选英雄</h3>
               <span class="card-desc">在你进入英雄选择时自动亮起/预选英雄</span>
             </div>
           </div>
@@ -558,19 +573,37 @@ async function handleToggleLockGameSettings() {
           <div class="setting-row">
             <span class="setting-label">启用自动亮起:</span>
             <div :class="['toggle-switch', config.Functions.EnableAutoHoverChampion ? 'on' : 'off']" @click="config.Functions.EnableAutoHoverChampion = !config.Functions.EnableAutoHoverChampion; triggerAutoSave()">
-              <span class="toggle-text">{{ config.Functions.EnableAutoHoverChampion ? '开' : '关' }}</span>
+              <span class="toggle-text{{ config.Functions.EnableAutoHoverChampion ? ' on' : '' }}">{{ config.Functions.EnableAutoHoverChampion ? '开' : '关' }}</span>
               <span class="toggle-slider"></span>
             </div>
           </div>
           <div class="setting-row">
-            <span class="setting-label">在结束时确认选择:</span>
+            <span class="setting-label">在结束时确认选择 (防秒退):</span>
             <div :class="['toggle-switch', config.Functions.AutoSelectConfirmOnTimeout ? 'on' : 'off']" @click="config.Functions.AutoSelectConfirmOnTimeout = !config.Functions.AutoSelectConfirmOnTimeout; triggerAutoSave()">
               <span class="toggle-text">{{ config.Functions.AutoSelectConfirmOnTimeout ? '开' : '关' }}</span>
               <span class="toggle-slider"></span>
             </div>
           </div>
+          
+          <!-- 分路选择选项卡 -->
+          <div class="lane-tab-group">
+            <button 
+              v-for="lane in LANE_OPTIONS" 
+              :key="lane.value" 
+              :class="['lane-tab-btn', { active: hoverActiveLane === lane.value }]" 
+              @click="hoverActiveLane = lane.value"
+            >
+              {{ lane.label }}
+            </button>
+          </div>
+
           <div class="setting-picker-row">
-            <ChampionPicker v-model="config.Functions.AutoSelectChampion" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-if="hoverActiveLane === 'default'" v-model="config.Functions.AutoSelectChampion" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-else-if="hoverActiveLane === 'top'" v-model="config.Functions.AutoSelectChampionTop" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-else-if="hoverActiveLane === 'jug'" v-model="config.Functions.AutoSelectChampionJug" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-else-if="hoverActiveLane === 'mid'" v-model="config.Functions.AutoSelectChampionMid" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-else-if="hoverActiveLane === 'bot'" v-model="config.Functions.AutoSelectChampionBot" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-else-if="hoverActiveLane === 'sup'" v-model="config.Functions.AutoSelectChampionSup" :maxCount="1" @update:modelValue="onPickerChange" />
           </div>
         </div>
       </div>
@@ -606,8 +639,37 @@ async function handleToggleLockGameSettings() {
               <span class="toggle-slider"></span>
             </div>
           </div>
+          <div class="setting-row">
+            <span class="setting-label">避开队友已预选的英雄 (假禁用):</span>
+            <div :class="['toggle-switch', config.Functions.PretendBan ? 'on' : 'off']" @click="config.Functions.PretendBan = !config.Functions.PretendBan; triggerAutoSave()">
+              <span class="toggle-text">{{ config.Functions.PretendBan ? '开' : '关' }}</span>
+              <span class="toggle-slider"></span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">自动禁用前等待延迟 (秒):</span>
+            <input type="number" v-model.number="config.Functions.AutoBanDelay" class="number-input" min="0" max="15" step="0.5" @change="triggerAutoSave" />
+          </div>
+
+          <!-- 分路选择选项卡 -->
+          <div class="lane-tab-group">
+            <button 
+              v-for="lane in LANE_OPTIONS" 
+              :key="lane.value" 
+              :class="['lane-tab-btn', { active: banActiveLane === lane.value }]" 
+              @click="banActiveLane = lane.value"
+            >
+              {{ lane.label }}
+            </button>
+          </div>
+
           <div class="setting-picker-row">
-            <ChampionPicker v-model="config.Functions.AutoBanChampion" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-if="banActiveLane === 'default'" v-model="config.Functions.AutoBanChampion" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-else-if="banActiveLane === 'top'" v-model="config.Functions.AutoBanChampionTop" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-else-if="banActiveLane === 'jug'" v-model="config.Functions.AutoBanChampionJug" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-else-if="banActiveLane === 'mid'" v-model="config.Functions.AutoBanChampionMid" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-else-if="banActiveLane === 'bot'" v-model="config.Functions.AutoBanChampionBot" :maxCount="1" @update:modelValue="onPickerChange" />
+            <ChampionPicker v-else-if="banActiveLane === 'sup'" v-model="config.Functions.AutoBanChampionSup" :maxCount="1" @update:modelValue="onPickerChange" />
           </div>
         </div>
       </div>
@@ -643,8 +705,26 @@ async function handleToggleLockGameSettings() {
               <span class="toggle-slider"></span>
             </div>
           </div>
+
+          <!-- 分路选择选项卡 -->
+          <div class="lane-tab-group">
+            <button 
+              v-for="lane in LANE_OPTIONS" 
+              :key="lane.value" 
+              :class="['lane-tab-btn', { active: spellActiveLane === lane.value }]" 
+              @click="spellActiveLane = lane.value"
+            >
+              {{ lane.label }}
+            </button>
+          </div>
+
           <div class="setting-picker-row">
-            <SpellPicker v-model="config.Functions.AutoSetSummonerSpell" :maxCount="2" @update:modelValue="onPickerChange" />
+            <SpellPicker v-if="spellActiveLane === 'default'" v-model="config.Functions.AutoSetSummonerSpell" @update:modelValue="onPickerChange" />
+            <SpellPicker v-else-if="spellActiveLane === 'top'" v-model="config.Functions.AutoSetSummonerSpellTop" @update:modelValue="onPickerChange" />
+            <SpellPicker v-else-if="spellActiveLane === 'jug'" v-model="config.Functions.AutoSetSummonerSpellJug" @update:modelValue="onPickerChange" />
+            <SpellPicker v-else-if="spellActiveLane === 'mid'" v-model="config.Functions.AutoSetSummonerSpellMid" @update:modelValue="onPickerChange" />
+            <SpellPicker v-else-if="spellActiveLane === 'bot'" v-model="config.Functions.AutoSetSummonerSpellBot" @update:modelValue="onPickerChange" />
+            <SpellPicker v-else-if="spellActiveLane === 'sup'" v-model="config.Functions.AutoSetSummonerSpellSup" @update:modelValue="onPickerChange" />
           </div>
         </div>
       </div>
@@ -1376,10 +1456,11 @@ async function handleToggleLockGameSettings() {
 }
 
 .text-input, .number-input {
-  padding: 8px 12px;
+  padding: 10px 12px 6px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   font-size: 0.82rem;
+  line-height: 1;
   outline: none;
   background-color: rgba(255, 255, 255, 0.6);
   transition: all 0.2s ease;
@@ -1970,5 +2051,42 @@ async function handleToggleLockGameSettings() {
 .toast-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(-8px);
+}
+
+.lane-tab-group {
+  display: flex;
+  background: rgba(0, 0, 0, 0.03);
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  margin: 14px 0 8px;
+  gap: 4px;
+  width: 100%;
+}
+
+.lane-tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.lane-tab-btn:hover {
+  color: var(--text-color);
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.lane-tab-btn.active {
+  color: var(--primary-color);
+  background: white;
+  box-shadow: var(--shadow-sm);
 }
 </style>
