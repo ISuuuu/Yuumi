@@ -105,6 +105,37 @@ jobs:
       - name: Build Tauri (Windows)
         run: pnpm tauri build
 
+      - name: Generate latest.json for updater
+        shell: pwsh
+        run: |
+          $VERSION = "${{ needs.create-release.outputs.version }}" -replace '^v', ''
+          $TAG = "${{ needs.create-release.outputs.version }}"
+          $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1
+          $EXE_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -Exclude "*.exe.sig" | Select-Object -First 1
+
+          if (-not $SIG_FILE -or -not $EXE_FILE) {
+            Write-Error "Missing .sig or .exe file in bundle/nsis/"
+            exit 1
+          }
+
+          $SIGNATURE = Get-Content $SIG_FILE.FullName -Raw
+          $PUB_DATE = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+
+          $LATEST_JSON = @{
+            version = $VERSION
+            notes = "See the assets to download this version and install."
+            pub_date = $PUB_DATE
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = $SIGNATURE.Trim()
+                url = "https://github.com/Isuuuu/yuumi/releases/download/${TAG}/$($EXE_FILE.Name)"
+              }
+            }
+          }
+
+          $LATEST_JSON | ConvertTo-Json -Depth 10 | Set-Content "latest.json" -Encoding UTF8
+          Write-Host "Generated latest.json"
+
       - name: Pack portable zip
         shell: pwsh
         run: |
@@ -138,20 +169,6 @@ jobs:
           name: yuumi-windows-portable
           path: ./Yuumi_v*_portable.zip
           retention-days: 7
-
-      - name: Find and upload latest.json for updater
-        shell: pwsh
-        run: |
-          $latestFile = Get-ChildItem -Path "src-tauri/target/release/bundle" -Filter "latest.json" -Recurse | Select-Object -First 1
-          if ($latestFile) {
-            Write-Host "Found latest.json at: $($latestFile.FullName)"
-            Copy-Item $latestFile.FullName "./latest.json"
-          } else {
-            Write-Error "latest.json not found in bundle directory!"
-            Write-Host "Bundle directory contents:"
-            Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse | ForEach-Object { Write-Host $_.FullName }
-            exit 1
-          }
 
       - name: Upload latest.json artifact
         uses: actions/upload-artifact@v4
