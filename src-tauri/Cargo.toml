@@ -54,3 +54,6 @@ rfd = "0.15"
 # 日志
 log = { version = "0.4", features = ["std"] }
 chrono = "0.4"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
