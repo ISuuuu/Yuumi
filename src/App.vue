@@ -8,7 +8,7 @@ import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { SummonerDisplay } from "./api/lcu";
+import type { SummonerDisplay, AppConfig } from "./api/lcu";
 import Home from "./views/Home.vue";
 import Career from "./views/Career.vue";
 import Search from "./views/Search.vue";
@@ -22,6 +22,8 @@ import opggIcon from "./assets/opgg.svg";
 const store = useLcuStore();
 const { gamePhase } = storeToRefs(store);
 const currentPage = ref("home");
+const appConfig = ref<AppConfig | null>(null);
+provide("appConfig", appConfig);
 const pageHistory: string[] = [];
 const isSidebarExpanded = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
@@ -86,16 +88,17 @@ onMounted(async () => {
 
   // 自动启动 LOL 客户端并按需显示主窗口
   try {
-    const cfg = await fetchConfig();
-    if (cfg.General?.EnableStartLolWithApp) {
+    appConfig.value = await fetchConfig();
+    const cfg = appConfig.value;
+    if (cfg?.General?.EnableStartLolWithApp) {
       invoke("launch_lol_client").catch((e: any) => console.warn("自动启动 LOL 失败:", e));
     }
     // 如果没有开启“游戏开始最小化”（静默启动），则在组件挂载并完成配置获取后显示窗口
-    if (!cfg.General?.EnableGameStartMinimize) {
+    if (!cfg?.General?.EnableGameStartMinimize) {
       await getCurrentWindow().show();
     }
     // 无论是否静默启动，都在配置加载完后尝试应用一次云母效果，防止窗口创建时隐藏导致 DWM 特效应用失败
-    if (cfg.Personalization?.MicaEnabled) {
+    if (cfg?.Personalization?.MicaEnabled) {
       invoke("set_mica_effect", { enabled: true }).catch((e: any) => console.warn("应用云母效果失败:", e));
     }
   } catch (e) {
@@ -128,6 +131,16 @@ async function openOpggWindow() {
     await existing.setFocus();
     return;
   }
+
+  // 从配置中读取是否置顶窗口
+  let alwaysOnTop = false;
+  try {
+    const cfg = appConfig.value || await fetchConfig();
+    alwaysOnTop = cfg.Functions?.EnableOpggOnTop ?? false;
+  } catch (e) {
+    console.warn("加载置顶配置失败，使用默认值:", e);
+  }
+
   // 获取当前窗口所在屏幕（显示器），将 OP.GG 窗口放置在屏幕右侧
   const monitor = await currentMonitor();
   if (monitor) {
@@ -144,6 +157,7 @@ async function openOpggWindow() {
       decorations: true,
       resizable: true,
       center: false,
+      alwaysOnTop,
     });
   } else {
     // 兜底：获取不到屏幕信息时，放在主窗口右侧
@@ -159,6 +173,7 @@ async function openOpggWindow() {
       decorations: true,
       resizable: true,
       center: false,
+      alwaysOnTop,
     });
   }
 }
@@ -214,7 +229,7 @@ async function loadLcuState() {
 
   // 5. 初始化加载主题色
   try {
-    const cfg = await fetchConfig();
+    const cfg = appConfig.value || await fetchConfig();
     if (cfg && cfg.Personalization && cfg.Personalization.ThemeColor) {
       updateThemeColor(cfg.Personalization.ThemeColor);
     }
@@ -261,6 +276,20 @@ watch(gamePhase, (phase: string) => {
   if (phase === "ChampSelect" || phase === "GameStart" || phase === "InProgress") {
     console.log("[watch gamePhase] navigating to gameinfo");
     currentPage.value = "gameinfo";
+
+    if (phase === "ChampSelect") {
+      const runAutoShow = async () => {
+        try {
+          const cfg = appConfig.value || await fetchConfig();
+          if (cfg?.Functions?.AutoShowOpgg) {
+            openOpggWindow();
+          }
+        } catch (e) {
+          console.warn("读取配置用于自动弹出 OP.GG 失败:", e);
+        }
+      };
+      runAutoShow();
+    }
   }
 });
 
