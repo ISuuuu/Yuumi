@@ -172,10 +172,10 @@ impl Log for Logger {
 /// - log_level: 20=Debug, 30=Warn, 40=Info
 pub fn init(log_level: u32) {
     let level = match log_level {
-        0..=20 => LevelFilter::Debug,
-        21..=30 => LevelFilter::Warn,
-        31..=40 => LevelFilter::Info,
-        _ => LevelFilter::Info,
+        0 | 10 => LevelFilter::Debug,
+        1 | 20 | 30 | 40 => LevelFilter::Info,
+        2 => LevelFilter::Error,
+        _ => LevelFilter::Debug, // Default to Debug as requested
     };
 
     let log_dir = std::env::current_exe()

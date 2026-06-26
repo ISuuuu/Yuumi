@@ -43,7 +43,7 @@ impl Default for GeneralConfig {
             enable_close_to_tray: None,
             enable_game_start_minimize: false,
             enable_check_update: true,
-            log_level: 40,
+            log_level: 0,
             enable_github_proxy: false,
             github_proxy_addr: "127.0.0.1:10809".into(),
             enable_opgg_proxy: false,
