@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/nicklasoverworlds/tauri/refs/heads/dev/crates/tauri-utils/schema.json",
   "identifier": "default",
   "description": "Capability for all windows",
-  "windows": ["*"],
+  "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-set-title",

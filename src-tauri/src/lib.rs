@@ -250,6 +250,7 @@ pub fn run() {
             tools::set_game_settings_readonly,
             get_config,
             update_config,
+            get_config_load_error,
             get_close_to_tray,
             get_lcu_connection_info,
             detect_lol_path,
@@ -442,6 +443,12 @@ pub fn build_auth_header(token: &str) -> String {
 async fn get_config(app_state: tauri::State<'_, AppState>) -> Result<config::AppConfig, String> {
     let cfg = app_state.config.read().await;
     Ok(cfg.clone())
+}
+
+/// 读取配置加载错误信息（前端启动时调用，读取后自动清除错误文件）
+#[tauri::command]
+fn get_config_load_error() -> Option<String> {
+    config::AppConfig::take_load_error()
 }
 
 /// 更新配置（接收完整 AppConfig JSON，写入内存并持久化）

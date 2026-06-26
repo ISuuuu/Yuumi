@@ -65,12 +65,23 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
 
       - name: Install pnpm
         uses: pnpm/action-setup@v2
         with:
           version: 8
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PNPM_STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -78,7 +89,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: './src-tauri -> target'
+          workspaces: './src-tauri'
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -94,15 +105,102 @@ jobs:
       - name: Build Tauri (Windows)
         run: pnpm tauri build
 
-      - name: Upload Windows artifacts
+      - name: Generate latest.json for updater
+        shell: pwsh
+        run: |
+          # 调试：打印 bundle 目录内容
+          Write-Host "=== Bundle directory contents ==="
+          if (Test-Path "src-tauri/target/release/bundle") {
+            Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File | ForEach-Object { Write-Host $_.FullName }
+          } else {
+            Write-Host "Bundle directory does not exist!"
+            exit 1
+          }
+
+          $VERSION = "${{ needs.create-release.outputs.version }}" -replace '^v', ''
+          $TAG = "${{ needs.create-release.outputs.version }}"
+
+          # 找 exe（排除 .sig）
+          $EXE_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | Where-Object { $_.Name -notlike "*.sig" } | Select-Object -First 1
+
+          if (-not $EXE_FILE) {
+            Write-Error "No .exe found in bundle/nsis/"
+            exit 1
+          }
+
+          # 找 .sig 文件，没有就自动生成
+          $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1
+
+          if (-not $SIG_FILE) {
+            Write-Host "No .sig found, generating..."
+            npx --yes tauri signer sign $EXE_FILE.FullName --private-key "${{ env.TAURI_SIGNING_PRIVATE_KEY }}" --password "${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
+            $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1
+          }
+
+          if (-not $SIG_FILE) {
+            Write-Error "Failed to generate .sig file"
+            exit 1
+          }
+
+          $SIGNATURE = Get-Content $SIG_FILE.FullName -Raw
+          $PUB_DATE = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+
+          $LATEST_JSON = @{
+            version = $VERSION
+            notes = "See the assets to download this version and install."
+            pub_date = $PUB_DATE
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = $SIGNATURE.Trim()
+                url = "https://github.com/Isuuuu/yuumi/releases/download/${TAG}/$($EXE_FILE.Name)"
+              }
+            }
+          }
+
+          $LATEST_JSON | ConvertTo-Json -Depth 10 | Set-Content "latest.json" -Encoding UTF8
+          Write-Host "Generated latest.json"
+          Get-Content "latest.json" | Write-Host
+
+      - name: Pack portable zip
+        shell: pwsh
+        run: |
+          $VERSION = "${{ needs.create-release.outputs.version }}" -replace '^v', ''
+          $PORTABLE_DIR = "Yuumi_portable"
+          $ZIP_NAME = "Yuumi_v${VERSION}_portable.zip"
+
+          # 创建便携版目录，复制 exe 和 resources
+          New-Item -ItemType Directory -Force -Path $PORTABLE_DIR
+          Copy-Item "src-tauri/target/release/yuumi.exe" "$PORTABLE_DIR/"
+          if (Test-Path "src-tauri/target/release/resources") {
+            Copy-Item "src-tauri/target/release/resources" "$PORTABLE_DIR/" -Recurse
+          }
+
+          # 打包成 zip
+          Compress-Archive -Path "$PORTABLE_DIR/*" -DestinationPath $ZIP_NAME -Force
+          Write-Host "Portable zip created: $ZIP_NAME"
+
+      - name: Upload Windows installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: yuumi-windows
+          name: yuumi-windows-installer
           path: |
             ./src-tauri/target/release/bundle/nsis/*.exe
-            ./src-tauri/target/release/bundle/msi/*.msi
           retention-days: 7
           if-no-files-found: ignore
+
+      - name: Upload Windows portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yuumi-windows-portable
+          path: ./Yuumi_v*_portable.zip
+          retention-days: 7
+
+      - name: Upload latest.json artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yuumi-updater
+          path: ./latest.json
+          retention-days: 7
 
   publish-release:
     needs: [create-release, build-windows]
@@ -117,7 +215,8 @@ jobs:
         id: changelog
         run: |
           TAG_NAME="${{ needs.create-release.outputs.version }}"
-          PREV_TAG=$(git describe --tags --abbrev=0 "$TAG_NAME^" 2>/dev/null || echo "")
+          # 获取上一个 tag
+          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${TAG_NAME}$" | head -1 || echo "")
           if [ -z "$PREV_TAG" ]; then
             CHANGELOG=$(git log --oneline --format="- %s" -20)
           else
@@ -129,24 +228,35 @@ jobs:
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Download Windows artifacts
+      - name: Download Windows installer artifacts
         uses: actions/download-artifact@v4
         with:
-          name: yuumi-windows
-          path: ./artifacts
+          name: yuumi-windows-installer
+          path: ./artifacts/installer
+
+      - name: Download Windows portable artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: yuumi-windows-portable
+          path: ./artifacts/portable
+
+      - name: Download updater artifact (latest.json)
+        uses: actions/download-artifact@v4
+        with:
+          name: yuumi-updater
+          path: ./artifacts/updater
 
       - name: List artifacts
-        run: ls -la ./artifacts
+        run: ls -la ./artifacts/installer ./artifacts/portable ./artifacts/updater
 
       - name: Publish release
         uses: ncipollo/release-action@v1
         with:
           allowUpdates: true
           artifactErrorsFailBuild: true
-          replacesArtifacts: true
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           prerelease: false
           releaseId: ${{ needs.create-release.outputs.release_id }}
           body: "${{ steps.changelog.outputs.notes }}"
-          artifacts: "./artifacts/*"
+          artifacts: "./artifacts/installer/*,./artifacts/portable/*,./artifacts/updater/latest.json"

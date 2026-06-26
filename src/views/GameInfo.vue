@@ -18,6 +18,101 @@ const appConfig = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | 
 
 const currentSummonerId = ref<number>(0);
 
+// ---- 组队开黑检测 ----
+// 预组队颜色方案（参考 Seraphine，扩展到 5 组）
+const PREMADE_COLORS = [
+  { border: '#ff8c00', bg: 'rgba(255, 140, 0, 0.08)', dot: '#ff8c00' },   // 橙
+  { border: '#ec4899', bg: 'rgba(236, 72, 153, 0.08)', dot: '#ec4899' },   // 粉
+  { border: '#3b82f6', bg: 'rgba(59, 130, 246, 0.08)', dot: '#3b82f6' },   // 蓝
+  { border: '#22c55e', bg: 'rgba(34, 197, 94, 0.08)', dot: '#22c55e' },    // 绿
+  { border: '#a855f7', bg: 'rgba(168, 85, 247, 0.08)', dot: '#a855f7' },   // 紫
+];
+
+// summonerId → colorIndex（-1 = 单排，0+ = 组队颜色索引）
+const premadeColorsMy = ref<Record<number, number>>({});
+const premadeColorsTheir = ref<Record<number, number>>({});
+
+/** 根据 teamParticipantId 分组，计算组队颜色映射 */
+function computePremadeColors(team: any[]): Record<number, number> {
+  if (!team || team.length === 0) return {};
+  const tIdToSIds: Record<number, number[]> = {};
+
+  for (const p of team) {
+    const sid = p.summonerId;
+    const tpid = p.teamParticipantId;
+    if (!sid || tpid === undefined || tpid === null) continue;
+    if (!tIdToSIds[tpid]) tIdToSIds[tpid] = [];
+    tIdToSIds[tpid].push(sid);
+  }
+
+  const result: Record<number, number> = {};
+  let currentColor = 0;
+
+  for (const ids of Object.values(tIdToSIds)) {
+    if (ids.length === 1) {
+      result[ids[0]] = -1; // 单排
+    } else {
+      for (const id of ids) result[id] = currentColor;
+      currentColor++;
+    }
+  }
+  return result;
+}
+
+/** 从 gameflow session 获取组队信息（ChampSelect 阶段使用） */
+async function fetchPremadeColors() {
+  try {
+    const resp = await lcuRequest<any>("GET", "/lol-gameflow/v1/session");
+    if (!resp.success || !resp.data?.gameData) return;
+    const { teamOne, teamTwo } = resp.data.gameData;
+    if (!teamOne || !teamTwo || teamOne.length === 0) return;
+
+    const isTeamOne = teamOne.some((p: any) => p.summonerId === currentSummonerId.value);
+    const ally = isTeamOne ? teamOne : teamTwo;
+    const enemy = isTeamOne ? teamTwo : teamOne;
+    premadeColorsMy.value = computePremadeColors(ally);
+    premadeColorsTheir.value = computePremadeColors(enemy);
+  } catch { /* ignore */ }
+}
+
+/** 获取玩家组队颜色索引 */
+function getPremadeIdx(summonerId: number, side: 'my' | 'their'): number {
+  const colors = side === 'my' ? premadeColorsMy.value : premadeColorsTheir.value;
+  return colors[summonerId] ?? -1;
+}
+
+/** 左侧玩家卡片组队样式 */
+function getPremadeCardStyle(summonerId: number, side: 'my' | 'their'): Record<string, string> {
+  const idx = getPremadeIdx(summonerId, side);
+  if (idx < 0) return {};
+  const c = PREMADE_COLORS[idx % PREMADE_COLORS.length];
+  return { borderLeftColor: c.border, borderLeftWidth: '3px' };
+}
+
+/** 右侧列头组队样式 */
+function getPremadeColumnStyle(summonerId: number, side: 'my' | 'their'): Record<string, string> {
+  const idx = getPremadeIdx(summonerId, side);
+  if (idx < 0) return {};
+  const c = PREMADE_COLORS[idx % PREMADE_COLORS.length];
+  return { borderTopColor: c.border, borderTopWidth: '3px' };
+}
+
+/** 是否有组队信息 */
+const hasPremadeInfo = computed(() => {
+  const colors = activeTab.value === 'my' ? premadeColorsMy.value : premadeColorsTheir.value;
+  return Object.keys(colors).length > 0;
+});
+
+/** 当前 Tab 的组队颜色索引列表（去重、排序） */
+const premadeLegendIndices = computed(() => {
+  const colors = activeTab.value === 'my' ? premadeColorsMy.value : premadeColorsTheir.value;
+  const indices = new Set<number>();
+  for (const v of Object.values(colors)) {
+    if (v >= 0) indices.add(v);
+  }
+  return Array.from(indices).sort((a, b) => a - b);
+});
+
 // 当前游戏模式对应的队列 ID（用于过滤战绩）
 const currentQueueId = ref<number | null>(null);
 
@@ -261,6 +356,10 @@ async function loadFromGameflowSession() {
       displayName: p.summonerName || p.displayName,
     }));
 
+    // 计算组队颜色
+    premadeColorsMy.value = computePremadeColors(allyTeam);
+    premadeColorsTheir.value = computePremadeColors(enemyTeam);
+
     try {
       localStorage.setItem("yuumi_last_gameflow_my_team", JSON.stringify(gameflowMyTeam.value));
       localStorage.setItem("yuumi_last_gameflow_their_team", JSON.stringify(gameflowTheirTeam.value));
@@ -342,6 +441,10 @@ onMounted(async () => {
       const parsed = JSON.parse(savedPlayerData);
       if (parsed && Object.keys(parsed).length > 0) playerData.value = parsed;
     }
+
+    // 从已加载的队伍数据恢复组队颜色
+    if (gameflowMyTeam.value.length > 0) premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
+    if (gameflowTheirTeam.value.length > 0) premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
   } catch { /* ignore */ }
 
   // 获取当前玩家 summonerId，用于 InProgress 阶段分离队伍
@@ -367,6 +470,8 @@ watch(() => store.gamePhase, (phase: string) => {
     gameflowMyTeam.value = [];
     gameflowTheirTeam.value = [];
     playerData.value = {}; // 清除上一局的旧玩家数据缓存
+    premadeColorsMy.value = {};
+    premadeColorsTheir.value = {};
     try {
       localStorage.removeItem("yuumi_last_gameflow_my_team");
       localStorage.removeItem("yuumi_last_gameflow_their_team");
@@ -383,6 +488,8 @@ watch(() => store.champSelectSession, (session: any) => {
     loading.value = false;
     error.value = "";
     loadAllPlayers();
+    // 获取组队颜色（gameflow session 在选人阶段也有 teamParticipantId）
+    fetchPremadeColors();
   }
 }, { deep: true });
 
@@ -430,6 +537,17 @@ watch(activeTab, () => loadAllPlayers());
           <button :class="['tab-btn', { active: activeTab === 'their' }]" @click="activeTab = 'their'">
             敌方 ({{ theirTeam.length }})
           </button>
+          <div v-if="hasPremadeInfo" class="premade-legend">
+            <span class="legend-label">组队:</span>
+            <span
+              v-for="idx in premadeLegendIndices"
+              :key="idx"
+              class="legend-item"
+            >
+              <span class="legend-dot" :style="{ background: PREMADE_COLORS[idx % PREMADE_COLORS.length].dot }"></span>
+              {{ idx + 1 }}
+            </span>
+          </div>
         </div>
 
         <div class="player-list">
@@ -437,6 +555,8 @@ watch(activeTab, () => loadAllPlayers());
             v-for="(p, i) in currentTeam"
             :key="p.cellId ?? i"
             class="player-card"
+            :class="{ 'premade-card': getPremadeIdx(p.summonerId, activeTab) >= 0 }"
+            :style="getPremadeCardStyle(p.summonerId, activeTab)"
           >
             <div class="pc-avatar-area">
               <!-- 选人阶段：选了英雄或预选了英雄才显示英雄头像 -->
@@ -457,6 +577,12 @@ watch(activeTab, () => loadAllPlayers());
             <div class="pc-info">
               <div class="pc-name-row">
                 <span class="pc-name">
+                  <span
+                    v-if="getPremadeIdx(p.summonerId, activeTab) >= 0"
+                    class="premade-dot"
+                    :style="{ background: PREMADE_COLORS[getPremadeIdx(p.summonerId, activeTab) % PREMADE_COLORS.length].dot }"
+                    :title="`组队 ${getPremadeIdx(p.summonerId, activeTab) + 1}`"
+                  ></span>
                   {{ playerData[p.cellId]?.info?.gameName || playerData[p.cellId]?.info?.displayName || p.displayName || '未知' }}
                   <span v-if="playerData[p.cellId]?.info?.tagLine" class="pc-tag">#{{ playerData[p.cellId].info.tagLine }}</span>
                 </span>
@@ -494,6 +620,7 @@ watch(activeTab, () => loadAllPlayers());
             v-for="(p, i) in currentTeam"
             :key="p.cellId ?? i"
             class="player-column"
+            :style="getPremadeColumnStyle(p.summonerId, activeTab)"
           >
             <div class="col-header">
               <div class="col-header-top">
@@ -633,6 +760,31 @@ watch(activeTab, () => loadAllPlayers());
   background: var(--card-bg);
 }
 
+/* 组队图例 */
+.premade-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: 0.7rem;
+  color: var(--text-dimmed);
+}
+.legend-label {
+  white-space: nowrap;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+}
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
 .player-list {
   display: flex;
   flex-direction: column;
@@ -653,15 +805,30 @@ watch(activeTab, () => loadAllPlayers());
   padding: 12px;
   background: rgba(0, 0, 0, 0.02);
   border: 1px solid var(--border-color);
+  border-left: 3px solid var(--border-color);
   border-radius: 8px;
   transition: all 0.2s ease-in-out;
   box-sizing: border-box;
+}
+.player-card.premade-card {
+  background: var(--premade-bg, rgba(0, 0, 0, 0.02));
 }
 .player-card:hover {
   background: var(--hover-bg);
   transform: translateY(-2px);
   border-color: rgba(var(--primary-color-rgb, 59, 130, 246), 0.3);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 组队标记圆点 */
+.premade-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+  box-shadow: 0 0 4px currentColor;
 }
 
 /* 左侧：头像区域 */
@@ -828,6 +995,7 @@ watch(activeTab, () => loadAllPlayers());
 
 .player-column {
   border-right: 1px solid var(--border-color);
+  border-top: 3px solid var(--border-color);
   display: flex;
   flex-direction: column;
   height: 100%;
