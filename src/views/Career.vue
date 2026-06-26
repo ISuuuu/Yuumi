@@ -793,7 +793,7 @@ const statsSummary = computed(() => {
 }
 
 .death-red {
-  color: var(--loss-color);
+  color: var(--death-color, var(--loss-color));
 }
 
 .kda-ratio {

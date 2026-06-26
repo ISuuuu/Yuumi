@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
-import { updateThemeColor } from "../utils/theme";
+import { updateThemeColor, updateDeathColor, applyDpiScale } from "../utils/theme";
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 
@@ -37,13 +37,17 @@ function closeAllDropdowns() {
 
 // ─── 自动保存（防抖 500ms）───
 let saveDebounce: ReturnType<typeof setTimeout> | null = null;
+let skipAutoSaveToast = false;
 function autoSave() {
   if (!config.value) return;
   if (saveDebounce) clearTimeout(saveDebounce);
   saveDebounce = setTimeout(async () => {
     try {
       await updateConfig(config.value!);
-      showToast('设置已自动保存');
+      if (!skipAutoSaveToast) {
+        showToast('设置已自动保存');
+      }
+      skipAutoSaveToast = false;
     } catch (e) {
       showToast('保存失败', 'error');
     }
@@ -205,9 +209,28 @@ function toColor8(color: string): string {
 function onThemeColorInput(e: Event) {
   const target = e.target as HTMLInputElement;
   if (config.value?.Personalization) {
-    config.value.Personalization.ThemeColor = toColor8(target.value);
+    config.value.Personalization.ThemeColor = target.value;
   }
   updateThemeColor(target.value);
+}
+
+function onDeathColorInput(e: Event, field: 'LightDeathsNumberColor' | 'DarkDeathsNumberColor') {
+  const target = e.target as HTMLInputElement;
+  const color8 = toColor8(target.value);
+  if (config.value?.Personalization) {
+    config.value.Personalization[field] = color8;
+  }
+  // 实时更新 CSS 变量
+  const light = field === 'LightDeathsNumberColor' ? target.value : toColor6(config.value?.Personalization?.LightDeathsNumberColor);
+  const dark  = field === 'DarkDeathsNumberColor'  ? target.value : toColor6(config.value?.Personalization?.DarkDeathsNumberColor);
+  updateDeathColor(light, dark);
+}
+
+function onDpiScaleChange(scale: string) {
+  if (!config.value?.Personalization) return;
+  config.value.Personalization.DpiScale = scale;
+  applyDpiScale(scale);
+  autoSave();
 }
 </script>
 
@@ -586,11 +609,11 @@ function onThemeColorInput(e: Event) {
           <div class="color-pickers-row">
             <div class="color-picker-item">
               <label>浅色主题下颜色:</label>
-              <input type="color" :value="toColor6(config.Personalization.LightDeathsNumberColor)" @input="config.Personalization.LightDeathsNumberColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
+              <input type="color" :value="toColor6(config.Personalization.LightDeathsNumberColor)" @input="onDeathColorInput($event, 'LightDeathsNumberColor')" @change="autoSave" />
             </div>
             <div class="color-picker-item">
               <label>深色主题下颜色:</label>
-              <input type="color" :value="toColor6(config.Personalization.DarkDeathsNumberColor)" @input="config.Personalization.DarkDeathsNumberColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
+              <input type="color" :value="toColor6(config.Personalization.DarkDeathsNumberColor)" @input="onDeathColorInput($event, 'DarkDeathsNumberColor')" @change="autoSave" />
             </div>
           </div>
         </div>
@@ -598,26 +621,20 @@ function onThemeColorInput(e: Event) {
 
       <!-- 界面缩放 -->
       <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showDpiDropdown }]">
-        <div class="collapse-header" @click="toggleCollapse('dpiscale')">
+        <div class="collapse-header" @click.stop>
           <div class="collapse-left">
             <h3 class="card-title">界面缩放</h3>
-            <span class="card-desc">调整部件和字体的大小</span>
+            <span class="card-desc">调整部件和字体的大小（重启后生效）</span>
           </div>
           <div class="collapse-right">
-            <span class="status-preview">{{ config.Personalization.DpiScale === 'Auto' ? '跟随系统' : config.Personalization.DpiScale + '%' }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'dpiscale' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'dpiscale'" class="collapse-content">
-          <div class="input-row">
             <div class="dropdown-trigger" @click.stop="showDpiDropdown = !showDpiDropdown">
-              <span>{{ config.Personalization.DpiScale === 'Auto' ? '跟随系统设置' : config.Personalization.DpiScale + '%' }}</span>
+              <span>{{ config.Personalization.DpiScale === 'Auto' ? '跟随系统' : config.Personalization.DpiScale + '%' }}</span>
               <svg :class="['arrow-icon', { expanded: showDpiDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               <div v-if="showDpiDropdown" class="dropdown-menu" @click.stop>
-                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === 'Auto' }]" @click="config.Personalization.DpiScale = 'Auto'; autoSave(); showDpiDropdown = false">跟随系统设置</div>
-                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '100' }]" @click="config.Personalization.DpiScale = '100'; autoSave(); showDpiDropdown = false">100%</div>
-                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '125' }]" @click="config.Personalization.DpiScale = '125'; autoSave(); showDpiDropdown = false">125%</div>
-                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '150' }]" @click="config.Personalization.DpiScale = '150'; autoSave(); showDpiDropdown = false">150%</div>
+                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === 'Auto' }]" @click="if(config.Personalization.DpiScale !== 'Auto') { config.Personalization.DpiScale = 'Auto'; skipAutoSaveToast = true; autoSave(); showToast('缩放已修改，重启后生效'); }; showDpiDropdown = false">跟随系统</div>
+                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '100' }]" @click="if(config.Personalization.DpiScale !== '100') { config.Personalization.DpiScale = '100'; skipAutoSaveToast = true; autoSave(); showToast('缩放已修改，重启后生效'); }; showDpiDropdown = false">100%</div>
+                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '125' }]" @click="if(config.Personalization.DpiScale !== '125') { config.Personalization.DpiScale = '125'; skipAutoSaveToast = true; autoSave(); showToast('缩放已修改，重启后生效'); }; showDpiDropdown = false">125%</div>
+                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '150' }]" @click="if(config.Personalization.DpiScale !== '150') { config.Personalization.DpiScale = '150'; skipAutoSaveToast = true; autoSave(); showToast('缩放已修改，重启后生效'); }; showDpiDropdown = false">150%</div>
               </div>
             </div>
           </div>
@@ -625,31 +642,25 @@ function onThemeColorInput(e: Event) {
       </div>
 
       <!-- 语言 -->
-      <div :class="['collapse-item', { 'has-dropdown-open': showLangDropdown }]">
-        <div class="collapse-header" @click="toggleCollapse('lang')">
+      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showLangDropdown }]">
+        <div class="collapse-header" @click.stop>
           <div class="collapse-left">
             <h3 class="card-title">语言</h3>
-            <span class="card-desc">选择 Yuumi 所使用的语言</span>
+            <span class="card-desc">选择 Yuumi 所使用的语言（重启后生效）</span>
           </div>
           <div class="collapse-right">
-            <span class="status-preview">
-              {{ config.Personalization.Language === 'Auto' ? '跟随系统' :
-                 config.Personalization.Language === 'zh_CN' ? '简体中文' :
-                 config.Personalization.Language === 'zh_TW' ? '繁體中文' : 'English' }}
-            </span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'lang' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'lang'" class="collapse-content">
-          <div class="input-row">
             <div class="dropdown-trigger" @click.stop="showLangDropdown = !showLangDropdown">
-              <span>{{ config.Personalization.Language === 'Auto' ? '跟随系统设置' : config.Personalization.Language === 'zh_CN' ? '简体中文' : config.Personalization.Language === 'zh_TW' ? '繁體中文' : 'English' }}</span>
+              <span>
+                {{ config.Personalization.Language === 'Auto' ? '跟随系统' :
+                   config.Personalization.Language === 'zh_CN' ? '简体中文' :
+                   config.Personalization.Language === 'zh_TW' ? '繁體中文' : 'English' }}
+              </span>
               <svg :class="['arrow-icon', { expanded: showLangDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               <div v-if="showLangDropdown" class="dropdown-menu" @click.stop>
-                <div :class="['dropdown-item', { active: config.Personalization.Language === 'Auto' }]" @click="config.Personalization.Language = 'Auto'; autoSave(); showLangDropdown = false">跟随系统设置</div>
-                <div :class="['dropdown-item', { active: config.Personalization.Language === 'zh_CN' }]" @click="config.Personalization.Language = 'zh_CN'; autoSave(); showLangDropdown = false">简体中文</div>
-                <div :class="['dropdown-item', { active: config.Personalization.Language === 'zh_TW' }]" @click="config.Personalization.Language = 'zh_TW'; autoSave(); showLangDropdown = false">繁體中文</div>
-                <div :class="['dropdown-item', { active: config.Personalization.Language === 'en_US' }]" @click="config.Personalization.Language = 'en_US'; autoSave(); showLangDropdown = false">English</div>
+                <div :class="['dropdown-item', { active: config.Personalization.Language === 'Auto' }]" @click="if(config.Personalization.Language !== 'Auto') { config.Personalization.Language = 'Auto'; skipAutoSaveToast = true; autoSave(); showToast('语言已保存，重启后生效'); }; showLangDropdown = false">跟随系统</div>
+                <div :class="['dropdown-item', { active: config.Personalization.Language === 'zh_CN' }]" @click="if(config.Personalization.Language !== 'zh_CN') { config.Personalization.Language = 'zh_CN'; skipAutoSaveToast = true; autoSave(); showToast('语言已保存，重启后生效'); }; showLangDropdown = false">简体中文</div>
+                <div :class="['dropdown-item', { active: config.Personalization.Language === 'zh_TW' }]" @click="if(config.Personalization.Language !== 'zh_TW') { config.Personalization.Language = 'zh_TW'; skipAutoSaveToast = true; autoSave(); showToast('语言已保存，重启后生效'); }; showLangDropdown = false">繁體中文</div>
+                <div :class="['dropdown-item', { active: config.Personalization.Language === 'en_US' }]" @click="if(config.Personalization.Language !== 'en_US') { config.Personalization.Language = 'en_US'; skipAutoSaveToast = true; autoSave(); showToast('语言已保存，重启后生效'); }; showLangDropdown = false">English</div>
               </div>
             </div>
           </div>
@@ -928,6 +939,36 @@ function onThemeColorInput(e: Event) {
   border-color: var(--primary-color);
   box-shadow: 0 0 8px var(--primary-color-alpha-15);
 }
+
+/* 分段控制组件（扁平化按钮组） */
+.segmented-control {
+  display: inline-flex;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+.segmented-item {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  outline: none;
+}
+.segmented-item:hover {
+  color: var(--text-color);
+}
+.segmented-item.active {
+  background: #ffffff;
+  color: var(--primary-color);
+  box-shadow: var(--shadow-sm);
+}
+
 
 .dropdown-trigger {
   display: inline-flex;

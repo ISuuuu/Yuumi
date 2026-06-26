@@ -1261,7 +1261,7 @@ const gameDetails = computed(() => {
 }
 
 .death-red {
-  color: var(--loss-color);
+  color: var(--death-color, var(--loss-color));
   font-weight: 600;
 }
 
