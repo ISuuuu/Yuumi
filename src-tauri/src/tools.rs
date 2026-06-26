@@ -455,58 +455,74 @@ pub async fn fix_lcu_window(
         }
     };
 
-    // 使用 PowerShell 查找并修复 League Client 窗口
-    // 原 Python 实现使用 fix_lcu_window.exe，这里用 PowerShell 替代
-    let ps_script = format!(
-        r#"
-        Add-Type @"
-            using System;
-            using System.Runtime.InteropServices;
-            public class WinAPI {{
-                [DllImport("user32.dll")]
-                public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-                [DllImport("user32.dll")]
-                public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-                [DllImport("user32.dll")]
-                public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-            }}
+    // 将 PowerShell 脚本写入临时文件，通过参数传入 zoom，避免字符串拼接注入风险
+    let ps_script_body = r#"param([double]$zoom)
+Add-Type @"
+    using System;
+    using System.Runtime.InteropServices;
+    public class WinAPI {
+        [DllImport("user32.dll")]
+        public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")]
+        public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    }
 "@
-        $procs = Get-Process -Name "LeagueClientUx" -ErrorAction SilentlyContinue
-        if ($procs) {{
-            $hWnd = $procs[0].MainWindowHandle
-            if ($hWnd -ne [IntPtr]::Zero) {{
-                # SW_RESTORE = 9
-                [WinAPI]::ShowWindow($hWnd, 9)
-                # SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED = 0x0003 | 0x0020
-                [WinAPI]::SetWindowPos($hWnd, [IntPtr]::Zero, 0, 0, 0, 0, 0x0043)
-                Write-Output "窗口已修复 (zoom={0})"
-            }} else {{
-                Write-Output "未找到窗口句柄"
-            }}
-        }} else {{
-            Write-Output "未找到 LeagueClientUx 进程"
-        }}
-        "#,
-        zoom
-    );
+$procs = Get-Process -Name "LeagueClientUx" -ErrorAction SilentlyContinue
+if ($procs) {
+    $hWnd = $procs[0].MainWindowHandle
+    if ($hWnd -ne [IntPtr]::Zero) {
+        [WinAPI]::ShowWindow($hWnd, 9)
+        [WinAPI]::SetWindowPos($hWnd, [IntPtr]::Zero, 0, 0, 0, 0, 0x0043)
+        Write-Output "窗口已修复 (zoom=$zoom)"
+    } else {
+        Write-Output "未找到窗口句柄"
+    }
+} else {
+    Write-Output "未找到 LeagueClientUx 进程"
+}
+"#;
 
-    tokio::task::spawn_blocking(move || {
-        std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &ps_script])
+    let temp_ps_path = std::env::temp_dir().join("yuumi_fix_window.ps1");
+    let zoom_str = zoom.to_string();
+
+    let result = tokio::task::spawn_blocking(move || {
+        // 写入临时脚本文件
+        if let Err(e) = std::fs::write(&temp_ps_path, ps_script_body) {
+            return Err(format!("写入 PowerShell 脚本失败: {}", e));
+        }
+
+        let output = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                &temp_ps_path.to_string_lossy(),
+                "-zoom",
+                &zoom_str,
+            ])
             .output()
-            .map_err(|e| format!("执行 PowerShell 失败: {}", e))
-            .and_then(|output| {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                if stdout.is_empty() {
-                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                    Err(stderr)
-                } else {
-                    Ok(stdout.trim().to_string())
-                }
-            })
+            .map_err(|e| format!("执行 PowerShell 失败: {}", e));
+
+        // 清理临时文件
+        let _ = std::fs::remove_file(&temp_ps_path);
+
+        output.and_then(|out| {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            if stdout.is_empty() {
+                let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                Err(stderr)
+            } else {
+                Ok(stdout.trim().to_string())
+            }
+        })
     })
     .await
-    .map_err(|e| format!("任务执行失败: {}", e))?
+    .map_err(|e| format!("任务执行失败: {}", e))?;
+
+    result
 }
 
 use std::path::{Path, PathBuf};

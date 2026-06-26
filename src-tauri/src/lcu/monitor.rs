@@ -138,9 +138,10 @@ pub fn start(
                 .or_else(|| find_via_cmdline(&sys))
                 .or_else(|| find_via_wmic());
 
-            // 诊断日志
+            // 诊断日志（写入系统临时目录，避免硬编码开发者路径）
             if lcu_info.is_none() {
-                if let Ok(mut file) = std::fs::File::create("E:\\Code\\Yuumi\\lcu_debug.txt") {
+                let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
+                if let Ok(mut file) = std::fs::File::create(&debug_path) {
                     use std::io::Write;
                     let _ = writeln!(file, "====== 实时 LOL 进程诊断 ======");
                     for (pid, process) in sys.processes() {
@@ -159,7 +160,8 @@ pub fn start(
                     let _ = writeln!(file, "===============================");
                 }
             } else {
-                let _ = std::fs::remove_file("E:\\Code\\Yuumi\\lcu_debug.txt");
+                let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
+                let _ = std::fs::remove_file(&debug_path);
             }
 
 

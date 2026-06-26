@@ -1556,7 +1556,7 @@ async function handleToggleLockGameSettings() {
 }
 
 .text-input:focus, .number-input:focus {
-  background-color: #fff;
+  background-color: var(--card-bg-hover);
   border-color: var(--primary-color);
   box-shadow: 0 0 8px var(--primary-color-alpha-15);
 }
@@ -1657,7 +1657,7 @@ async function handleToggleLockGameSettings() {
   border-color: var(--primary-color-alpha-40);
 }
 .number-input:focus {
-  background-color: #fff;
+  background-color: var(--card-bg-hover);
   border-color: var(--primary-color);
   box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
 }
@@ -1859,7 +1859,7 @@ async function handleToggleLockGameSettings() {
 
 .skin-modal-card {
   width: 480px;
-  background: #fff;
+  background: var(--settings-card-bg);
   border: 1px solid var(--border-color);
   border-radius: 16px;
   box-shadow: var(--shadow-lg);
@@ -1964,7 +1964,7 @@ async function handleToggleLockGameSettings() {
   border-radius: 12px;
   overflow: hidden;
   box-shadow: var(--shadow-md);
-  border: 2px solid white;
+  border: 2px solid var(--card-bg);
   transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
@@ -1998,8 +1998,9 @@ async function handleToggleLockGameSettings() {
 }
 
 .thumbnail-slider-wrapper::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--text-dimmed);
   border-radius: 2px;
+  opacity: 0.3;
 }
 
 .thumbnail-slider {
@@ -2178,13 +2179,7 @@ async function handleToggleLockGameSettings() {
 
 .lane-tab-btn.active {
   color: var(--primary-color);
-  background: white;
-  box-shadow: var(--shadow-sm);
-}
-
-[data-theme="dark"] .lane-tab-btn.active {
-  color: var(--primary-color);
-  background: rgba(30, 41, 59, 0.9);
+  background: var(--card-bg-hover);
   box-shadow: var(--shadow-sm);
 }
 </style>
