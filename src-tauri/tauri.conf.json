@@ -18,11 +18,12 @@
         "height": 910,
         "center": true,
         "decorations": false,
-        "visible": false
+        "visible": false,
+        "devtools": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https:; connect-src 'self' https://127.0.0.1 https://*; font-src 'self' https:; object-src 'none'"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' https://127.0.0.1:* https://*; font-src 'self' https: data:; object-src 'none'"
     }
   },
   "bundle": {
