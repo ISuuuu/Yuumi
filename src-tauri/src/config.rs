@@ -264,7 +264,8 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    /// 从磁盘加载配置，文件不存在或解析失败时返回默认值
+    /// 从磁盘加载配置，文件不存在返回默认值并保存；
+    /// 解析失败时备份损坏文件并写入错误信息，再返回默认值。
     pub fn load() -> Self {
         let path = config_path();
         if !path.exists() {
@@ -272,15 +273,53 @@ impl AppConfig {
             config.save();
             return config;
         }
-        match std::fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-                log::warn!("配置文件解析失败，使用默认值: {}", e);
-                Self::default()
-            }),
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
             Err(e) => {
-                log::warn!("读取配置文件失败: {}", e);
+                log::error!("读取配置文件失败: {}, 使用默认配置", e);
+                return Self::default();
+            }
+        };
+        match serde_json::from_str::<Self>(&text) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                // 备份损坏的配置文件
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let backup_path = path.with_extension(format!("json.backup.{}", ts));
+                if let Err(be) = std::fs::copy(&path, &backup_path) {
+                    log::warn!("备份损坏配置文件失败: {}", be);
+                } else {
+                    log::warn!("配置文件解析失败，已备份到: {}", backup_path.display());
+                }
+                // 写入错误提示文件，供前端读取
+                let error_path = path.with_extension("json.error");
+                let error_msg = format!(
+                    "配置文件格式错误，已恢复为默认设置。\n错误详情: {}\n原文件已备份至: {}",
+                    e,
+                    backup_path.display()
+                );
+                let _ = std::fs::write(&error_path, &error_msg);
+                log::error!("配置文件解析失败，使用默认值: {}", e);
                 Self::default()
             }
+        }
+    }
+
+    /// 读取配置加载错误信息（前端调用，读取后自动清除）
+    pub fn take_load_error() -> Option<String> {
+        let error_path = config_path().with_extension("json.error");
+        if error_path.exists() {
+            let msg = std::fs::read_to_string(&error_path).ok();
+            let _ = std::fs::remove_file(&error_path);
+            msg
+        } else {
+            None
         }
     }
 

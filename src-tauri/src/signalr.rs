@@ -235,17 +235,25 @@ async fn try_connect(
 
     log::info!("[SignalR] 正在建立 WebSocket 连接到: {}", ws_url);
 
-    let tls_config = ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(NoVerifier))
-        .with_no_client_auth();
-    let tls_connector = Connector::Rustls(Arc::new(tls_config));
+    let is_local = server_url.contains("127.0.0.1") || server_url.contains("localhost");
+
+    let tls_connector = if is_local {
+        // localhost: LCU 使用自签名证书，需跳过验证
+        let tls_config = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoVerifier))
+            .with_no_client_auth();
+        Some(Connector::Rustls(Arc::new(tls_config)))
+    } else {
+        // 远程服务器: 使用正常 TLS 验证，不跳过证书检查
+        None
+    };
 
     let url: http::Uri = ws_url.parse()?;
     let request = ClientRequestBuilder::new(url);
 
     let (ws_stream, _) =
-        connect_async_tls_with_config(request, None, false, Some(tls_connector)).await?;
+        connect_async_tls_with_config(request, None, false, tls_connector).await?;
 
     Ok(ws_stream)
 }
