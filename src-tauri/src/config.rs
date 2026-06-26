@@ -66,9 +66,6 @@ fn default_theme_color() -> String {
     "#009faa".into()
 }
 
-fn default_theme_mode() -> String {
-    "Auto".into()
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
