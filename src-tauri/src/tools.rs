@@ -386,10 +386,10 @@ pub async fn clear_game_cache() -> Result<String, String> {
 /// 打开日志文件夹
 #[tauri::command]
 pub async fn open_log_folder(app: tauri::AppHandle) -> Result<String, String> {
-    let log_dir = dirs::config_dir()
-        .ok_or("无法获取 AppData 路径")?
-        .join("Yuumi")
-        .join("logs");
+    let log_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("log")))
+        .unwrap_or_else(|| std::path::PathBuf::from("log"));
 
     if !log_dir.exists() {
         let _ = std::fs::create_dir_all(&log_dir);
