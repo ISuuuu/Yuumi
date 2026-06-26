@@ -3,7 +3,7 @@ import { ref, onMounted, watch, computed, provide } from "vue";
 import { useLcuStore, initLcuListeners } from "./store/lcuStore";
 import { storeToRefs } from "pinia";
 import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
-import { updateThemeColor } from "./utils/theme";
+import { updateThemeColor, updateDeathColor, applyDpiScale } from "./utils/theme";
 import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { invoke } from "@tauri-apps/api/core";
@@ -100,6 +100,17 @@ onMounted(async () => {
     // 无论是否静默启动，都在配置加载完后尝试应用一次云母效果，防止窗口创建时隐藏导致 DWM 特效应用失败
     if (cfg?.Personalization?.MicaEnabled) {
       invoke("set_mica_effect", { enabled: true }).catch((e: any) => console.warn("应用云母效果失败:", e));
+    }
+    // 应用主题色、死亡数字颜色 & 界面缩放
+    if (cfg?.Personalization) {
+      if (cfg.Personalization.ThemeColor) {
+        updateThemeColor(cfg.Personalization.ThemeColor);
+      }
+      updateDeathColor(
+        cfg.Personalization.LightDeathsNumberColor,
+        cfg.Personalization.DarkDeathsNumberColor
+      );
+      applyDpiScale(cfg.Personalization.DpiScale);
     }
   } catch (e) {
     console.warn("[App] 启动配置检查失败:", e);
@@ -580,6 +591,7 @@ async function handleClose() {
   --loss-bg: rgba(239, 68, 68, 0.07);
   --loss-border: rgba(239, 68, 68, 0.18);
   --loss-glow: rgba(239, 68, 68, 0.08);
+  --death-color: #ef4444; /* 死亡数字颜色，可通过设置覆盖 */
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
   --radius-sm: 4px;

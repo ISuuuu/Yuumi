@@ -997,7 +997,7 @@ watch(activeTab, () => loadAllPlayers());
   white-space: nowrap;
 }
 .cm-kda .d {
-  color: #ef4444; /* 强调死亡数 */
+  color: var(--death-color, #ef4444); /* 强调死亡数 */
 }
 .cm-date {
   font-size: 0.65rem;
