@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from "vue";
+import { ref, onMounted, onUnmounted, watch, computed, inject, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { fetchConfig, updateConfig, lcuRequest } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
@@ -7,7 +7,7 @@ import ChampionPicker from "../components/ChampionPicker.vue";
 import SpellPicker from "../components/SpellPicker.vue";
 import LcuImage from "../components/LcuImage.vue";
 
-const config = ref<AppConfig | null>(null);
+const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 const loading = ref(false);
 
 // Toast 通知
@@ -202,12 +202,14 @@ const GAME_MODES: { id: number; name: string }[] = [
 
 onMounted(async () => {
   document.addEventListener("click", closeAllDropdowns);
-  try {
-    config.value = await fetchConfig();
-    await checkGameSettingsLock();
-  } catch (e) {
-    console.error("加载其他功能配置失败:", e);
+  if (!config.value) {
+    try {
+      config.value = await fetchConfig();
+    } catch (e) {
+      console.error("加载其他功能配置失败:", e);
+    }
   }
+  await checkGameSettingsLock();
 });
 
 onUnmounted(() => {
