@@ -89,9 +89,18 @@ watch(isGameActive, (active) => {
       const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
       const savedTheirTeam = localStorage.getItem("yuumi_last_gameflow_their_team");
       const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
-      if (savedMyTeam) gameflowMyTeam.value = JSON.parse(savedMyTeam);
-      if (savedTheirTeam) gameflowTheirTeam.value = JSON.parse(savedTheirTeam);
-      if (savedPlayerData) playerData.value = JSON.parse(savedPlayerData);
+      if (savedMyTeam) {
+        const parsed = JSON.parse(savedMyTeam);
+        if (Array.isArray(parsed) && parsed.length > 0) gameflowMyTeam.value = parsed;
+      }
+      if (savedTheirTeam) {
+        const parsed = JSON.parse(savedTheirTeam);
+        if (Array.isArray(parsed) && parsed.length > 0) gameflowTheirTeam.value = parsed;
+      }
+      if (savedPlayerData) {
+        const parsed = JSON.parse(savedPlayerData);
+        if (parsed && Object.keys(parsed).length > 0) playerData.value = parsed;
+      }
     } catch { /* ignore */ }
   }
 });
@@ -227,7 +236,11 @@ async function loadFromGameflowSession() {
     }
 
     const { teamOne, teamTwo } = resp.data.gameData;
-    if (!teamOne || !teamTwo) return;
+    // 队伍数据缺失或为空时不覆盖已有数据（退出游戏过程中可能出现）
+    if (!teamOne || !teamTwo || teamOne.length === 0 || teamTwo.length === 0) {
+      loading.value = false;
+      return;
+    }
 
     // 用当前玩家 summonerId 判断哪队是己方
     console.log("[GameInfo] currentSummonerId:", currentSummonerId.value);
@@ -317,9 +330,18 @@ onMounted(async () => {
     const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
     const savedTheirTeam = localStorage.getItem("yuumi_last_gameflow_their_team");
     const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
-    if (savedMyTeam) gameflowMyTeam.value = JSON.parse(savedMyTeam);
-    if (savedTheirTeam) gameflowTheirTeam.value = JSON.parse(savedTheirTeam);
-    if (savedPlayerData) playerData.value = JSON.parse(savedPlayerData);
+    if (savedMyTeam) {
+      const parsed = JSON.parse(savedMyTeam);
+      if (Array.isArray(parsed) && parsed.length > 0) gameflowMyTeam.value = parsed;
+    }
+    if (savedTheirTeam) {
+      const parsed = JSON.parse(savedTheirTeam);
+      if (Array.isArray(parsed) && parsed.length > 0) gameflowTheirTeam.value = parsed;
+    }
+    if (savedPlayerData) {
+      const parsed = JSON.parse(savedPlayerData);
+      if (parsed && Object.keys(parsed).length > 0) playerData.value = parsed;
+    }
   } catch { /* ignore */ }
 
   // 获取当前玩家 summonerId，用于 InProgress 阶段分离队伍
@@ -608,7 +630,7 @@ watch(activeTab, () => loadAllPlayers());
 .tab-btn.active {
   color: var(--primary-color);
   border-bottom-color: var(--primary-color);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--card-bg);
 }
 
 .player-list {
@@ -636,7 +658,7 @@ watch(activeTab, () => loadAllPlayers());
   box-sizing: border-box;
 }
 .player-card:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--hover-bg);
   transform: translateY(-2px);
   border-color: rgba(var(--primary-color-rgb, 59, 130, 246), 0.3);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -680,7 +702,7 @@ watch(activeTab, () => loadAllPlayers());
   border-radius: 8px;
   white-space: nowrap;
   box-shadow: 0 2px 6px var(--primary-color-alpha-40);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-color);
 }
 
 .pc-info {
@@ -949,7 +971,7 @@ watch(activeTab, () => loadAllPlayers());
   width: 13px;
   height: 13px;
   line-height: 11px;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--card-bg);
   color: var(--text-color);
   border-radius: 50%;
   font-size: 0.55rem;

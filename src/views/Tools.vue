@@ -1230,19 +1230,20 @@ async function handleToggleLockGameSettings() {
   letter-spacing: 0.5px;
 }
 
-/* 卡片 Item 通用样式 (Seraphine 风格) */
+/* 卡片 Item 通用样式 */
 .card-item, .collapse-item {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
+  background: var(--settings-card-bg);
+  border: 1px solid var(--settings-card-border);
   border-radius: 12px;
   margin-bottom: 8px;
   box-shadow: var(--shadow-sm);
-  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition: box-shadow 0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+              border-color 0.25s,
+              background-color 0.25s,
+              transform 0.2s;
   position: relative;
 }
-.collapse-item.has-dropdown-open {
-  z-index: 10;
-}
+.collapse-item.has-dropdown-open { z-index: 10; }
 
 .card-item {
   padding: 16px 24px;
@@ -1258,10 +1259,31 @@ async function handleToggleLockGameSettings() {
 }
 
 .card-item:hover, .collapse-item:hover {
-  box-shadow: var(--shadow-md);
-  border-color: var(--primary-color-alpha-30);
-  background-color: #ffffff;
+  border-color: var(--settings-card-border-hover);
+  background-color: var(--settings-card-bg-hover);
+  box-shadow: var(--card-glow-hover);
+  transform: translateY(-1px);
 }
+/* 底部分隔线 — 卡片组内用细线分隔 */
+.card-item.border-bottom {
+  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--settings-separator);
+  margin-bottom: 0;
+}
+.card-item.border-bottom + .card-item { border-radius: 0; margin-top: 0; }
+.card-item.border-bottom + .card-item:last-child { border-radius: 0 0 12px 12px; }
+.collapse-item.border-bottom {
+  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--settings-separator);
+  margin-bottom: 0;
+}
+.collapse-item.border-bottom + .card-item { border-radius: 0; margin-top: 0; }
+.collapse-item.border-bottom + .collapse-item { border-radius: 0; margin-top: 0; }
+.collapse-item.border-bottom + .card-item:last-child { border-radius: 0 0 12px 12px; }
+.collapse-item.border-bottom + .collapse-item:last-child { border-radius: 0 0 12px 12px; }
+.card-item.border-bottom:last-of-type { border-radius: 0 0 12px 12px; border-bottom: 1px solid var(--settings-separator); }
+.collapse-item.border-bottom:last-of-type { border-radius: 0 0 12px 12px; border-bottom: 1px solid var(--settings-separator); }
+.collapse-item:not(.border-bottom) { border-bottom: none; }
 
 .card-left, .collapse-left {
   display: flex;
@@ -1317,8 +1339,8 @@ async function handleToggleLockGameSettings() {
 
 /* 按钮样式 */
 .action-btn {
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid var(--border-color);
+  background: var(--settings-card-bg);
+  border: 1px solid var(--settings-card-border);
   color: var(--text-color);
   padding: 6px 20px;
   border-radius: 6px;
@@ -1331,13 +1353,14 @@ async function handleToggleLockGameSettings() {
 }
 
 .action-btn:hover {
-  background: var(--primary-color-alpha-15);
   border-color: var(--primary-color);
+  background-color: var(--settings-card-bg-hover);
+  box-shadow: 0 0 0 1px rgba(0, 159, 170, 0.3);
   transform: translateY(-0.5px);
 }
 
 .action-btn:active {
-  background: var(--primary-color-alpha-30);
+  background: var(--settings-card-bg);
   transform: translateY(0.5px);
 }
 
@@ -1357,24 +1380,82 @@ async function handleToggleLockGameSettings() {
   border-color: var(--loss-border);
 }
 
-/* 统一 Toggle 开关样式 (与设置页一致) */
+/* 统一 Toggle 开关样式 */
 .toggle-switch {
   display: flex; align-items: center; width: 58px; height: 28px;
   border-radius: 14px; cursor: pointer; position: relative;
-  transition: background-color 0.25s; padding: 0 8px;
+  transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s; padding: 0 8px;
+  flex-shrink: 0;
 }
-.toggle-switch.off { background-color: rgba(0, 0, 0, 0.06); justify-content: flex-end; }
-.toggle-switch.on { background-color: var(--primary-color); justify-content: flex-start; }
+.toggle-switch.off { background-color: var(--toggle-track-off); justify-content: flex-end; }
+.toggle-switch.on {
+  background-color: var(--primary-color);
+  justify-content: flex-start;
+  box-shadow: var(--toggle-glow);
+}
 .toggle-text { font-size: 0.75rem; font-weight: bold; color: white; }
 .toggle-switch.off .toggle-text { color: var(--text-dimmed); }
 .toggle-slider {
-  width: 22px; height: 22px; background-color: white;
+  width: 22px; height: 22px; background-color: var(--toggle-slider);
   border-radius: 50%; position: absolute; top: 3px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-  transition: left 0.25s, right 0.25s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255,255,255,0.08);
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .toggle-switch.on .toggle-slider { right: 3px; }
 .toggle-switch.off .toggle-slider { left: 3px; }
+
+/* 手风琴折叠样式 */
+.collapse-header {
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  background-color: transparent;
+  border-radius: 12px 12px 0 0;
+}
+
+.arrow-icon {
+  width: 18px;
+  height: 18px;
+  transition: transform 0.2s;
+  color: var(--text-dimmed);
+}
+
+.arrow-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.collapse-content {
+  border-top: 1px solid var(--settings-separator);
+  padding: 14px 20px 16px;
+  animation: slideDown 0.2s ease-out;
+  background-color: rgba(0, 0, 0, 0.02);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+/* 新增设置行级样式 */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.setting-row:last-child {
+  border-bottom: none;
+}
+
+.setting-row.no-border {
+  border-bottom: none;
+  padding-bottom: 6px;
+}
+
+.setting-row.justify-end {
+  justify-content: flex-end;
+}
 
 /* 手风琴折叠样式 */
 .collapse-header {
@@ -1462,13 +1543,13 @@ async function handleToggleLockGameSettings() {
   font-size: 0.82rem;
   line-height: 1;
   outline: none;
-  background-color: rgba(255, 255, 255, 0.6);
+  background-color: var(--card-bg);
   transition: all 0.2s ease;
   color: var(--text-color);
 }
 
 .text-input:hover, .number-input:hover {
-  background-color: rgba(255, 255, 255, 0.95);
+  background-color: var(--card-bg);
   border-color: var(--border-color-hover);
 }
 
@@ -1486,7 +1567,7 @@ async function handleToggleLockGameSettings() {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   padding: 8px 12px;
   border-radius: 6px;
@@ -1498,7 +1579,7 @@ async function handleToggleLockGameSettings() {
   min-width: 140px;
 }
 .dropdown-trigger:hover {
-  background: #ffffff;
+  background: var(--card-bg);
   border-color: var(--primary-color);
 }
 .dropdown-trigger.disabled {
@@ -1523,7 +1604,7 @@ async function handleToggleLockGameSettings() {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  background: #ffffff;
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   box-shadow: var(--shadow-lg);
@@ -1556,7 +1637,7 @@ async function handleToggleLockGameSettings() {
   border-radius: 6px;
   font-size: 0.82rem;
   outline: none;
-  background-color: rgba(255, 255, 255, 0.6);
+  background-color: var(--card-bg);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   color: var(--text-color);
   text-align: center;
@@ -1570,7 +1651,7 @@ async function handleToggleLockGameSettings() {
   height: 24px;
 }
 .number-input:hover {
-  background-color: rgba(255, 255, 255, 0.85);
+  background-color: var(--card-bg);
   border-color: var(--primary-color-alpha-40);
 }
 .number-input:focus {
@@ -1598,7 +1679,7 @@ async function handleToggleLockGameSettings() {
 }
 
 .apply-btn:active {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
   transform: translateY(0.5px);
 }
 
@@ -1614,7 +1695,7 @@ async function handleToggleLockGameSettings() {
 
 .status-btn {
   border: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   padding: 6px 20px;
   border-radius: 6px;
   font-size: 0.78rem;
@@ -1841,7 +1922,7 @@ async function handleToggleLockGameSettings() {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   color: var(--text-color);
   display: flex;
@@ -1978,7 +2059,7 @@ async function handleToggleLockGameSettings() {
 }
 
 .cancel-action-btn {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   color: var(--text-color);
   padding: 8px 16px;
@@ -1990,7 +2071,7 @@ async function handleToggleLockGameSettings() {
 }
 
 .cancel-action-btn:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--card-bg);
 }
 
 [data-theme="dark"] .cancel-action-btn:hover {
@@ -2085,12 +2166,12 @@ async function handleToggleLockGameSettings() {
 
 .lane-tab-btn:hover {
   color: var(--text-color);
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--card-bg);
 }
 
 [data-theme="dark"] .lane-tab-btn:hover {
   color: var(--text-color);
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--card-bg);
 }
 
 .lane-tab-btn.active {

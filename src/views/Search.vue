@@ -904,7 +904,7 @@ const gameDetails = computed(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #ffffff;
+  background: var(--card-bg);
   border: 1px solid rgba(0, 0, 0, 0.05);
   padding: 10px 16px;
   border-radius: 8px;
@@ -928,7 +928,7 @@ const gameDetails = computed(() => {
   top: 100%;
   left: 0;
   right: 0;
-  background: #ffffff;
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0 0 8px 8px;
@@ -1022,7 +1022,7 @@ const gameDetails = computed(() => {
   width: 100%;
   padding: 6px 36px 6px 12px;
   border: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--card-bg);
   border-radius: 6px;
   font-size: 0.85rem;
   color: var(--text-color);
@@ -1035,7 +1035,7 @@ const gameDetails = computed(() => {
 .search-input:focus {
   border-color: var(--primary-color);
   box-shadow: 0 0 8px var(--primary-color-alpha-15);
-  background: #ffffff;
+  background: var(--card-bg);
 }
 
 .search-trigger-btn {
@@ -1058,7 +1058,7 @@ const gameDetails = computed(() => {
 }
 
 .tab-btn {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   color: var(--text-color);
   padding: 0 16px;
@@ -1073,13 +1073,13 @@ const gameDetails = computed(() => {
 }
 
 .tab-btn:hover {
-  background: #ffffff;
+  background: var(--card-bg);
   color: var(--text-color);
   border-color: var(--primary-color);
 }
 
 .tab-btn.active {
-  background-color: rgba(255, 255, 255, 0.5);
+  background-color: var(--card-bg);
   color: var(--text-color);
   border-color: var(--border-color);
   font-weight: 600;
@@ -1087,7 +1087,7 @@ const gameDetails = computed(() => {
 }
 
 .tab-btn.active:hover {
-  background: #ffffff;
+  background: var(--card-bg);
   border-color: var(--primary-color);
 }
 
@@ -1095,7 +1095,7 @@ const gameDetails = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   padding: 4px 10px;
   border-radius: 6px;
@@ -1108,7 +1108,7 @@ const gameDetails = computed(() => {
 }
 
 .dropdown-trigger:hover {
-  background: #ffffff;
+  background: var(--card-bg);
   border-color: var(--primary-color);
 }
 
@@ -1126,7 +1126,7 @@ const gameDetails = computed(() => {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   box-shadow: var(--shadow-lg);
@@ -1199,7 +1199,7 @@ const gameDetails = computed(() => {
   border: 1px solid rgba(0, 0, 0, 0.05);
   cursor: pointer;
   transition: all 0.2s ease;
-  background: #ffffff;
+  background: var(--card-bg);
 }
 
 .mini-match-card.win {
@@ -1214,7 +1214,6 @@ const gameDetails = computed(() => {
 [data-theme="dark"] .mini-match-card.win:hover {
   background-color: rgba(34, 197, 94, 0.15);
 }
-}
 
 .mini-match-card.lose {
   background-color: var(--loss-bg);
@@ -1227,7 +1226,6 @@ const gameDetails = computed(() => {
 
 [data-theme="dark"] .mini-match-card.lose:hover {
   background-color: rgba(239, 68, 68, 0.15);
-}
 }
 
 .mini-match-card.selected.win {
@@ -1258,7 +1256,7 @@ const gameDetails = computed(() => {
 .mini-mode {
   font-size: 0.78rem;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text-color);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1282,7 +1280,7 @@ const gameDetails = computed(() => {
   justify-content: center;
   gap: 16px;
   margin-top: 8px;
-  background: #ffffff;
+  background: var(--card-bg);
   border: 1px solid rgba(0, 0, 0, 0.05);
   padding: 6px;
   border-radius: 6px;
@@ -1344,7 +1342,7 @@ const gameDetails = computed(() => {
   height: 640px;
   color: var(--text-muted);
   font-size: 0.85rem;
-  background: #ffffff;
+  background: var(--card-bg);
   border: 1px solid rgba(0, 0, 0, 0.05);
   border-radius: 8px;
   box-shadow: var(--shadow-sm);
@@ -1427,7 +1425,7 @@ const gameDetails = computed(() => {
 }
 
 .copy-btn {
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 6px;
   width: 30px;
@@ -1446,7 +1444,6 @@ const gameDetails = computed(() => {
 
 [data-theme="dark"] .copy-btn:hover {
   background-color: rgba(30, 41, 59, 0.9);
-}
   border-color: var(--primary-color);
   color: var(--primary-color);
 }
@@ -1612,8 +1609,8 @@ const gameDetails = computed(() => {
 }
 
 [data-theme="dark"] .row-level-overlay {
-  background: #f1f5f9;
-  color: #0f172a;
+  background: var(--card-bg);
+  color: var(--text-color);
   border-color: rgba(255,255,255,0.2);
 }
 

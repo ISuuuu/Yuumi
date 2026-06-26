@@ -159,7 +159,7 @@ watch(() => store.isConnected, (connected) => {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   padding: 8px 16px;
   border-radius: 8px;
@@ -174,7 +174,7 @@ watch(() => store.isConnected, (connected) => {
 }
 
 .change-client-btn:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--card-bg-hover);
   color: var(--text-color);
   border-color: var(--primary-color);
   box-shadow: 0 4px 12px var(--primary-color-alpha-15);

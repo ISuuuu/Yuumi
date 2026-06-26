@@ -294,12 +294,12 @@ function clearAll() {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: #f0f2f5;
-  border: 1px solid #dcdfe6;
+  background: var(--card-bg);
+  border: 1px solid var(--settings-card-border);
   border-radius: 6px;
   padding: 3px 8px 3px 3px;
   font-size: 0.78rem;
-  color: #303133;
+  color: var(--text-color);
 }
 
 .chip-icon {
@@ -318,16 +318,16 @@ function clearAll() {
 
 .chip-remove {
   cursor: pointer;
-  color: #c0c4cc;
+  color: var(--text-dimmed);
   font-size: 0.7rem;
   margin-left: 2px;
   padding: 0 2px;
 }
-.chip-remove:hover { color: #f56c6c; }
+.chip-remove:hover { color: var(--loss-color); }
 
 .chip-empty {
   font-size: 0.82rem;
-  color: #c0c4cc;
+  color: var(--text-dimmed);
 }
 
 .trigger-actions {
@@ -338,10 +338,10 @@ function clearAll() {
 
 .select-btn {
   padding: 6px 16px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--settings-card-border);
   border-radius: 6px;
-  background: white;
-  color: #606266;
+  background: var(--settings-card-bg);
+  color: var(--text-muted);
   font-size: 0.82rem;
   font-weight: 500;
   cursor: pointer;
@@ -355,16 +355,16 @@ function clearAll() {
 
 .clear-btn {
   padding: 6px 12px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--settings-card-border);
   border-radius: 6px;
-  background: white;
-  color: #909399;
+  background: var(--settings-card-bg);
+  color: var(--text-dimmed);
   font-size: 0.78rem;
   cursor: pointer;
 }
 .clear-btn:hover {
-  color: #f56c6c;
-  border-color: #f56c6c;
+  color: var(--loss-color);
+  border-color: var(--loss-color);
 }
 
 /* 模态遮罩 */
@@ -384,7 +384,7 @@ function clearAll() {
 
 /* 模态框主体 */
 .modal-content {
-  background: #ffffff;
+  background: var(--card-bg);
   border-radius: 16px;
   width: 90%;
   max-width: 560px;
@@ -392,7 +392,7 @@ function clearAll() {
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--border-color);
   overflow: hidden;
   position: relative;
 }
@@ -403,21 +403,21 @@ function clearAll() {
   align-items: center;
   justify-content: space-between;
   padding: 16px 24px;
-  border-bottom: 1px solid #f0f0f2;
+  border-bottom: 1px solid var(--settings-separator);
 }
 
 .modal-title {
   margin: 0;
   font-size: 1.15rem;
   font-weight: 700;
-  color: #1a1a1a;
+  color: var(--text-color);
 }
 
 .close-btn {
   background: transparent;
   border: none;
   font-size: 1.2rem;
-  color: #a0a0a5;
+  color: var(--text-dimmed);
   cursor: pointer;
   padding: 4px;
   line-height: 1;
@@ -430,8 +430,8 @@ function clearAll() {
   height: 28px;
 }
 .close-btn:hover {
-  background: #f0f0f2;
-  color: #f56c6c;
+  background: var(--settings-card-bg-hover);
+  color: var(--loss-color);
 }
 
 /* 搜索框 */
@@ -447,24 +447,24 @@ function clearAll() {
   left: 36px;
   width: 16px;
   height: 16px;
-  color: #909399;
+  color: var(--text-dimmed);
   pointer-events: none;
 }
 
 .search-input {
   width: 100%;
   padding: 9px 12px 9px 36px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--settings-card-border);
   border-radius: 8px;
   font-size: 0.88rem;
-  color: #303133;
+  color: var(--text-color);
   outline: none;
   transition: all 0.25s;
-  background: #f5f7fa;
+  background: var(--card-bg);
 }
 .search-input:focus {
   border-color: var(--primary-color);
-  background: #ffffff;
+  background: var(--card-bg);
   box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
 }
 
@@ -476,14 +476,14 @@ function clearAll() {
   justify-content: center;
   gap: 12px;
   padding: 3rem;
-  color: #909399;
+  color: var(--text-dimmed);
   font-size: 0.9rem;
 }
 
 .loading-spinner {
   width: 28px;
   height: 28px;
-  border: 3px solid #e8e8ec;
+  border: 3px solid var(--settings-card-border);
   border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 1s infinite linear;
@@ -511,11 +511,11 @@ function clearAll() {
   background: transparent;
 }
 .champion-grid::-webkit-scrollbar-thumb {
-  background: #dbdde0;
+  background: var(--settings-card-border);
   border-radius: 3px;
 }
 .champion-grid::-webkit-scrollbar-thumb:hover {
-  background: #c0c2c5;
+  background: var(--text-dimmed);
 }
 
 .champ-cell {
@@ -532,7 +532,7 @@ function clearAll() {
   user-select: none;
 }
 .champ-cell:hover {
-  background: #f4f4f7;
+  background: var(--settings-card-bg-hover);
   transform: translateY(-2px);
 }
 .champ-cell.selected {
@@ -553,7 +553,7 @@ function clearAll() {
 
 .champ-name {
   font-size: 0.72rem;
-  color: #48484a;
+  color: var(--text-color);
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
@@ -593,13 +593,13 @@ function clearAll() {
   justify-content: space-between;
   align-items: center;
   padding: 16px 24px;
-  border-top: 1px solid #f0f0f2;
-  background: #fafbfc;
+  border-top: 1px solid var(--settings-separator);
+  background: var(--settings-card-bg);
 }
 
 .selected-count {
   font-size: 0.82rem;
-  color: #909399;
+  color: var(--text-dimmed);
 }
 
 .confirm-btn {

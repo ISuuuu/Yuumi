@@ -805,11 +805,11 @@ async function setRunePage() {
 }
 
 .tab-btn {
-  border: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.5); color: var(--text-muted);
+  border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-muted);
   padding: 3px 12px; border-radius: 6px; font-size: 0.78rem;
   font-weight: 600; cursor: pointer; transition: all 0.15s;
 }
-.tab-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.95); color: var(--text-color); }
+.tab-btn:hover:not(:disabled) { background: var(--card-bg-hover); color: var(--text-color); }
 .tab-btn.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
 .tab-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -829,7 +829,7 @@ async function setRunePage() {
   border: 1px solid var(--border-color);
   border-radius: 6px;
   font-size: 0.78rem;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   color: var(--text-color);
   cursor: pointer;
   position: relative;
@@ -838,7 +838,7 @@ async function setRunePage() {
   min-width: 0;
 }
 .filter-trigger:hover {
-  background: #ffffff;
+  background: var(--card-bg);
   border-color: var(--primary-color);
 }
 .filter-arrow {
@@ -853,7 +853,7 @@ async function setRunePage() {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   box-shadow: var(--shadow-lg);
@@ -951,7 +951,7 @@ async function setRunePage() {
   background: #f1f3f7; /* 软灰背景，让白色卡片更具层次感 */
 }
 .build-card {
-  background: #ffffff;
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   margin: 10px 14px;

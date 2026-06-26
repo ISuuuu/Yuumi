@@ -651,6 +651,34 @@ async function handleClose() {
   --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.4);
   --glass-filter: blur(16px);
+
+  /* Settings UI 暗色专用 */
+  --toggle-track-off: rgba(255, 255, 255, 0.1);
+  --toggle-slider: #ffffff;
+  --toggle-glow: 0 0 12px rgba(0, 159, 170, 0.4);
+  --segmented-bg: rgba(255, 255, 255, 0.05);
+  --card-glow-hover: 0 0 0 1px rgba(0, 159, 170, 0.35), 0 4px 20px rgba(0, 0, 0, 0.3);
+  --settings-card-bg: rgba(37, 47, 63, 0.92);
+  --settings-card-bg-hover: rgba(44, 55, 72, 0.96);
+  --settings-card-border: rgba(255, 255, 255, 0.08);
+  --settings-card-border-hover: rgba(0, 159, 170, 0.4);
+  --settings-collapse-bg: rgba(33, 43, 58, 0.9);
+  --settings-separator: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="light"] {
+  /* Settings UI 亮色专用 */
+  --toggle-track-off: rgba(0, 0, 0, 0.12);
+  --toggle-slider: #ffffff;
+  --toggle-glow: 0 0 10px rgba(0, 159, 170, 0.35);
+  --segmented-bg: rgba(0, 0, 0, 0.04);
+  --card-glow-hover: 0 0 0 1px rgba(0, 159, 170, 0.3), 0 2px 8px rgba(0, 0, 0, 0.07);
+  --settings-card-bg: #ffffff;
+  --settings-card-bg-hover: rgba(255, 255, 255, 0.98);
+  --settings-card-border: rgba(0, 0, 0, 0.07);
+  --settings-card-border-hover: rgba(0, 159, 170, 0.5);
+  --settings-collapse-bg: rgba(247, 250, 252, 0.96);
+  --settings-separator: rgba(0, 0, 0, 0.04);
 }
 
 * {
