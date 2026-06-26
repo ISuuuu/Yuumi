@@ -108,13 +108,37 @@ jobs:
       - name: Generate latest.json for updater
         shell: pwsh
         run: |
+          # 调试：打印 bundle 目录内容
+          Write-Host "=== Bundle directory contents ==="
+          if (Test-Path "src-tauri/target/release/bundle") {
+            Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File | ForEach-Object { Write-Host $_.FullName }
+          } else {
+            Write-Host "Bundle directory does not exist!"
+            exit 1
+          }
+
           $VERSION = "${{ needs.create-release.outputs.version }}" -replace '^v', ''
           $TAG = "${{ needs.create-release.outputs.version }}"
-          $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1
-          $EXE_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -Exclude "*.exe.sig" | Select-Object -First 1
 
-          if (-not $SIG_FILE -or -not $EXE_FILE) {
-            Write-Error "Missing .sig or .exe file in bundle/nsis/"
+          # 找 exe（排除 .sig）
+          $EXE_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | Where-Object { $_.Name -notlike "*.sig" } | Select-Object -First 1
+
+          if (-not $EXE_FILE) {
+            Write-Error "No .exe found in bundle/nsis/"
+            exit 1
+          }
+
+          # 找 .sig 文件，没有就自动生成
+          $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1
+
+          if (-not $SIG_FILE) {
+            Write-Host "No .sig found, generating..."
+            npx --yes tauri signer sign $EXE_FILE.FullName --private-key "${{ env.TAURI_SIGNING_PRIVATE_KEY }}" --password "${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
+            $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1
+          }
+
+          if (-not $SIG_FILE) {
+            Write-Error "Failed to generate .sig file"
             exit 1
           }
 
@@ -135,6 +159,7 @@ jobs:
 
           $LATEST_JSON | ConvertTo-Json -Depth 10 | Set-Content "latest.json" -Encoding UTF8
           Write-Host "Generated latest.json"
+          Get-Content "latest.json" | Write-Host
 
       - name: Pack portable zip
         shell: pwsh
