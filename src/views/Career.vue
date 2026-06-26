@@ -616,7 +616,7 @@ const statsSummary = computed(() => {
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  color: #1e293b;
+  color: var(--text-color);
   font-size: 0.72rem;
   font-weight: 700;
   z-index: 2;
@@ -625,7 +625,7 @@ const statsSummary = computed(() => {
 }
 
 [data-theme="dark"] .level-badge {
-  color: #f1f5f9;
+  color: var(--text-color);
 }
 
 .summoner-info {
@@ -710,7 +710,7 @@ const statsSummary = computed(() => {
 }
 
 .action-btn {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   color: var(--text-color);
   padding: 6px 16px;
@@ -862,7 +862,7 @@ const statsSummary = computed(() => {
 }
 
 .summary-action-btn {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   color: var(--text-color);
   padding: 4px 12px;
@@ -882,7 +882,7 @@ const statsSummary = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   padding: 4px 10px;
   border-radius: 4px;
@@ -913,7 +913,7 @@ const statsSummary = computed(() => {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   box-shadow: var(--shadow-lg);
@@ -975,8 +975,6 @@ const statsSummary = computed(() => {
 }
 
 .match-card.win:hover {
-  box-shadow: 0 6px 20px var(--win-glow);
-  border-color: var(--win-color);
   background-color: rgba(16, 185, 129, 0.12);
 }
 
@@ -986,8 +984,6 @@ const statsSummary = computed(() => {
 }
 
 .match-card.lose:hover {
-  box-shadow: 0 6px 20px var(--loss-glow);
-  border-color: var(--loss-color);
   background-color: rgba(239, 68, 68, 0.11);
 }
 
@@ -1020,8 +1016,8 @@ const statsSummary = computed(() => {
   width: 18px;
   height: 18px;
   line-height: 16px;
-  background-color: rgba(255, 255, 255, 0.95);
-  color: #1e293b;
+  background-color: var(--card-bg);
+  color: var(--text-color);
   border-radius: 50%;
   font-size: 0.7rem;
   font-weight: 700;
@@ -1030,8 +1026,8 @@ const statsSummary = computed(() => {
 }
 
 [data-theme="dark"] .level-overlay {
-  background-color: rgba(30, 41, 59, 0.95);
-  color: #f1f5f9;
+  background-color: var(--card-bg);
+  color: var(--text-color);
   border-color: rgba(255, 255, 255, 0.15);
 }
 

@@ -200,20 +200,20 @@ function removeSpell(slot: 'D' | 'F') {
   flex: 1;
   max-width: 140px;
   height: 56px;
-  border: 1.5px dashed #dcdfe6;
+  border: 1.5px dashed var(--settings-card-border);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #ffffff;
+  background: var(--card-bg);
   padding: 8px 12px;
   user-select: none;
 }
 .spell-slot-card:hover {
   border-color: var(--primary-color);
-  background: #fbfbfe;
+  background: var(--settings-card-bg-hover);
 }
 
 .slot-badge {
@@ -248,7 +248,7 @@ function removeSpell(slot: 'D' | 'F') {
 .slot-name {
   font-size: 0.82rem;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-color);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -264,15 +264,15 @@ function removeSpell(slot: 'D' | 'F') {
   transition: all 0.2s;
 }
 .slot-remove:hover {
-  background: #feeef0;
-  color: #f56c6c;
+  background: var(--loss-bg);
+  color: var(--loss-color);
 }
 
 .slot-placeholder {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #909399;
+  color: var(--text-dimmed);
   font-size: 0.8rem;
   font-weight: 500;
 }
@@ -284,8 +284,8 @@ function removeSpell(slot: 'D' | 'F') {
 
 /* 技能网格选择面板 */
 .picker-panel {
-  background: #fafbfc;
-  border: 1px solid #ebeef5;
+  background: var(--settings-card-bg);
+  border: 1px solid var(--settings-card-border);
   border-radius: 12px;
   padding: 14px;
   display: flex;
@@ -303,13 +303,13 @@ function removeSpell(slot: 'D' | 'F') {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #f0f0f2;
+  border-bottom: 1px solid var(--settings-separator);
   padding-bottom: 6px;
 }
 
 .panel-title {
   font-size: 0.82rem;
-  color: #606266;
+  color: var(--text-muted);
   font-weight: 600;
 }
 
@@ -317,15 +317,15 @@ function removeSpell(slot: 'D' | 'F') {
   background: transparent;
   border: none;
   font-size: 0.85rem;
-  color: #909399;
+  color: var(--text-dimmed);
   cursor: pointer;
 }
-.panel-close:hover { color: #f56c6c; }
+.panel-close:hover { color: var(--loss-color); }
 
 .picker-loading {
   text-align: center;
   padding: 1rem;
-  color: #909399;
+  color: var(--text-dimmed);
   font-size: 0.85rem;
 }
 
@@ -349,7 +349,7 @@ function removeSpell(slot: 'D' | 'F') {
   transition: all 0.15s;
   border: 2px solid transparent;
 }
-.spell-cell:hover { background: #e8e8ec; }
+.spell-cell:hover { background: var(--settings-card-bg-hover); }
 .spell-cell.selected {
   border-color: var(--primary-color);
   background: var(--primary-color-alpha-15);
@@ -368,7 +368,7 @@ function removeSpell(slot: 'D' | 'F') {
 
 .spell-name {
   font-size: 0.68rem;
-  color: #606266;
+  color: var(--text-muted);
   text-align: center;
   white-space: nowrap;
   overflow: hidden;

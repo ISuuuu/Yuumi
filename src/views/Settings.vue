@@ -4,7 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
-import { updateThemeColor, updateDeathColor, applyDpiScale } from "../utils/theme";
+import { updateThemeColor, updateDeathColor } from "../utils/theme";
+import ColorPicker from "../components/ColorPicker.vue";
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 
@@ -201,34 +202,9 @@ function toColor6(color: string | undefined): string {
   return color;
 }
 
-function toColor8(color: string, baseColor?: string): string {
+function toColor8(color: string): string {
   if (color.startsWith('#') && color.length === 7) {
-    const alpha = baseColor && baseColor.startsWith('#') && baseColor.length === 9
-      ? baseColor.slice(1, 3)
-      : 'ff';
-    return '#' + alpha + color.slice(1);
-  }
-  return color;
-}
-
-function getAlphaPercent(color: string | undefined): number {
-  if (!color) return 100;
-  if (color.startsWith('#') && color.length === 9) {
-    return Math.round((parseInt(color.slice(1, 3), 16) / 255) * 100);
-  }
-  return 100;
-}
-
-function setColorAlpha(color: string | undefined, alphaPercent: number): string {
-  if (!color) return '#ff000000';
-  const alpha = Math.round((Math.max(0, Math.min(100, alphaPercent)) / 100) * 255)
-    .toString(16)
-    .padStart(2, '0');
-  if (color.startsWith('#') && color.length === 9) {
-    return '#' + alpha + color.slice(3);
-  }
-  if (color.startsWith('#') && color.length === 7) {
-    return '#' + alpha + color.slice(1);
+    return '#ff' + color.slice(1);
   }
   return color;
 }
@@ -294,12 +270,6 @@ function applyThemeMode(mode: string) {
   }
 }
 
-function onDpiScaleChange(scale: string) {
-  if (!config.value?.Personalization) return;
-  config.value.Personalization.DpiScale = scale;
-  applyDpiScale(scale);
-  autoSave();
-}
 </script>
 
 <template>
@@ -615,7 +585,7 @@ function onDpiScaleChange(scale: string) {
       </div>
 
       <!-- 应用主题 -->
-      <div class="card-item border-bottom">
+      <div :class="['card-item', 'border-bottom', { 'has-dropdown-open': showThemeModeDropdown }]">
         <div class="card-left">
           <h3 class="card-title">应用主题</h3>
           <span class="card-desc">选择 Yuumi 的显示主题</span>
@@ -659,7 +629,7 @@ function onDpiScaleChange(scale: string) {
       </div>
 
       <!-- 对局卡片颜色 -->
-      <div class="collapse-item border-bottom">
+      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': activeCollapse === 'cardcolors' }]">
         <div class="collapse-header" @click="toggleCollapse('cardcolors')">
           <div class="collapse-left">
             <h3 class="card-title">对局卡片颜色</h3>
@@ -673,30 +643,15 @@ function onDpiScaleChange(scale: string) {
           <div class="color-pickers-row">
             <div class="color-picker-item">
               <label>胜利卡片:</label>
-              <input type="color" :value="toColor6(config.Personalization.WinCardColor)" @input="config.Personalization.WinCardColor = toColor8(($event.target as HTMLInputElement).value, config.Personalization.WinCardColor)" @change="autoSave" />
-              <div class="alpha-row">
-                <span class="alpha-label">透明度:</span>
-                <input type="number" class="alpha-number-input" min="0" max="100" :value="getAlphaPercent(config.Personalization.WinCardColor)" @input="config.Personalization.WinCardColor = setColorAlpha(config.Personalization.WinCardColor, Number(($event.target as HTMLInputElement).value))" @change="autoSave" />
-                <span class="alpha-suffix">%</span>
-              </div>
+              <ColorPicker v-model="config.Personalization.WinCardColor" @change="autoSave" />
             </div>
             <div class="color-picker-item">
               <label>失败卡片:</label>
-              <input type="color" :value="toColor6(config.Personalization.LoseCardColor)" @input="config.Personalization.LoseCardColor = toColor8(($event.target as HTMLInputElement).value, config.Personalization.LoseCardColor)" @change="autoSave" />
-              <div class="alpha-row">
-                <span class="alpha-label">透明度:</span>
-                <input type="number" class="alpha-number-input" min="0" max="100" :value="getAlphaPercent(config.Personalization.LoseCardColor)" @input="config.Personalization.LoseCardColor = setColorAlpha(config.Personalization.LoseCardColor, Number(($event.target as HTMLInputElement).value))" @change="autoSave" />
-                <span class="alpha-suffix">%</span>
-              </div>
+              <ColorPicker v-model="config.Personalization.LoseCardColor" @change="autoSave" />
             </div>
             <div class="color-picker-item">
               <label>重开卡片:</label>
-              <input type="color" :value="toColor6(config.Personalization.RemakeCardColor)" @input="config.Personalization.RemakeCardColor = toColor8(($event.target as HTMLInputElement).value, config.Personalization.RemakeCardColor)" @change="autoSave" />
-              <div class="alpha-row">
-                <span class="alpha-label">透明度:</span>
-                <input type="number" class="alpha-number-input" min="0" max="100" :value="getAlphaPercent(config.Personalization.RemakeCardColor)" @input="config.Personalization.RemakeCardColor = setColorAlpha(config.Personalization.RemakeCardColor, Number(($event.target as HTMLInputElement).value))" @change="autoSave" />
-                <span class="alpha-suffix">%</span>
-              </div>
+              <ColorPicker v-model="config.Personalization.RemakeCardColor" @change="autoSave" />
             </div>
           </div>
           <div class="reset-row">
@@ -847,14 +802,14 @@ function onDpiScaleChange(scale: string) {
 .tip { font-size: 0.95rem; color: var(--text-dimmed); margin-top: 12px; }
 
 .loading-spinner {
-  width: 36px; height: 36px; border: 3px solid rgba(0, 0, 0, 0.05);
+  width: 36px; height: 36px; border: 3px solid var(--hover-bg);
   border-top-color: var(--primary-color); border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .action-btn, .github-btn {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   color: var(--text-color);
   padding: 6px 16px;
@@ -896,7 +851,7 @@ function onDpiScaleChange(scale: string) {
   transform: translateY(-0.5px);
 }
 .feedback-btn:active {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
   transform: translateY(0.5px);
 }
 
@@ -910,26 +865,55 @@ function onDpiScaleChange(scale: string) {
 }
 
 .card-item, .collapse-item {
-  background: var(--card-bg);
+  background: var(--settings-card-bg);
   padding: 16px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--settings-card-border);
   border-radius: 12px;
   margin-bottom: 8px;
   box-shadow: var(--shadow-sm);
-  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition: box-shadow 0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+              border-color 0.25s,
+              background-color 0.25s,
+              transform 0.2s;
   position: relative;
 }
-.collapse-item.has-dropdown-open {
-  z-index: 10;
-}
+.collapse-item.has-dropdown-open,
+.card-item.has-dropdown-open { z-index: 20; }
 .card-item:hover, .collapse-item:hover {
-  box-shadow: var(--shadow-md);
-  border-color: var(--primary-color-alpha-30);
-  background-color: var(--card-bg-hover);
+  border-color: var(--settings-card-border-hover);
+  background-color: var(--settings-card-bg-hover);
+  box-shadow: var(--card-glow-hover);
+  transform: translateY(-1px);
 }
+/* 底部分隔线 — 卡片组内用细线分隔 */
+.card-item.border-bottom {
+  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--settings-separator);
+  margin-bottom: 0;
+}
+.card-item.border-bottom + .card-item { border-radius: 0; margin-top: 0; }
+.card-item.border-bottom + .card-item:last-child { border-radius: 0 0 12px 12px; }
+.collapse-item.border-bottom {
+  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--settings-separator);
+  margin-bottom: 0;
+}
+.collapse-item.border-bottom + .card-item { border-radius: 0; margin-top: 0; }
+.collapse-item.border-bottom + .collapse-item { border-radius: 0; margin-top: 0; }
+.collapse-item.border-bottom + .card-item:last-child { border-radius: 0 0 12px 12px; }
+.collapse-item.border-bottom + .collapse-item:last-child { border-radius: 0 0 12px 12px; }
+/* 折叠项内部内容面板 */
+.collapse-item .collapse-content {
+  border-top: 1px solid var(--settings-separator);
+}
+/* 分组最后的卡片恢复圆角 */
+.card-item.border-bottom:last-of-type { border-radius: 0 0 12px 12px; border-bottom: 1px solid var(--settings-separator); }
+.collapse-item.border-bottom:last-of-type { border-radius: 0 0 12px 12px; border-bottom: 1px solid var(--settings-separator); }
+/* 整体折叠项（带内容）底部有圆角 */
+.collapse-item:not(.border-bottom) { border-bottom: none; }
 
 .card-left { display: flex; flex-direction: column; flex: 1; }
 .card-title { font-size: 0.88rem; font-weight: bold; color: var(--text-color); margin: 0; }
@@ -946,17 +930,23 @@ function onDpiScaleChange(scale: string) {
 .toggle-switch {
   display: flex; align-items: center; width: 58px; height: 28px;
   border-radius: 14px; cursor: pointer; position: relative;
-  transition: background-color 0.25s; padding: 0 8px;
+  transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s; padding: 0 8px;
+  flex-shrink: 0;
 }
-.toggle-switch.off { background-color: rgba(0, 0, 0, 0.06); justify-content: flex-end; }
-.toggle-switch.on { background-color: var(--primary-color); justify-content: flex-start; }
+.toggle-switch.off { background-color: var(--toggle-track-off); justify-content: flex-end; }
+.toggle-switch.on {
+  background-color: var(--primary-color);
+  justify-content: flex-start;
+  box-shadow: var(--toggle-glow);
+}
 .toggle-text { font-size: 0.75rem; font-weight: bold; color: white; }
 .toggle-switch.off .toggle-text { color: var(--text-dimmed); }
 .toggle-slider {
-  width: 22px; height: 22px; background-color: var(--bg-color);
+  width: 22px; height: 22px; background-color: var(--toggle-slider);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.12);
   border-radius: 50%; position: absolute; top: 3px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-  transition: left 0.25s, right 0.25s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255,255,255,0.08);
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .toggle-switch.on .toggle-slider { right: 3px; }
 .toggle-switch.off .toggle-slider { left: 3px; }
@@ -988,7 +978,12 @@ function onDpiScaleChange(scale: string) {
   border: 1px solid var(--border-color);
   border-radius: 6px;
   margin-bottom: 6px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.path-item:hover {
+  border-color: rgba(0, 159, 170, 0.3);
+  box-shadow: 0 0 0 1px rgba(0, 159, 170, 0.15);
 }
 .path-input {
   font-size: 0.82rem;
@@ -1004,7 +999,7 @@ function onDpiScaleChange(scale: string) {
 }
 .path-input:focus {
   border-color: var(--primary-color);
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--card-bg);
 }
 .path-remove-btn {
   background: transparent;
@@ -1040,7 +1035,7 @@ function onDpiScaleChange(scale: string) {
   font-size: 0.82rem;
   line-height: 1;
   outline: none;
-  background-color: rgba(255, 255, 255, 0.6);
+  background-color: var(--card-bg);
   transition: all 0.2s ease;
   color: var(--text-color);
 }
@@ -1057,7 +1052,7 @@ function onDpiScaleChange(scale: string) {
 /* 分段控制组件（扁平化按钮组） */
 .segmented-control {
   display: inline-flex;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--segmented-bg);
   padding: 3px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
@@ -1074,14 +1069,11 @@ function onDpiScaleChange(scale: string) {
   transition: all 0.2s ease;
   outline: none;
 }
-.segmented-item:hover {
-  color: var(--text-color);
-  background: var(--hover-bg);
-}
+.segmented-item:hover { color: var(--text-color); background: var(--hover-bg); }
 .segmented-item.active {
   background: var(--card-bg-hover);
   color: var(--primary-color);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm), 0 0 8px rgba(0, 159, 170, 0.2);
 }
 
 
@@ -1089,7 +1081,7 @@ function onDpiScaleChange(scale: string) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   padding: 8px 12px;
   border-radius: 6px;
@@ -1177,33 +1169,8 @@ function onDpiScaleChange(scale: string) {
   border: 1px solid var(--border-color); background: var(--card-bg); padding: 2px;
   width: 44px; height: 28px; cursor: pointer; border-radius: 4px;
 }
-.color-pickers-row { display: flex; gap: 20px; flex-wrap: wrap; }
-.color-picker-item { display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; color: var(--text-muted); }
-.color-picker-item input[type="color"] {
-  border: 1px solid var(--border-color); background: var(--card-bg); padding: 2px;
-  width: 36px; height: 24px; cursor: pointer; border-radius: 4px;
-}
-.alpha-row { display: flex; align-items: center; gap: 4px; }
-.alpha-label { font-size: 0.75rem; color: var(--text-muted); }
-.alpha-number-input {
-  width: 42px;
-  height: 22px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: var(--card-bg);
-  color: var(--text-color);
-  font-size: 0.75rem;
-  text-align: center;
-  padding: 0 2px;
-  appearance: textfield;
-  -moz-appearance: textfield;
-}
-.alpha-number-input::-webkit-outer-spin-button,
-.alpha-number-input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.alpha-suffix { font-size: 0.75rem; color: var(--text-muted); }
+.color-pickers-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.color-picker-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-muted); }
 .reset-row {
   display: flex; justify-content: flex-end; margin-top: 8px;
 }
