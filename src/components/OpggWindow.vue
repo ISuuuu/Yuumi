@@ -26,7 +26,9 @@ function handleClose() {
   --card-bg-hover: rgba(255, 255, 255, 0.96);
   --border-color: rgba(0, 0, 0, 0.04);
   --border-color-hover: rgba(0, 0, 0, 0.08);
-
+  --hover-bg: rgba(0, 0, 0, 0.04);
+  --hover-bg-strong: rgba(0, 0, 0, 0.06);
+  
   --text-color: #0f172a;
   --text-muted: #334155;
   --text-dimmed: #64748b;
@@ -48,6 +50,39 @@ function handleClose() {
   --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.015);
   --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.03);
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.06);
+  --glass-filter: blur(16px);
+}
+
+[data-theme="dark"] {
+  /* 暗黑主题变量 */
+  --bg-color-gradient: linear-gradient(135deg, #0f172a 0%, #111827 40%, #1e293b 100%);
+  --bg-color: #0f172a;
+  --sidebar-bg: rgba(17, 24, 39, 0.9);
+  --card-bg: rgba(30, 41, 59, 0.85);
+  --card-bg-hover: rgba(30, 41, 59, 0.95);
+  --border-color: rgba(255, 255, 255, 0.06);
+  --border-color-hover: rgba(255, 255, 255, 0.12);
+  --hover-bg: rgba(255, 255, 255, 0.06);
+  --hover-bg-strong: rgba(255, 255, 255, 0.1);
+  
+  --text-color: #f1f5f9;
+  --text-muted: #94a3b8;
+  --text-dimmed: #64748b;
+
+  --win-color: #34d399;
+  --win-bg: rgba(16, 185, 129, 0.12);
+  --win-border: rgba(16, 185, 129, 0.25);
+  --win-glow: rgba(16, 185, 129, 0.12);
+
+  --loss-color: #f87171;
+  --loss-bg: rgba(239, 68, 68, 0.1);
+  --loss-border: rgba(239, 68, 68, 0.25);
+  --loss-glow: rgba(239, 68, 68, 0.1);
+  --death-color: #f87171;
+
+  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.4);
   --glass-filter: blur(16px);
 }
 

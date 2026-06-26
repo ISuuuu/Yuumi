@@ -267,25 +267,29 @@ const statsSummary = computed(() => {
       <div v-if="summoner" class="summoner-header">
         <div class="profile-center">
           <div class="profile-icon-wrapper">
-            <!-- 外层进度条圆环 -->
-            <div class="gauge-ring" :style="{ '--progress': summoner.percentCompleteForNextLevel }"></div>
+            <!-- 等级进度环形条（缺口在底部） -->
+            <svg class="gauge-ring-svg" viewBox="0 0 100 100">
+              <circle class="gauge-track" cx="50" cy="50" r="45" />
+              <circle class="gauge-progress" cx="50" cy="50" r="45"
+                      :style="{ '--progress': summoner.percentCompleteForNextLevel }" />
+            </svg>
             <div class="avatar-container">
               <LcuImage :src="summoner.profileIconUrl" class="profile-avatar" alt="avatar" />
             </div>
-            <!-- 等级角标 -->
+            <!-- 等级数字（底部缺口处） -->
             <div class="level-badge">{{ summoner.summonerLevel }}</div>
           </div>
 
           <div class="summoner-info">
-            <div class="name-row">
-              <h1 class="display-name">{{ summoner.gameName || summoner.displayName }}</h1>
+            <h1 class="display-name">{{ summoner.gameName || summoner.displayName }}</h1>
+            <div class="copy-wrapper">
               <button class="copy-riot-id-btn" @click="copyRiotId" :title="`复制: ${summoner.gameName || summoner.displayName}#${summoner.tagLine}`">
-                <span v-if="copied" class="copied-text">✓ 已复制</span>
-                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                 </svg>
               </button>
+              <span v-if="copied" class="copied-text">✓ 已复制</span>
             </div>
             <span class="tagline"># {{ summoner.tagLine }}</span>
           </div>
@@ -552,28 +556,50 @@ const statsSummary = computed(() => {
 .summoner-header:hover {
   border-color: var(--primary-color-alpha-30);
   box-shadow: var(--shadow-md);
-  background-color: #ffffff;
+  background-color: var(--card-bg-hover);
 }
 
 .profile-icon-wrapper {
   position: relative;
-  width: 80px;
-  height: 80px;
+  width: 104px;
+  height: 104px;
   flex-shrink: 0;
 }
 
-.gauge-ring {
+.gauge-ring-svg {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
-  background: radial-gradient(circle, #fff 33px, transparent 34px),
-              conic-gradient(var(--primary-color) calc(var(--progress) * 1%), rgba(0, 0, 0, 0.05) 0);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* 环形轨道（灰色）与进度（主题色）共享参数 */
+/* r=45, 周长=2π×45≈282.74, 缺口60°以容纳3位等级, 可见弧≈235.62 */
+/* 旋转120°使缺口居中于底部(90°) */
+.gauge-track,
+.gauge-progress {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-dasharray: 235.62 282.74;
+  transform: rotate(120deg);
+  transform-origin: center;
+}
+
+.gauge-track {
+  stroke: #d9d9d9;
+}
+
+.gauge-progress {
+  stroke: var(--primary-color);
+  stroke-dashoffset: calc(235.62px * (1 - var(--progress) / 100));
+  transition: stroke-dashoffset 0.8s ease;
 }
 
 .avatar-container {
   position: absolute;
-  inset: 5px;
+  inset: 13px;
   border-radius: 50%;
   overflow: hidden;
 }
@@ -587,43 +613,55 @@ const statsSummary = computed(() => {
 
 .level-badge {
   position: absolute;
-  bottom: -4px;
+  bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  background-color: var(--primary-color);
-  color: white;
-  font-size: 0.7rem;
-  font-weight: bold;
-  padding: 1px 8px;
-  border-radius: 10px;
-  box-shadow: 0 4px 10px var(--primary-color-alpha-30);
-  z-index: 1;
+  color: #1e293b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  z-index: 2;
   white-space: nowrap;
+  line-height: 1;
+}
+
+[data-theme="dark"] .level-badge {
+  color: #f1f5f9;
 }
 
 .summoner-info {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 8px;
   flex: 1;
 }
 
-.name-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .display-name {
-  font-size: 1.4rem;
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 1.6rem;
   font-weight: 800;
   color: var(--text-color);
   margin: 0;
+  text-align: center;
 }
 
 .tagline {
+  grid-column: 1;
+  grid-row: 2;
   font-size: 0.85rem;
   color: var(--text-muted);
-  margin-top: 4px;
+  text-align: center;
+}
+
+.copy-wrapper {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+  justify-self: end;
+  position: relative;
+  display: flex;
+  align-items: center;
 }
 
 .copy-riot-id-btn {
@@ -638,7 +676,6 @@ const statsSummary = computed(() => {
   cursor: pointer;
   color: var(--text-muted);
   transition: all 0.2s;
-  flex-shrink: 0;
   padding: 0;
 }
 
@@ -654,7 +691,11 @@ const statsSummary = computed(() => {
 }
 
 .copied-text {
-  font-size: 0.65rem;
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.75rem;
   color: var(--win-color);
   font-weight: 600;
   white-space: nowrap;
@@ -681,7 +722,7 @@ const statsSummary = computed(() => {
 }
 
 .action-btn:hover {
-  background: #ffffff;
+  background: var(--card-bg-hover);
   color: var(--text-color);
   border-color: var(--primary-color);
 }
@@ -698,7 +739,7 @@ const statsSummary = computed(() => {
 }
 
 .rank-table-wrapper:hover {
-  background-color: #ffffff;
+  background-color: var(--card-bg-hover);
   box-shadow: var(--shadow-md);
   border-color: var(--primary-color-alpha-30);
 }
@@ -753,7 +794,7 @@ const statsSummary = computed(() => {
 }
 
 .recent-summary-bar:hover {
-  background-color: #ffffff;
+  background-color: var(--card-bg-hover);
   box-shadow: var(--shadow-md);
   border-color: var(--primary-color-alpha-30);
 }
@@ -833,7 +874,7 @@ const statsSummary = computed(() => {
 }
 
 .summary-action-btn:hover {
-  background: #ffffff;
+  background: var(--card-bg-hover);
   border-color: var(--primary-color);
 }
 
@@ -853,7 +894,7 @@ const statsSummary = computed(() => {
 }
 
 .dropdown-trigger:hover {
-  background: #ffffff;
+  background: var(--card-bg-hover);
   border-color: var(--primary-color);
 }
 
@@ -892,7 +933,7 @@ const statsSummary = computed(() => {
 }
 
 .queue-dropdown-item:hover {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--hover-bg);
   color: var(--text-color);
 }
 
@@ -979,13 +1020,19 @@ const statsSummary = computed(() => {
   width: 18px;
   height: 18px;
   line-height: 16px;
-  background-color: rgba(255, 255, 255, 0.9);
-  color: var(--text-color);
+  background-color: rgba(255, 255, 255, 0.95);
+  color: #1e293b;
   border-radius: 50%;
   font-size: 0.7rem;
   font-weight: 700;
   text-align: center;
   border: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .level-overlay {
+  background-color: rgba(30, 41, 59, 0.95);
+  color: #f1f5f9;
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 .spells-runes {

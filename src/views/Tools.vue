@@ -1993,6 +1993,10 @@ async function handleToggleLockGameSettings() {
   background: rgba(255, 255, 255, 0.95);
 }
 
+[data-theme="dark"] .cancel-action-btn:hover {
+  background: rgba(30, 41, 59, 0.9);
+}
+
 .confirm-action-btn {
   background: var(--primary-color);
   color: white;
@@ -2084,9 +2088,20 @@ async function handleToggleLockGameSettings() {
   background: rgba(255, 255, 255, 0.4);
 }
 
+[data-theme="dark"] .lane-tab-btn:hover {
+  color: var(--text-color);
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .lane-tab-btn.active {
   color: var(--primary-color);
   background: white;
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .lane-tab-btn.active {
+  color: var(--primary-color);
+  background: rgba(30, 41, 59, 0.9);
   box-shadow: var(--shadow-sm);
 }
 </style>

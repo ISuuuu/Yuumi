@@ -183,6 +183,7 @@ export interface PersonalizationConfig {
   MicaEnabled: boolean;
   DpiScale: string;
   Language: string;
+  ThemeMode: string;
   WinCardColor: string;
   LoseCardColor: string;
   RemakeCardColor: string;
