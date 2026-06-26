@@ -98,6 +98,12 @@ onMounted(async () => {
   // 自动启动 LOL 客户端并按需显示主窗口
   try {
     appConfig.value = await fetchConfig();
+
+    // 检查配置加载时是否有错误（如配置文件损坏已自动恢复）
+    const configErr = await invoke<null | string>("get_config_load_error");
+    if (configErr) {
+      alert("配置文件异常:\n" + configErr);
+    }
     const cfg = appConfig.value;
     if (cfg?.General?.EnableStartLolWithApp) {
       invoke("launch_lol_client").catch((e: any) => console.warn("自动启动 LOL 失败:", e));

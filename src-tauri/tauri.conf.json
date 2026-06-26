@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicklasoverworlds/tauri/refs/heads/dev/crates/tauri-config-schema/schema.json",
   "productName": "Yuumi",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "identifier": "com.yuumi.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -18,16 +18,18 @@
         "height": 910,
         "center": true,
         "decorations": false,
-        "visible": false
+        "visible": false,
+        "devtools": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' https://127.0.0.1:* https://*; font-src 'self' https: data:; object-src 'none'"
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
