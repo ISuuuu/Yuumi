@@ -29,10 +29,12 @@ function toggleCollapse(panelName: string) {
 const showLogLevelDropdown = ref(false);
 const showDpiDropdown = ref(false);
 const showLangDropdown = ref(false);
+const showThemeModeDropdown = ref(false);
 function closeAllDropdowns() {
   showLogLevelDropdown.value = false;
   showDpiDropdown.value = false;
   showLangDropdown.value = false;
+  showThemeModeDropdown.value = false;
 }
 
 // ─── 自动保存（防抖 500ms）───
@@ -199,9 +201,34 @@ function toColor6(color: string | undefined): string {
   return color;
 }
 
-function toColor8(color: string): string {
+function toColor8(color: string, baseColor?: string): string {
   if (color.startsWith('#') && color.length === 7) {
-    return '#ff' + color.slice(1);
+    const alpha = baseColor && baseColor.startsWith('#') && baseColor.length === 9
+      ? baseColor.slice(1, 3)
+      : 'ff';
+    return '#' + alpha + color.slice(1);
+  }
+  return color;
+}
+
+function getAlphaPercent(color: string | undefined): number {
+  if (!color) return 100;
+  if (color.startsWith('#') && color.length === 9) {
+    return Math.round((parseInt(color.slice(1, 3), 16) / 255) * 100);
+  }
+  return 100;
+}
+
+function setColorAlpha(color: string | undefined, alphaPercent: number): string {
+  if (!color) return '#ff000000';
+  const alpha = Math.round((Math.max(0, Math.min(100, alphaPercent)) / 100) * 255)
+    .toString(16)
+    .padStart(2, '0');
+  if (color.startsWith('#') && color.length === 9) {
+    return '#' + alpha + color.slice(3);
+  }
+  if (color.startsWith('#') && color.length === 7) {
+    return '#' + alpha + color.slice(1);
   }
   return color;
 }
@@ -256,6 +283,15 @@ function resetDeathColors() {
   config.value.Personalization.DarkDeathsNumberColor = DEFAULT_COLORS.DarkDeathsNumberColor;
   updateDeathColor(toColor6(DEFAULT_COLORS.LightDeathsNumberColor), toColor6(DEFAULT_COLORS.DarkDeathsNumberColor));
   autoSave();
+}
+
+function applyThemeMode(mode: string) {
+  const root = document.documentElement;
+  if (mode === 'Auto') {
+    root.removeAttribute('data-theme');
+  } else if (mode === 'Light' || mode === 'Dark') {
+    root.setAttribute('data-theme', mode.toLowerCase());
+  }
 }
 
 function onDpiScaleChange(scale: string) {
@@ -578,6 +614,28 @@ function onDpiScaleChange(scale: string) {
         </div>
       </div>
 
+      <!-- 应用主题 -->
+      <div class="card-item border-bottom">
+        <div class="card-left">
+          <h3 class="card-title">应用主题</h3>
+          <span class="card-desc">选择 Yuumi 的显示主题</span>
+        </div>
+        <div class="card-right">
+          <div class="dropdown-trigger" @click.stop="showThemeModeDropdown = !showThemeModeDropdown">
+            <span>
+              {{ config.Personalization.ThemeMode === 'Light' ? '浅色' :
+                 config.Personalization.ThemeMode === 'Dark' ? '深色' : '跟随系统' }}
+            </span>
+            <svg :class="['arrow-icon', { expanded: showThemeModeDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            <div v-if="showThemeModeDropdown" class="dropdown-menu" @click.stop>
+              <div :class="['dropdown-item', { active: config.Personalization.ThemeMode === 'Light' }]" @click="if(config.Personalization.ThemeMode !== 'Light') { config.Personalization.ThemeMode = 'Light'; applyThemeMode('Light'); autoSave(); }; showThemeModeDropdown = false">浅色</div>
+              <div :class="['dropdown-item', { active: config.Personalization.ThemeMode === 'Dark' }]" @click="if(config.Personalization.ThemeMode !== 'Dark') { config.Personalization.ThemeMode = 'Dark'; applyThemeMode('Dark'); autoSave(); }; showThemeModeDropdown = false">深色</div>
+              <div :class="['dropdown-item', { active: config.Personalization.ThemeMode === 'Auto' }]" @click="if(config.Personalization.ThemeMode !== 'Auto') { config.Personalization.ThemeMode = 'Auto'; applyThemeMode('Auto'); autoSave(); }; showThemeModeDropdown = false">跟随系统</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 主题色 -->
       <div class="collapse-item border-bottom">
         <div class="collapse-header" @click="toggleCollapse('themecolor')">
@@ -593,6 +651,8 @@ function onDpiScaleChange(scale: string) {
           <div class="input-row align-center">
             <label class="color-picker-label">调色盘:</label>
             <input type="color" class="color-picker" :value="toColor6(config.Personalization.ThemeColor)" @input="onThemeColorInput" @change="autoSave" />
+          </div>
+          <div class="reset-row">
             <button class="action-btn" @click="resetThemeColor">恢复默认</button>
           </div>
         </div>
@@ -613,15 +673,30 @@ function onDpiScaleChange(scale: string) {
           <div class="color-pickers-row">
             <div class="color-picker-item">
               <label>胜利卡片:</label>
-              <input type="color" :value="toColor6(config.Personalization.WinCardColor)" @input="config.Personalization.WinCardColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
+              <input type="color" :value="toColor6(config.Personalization.WinCardColor)" @input="config.Personalization.WinCardColor = toColor8(($event.target as HTMLInputElement).value, config.Personalization.WinCardColor)" @change="autoSave" />
+              <div class="alpha-row">
+                <span class="alpha-label">透明度:</span>
+                <input type="number" class="alpha-number-input" min="0" max="100" :value="getAlphaPercent(config.Personalization.WinCardColor)" @input="config.Personalization.WinCardColor = setColorAlpha(config.Personalization.WinCardColor, Number(($event.target as HTMLInputElement).value))" @change="autoSave" />
+                <span class="alpha-suffix">%</span>
+              </div>
             </div>
             <div class="color-picker-item">
               <label>失败卡片:</label>
-              <input type="color" :value="toColor6(config.Personalization.LoseCardColor)" @input="config.Personalization.LoseCardColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
+              <input type="color" :value="toColor6(config.Personalization.LoseCardColor)" @input="config.Personalization.LoseCardColor = toColor8(($event.target as HTMLInputElement).value, config.Personalization.LoseCardColor)" @change="autoSave" />
+              <div class="alpha-row">
+                <span class="alpha-label">透明度:</span>
+                <input type="number" class="alpha-number-input" min="0" max="100" :value="getAlphaPercent(config.Personalization.LoseCardColor)" @input="config.Personalization.LoseCardColor = setColorAlpha(config.Personalization.LoseCardColor, Number(($event.target as HTMLInputElement).value))" @change="autoSave" />
+                <span class="alpha-suffix">%</span>
+              </div>
             </div>
             <div class="color-picker-item">
               <label>重开卡片:</label>
-              <input type="color" :value="toColor6(config.Personalization.RemakeCardColor)" @input="config.Personalization.RemakeCardColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
+              <input type="color" :value="toColor6(config.Personalization.RemakeCardColor)" @input="config.Personalization.RemakeCardColor = toColor8(($event.target as HTMLInputElement).value, config.Personalization.RemakeCardColor)" @change="autoSave" />
+              <div class="alpha-row">
+                <span class="alpha-label">透明度:</span>
+                <input type="number" class="alpha-number-input" min="0" max="100" :value="getAlphaPercent(config.Personalization.RemakeCardColor)" @input="config.Personalization.RemakeCardColor = setColorAlpha(config.Personalization.RemakeCardColor, Number(($event.target as HTMLInputElement).value))" @change="autoSave" />
+                <span class="alpha-suffix">%</span>
+              </div>
             </div>
           </div>
           <div class="reset-row">
@@ -795,12 +870,12 @@ function onDpiScaleChange(scale: string) {
   box-shadow: var(--shadow-sm);
 }
 .action-btn:hover, .github-btn:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--hover-bg-strong);
   border-color: var(--primary-color);
   transform: translateY(-0.5px);
 }
 .action-btn:active, .github-btn:active {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--hover-bg);
   transform: translateY(0.5px);
 }
 
@@ -853,7 +928,7 @@ function onDpiScaleChange(scale: string) {
 .card-item:hover, .collapse-item:hover {
   box-shadow: var(--shadow-md);
   border-color: var(--primary-color-alpha-30);
-  background-color: #ffffff;
+  background-color: var(--card-bg-hover);
 }
 
 .card-left { display: flex; flex-direction: column; flex: 1; }
@@ -878,7 +953,7 @@ function onDpiScaleChange(scale: string) {
 .toggle-text { font-size: 0.75rem; font-weight: bold; color: white; }
 .toggle-switch.off .toggle-text { color: var(--text-dimmed); }
 .toggle-slider {
-  width: 22px; height: 22px; background-color: white;
+  width: 22px; height: 22px; background-color: var(--bg-color);
   border-radius: 50%; position: absolute; top: 3px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.15);
   transition: left 0.25s, right 0.25s;
@@ -970,11 +1045,11 @@ function onDpiScaleChange(scale: string) {
   color: var(--text-color);
 }
 .text-input:hover {
-  background-color: rgba(255, 255, 255, 0.95);
+  background-color: var(--card-bg-hover);
   border-color: var(--border-color-hover);
 }
 .text-input:focus {
-  background-color: #fff;
+  background-color: var(--card-bg-hover);
   border-color: var(--primary-color);
   box-shadow: 0 0 8px var(--primary-color-alpha-15);
 }
@@ -1001,9 +1076,10 @@ function onDpiScaleChange(scale: string) {
 }
 .segmented-item:hover {
   color: var(--text-color);
+  background: var(--hover-bg);
 }
 .segmented-item.active {
-  background: #ffffff;
+  background: var(--card-bg-hover);
   color: var(--primary-color);
   box-shadow: var(--shadow-sm);
 }
@@ -1025,7 +1101,7 @@ function onDpiScaleChange(scale: string) {
   min-width: 140px;
 }
 .dropdown-trigger:hover {
-  background: #ffffff;
+  background: var(--card-bg-hover);
   border-color: var(--primary-color);
 }
 .dropdown-trigger .arrow-icon {
@@ -1041,7 +1117,7 @@ function onDpiScaleChange(scale: string) {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  background: #ffffff;
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   box-shadow: var(--shadow-lg);
@@ -1057,7 +1133,7 @@ function onDpiScaleChange(scale: string) {
   transition: all 0.2s;
 }
 .dropdown-item:hover {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--hover-bg);
   color: var(--text-color);
 }
 .dropdown-item.active {
@@ -1073,7 +1149,7 @@ function onDpiScaleChange(scale: string) {
   border-radius: 8px;
   font-size: 0.82rem;
   outline: none;
-  background-color: rgba(255, 255, 255, 0.6);
+  background-color: var(--card-bg);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   color: var(--text-color);
   text-align: center;
@@ -1087,26 +1163,47 @@ function onDpiScaleChange(scale: string) {
   height: 28px;
 }
 .number-input:hover {
-  background-color: rgba(255, 255, 255, 0.85);
+  background-color: var(--card-bg-hover);
   border-color: var(--primary-color-alpha-40);
 }
 .number-input:focus {
-  background-color: #fff;
+  background-color: var(--card-bg-hover);
   border-color: var(--primary-color);
   box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
 }
 
 .color-picker-label { font-size: 0.82rem; color: var(--text-muted); }
 .color-picker {
-  border: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.6); padding: 2px;
+  border: 1px solid var(--border-color); background: var(--card-bg); padding: 2px;
   width: 44px; height: 28px; cursor: pointer; border-radius: 4px;
 }
-.color-pickers-row { display: flex; gap: 16px; flex-wrap: wrap; }
-.color-picker-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-muted); }
+.color-pickers-row { display: flex; gap: 20px; flex-wrap: wrap; }
+.color-picker-item { display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; color: var(--text-muted); }
 .color-picker-item input[type="color"] {
-  border: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.6); padding: 2px;
+  border: 1px solid var(--border-color); background: var(--card-bg); padding: 2px;
   width: 36px; height: 24px; cursor: pointer; border-radius: 4px;
 }
+.alpha-row { display: flex; align-items: center; gap: 4px; }
+.alpha-label { font-size: 0.75rem; color: var(--text-muted); }
+.alpha-number-input {
+  width: 42px;
+  height: 22px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--card-bg);
+  color: var(--text-color);
+  font-size: 0.75rem;
+  text-align: center;
+  padding: 0 2px;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.alpha-number-input::-webkit-outer-spin-button,
+.alpha-number-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.alpha-suffix { font-size: 0.75rem; color: var(--text-muted); }
 .reset-row {
   display: flex; justify-content: flex-end; margin-top: 8px;
 }

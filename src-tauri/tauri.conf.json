@@ -35,5 +35,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzQjk5RURCMTE1MTM5MEIKUldRTE9WRVIyNTY1Z3pVZWRIQzh1bythRWZ3bWJsdTdoeS9uUTEvL0ZBa3I1bXZEd1o3cWpRbTYK",
+      "active": true,
+      "endpoints": [
+        "https://github.com/Isuuuu/yuumi/releases/latest/download/latest.json"
+      ]      
+    }
   }
 }

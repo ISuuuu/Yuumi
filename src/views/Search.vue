@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, watch, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import { fetchMatchHistory, lcuRequest, batchUploadMatches, fetchConfig, updateConfig } from "../api/lcu";
@@ -1203,21 +1203,31 @@ const gameDetails = computed(() => {
 }
 
 .mini-match-card.win {
-  background-color: #f0fdf4;
-  border-color: #dcfce7;
+  background-color: var(--win-bg);
+  border-color: var(--win-border);
 }
 
 .mini-match-card.win:hover {
-  background-color: #e6f7ec;
+  background-color: var(--win-bg);
+}
+
+[data-theme="dark"] .mini-match-card.win:hover {
+  background-color: rgba(34, 197, 94, 0.15);
+}
 }
 
 .mini-match-card.lose {
-  background-color: #fdf2f2;
-  border-color: #fde8e8;
+  background-color: var(--loss-bg);
+  border-color: var(--loss-border);
 }
 
 .mini-match-card.lose:hover {
-  background-color: #fbebeb;
+  background-color: var(--loss-bg);
+}
+
+[data-theme="dark"] .mini-match-card.lose:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+}
 }
 
 .mini-match-card.selected.win {
@@ -1256,7 +1266,7 @@ const gameDetails = computed(() => {
 
 .mini-time-kda {
   font-size: 0.72rem;
-  color: #64748b;
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
@@ -1367,13 +1377,13 @@ const gameDetails = computed(() => {
 }
 
 .detail-banner.win {
-  background-color: #f0fdf4;
-  border-color: #dcfce7;
+  background-color: var(--win-bg);
+  border-color: var(--win-border);
 }
 
 .detail-banner.lose {
-  background-color: #fdf2f2;
-  border-color: #fee2e2;
+  background-color: var(--loss-bg);
+  border-color: var(--loss-border);
 }
 
 .banner-main {
@@ -1408,12 +1418,12 @@ const gameDetails = computed(() => {
   margin: 0 0 2px;
 }
 
-.banner-result.win { color: #22c55e; }
-.banner-result.lose { color: #ef4444; }
+.banner-result.win { color: var(--win-color); }
+.banner-result.lose { color: var(--loss-color); }
 
 .banner-subtext {
   font-size: 0.75rem;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .copy-btn {
@@ -1431,7 +1441,12 @@ const gameDetails = computed(() => {
 }
 
 .copy-btn:hover {
-  background-color: #ffffff;
+  background-color: var(--card-bg);
+}
+
+[data-theme="dark"] .copy-btn:hover {
+  background-color: rgba(30, 41, 59, 0.9);
+}
   border-color: var(--primary-color);
   color: var(--primary-color);
 }
@@ -1450,19 +1465,19 @@ const gameDetails = computed(() => {
 }
 
 .team-block {
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   overflow: hidden;
-  background: #ffffff;
+  background: var(--card-bg);
   box-shadow: var(--shadow-sm);
 }
 
 .team-block.win-block {
-  border-color: #dcfce7;
+  border-color: var(--win-border);
 }
 
 .team-block.lose-block {
-  border-color: #fee2e2;
+  border-color: var(--loss-border);
 }
 
 .team-header-bar {
@@ -1474,26 +1489,26 @@ const gameDetails = computed(() => {
 }
 
 .team-header-bar.win-bar {
-  background-color: #f0f9eb;
-  border-bottom: 1px solid #e1f3d8;
+  background-color: var(--win-bg);
+  border-bottom: 1px solid var(--win-border);
 }
 
 .team-header-bar.lose-bar {
-  background-color: #fef0f0;
-  border-bottom: 1px solid #fde2e2;
+  background-color: var(--loss-bg);
+  border-bottom: 1px solid var(--loss-border);
 }
 
 .team-result-label {
   font-weight: bold;
 }
-.win-text { color: #22c55e; }
-.lose-text { color: #ef4444; }
+.win-text { color: var(--win-color); }
+.lose-text { color: var(--loss-color); }
 
 .team-objectives {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #606266;
+  color: var(--text-muted);
   font-weight: 500;
   font-size: 0.8rem;
 }
@@ -1518,9 +1533,9 @@ const gameDetails = computed(() => {
   display: flex;
   align-items: center;
   padding: 6px 14px;
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid var(--border-color);
   font-size: 0.8rem;
-  color: #333;
+  color: var(--text-color);
 }
 
 .player-row:last-child {
@@ -1529,11 +1544,11 @@ const gameDetails = computed(() => {
 
 /* 玩家高亮行 */
 .player-row.highlight-row.win-row {
-  background-color: #f0fdf4 !important;
+  background-color: var(--win-bg) !important;
 }
 
 .player-row.highlight-row.lose-row {
-  background-color: #fdf2f2 !important;
+  background-color: var(--loss-bg) !important;
 }
 
 .player-row.highlight-row.win-row .row-name,
@@ -1542,7 +1557,7 @@ const gameDetails = computed(() => {
 .player-row.highlight-row.win-row .row-cs-text,
 .player-row.highlight-row.win-row .row-gold-text,
 .player-row.highlight-row.win-row .row-damage-text {
-  color: #22c55e !important;
+  color: var(--win-color) !important;
   font-weight: 800;
 }
 
@@ -1552,7 +1567,7 @@ const gameDetails = computed(() => {
 .player-row.highlight-row.lose-row .row-cs-text,
 .player-row.highlight-row.lose-row .row-gold-text,
 .player-row.highlight-row.lose-row .row-damage-text {
-  color: #ef4444 !important;
+  color: var(--loss-color) !important;
   font-weight: 800;
 }
 
@@ -1577,7 +1592,7 @@ const gameDetails = computed(() => {
   height: 40px;
   border-radius: 50%;
   overflow: hidden;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--border-color);
 }
 
 .row-level-overlay {
@@ -1587,13 +1602,19 @@ const gameDetails = computed(() => {
   width: 14px;
   height: 14px;
   line-height: 12px;
-  background: #202124;
-  color: white;
+  background: var(--text-color);
+  color: var(--bg-color);
   border-radius: 50%;
   font-size: 0.58rem;
   font-weight: bold;
   text-align: center;
-  border: 1px solid #fff;
+  border: 1px solid var(--card-bg);
+}
+
+[data-theme="dark"] .row-level-overlay {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: rgba(255,255,255,0.2);
 }
 
 .row-spell-rune-row {
@@ -1612,7 +1633,7 @@ const gameDetails = computed(() => {
   width: 18px;
   height: 18px;
   border-radius: 2px;
-  border: 1px solid rgba(0,0,0,0.08);
+  border: 1px solid var(--border-color);
 }
 
 .row-rune {
@@ -1640,7 +1661,7 @@ const gameDetails = computed(() => {
 .row-rank-badge {
   display: inline-block;
   font-size: 10px;
-  color: #8e44ad;
+  color: var(--primary-color);
   background: rgba(142, 68, 173, 0.08);
   padding: 1px 4px;
   border-radius: 4px;
@@ -1658,7 +1679,7 @@ const gameDetails = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #555;
+  color: var(--text-color);
   cursor: pointer;
   transition: color 0.15s;
 }
@@ -1669,11 +1690,11 @@ const gameDetails = computed(() => {
 
 .bot-player {
   cursor: default;
-  color: #aaa;
+  color: var(--text-dimmed);
 }
 
 .bot-player:hover {
-  color: #aaa;
+  color: var(--text-dimmed);
 }
 
 .highlight-user {
@@ -1739,7 +1760,7 @@ const gameDetails = computed(() => {
 .player-cs-col {
   width: 42px;
   text-align: center;
-  color: #606266;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -1751,7 +1772,7 @@ const gameDetails = computed(() => {
 .player-gold-col {
   width: 55px;
   text-align: right;
-  color: #606266;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -1764,7 +1785,7 @@ const gameDetails = computed(() => {
   width: 60px;
   text-align: right;
   font-weight: 700;
-  color: #2c3e50;
+  color: var(--text-color);
   flex-shrink: 0;
 }
 
@@ -1782,7 +1803,7 @@ const gameDetails = computed(() => {
   align-items: center;
   font-size: 0.72rem;
   font-weight: 700;
-  color: #7f8c8d;
+  color: var(--text-muted);
   padding-right: 2px;
 }
 
@@ -1830,3 +1851,4 @@ const gameDetails = computed(() => {
 .toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
 .toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 </style>
+

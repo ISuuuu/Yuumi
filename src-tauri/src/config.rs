@@ -66,12 +66,17 @@ fn default_theme_color() -> String {
     "#009faa".into()
 }
 
+fn default_theme_mode() -> String {
+    "Auto".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PersonalizationConfig {
     pub mica_enabled: bool,
     pub dpi_scale: String,
     pub language: String,
+    pub theme_mode: String,
     pub win_card_color: String,
     pub lose_card_color: String,
     pub remake_card_color: String,
@@ -87,6 +92,7 @@ impl Default for PersonalizationConfig {
             mica_enabled: true,
             dpi_scale: "Auto".into(),
             language: "Auto".into(),
+            theme_mode: "Auto".into(),
             win_card_color: "#2839b01b".into(),
             lose_card_color: "#28d3190c".into(),
             remake_card_color: "#28a2a2a2".into(),

@@ -1,0 +1,152 @@
+name: Release Yuumi
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '手动指定版本号 (例如: v0.1.0)'
+        required: true
+        type: string
+
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.result }}
+      version: ${{ steps.get-version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: get-version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        id: create-release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tagName = '${{ steps.get-version.outputs.version }}';
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: `Yuumi ${tagName}`,
+              body: '## What\'s Changed\n\n请查看下方 Changelog',
+              tag_name: tagName,
+              draft: true,
+              prerelease: false
+            });
+            return data.id
+
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Update version in tauri.conf.json
+        shell: pwsh
+        run: |
+          $VERSION = "${{ needs.create-release.outputs.version }}" -replace '^v', ''
+          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $config.version = $VERSION
+          $config | ConvertTo-Json -Depth 100 | Set-Content src-tauri/tauri.conf.json
+
+      - name: Build Tauri (Windows)
+        run: pnpm tauri build
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yuumi-windows
+          path: |
+            ./src-tauri/target/release/bundle/nsis/*.exe
+            ./src-tauri/target/release/bundle/msi/*.msi
+          retention-days: 7
+          if-no-files-found: ignore
+
+  publish-release:
+    needs: [create-release, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changelog
+        id: changelog
+        run: |
+          TAG_NAME="${{ needs.create-release.outputs.version }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 "$TAG_NAME^" 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --oneline --format="- %s" -20)
+          else
+            CHANGELOG=$(git log --oneline --format="- %s" "${PREV_TAG}..${TAG_NAME}")
+          fi
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "## Changes in this release" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: yuumi-windows
+          path: ./artifacts
+
+      - name: List artifacts
+        run: ls -la ./artifacts
+
+      - name: Publish release
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          artifactErrorsFailBuild: true
+          replacesArtifacts: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          body: "${{ steps.changelog.outputs.notes }}"
+          artifacts: "./artifacts/*"
