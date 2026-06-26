@@ -139,13 +139,26 @@ jobs:
           path: ./Yuumi_v*_portable.zip
           retention-days: 7
 
-      - name: Upload latest.json for updater
+      - name: Find and upload latest.json for updater
+        shell: pwsh
+        run: |
+          $latestFile = Get-ChildItem -Path "src-tauri/target/release/bundle" -Filter "latest.json" -Recurse | Select-Object -First 1
+          if ($latestFile) {
+            Write-Host "Found latest.json at: $($latestFile.FullName)"
+            Copy-Item $latestFile.FullName "./latest.json"
+          } else {
+            Write-Error "latest.json not found in bundle directory!"
+            Write-Host "Bundle directory contents:"
+            Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+
+      - name: Upload latest.json artifact
         uses: actions/upload-artifact@v4
         with:
           name: yuumi-updater
-          path: ./src-tauri/target/release/bundle/nsis/latest.json
+          path: ./latest.json
           retention-days: 7
-          if-no-files-found: error
 
   publish-release:
     needs: [create-release, build-windows]
