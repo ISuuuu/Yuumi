@@ -34,6 +34,7 @@ http = "1"
 # WebSocket
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
+uuid = { version = "1", features = ["v4"] }
 
 # 进程检测
 sysinfo = "0.33"

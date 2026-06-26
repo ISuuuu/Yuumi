@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, inject, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import { updateThemeColor } from "../utils/theme";
@@ -49,6 +50,11 @@ function autoSave() {
   }, 500);
 }
 
+// SignalR 连接状态
+const signalrStatus = ref<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+const signalrError = ref('');
+const unlistenFns = ref<Array<() => void>>([]);
+
 onMounted(async () => {
   document.addEventListener("click", closeAllDropdowns);
   if (!config.value) {
@@ -61,10 +67,44 @@ onMounted(async () => {
   if (config.value && config.value.Personalization && config.value.Personalization.ThemeColor) {
     updateThemeColor(config.value.Personalization.ThemeColor);
   }
+
+  // 获取初始 SignalR 状态
+  try {
+    signalrStatus.value = await invoke<any>("get_signalr_status");
+  } catch (e) {
+    console.error("获取 SignalR 状态失败:", e);
+  }
+
+  // 监听后端 SignalR 事件
+  try {
+    const unConnecting = await listen("signalr-connecting", () => {
+      signalrStatus.value = "connecting";
+      signalrError.value = "";
+    });
+    const unConnected = await listen("signalr-connected", () => {
+      signalrStatus.value = "connected";
+      signalrError.value = "";
+    });
+    const unDisconnected = await listen("signalr-disconnected", () => {
+      signalrStatus.value = "disconnected";
+    });
+    const unError = await listen<string>("signalr-error", (event) => {
+      signalrStatus.value = "error";
+      signalrError.value = event.payload;
+    });
+
+    unlistenFns.value.push(unConnecting);
+    unlistenFns.value.push(unConnected);
+    unlistenFns.value.push(unDisconnected);
+    unlistenFns.value.push(unError);
+  } catch (e) {
+    console.error("注册 SignalR 监听器失败:", e);
+  }
 });
 
 onUnmounted(() => {
   document.removeEventListener("click", closeAllDropdowns);
+  unlistenFns.value.forEach(fn => fn());
 });
 
 // 自动检测客户端路径（追加到列表）
@@ -392,33 +432,44 @@ function onThemeColorInput(e: Event) {
         </div>
       </div>
 
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('apiaddr')">
+      <!-- 云端服务 -->
+      <div class="collapse-item">
+        <div class="collapse-header" @click="toggleCollapse('upload_and_signalr')">
           <div class="collapse-left">
-            <h3 class="card-title">对局上传 API 地址</h3>
-            <span class="card-desc">用于上传对局历史数据的 URL 端点，留空则不上传</span>
+            <h3 class="card-title">云端服务</h3>
+            <span class="card-desc">配置战绩自动上报、LCU 实时数据同步与查询服务</span>
           </div>
           <div class="collapse-right">
-            <span class="status-preview truncate">{{ config.General.UploadApiUrl || '未设置' }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'apiaddr' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            <span class="status-preview">
+              {{ config.General.UploadApiUrl ? '已配置上传' : '未配置' }}
+              <template v-if="config.Functions.LcuRealtimeEnabled">
+                / 
+                <span :class="['signalr-status-badge', signalrStatus]">
+                  {{ signalrStatus === 'connected' ? '云端已连接' : signalrStatus === 'connecting' ? '云端连接中...' : signalrStatus === 'error' ? '云端连接失败' : '云端未连接' }}
+                </span>
+              </template>
+            </span>
+            <svg :class="['arrow-icon', { expanded: activeCollapse === 'upload_and_signalr' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </div>
         </div>
-        <div v-show="activeCollapse === 'apiaddr'" class="collapse-content">
-          <div class="input-row">
-            <input v-model="config.General.UploadApiUrl" placeholder="http://example.com" class="text-input" @change="autoSave" />
+        <div v-show="activeCollapse === 'upload_and_signalr'" class="collapse-content">
+          <div class="setting-input-row">
+            <span class="setting-input-label">服务器 API 地址:</span>
+            <input v-model="config.General.UploadApiUrl" placeholder="http://example.com" class="text-input" @change="if (config.Functions.LcuRealtimeEnabled && config.General.UploadApiUrl) { signalrStatus = 'connecting'; }; autoSave()" />
           </div>
-        </div>
-      </div>
-
-      <div class="card-item">
-        <div class="card-left">
-          <h3 class="card-title">LCU 实时查询</h3>
-          <span class="card-desc">通过 LCU 客户端实时查询对局历史</span>
-        </div>
-        <div class="card-right">
-          <div :class="['toggle-switch', config.Functions.LcuRealtimeEnabled ? 'on' : 'off']" @click="config.Functions.LcuRealtimeEnabled = !config.Functions.LcuRealtimeEnabled; autoSave()">
-            <span class="toggle-text">{{ config.Functions.LcuRealtimeEnabled ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
+          <div class="setting-input-row">
+            <span class="setting-input-label">LCU 实时查询:</span>
+            <div :class="['toggle-switch', config.Functions.LcuRealtimeEnabled ? 'on' : 'off']" @click="config.Functions.LcuRealtimeEnabled = !config.Functions.LcuRealtimeEnabled; if (config.Functions.LcuRealtimeEnabled && config.General.UploadApiUrl) { signalrStatus = 'connecting'; } else { signalrStatus = 'disconnected'; }; autoSave()">
+              <span class="toggle-text">{{ config.Functions.LcuRealtimeEnabled ? '开' : '关' }}</span>
+              <span class="toggle-slider"></span>
+            </div>
+          </div>
+          <div v-if="signalrStatus === 'error' && signalrError" class="setting-error-tip">
+            连接异常: {{ signalrError }}
+          </div>
+          <div class="setting-input-row">
+            <span class="setting-input-label">userid:</span>
+            <input v-model="config.General.SignalrUserId" placeholder="留空默认使用 lcu_user_001" class="text-input" @change="autoSave" />
           </div>
         </div>
       </div>
@@ -858,10 +909,11 @@ function onThemeColorInput(e: Event) {
 }
 .text-input {
   flex: 1;
-  padding: 8px 12px;
+  padding: 10px 12px 6px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   font-size: 0.82rem;
+  line-height: 1;
   outline: none;
   background-color: rgba(255, 255, 255, 0.6);
   transition: all 0.2s ease;
@@ -992,4 +1044,48 @@ function onThemeColorInput(e: Event) {
 .toast-leave-active { transition: all 0.2s ease-in; }
 .toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
 .toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+
+.setting-input-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.setting-input-row:last-child {
+  margin-bottom: 0;
+}
+
+.setting-input-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  width: 130px;
+  flex-shrink: 0;
+}
+.signalr-status-badge {
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+.signalr-status-badge.connected {
+  color: var(--win-color);
+}
+.signalr-status-badge.connecting {
+  color: #f59e0b;
+}
+.signalr-status-badge.error {
+  color: var(--loss-color);
+}
+.signalr-status-badge.disconnected {
+  color: var(--text-dimmed);
+}
+.setting-error-tip {
+  font-size: 0.76rem;
+  color: var(--loss-color);
+  margin-top: -6px;
+  margin-bottom: 10px;
+  padding-left: 142px;
+  text-align: left;
+}
 </style>

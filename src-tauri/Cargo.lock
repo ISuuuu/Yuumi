@@ -5664,6 +5664,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]
