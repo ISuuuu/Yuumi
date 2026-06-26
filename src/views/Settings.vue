@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, onUnmounted, inject, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import { updateThemeColor } from "../utils/theme";
 
-const config = ref<AppConfig | null>(null);
+const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 
 // Toast 通知
 const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
@@ -51,13 +51,15 @@ function autoSave() {
 
 onMounted(async () => {
   document.addEventListener("click", closeAllDropdowns);
-  try {
-    config.value = await fetchConfig();
-    if (config.value && config.value.Personalization && config.value.Personalization.ThemeColor) {
-      updateThemeColor(config.value.Personalization.ThemeColor);
+  if (!config.value) {
+    try {
+      config.value = await fetchConfig();
+    } catch (e) {
+      console.error("加载系统配置失败:", e);
     }
-  } catch (e) {
-    console.error("加载系统配置失败:", e);
+  }
+  if (config.value && config.value.Personalization && config.value.Personalization.ThemeColor) {
+    updateThemeColor(config.value.Personalization.ThemeColor);
   }
 });
 
@@ -145,8 +147,26 @@ async function handleOpenLogFolder() {
   }
 }
 
+function toColor6(color: string | undefined): string {
+  if (!color) return "#000000";
+  if (color.startsWith('#') && color.length === 9) {
+    return '#' + color.slice(3);
+  }
+  return color;
+}
+
+function toColor8(color: string): string {
+  if (color.startsWith('#') && color.length === 7) {
+    return '#ff' + color.slice(1);
+  }
+  return color;
+}
+
 function onThemeColorInput(e: Event) {
   const target = e.target as HTMLInputElement;
+  if (config.value?.Personalization) {
+    config.value.Personalization.ThemeColor = toColor8(target.value);
+  }
   updateThemeColor(target.value);
 }
 </script>
@@ -205,24 +225,15 @@ function onThemeColorInput(e: Event) {
         </div>
       </div>
 
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('filter')">
-          <div class="collapse-left">
-            <h3 class="card-title">对局信息过滤</h3>
-            <span class="card-desc">基于你所处的游戏模式筛选对局信息界面显示的战绩</span>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">{{ config.Functions.GameInfoFilter ? '已启用' : '未启用' }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'filter' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
+      <div class="card-item border-bottom">
+        <div class="card-left">
+          <h3 class="card-title">对局信息过滤</h3>
+          <span class="card-desc">基于你当前游戏模式（地图/队列）筛选战绩，只显示相同模式的玩家历史数据</span>
         </div>
-        <div v-show="activeCollapse === 'filter'" class="collapse-content">
-          <div class="input-row align-center">
-            <div :class="['toggle-switch', config.Functions.GameInfoFilter ? 'on' : 'off']" @click="config.Functions.GameInfoFilter = !config.Functions.GameInfoFilter; autoSave()">
-              <span class="toggle-text">{{ config.Functions.GameInfoFilter ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
-            <span class="toggle-desc">只显示当前地图/队列的玩家数据以净化对局信息</span>
+        <div class="card-right">
+          <div :class="['toggle-switch', config.Functions.GameInfoFilter ? 'on' : 'off']" @click="config.Functions.GameInfoFilter = !config.Functions.GameInfoFilter; autoSave()">
+            <span class="toggle-text">{{ config.Functions.GameInfoFilter ? '开' : '关' }}</span>
+            <span class="toggle-slider"></span>
           </div>
         </div>
       </div>
@@ -475,7 +486,7 @@ function onThemeColorInput(e: Event) {
         <div v-show="activeCollapse === 'themecolor'" class="collapse-content">
           <div class="input-row align-center">
             <label class="color-picker-label">调色盘:</label>
-            <input type="color" class="color-picker" v-model="config.Personalization.ThemeColor" @input="onThemeColorInput" @change="autoSave" />
+            <input type="color" class="color-picker" :value="toColor6(config.Personalization.ThemeColor)" @input="onThemeColorInput" @change="autoSave" />
           </div>
         </div>
       </div>
@@ -495,15 +506,15 @@ function onThemeColorInput(e: Event) {
           <div class="color-pickers-row">
             <div class="color-picker-item">
               <label>胜利卡片:</label>
-              <input type="color" v-model="config.Personalization.WinCardColor" @change="autoSave" />
+              <input type="color" :value="toColor6(config.Personalization.WinCardColor)" @input="config.Personalization.WinCardColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
             </div>
             <div class="color-picker-item">
               <label>失败卡片:</label>
-              <input type="color" v-model="config.Personalization.LoseCardColor" @change="autoSave" />
+              <input type="color" :value="toColor6(config.Personalization.LoseCardColor)" @input="config.Personalization.LoseCardColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
             </div>
             <div class="color-picker-item">
               <label>重开卡片:</label>
-              <input type="color" v-model="config.Personalization.RemakeCardColor" @change="autoSave" />
+              <input type="color" :value="toColor6(config.Personalization.RemakeCardColor)" @input="config.Personalization.RemakeCardColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
             </div>
           </div>
         </div>
@@ -524,11 +535,11 @@ function onThemeColorInput(e: Event) {
           <div class="color-pickers-row">
             <div class="color-picker-item">
               <label>浅色主题下颜色:</label>
-              <input type="color" v-model="config.Personalization.LightDeathsNumberColor" @change="autoSave" />
+              <input type="color" :value="toColor6(config.Personalization.LightDeathsNumberColor)" @input="config.Personalization.LightDeathsNumberColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
             </div>
             <div class="color-picker-item">
               <label>深色主题下颜色:</label>
-              <input type="color" v-model="config.Personalization.DarkDeathsNumberColor" @change="autoSave" />
+              <input type="color" :value="toColor6(config.Personalization.DarkDeathsNumberColor)" @input="config.Personalization.DarkDeathsNumberColor = toColor8(($event.target as HTMLInputElement).value)" @change="autoSave" />
             </div>
           </div>
         </div>

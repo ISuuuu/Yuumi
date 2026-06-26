@@ -6,16 +6,27 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::{build_auth_header, AppState};
 
-static OPGG_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static OPGG_CACHE: OnceLock<Mutex<HashMap<String, serde_json::Value>>> = OnceLock::new();
 
-fn get_opgg_client() -> &'static reqwest::Client {
-    OPGG_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    })
+fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true);
+
+    if enable_proxy && !proxy_addr.is_empty() {
+        let proxy_url = if proxy_addr.contains("://") {
+            proxy_addr.to_string()
+        } else {
+            format!("http://{}", proxy_addr)
+        };
+        if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
+            builder = builder.proxy(proxy);
+            log::info!("OP.GG 请求已配置代理: {}", proxy_url);
+        } else {
+            log::warn!("无效的 OP.GG 代理地址: {}", proxy_addr);
+        }
+    }
+
+    builder.build().unwrap_or_else(|_| reqwest::Client::new())
 }
 
 fn get_opgg_cache() -> &'static Mutex<HashMap<String, serde_json::Value>> {
@@ -289,6 +300,7 @@ pub async fn fetch_opgg_data(
     tier: String,
     champion_id: Option<i32>,
     position: Option<String>,
+    app_state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let cache_key = format!(
         "{}_{}_{}_{:?}_{:?}",
@@ -315,7 +327,12 @@ pub async fn fetch_opgg_data(
         None => format!("https://lol-api-champion.op.gg/api/{}/champions/{}", region, mode),
     };
 
-    let client = get_opgg_client();
+    let (enable_proxy, proxy_addr) = {
+        let cfg = app_state.config.read().await;
+        (cfg.general.enable_opgg_proxy, cfg.general.opgg_proxy_addr.clone())
+    };
+
+    let client = build_opgg_client(enable_proxy, &proxy_addr);
     let resp = client
         .get(&url)
         .query(&[("tier", tier.as_str())])

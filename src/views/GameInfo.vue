@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted } from "vue";
+import { ref, watch, computed, onMounted, inject, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import {
   getGameflowPhase, getChampSelectSession, fetchMatchHistory,
@@ -14,10 +14,26 @@ const error = ref("");
 const activeTab = ref<"my" | "their">("my");
 
 // 应用配置（用于获取对局卡片颜色）
-const appConfig = ref<AppConfig | null>(null);
+const appConfig = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 
-// 当前登录玩家的 summonerId，用于 InProgress 阶段分离己方/敌方
 const currentSummonerId = ref<number>(0);
+
+// 当前游戏模式对应的队列 ID（用于过滤战绩）
+const currentQueueId = ref<number | null>(null);
+
+async function updateCurrentQueueId() {
+  try {
+    const resp = await lcuRequest<any>("GET", "/lol-gameflow/v1/session");
+    if (resp.success && resp.data?.gameData?.queue?.id !== undefined) {
+      currentQueueId.value = resp.data.gameData.queue.id;
+      console.log("[GameInfo] Detected current game mode queueId:", currentQueueId.value);
+    } else {
+      currentQueueId.value = null;
+    }
+  } catch {
+    currentQueueId.value = null;
+  }
+}
 
 // 每个玩家的完整数据
 interface PlayerData {
@@ -54,8 +70,31 @@ const gameflowTheirTeam = ref<any[]>([]);
 
 /** 当前是否处于可展示战绩的阶段 */
 const isGameActive = computed(() =>
-  store.gamePhase === "ChampSelect" || store.gamePhase === "InProgress",
+  store.gamePhase === "ChampSelect" || store.gamePhase === "GameStart" || store.gamePhase === "InProgress",
 );
+
+/** 是否应该在界面中展示对局信息（如果开启了“保留对局信息界面内容”且有历史数据，则即使不在对局中也展示） */
+const shouldShowContent = computed(() => {
+  if (isGameActive.value) return true;
+  if (appConfig.value?.Functions?.EnableReserveGameinfo) {
+    return Object.keys(playerData.value).length > 0;
+  }
+  return false;
+});
+
+// 监听游戏活跃状态的变化，当退出游戏或选人阶段时，若开启了保留上一局配置，则从本地存储中加载数据以在内存中还原对局选手和战绩
+watch(isGameActive, (active) => {
+  if (!active) {
+    try {
+      const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
+      const savedTheirTeam = localStorage.getItem("yuumi_last_gameflow_their_team");
+      const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
+      if (savedMyTeam) gameflowMyTeam.value = JSON.parse(savedMyTeam);
+      if (savedTheirTeam) gameflowTheirTeam.value = JSON.parse(savedTheirTeam);
+      if (savedPlayerData) playerData.value = JSON.parse(savedPlayerData);
+    } catch { /* ignore */ }
+  }
+});
 
 async function refreshState() {
   loading.value = true;
@@ -83,10 +122,18 @@ async function loadPlayerData(cellId: number, summonerId: number) {
     }
     const info = resp.data;
 
-    const [matches, rankedResp] = await Promise.all([
-      info.puuid ? fetchMatchHistory(info.puuid, 0, 10) : Promise.resolve([]),
+    const filterEnabled = appConfig.value?.Functions?.GameInfoFilter ?? false;
+    const maxMatches = filterEnabled ? 50 : 10;
+
+    const [historyMatches, rankedResp] = await Promise.all([
+      info.puuid ? fetchMatchHistory(info.puuid, 0, maxMatches) : Promise.resolve([]),
       info.puuid ? lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${info.puuid}`) : Promise.resolve({ success: false } as any),
     ]);
+
+    let matches = historyMatches;
+    if (filterEnabled && currentQueueId.value !== null) {
+      matches = historyMatches.filter((m: MatchDisplay) => m.queueId === currentQueueId.value).slice(0, 10);
+    }
 
     let solo = null, flex = null;
     if (rankedResp.success && rankedResp.data?.queues) {
@@ -136,6 +183,11 @@ async function loadPlayerData(cellId: number, summonerId: number) {
       winCount,
       lossesCount,
     };
+    try {
+      localStorage.setItem("yuumi_last_game_player_data", JSON.stringify(playerData.value));
+      localStorage.setItem("yuumi_last_gameflow_my_team", JSON.stringify(myTeam.value));
+      localStorage.setItem("yuumi_last_gameflow_their_team", JSON.stringify(theirTeam.value));
+    } catch { /* ignore */ }
   } catch {
     playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: false };
   }
@@ -145,6 +197,7 @@ async function loadPlayerData(cellId: number, summonerId: number) {
 async function loadAllPlayers() {
   const team = currentTeam.value;
   if (!team || team.length === 0) return;
+  await updateCurrentQueueId();
   await Promise.all(team.map((p: any) => loadPlayerData(p.cellId, p.summonerId)));
 }
 
@@ -155,6 +208,7 @@ async function loadAllPlayers() {
 async function loadFromGameflowSession() {
   loading.value = true;
   error.value = "";
+  await updateCurrentQueueId();
 
   // 保底获取当前玩家 summonerId（onMounted 可能还没拿到）
   if (!currentSummonerId.value) {
@@ -193,6 +247,11 @@ async function loadFromGameflowSession() {
       cellId: p.summonerId,
       displayName: p.summonerName || p.displayName,
     }));
+
+    try {
+      localStorage.setItem("yuumi_last_gameflow_my_team", JSON.stringify(gameflowMyTeam.value));
+      localStorage.setItem("yuumi_last_gameflow_their_team", JSON.stringify(gameflowTheirTeam.value));
+    } catch { /* ignore */ }
 
     // 并行加载双方全部玩家
     await Promise.all([
@@ -253,6 +312,16 @@ function formatRank(q: any): string {
 }
 
 onMounted(async () => {
+  // 从 localStorage 加载上一局数据以支持持久化显示
+  try {
+    const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
+    const savedTheirTeam = localStorage.getItem("yuumi_last_gameflow_their_team");
+    const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
+    if (savedMyTeam) gameflowMyTeam.value = JSON.parse(savedMyTeam);
+    if (savedTheirTeam) gameflowTheirTeam.value = JSON.parse(savedTheirTeam);
+    if (savedPlayerData) playerData.value = JSON.parse(savedPlayerData);
+  } catch { /* ignore */ }
+
   // 获取当前玩家 summonerId，用于 InProgress 阶段分离队伍
   try {
     const s = await fetchCurrentSummoner();
@@ -260,9 +329,11 @@ onMounted(async () => {
   } catch { /* ignore */ }
 
   // 获取应用配置（用于对局卡片颜色）
-  try {
-    appConfig.value = await fetchConfig();
-  } catch { /* ignore */ }
+  if (!appConfig.value) {
+    try {
+      appConfig.value = await fetchConfig();
+    } catch { /* ignore */ }
+  }
 
   refreshState();
 });
@@ -273,6 +344,12 @@ watch(() => store.gamePhase, (phase: string) => {
     // 清除 gameflow 数据，回退到 champSelectSession
     gameflowMyTeam.value = [];
     gameflowTheirTeam.value = [];
+    playerData.value = {}; // 清除上一局的旧玩家数据缓存
+    try {
+      localStorage.removeItem("yuumi_last_gameflow_my_team");
+      localStorage.removeItem("yuumi_last_gameflow_their_team");
+      localStorage.removeItem("yuumi_last_game_player_data");
+    } catch { /* ignore */ }
     refreshState();
   }
   if (phase === "InProgress" || phase === "GameStart") loadFromGameflowSession();
@@ -316,7 +393,7 @@ watch(activeTab, () => loadAllPlayers());
       <p class="tip">请先启动英雄联盟客户端</p>
     </div>
 
-    <div v-else-if="!isGameActive" class="tip-container">
+    <div v-else-if="!shouldShowContent" class="tip-container">
       <div class="offline-logo">⏳</div>
       <p class="tip">进入选人阶段后将自动加载对局信息</p>
     </div>

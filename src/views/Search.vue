@@ -66,6 +66,15 @@ function selectQueue(id: number | null) {
 const selectedGameId = ref<number | null>(null);
 const selectedGame = ref<any | null>(null);
 const gameLoading = ref(false);
+const participantRanks = ref<Record<string, string>>({});
+
+const appConfig = ref<any>(null);
+
+const TIER_MAP: Record<string, string> = {
+  NONE: "", IRON: "黑铁", BRONZE: "黄铜", SILVER: "白银", GOLD: "黄金",
+  PLATINUM: "铂金", EMERALD: "翡翠", DIAMOND: "钻石",
+  MASTER: "大师", GRANDMASTER: "宗师", CHALLENGER: "王者",
+};
 const gameDataAssets = ref<any>(null);
 
 // 分页相关
@@ -132,9 +141,9 @@ let unlistenGameDataReady: (() => void) | null = null;
 onMounted(async () => {
   loadSearchHistory();
   document.addEventListener("click", onDocClick);
-  // 从配置文件加载上传开关状态
   try {
     const cfg = await fetchConfig();
+    appConfig.value = cfg;
     uploadEnabled.value = cfg.Functions?.UploadEnabled ?? true;
   } catch (e) {
     console.warn("加载上传配置失败，使用默认值:", e);
@@ -305,13 +314,63 @@ async function loadMatchHistoryList() {
 
 async function selectMatch(gameId: number) {
   selectedGameId.value = gameId;
+  gameLoading.value = true;
   try {
     const resp = await lcuRequest<any>("GET", `/lol-match-history/v1/games/${gameId}`);
     if (resp.success && resp.data) {
       selectedGame.value = resp.data;
+
+      // 清空上次对局玩家的段位缓存
+      participantRanks.value = {};
+
+      const g = resp.data;
+      const participants = g.participants || [];
+      const identities = g.participantIdentities || [];
+
+      // 如果开启了显示段位选项，则并发拉取所有玩家的段位
+      const showTier = appConfig.value?.Functions?.ShowTierInGameInfo ?? false;
+      if (showTier && participants.length > 0) {
+        const playerPuuids: string[] = [];
+        for (const identity of identities) {
+          if (identity.player?.puuid && identity.player.summonerId) { // 排除机器人
+            playerPuuids.push(identity.player.puuid);
+          }
+        }
+
+        // 并发拉取段位数据
+        const rankPromises = playerPuuids.map(async (puuid) => {
+          try {
+            const rResp = await lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${puuid}`);
+            if (rResp.success && rResp.data?.queues) {
+              const queues = rResp.data.queues;
+              // 优先单双排，其次灵活排位
+              const solo = queues.find((q: any) => q.queueType === "RANKED_SOLO_5x5");
+              const flex = queues.find((q: any) => q.queueType === "RANKED_FLEX_SR");
+              const activeQueue = solo || flex;
+              if (activeQueue && activeQueue.tier && activeQueue.tier !== "NONE") {
+                const tier = TIER_MAP[activeQueue.tier] || activeQueue.tier;
+                const div = activeQueue.rank && activeQueue.rank !== "NA" ? activeQueue.rank : "";
+                return { puuid, rankStr: `${tier}${div}` };
+              }
+            }
+          } catch (e) {
+            console.error(`拉取 PUUID 为 ${puuid} 的段位失败:`, e);
+          }
+          return { puuid, rankStr: "" };
+        });
+
+        const rankResults = await Promise.all(rankPromises);
+        for (const res of rankResults) {
+          if (res.rankStr) {
+            participantRanks.value[res.puuid] = res.rankStr;
+          }
+        }
+      }
     }
   } catch (e) {
     console.error("拉取对局详细信息失败:", e);
+  } finally {
+    gameLoading.value = false;
   }
 }
 
@@ -737,6 +796,9 @@ const gameDetails = computed(() => {
                         :title="p.summonerId ? `搜索 ${p.name}` : '机器人'"
                       >
                         {{ p.name }}
+                      </span>
+                      <span v-if="participantRanks[p.puuid]" class="row-rank-badge" :title="`段位: ${participantRanks[p.puuid]}`">
+                        {{ participantRanks[p.puuid] }}
                       </span>
                     </div>
 
@@ -1565,12 +1627,30 @@ const gameDetails = computed(() => {
   border-radius: 50%;
 }
 
-/* 2. 名字区 */
 .player-name-col {
   width: 120px;
   min-width: 0;
   padding-right: 6px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.row-rank-badge {
+  display: inline-block;
+  font-size: 10px;
+  color: #8e44ad;
+  background: rgba(142, 68, 173, 0.08);
+  padding: 1px 4px;
+  border-radius: 4px;
+  margin-top: 2px;
+  align-self: flex-start;
+  font-weight: 500;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .row-name {
