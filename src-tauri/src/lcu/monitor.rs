@@ -137,7 +137,6 @@ pub fn start(
             let lcu_info = find_via_lockfile(&sys)
                 .or_else(|| find_via_cmdline(&sys))
                 .or_else(|| find_via_wmic());
-
             // 诊断日志（写入系统临时目录，避免硬编码开发者路径）
             if lcu_info.is_none() {
                 let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
@@ -169,7 +168,7 @@ pub fn start(
             let needs_reconnect = {
                 let lock = lcu_state.read().await;
                 match &lcu_info {
-                    Some((pid, port, token)) => {
+                    Some((pid, port, token, _server)) => {
                         match lock.as_ref() {
                             Some(client) => {
                                 client.pid != *pid
@@ -185,10 +184,10 @@ pub fn start(
             // 读锁已释放
 
             match lcu_info {
-                Some((pid, port, token)) => {
+                Some((pid, port, token, server)) => {
                     if needs_reconnect {
                         // ── 阶段 2: 在获取写锁之前探测 LCU HTTP 是否就绪 ──
-                        log::info!("检测到 LCU: pid={}, port={}, 等待 HTTP 服务器就绪...", pid, port);
+                        log::info!("检测到 LCU: pid={}, port={}, server={:?}, 等待 HTTP 服务器就绪...", pid, port, server);
 
                         if let Err(msg) = probe_lcu_readiness(port, &token).await {
                             log::warn!("LCU 就绪探测失败，跳过本轮: {}", msg);
@@ -205,6 +204,7 @@ pub fn start(
                                         pid,
                                         port,
                                         token: token.clone(),
+                                        server: server.clone(),
                                         http_client,
                                     };
                                     // 写锁仅短暂持有
@@ -229,6 +229,7 @@ pub fn start(
                                                     pid,
                                                     port,
                                                     token: token_for_gd.clone(),
+                                                    server: None,
                                                     http_client: http,
                                                 };
                                                 let assets = super::game_data::fetch_game_data_assets(&tmp_lcu).await;
@@ -284,7 +285,7 @@ pub fn start(
 ///
 /// LCU 启动时会在安装目录写入 lockfile，格式为：
 /// `name:pid:port:password:protocol`
-fn find_via_lockfile(sys: &System) -> Option<(u32, u16, String)> {
+fn find_via_lockfile(sys: &System) -> Option<(u32, u16, String, Option<String>)> {
     // 找到 LeagueClientUx.exe 进程，获取其可执行文件所在目录
     let exe_dir = find_lcu_exe_dir(sys)?;
 
@@ -311,12 +312,15 @@ fn find_via_lockfile(sys: &System) -> Option<(u32, u16, String)> {
     let port: u16 = parts[2].parse().ok()?;
     let password = parts[3].to_string();
 
-    log::debug!("从 lockfile 读取: pid={}, port={}, token=***", pid, port);
-    Some((pid, port, password))
+    // lockfile 不含大区信息，从进程命令行补充提取 --rso_platform_id=
+    let server = extract_server_from_sys(sys);
+
+    log::debug!("从 lockfile 读取: pid={}, port={}, token=***, server={:?}", pid, port, server);
+    Some((pid, port, password, server))
 }
 
 /// 方式二：从进程命令行参数提取（对应 Seraphine getPortTokenServerByPidViaPsutil）
-fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String)> {
+fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> {
     for (pid, process) in sys.processes() {
         let name = process.name().to_string_lossy().to_lowercase();
         if name == "leagueclientux.exe" || name == "leagueclientux" {
@@ -339,6 +343,7 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String)> {
 
             let mut port: Option<u16> = None;
             let mut token: Option<String> = None;
+            let mut server: Option<String> = None;
 
             // 提取 --app-port=
             if let Some(p_idx) = cmd_str.find("--app-port=") {
@@ -354,11 +359,18 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String)> {
                 token = Some(sub[..end].to_string());
             }
 
-            log::info!("从命令行解析结果: port={:?}, token={:?}", port, token);
+            // 提取 --rso_platform_id=（登录大区标识，用于 SGP 观战等）
+            if let Some(s_idx) = cmd_str.find("--rso_platform_id=") {
+                let sub = &cmd_str[s_idx + 18..];
+                let end = sub.find(|c: char| c == ' ' || c == '"' || c == '\'').unwrap_or(sub.len());
+                server = Some(sub[..end].to_string());
+            }
+
+            log::info!("从命令行解析结果: port={:?}, token={:?}, server={:?}", port, token, server);
 
             // 只有成功提取到了合规的凭据才返回，避免因遇到无权/僵尸同名进程导致提前退出
             if let (Some(p), Some(t)) = (port, token) {
-                return Some((pid.as_u32(), p, t));
+                return Some((pid.as_u32(), p, t, server));
             }
         }
     }
@@ -366,7 +378,7 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String)> {
 }
 
 /// 方式三：通过 WMIC 获取命令行参数（对应 Seraphine getPortTokenServerByPidViaWmic）
-fn find_via_wmic() -> Option<(u32, u16, String)> {
+fn find_via_wmic() -> Option<(u32, u16, String, Option<String>)> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -382,18 +394,20 @@ fn find_via_wmic() -> Option<(u32, u16, String)> {
         let port = regex_find_number(&stdout, r"--app-port=(\d+)")?;
         // 提取 --remoting-auth-token=
         let token = regex_find_value(&stdout, r#"--remoting-auth-token=([^"\s]+)"#)?;
+        // 提取 --rso_platform_id=
+        let server = regex_find_value(&stdout, r#"--rso_platform_id=([^"\s]+)"#);
 
-        log::info!("从 WMIC 解析结果: port={}, token=***", port);
+        log::info!("从 WMIC 解析结果: port={}, token=***, server={:?}", port, server);
 
         // WMIC 不返回 PID，从进程列表中查找
         let sys = System::new_all();
         for (pid, process) in sys.processes() {
             let name = process.name().to_string_lossy().to_lowercase();
             if name == "leagueclientux.exe" || name == "leagueclientux" {
-                return Some((pid.as_u32(), port, token));
+                return Some((pid.as_u32(), port, token, server));
             }
         }
-        Some((0, port, token))
+        Some((0, port, token, server))
     }
     #[cfg(not(target_os = "windows"))]
     None
@@ -419,6 +433,31 @@ fn find_lcu_exe_dir(sys: &System) -> Option<PathBuf> {
             // 不使用 ? 语法，防止某个特定的同名进程没有 exe() 权限时直接中断整个函数
             if let Some(exe_path) = process.exe() {
                 return exe_path.parent().map(|p| p.to_path_buf());
+            }
+        }
+    }
+    None
+}
+
+/// 从 LeagueClientUx.exe 进程命令行提取 --rso_platform_id=（登录大区标识）。
+/// lockfile 方式不含大区信息，需要用此函数补充。
+fn extract_server_from_sys(sys: &System) -> Option<String> {
+    for (pid, process) in sys.processes() {
+        let name = process.name().to_string_lossy().to_lowercase();
+        if name == "leagueclientux.exe" || name == "leagueclientux" {
+            let mut cmd_str: String = process.cmd().iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ");
+
+            #[cfg(target_os = "windows")]
+            if cmd_str.is_empty() {
+                if let Some(win_cmd) = get_cmdline_windows(pid.as_u32()) {
+                    cmd_str = win_cmd;
+                }
+            }
+
+            if let Some(s_idx) = cmd_str.find("--rso_platform_id=") {
+                let sub = &cmd_str[s_idx + 18..];
+                let end = sub.find(|c: char| c == ' ' || c == '"' || c == '\'').unwrap_or(sub.len());
+                return Some(sub[..end].to_string());
             }
         }
     }
