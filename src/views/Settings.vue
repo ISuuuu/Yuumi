@@ -230,10 +230,10 @@ function onDeathColorInput(e: Event, field: 'LightDeathsNumberColor' | 'DarkDeat
 }
 
 const DEFAULT_COLORS = {
-  ThemeColor: '#009faa',
-  WinCardColor: '#2839b01b',
-  LoseCardColor: '#28d3190c',
-  RemakeCardColor: '#28a2a2a2',
+  ThemeColor: '#00d2c4',
+  WinCardColor: '#1510b981',
+  LoseCardColor: '#12f43f5e',
+  RemakeCardColor: '#1294a3b8',
   LightDeathsNumberColor: '#ffb60000',
   DarkDeathsNumberColor: '#ffff8d8d',
 };
@@ -265,8 +265,10 @@ function applyThemeMode(mode: string) {
   const root = document.documentElement;
   if (mode === 'Auto') {
     root.removeAttribute('data-theme');
+    localStorage.setItem("yuumi_theme", "Auto");
   } else if (mode === 'Light' || mode === 'Dark') {
     root.setAttribute('data-theme', mode.toLowerCase());
+    localStorage.setItem("yuumi_theme", mode);
   }
 }
 

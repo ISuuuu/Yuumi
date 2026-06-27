@@ -23,8 +23,10 @@ function applyThemeMode(mode: string) {
   const root = document.documentElement;
   if (mode === 'Auto') {
     root.removeAttribute('data-theme');
+    localStorage.setItem("yuumi_theme", "Auto");
   } else if (mode === 'Light' || mode === 'Dark') {
     root.setAttribute('data-theme', mode.toLowerCase());
+    localStorage.setItem("yuumi_theme", mode);
   }
 }
 
@@ -168,6 +170,14 @@ async function openOpggWindow() {
     console.warn("加载置顶配置失败，使用默认值:", e);
   }
 
+  // 根据当前主题决定原生标题栏颜色
+  const savedTheme = localStorage.getItem("yuumi_theme");
+  const isSystemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const nativeTheme: "dark" | "light" =
+    savedTheme === "Dark" || (savedTheme !== "Light" && isSystemDark)
+      ? "dark"
+      : "light";
+
   // 获取当前窗口所在屏幕（显示器），将 OP.GG 窗口放置在屏幕右侧
   const monitor = await currentMonitor();
   if (monitor) {
@@ -185,6 +195,7 @@ async function openOpggWindow() {
       resizable: true,
       center: false,
       alwaysOnTop,
+      theme: nativeTheme,
     });
   } else {
     // 兜底：获取不到屏幕信息时，放在主窗口右侧
@@ -201,6 +212,7 @@ async function openOpggWindow() {
       resizable: true,
       center: false,
       alwaysOnTop,
+      theme: nativeTheme,
     });
   }
 }
@@ -582,118 +594,118 @@ async function handleClose() {
 
 <style>
 :root {
-  --primary-color: #009faa;
-  --primary-color-hover: #008a94;
-  --primary-color-alpha-15: rgba(0, 159, 170, 0.15);
-  --primary-color-alpha-30: rgba(0, 159, 170, 0.3);
-  --primary-color-alpha-40: rgba(0, 159, 170, 0.4);
+  --primary-color: #00d2c4;
+  --primary-color-hover: #00b3a7;
+  --primary-color-alpha-15: rgba(0, 210, 196, 0.15);
+  --primary-color-alpha-30: rgba(0, 210, 196, 0.3);
+  --primary-color-alpha-40: rgba(0, 210, 196, 0.4);
 
   /* 纯白水晶极光主题变量 */
-  --bg-color-gradient: linear-gradient(135deg, #ffffff 0%, #fcfdfe 40%, #f3f6fc 100%);
-  --bg-color: #f7fafc;
-  --sidebar-bg: rgba(255, 255, 255, 0.85);
-  --card-bg: rgba(255, 255, 255, 0.82);
-  --card-bg-hover: rgba(255, 255, 255, 0.96);
-  --border-color: rgba(0, 0, 0, 0.04);
-  --border-color-hover: rgba(0, 0, 0, 0.08);
-  --hover-bg: rgba(0, 0, 0, 0.04);
+  --bg-color-gradient: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 50%, #e2e8f0 100%);
+  --bg-color: #f8fafc;
+  --sidebar-bg: rgba(255, 255, 255, 0.75);
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --card-bg-hover: rgba(255, 255, 255, 0.9);
+  --border-color: rgba(0, 0, 0, 0.05);
+  --border-color-hover: rgba(0, 210, 196, 0.25);
+  --hover-bg: rgba(0, 0, 0, 0.03);
   --hover-bg-strong: rgba(0, 0, 0, 0.06);
-  --titlebar-bg: rgba(255, 255, 255, 0.88);
+  --titlebar-bg: rgba(255, 255, 255, 0.8);
   
   --text-color: #0f172a;
-  --text-muted: #334155;
+  --text-muted: #475569;
   --text-dimmed: #64748b;
 
   --win-color: #10b981;
   --win-bg: rgba(16, 185, 129, 0.08);
-  --win-border: rgba(16, 185, 129, 0.18);
-  --win-glow: rgba(16, 185, 129, 0.08);
+  --win-border: rgba(16, 185, 129, 0.2);
+  --win-glow: rgba(16, 185, 129, 0.06);
 
-  --loss-color: #ef4444;
-  --loss-bg: rgba(239, 68, 68, 0.07);
-  --loss-border: rgba(239, 68, 68, 0.18);
-  --loss-glow: rgba(239, 68, 68, 0.08);
-  --death-color: #ef4444; /* 死亡数字颜色，可通过设置覆盖 */
-  --accent-color: #e6a23c; /* 强调/功能色（橙色） */
-  --accent-bg: rgba(230, 162, 60, 0.08);
-  --tier-blue: #3b82f6; /* 段位/KDA 中等层级的蓝色 */
-  --tier-blue-bg: rgba(59, 130, 246, 0.1);
+  --loss-color: #f43f5e;
+  --loss-bg: rgba(244, 63, 94, 0.08);
+  --loss-border: rgba(244, 63, 94, 0.2);
+  --loss-glow: rgba(244, 63, 94, 0.06);
+  --death-color: #f43f5e;
+  --accent-color: #f59e0b;
+  --accent-bg: rgba(245, 158, 11, 0.08);
+  --tier-blue: #3b82f6;
+  --tier-blue-bg: rgba(59, 130, 246, 0.08);
   --tier-blue-border: rgba(59, 130, 246, 0.15);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.015);
-  --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.06);
-  --glass-filter: blur(16px);
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.02);
+  --shadow-md: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 8px -1px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 20px 25px -5px rgba(0,0,0,0.08), 0 10px 10px -5px rgba(0,0,0,0.04);
+  --glass-filter: blur(20px) saturate(190%);
 }
 
 [data-theme="dark"] {
-  /* 暗黑主题变量 */
-  --bg-color-gradient: linear-gradient(135deg, #0f172a 0%, #111827 40%, #1e293b 100%);
-  --bg-color: #0f172a;
-  --sidebar-bg: rgba(17, 24, 39, 0.9);
-  --card-bg: rgba(30, 41, 59, 0.85);
-  --card-bg-hover: rgba(30, 41, 59, 0.95);
+  /* 暗黑海克斯水晶主题变量 */
+  --bg-color-gradient: linear-gradient(135deg, #0b0f19 0%, #111827 50%, #172033 100%);
+  --bg-color: #0b0f19;
+  --sidebar-bg: rgba(17, 24, 39, 0.75);
+  --card-bg: rgba(30, 41, 59, 0.55);
+  --card-bg-hover: rgba(30, 41, 59, 0.75);
   --border-color: rgba(255, 255, 255, 0.06);
-  --border-color-hover: rgba(255, 255, 255, 0.12);
-  --hover-bg: rgba(255, 255, 255, 0.08);
-  --hover-bg-strong: rgba(255, 255, 255, 0.12);
-  --titlebar-bg: rgba(17, 24, 39, 0.9);
+  --border-color-hover: rgba(0, 210, 196, 0.35);
+  --hover-bg: rgba(255, 255, 255, 0.04);
+  --hover-bg-strong: rgba(255, 255, 255, 0.08);
+  --titlebar-bg: rgba(11, 15, 25, 0.8);
   
-  --text-color: #f1f5f9;
-  --text-muted: #94a3b8;
-  --text-dimmed: #64748b;
+  --text-color: #f8fafc;
+  --text-muted: #cbd5e1;
+  --text-dimmed: #94a3b8;
 
   --win-color: #34d399;
-  --win-bg: rgba(16, 185, 129, 0.12);
-  --win-border: rgba(16, 185, 129, 0.25);
-  --win-glow: rgba(16, 185, 129, 0.12);
+  --win-bg: rgba(52, 211, 153, 0.12);
+  --win-border: rgba(52, 211, 153, 0.25);
+  --win-glow: rgba(52, 211, 153, 0.1);
 
-  --loss-color: #f87171;
-  --loss-bg: rgba(239, 68, 68, 0.1);
-  --loss-border: rgba(239, 68, 68, 0.25);
-  --loss-glow: rgba(239, 68, 68, 0.1);
-  --death-color: #f87171;
-  --accent-color: #f59e0b; /* 强调/功能色（橙色），暗色用琥珀色更柔和 */
-  --accent-bg: rgba(245, 158, 11, 0.12);
-  --tier-blue: #60a5fa; /* 暗色蓝色调亮一些以保证可读性 */
+  --loss-color: #fb7185;
+  --loss-bg: rgba(251, 113, 133, 0.12);
+  --loss-border: rgba(251, 113, 133, 0.25);
+  --loss-glow: rgba(251, 113, 133, 0.1);
+  --death-color: #fb7185;
+  --accent-color: #fbbf24;
+  --accent-bg: rgba(251, 191, 36, 0.12);
+  --tier-blue: #60a5fa;
   --tier-blue-bg: rgba(96, 165, 250, 0.12);
-  --tier-blue-border: rgba(96, 165, 250, 0.2);
+  --tier-blue-border: rgba(96, 165, 250, 0.25);
 
-  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.4);
-  --glass-filter: blur(16px);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md: 0 10px 25px -5px rgba(0,0,0,0.4), 0 8px 10px -6px rgba(0,0,0,0.4);
+  --shadow-lg: 0 20px 25px -5px rgba(0,0,0,0.5), 0 10px 10px -5px rgba(0,0,0,0.5);
+  --glass-filter: blur(25px) saturate(200%);
 
   /* Settings UI 暗色专用 */
-  --toggle-track-off: rgba(255, 255, 255, 0.1);
+  --toggle-track-off: rgba(255, 255, 255, 0.08);
   --toggle-slider: #ffffff;
-  --toggle-glow: 0 0 12px rgba(0, 159, 170, 0.4);
+  --toggle-glow: 0 0 14px rgba(0, 210, 196, 0.4);
   --segmented-bg: rgba(255, 255, 255, 0.05);
-  --card-glow-hover: 0 0 0 1px rgba(0, 159, 170, 0.35), 0 4px 20px rgba(0, 0, 0, 0.3);
-  --settings-card-bg: rgba(37, 47, 63, 0.92);
-  --settings-card-bg-hover: rgba(44, 55, 72, 0.96);
-  --settings-card-border: rgba(255, 255, 255, 0.08);
-  --settings-card-border-hover: rgba(0, 159, 170, 0.4);
-  --settings-collapse-bg: rgba(33, 43, 58, 0.9);
-  --settings-separator: rgba(255, 255, 255, 0.05);
+  --card-glow-hover: 0 0 0 1px rgba(0, 210, 196, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
+  --settings-card-bg: rgba(24, 34, 54, 0.7);
+  --settings-card-bg-hover: rgba(30, 41, 64, 0.85);
+  --settings-card-border: rgba(255, 255, 255, 0.06);
+  --settings-card-border-hover: rgba(0, 210, 196, 0.4);
+  --settings-collapse-bg: rgba(17, 24, 39, 0.8);
+  --settings-separator: rgba(255, 255, 255, 0.04);
 }
 
 [data-theme="light"] {
   /* Settings UI 亮色专用 */
-  --toggle-track-off: rgba(0, 0, 0, 0.12);
+  --toggle-track-off: rgba(0, 0, 0, 0.1);
   --toggle-slider: #ffffff;
-  --toggle-glow: 0 0 10px rgba(0, 159, 170, 0.35);
+  --toggle-glow: 0 0 10px rgba(0, 210, 196, 0.35);
   --segmented-bg: rgba(0, 0, 0, 0.04);
-  --card-glow-hover: 0 0 0 1px rgba(0, 159, 170, 0.3), 0 2px 8px rgba(0, 0, 0, 0.07);
-  --settings-card-bg: #ffffff;
-  --settings-card-bg-hover: rgba(255, 255, 255, 0.98);
-  --settings-card-border: rgba(0, 0, 0, 0.07);
-  --settings-card-border-hover: rgba(0, 159, 170, 0.5);
-  --settings-collapse-bg: rgba(247, 250, 252, 0.96);
+  --card-glow-hover: 0 0 0 1px rgba(0, 210, 196, 0.3), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --settings-card-bg: rgba(255, 255, 255, 0.8);
+  --settings-card-bg-hover: rgba(255, 255, 255, 0.95);
+  --settings-card-border: rgba(0, 0, 0, 0.06);
+  --settings-card-border-hover: rgba(0, 210, 196, 0.5);
+  --settings-collapse-bg: rgba(243, 244, 246, 0.8);
   --settings-separator: rgba(0, 0, 0, 0.04);
 }
 
@@ -890,21 +902,22 @@ body {
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 6px;
+  gap: 6px;
+  padding: 8px;
   flex: 1;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  height: 40px;
-  padding: 0 12px;
-  border-radius: 8px;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   color: var(--text-muted);
   position: relative;
-  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  border: 1px solid transparent;
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .sidebar.collapsed .nav-item {
@@ -915,18 +928,20 @@ body {
 .nav-item:hover {
   background-color: var(--hover-bg);
   color: var(--text-color);
-  transform: translateX(2px);
+  border-color: var(--border-color);
+  transform: translateY(-1px);
 }
 
 .sidebar.collapsed .nav-item:hover {
-  transform: translateX(0);
+  transform: none;
 }
 
 .nav-item.active {
   background-color: var(--primary-color-alpha-15);
-  color: var(--primary-color);
+  color: var(--text-color);
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px var(--primary-color-alpha-15);
+  border-color: var(--primary-color-alpha-30);
+  box-shadow: 0 4px 12px var(--primary-color-alpha-15);
 }
 
 /* 左侧指示发光条 */
@@ -934,12 +949,12 @@ body {
   content: "";
   position: absolute;
   left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
+  top: 10px;
+  bottom: 10px;
+  width: 4px;
   background-color: var(--primary-color);
   border-radius: 0 4px 4px 0;
-  box-shadow: 0 0 6px var(--primary-color-alpha-40);
+  box-shadow: 0 0 10px var(--primary-color);
 }
 
 .sidebar.collapsed .nav-item.active::before {
@@ -955,11 +970,11 @@ body {
   flex-shrink: 0;
   margin-right: 12px;
   color: inherit;
-  transition: transform 0.2s;
+  transition: transform 0.25s ease;
 }
 
 .nav-item:hover .nav-icon {
-  transform: scale(1.05);
+  transform: scale(1.1) rotate(2deg);
 }
 
 .nav-icon svg {
@@ -983,7 +998,7 @@ body {
 }
 
 .nav-label {
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   white-space: nowrap;
   opacity: 1;
   transition: opacity 0.2s;
@@ -1001,8 +1016,8 @@ body {
 .sidebar-bottom {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 6px;
+  gap: 6px;
+  padding: 8px;
   border-top: 1px solid var(--border-color);
 }
 
@@ -1010,14 +1025,15 @@ body {
 .user-card {
   display: flex;
   align-items: center;
-  height: 48px;
-  padding: 0 8px;
-  margin: 6px 0;
-  border-radius: 8px;
+  height: 52px;
+  padding: 0 10px;
+  margin: 8px 0;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.25s ease;
   overflow: hidden;
   border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .sidebar.collapsed .user-card {
@@ -1027,27 +1043,30 @@ body {
 
 .user-card:hover {
   background-color: var(--hover-bg-strong);
-  border-color: var(--border-color);
+  border-color: var(--border-color-hover);
+  box-shadow: var(--shadow-sm);
 }
 
 .user-avatar {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   overflow: hidden;
   flex-shrink: 0;
   border: 1.5px solid var(--border-color);
-  transition: border-color 0.2s;
+  transition: all 0.25s ease;
 }
 
 .user-card:hover .user-avatar {
   border-color: var(--primary-color);
+  box-shadow: 0 0 8px var(--primary-color-alpha-40);
+  transform: scale(1.05);
 }
 
 .user-info {
   display: flex;
   flex-direction: column;
-  margin-left: 8px;
+  margin-left: 10px;
   min-width: 0;
 }
 
@@ -1056,7 +1075,7 @@ body {
 }
 
 .user-name {
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   font-weight: 700;
   color: var(--text-color);
   white-space: nowrap;
@@ -1065,7 +1084,7 @@ body {
 }
 
 .user-region {
-  font-size: 0.65rem;
+  font-size: 0.68rem;
   color: var(--text-muted);
 }
 
@@ -1079,19 +1098,19 @@ body {
 
 /* 占位页面样式 */
 .placeholder-view {
-  padding: 2.5rem 1.5rem;
-  max-width: 800px;
+  padding: 3rem 2rem;
+  max-width: 840px;
   margin: 0 auto;
 }
 
 .view-header {
   margin-bottom: 2rem;
   border-bottom: 1px solid var(--border-color);
-  padding-bottom: 1rem;
+  padding-bottom: 1.2rem;
 }
 
 .view-header h2 {
-  font-size: 1.6rem;
+  font-size: 1.75rem;
   margin: 0;
   font-weight: 800;
   color: var(--text-color);
@@ -1101,19 +1120,19 @@ body {
 .view-card {
   background: var(--card-bg);
   border-radius: var(--radius-lg);
-  padding: 3rem 2rem;
+  padding: 3.5rem 2.5rem;
   text-align: center;
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
-  transition: all 0.3s ease;
+  box-shadow: var(--shadow-md);
+  transition: all 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .view-card:hover {
-  border-color: var(--primary-color-alpha-30);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
+  border-color: var(--primary-color-alpha-40);
+  box-shadow: 0 12px 30px -10px var(--primary-color-alpha-15), var(--shadow-lg);
+  transform: translateY(-4px);
 }
 
 .avatar-circle.op-icon {

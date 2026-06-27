@@ -59,6 +59,10 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
   toastTimer = setTimeout(() => { toast.value.visible = false; }, 2500);
 }
 
+// 主题监听响应
+const dataTheme = ref("light");
+let themeObserver: MutationObserver | null = null;
+
 // 过滤 HTML 标签的工具函数
 function cleanDescription(text: string): string {
   if (!text) return "";
@@ -109,47 +113,82 @@ const TIER_COLORS: Record<string, string> = {
   "":  "#7D8185",
 };
 
-// 梯队卡片行背景色
-const TIER_CARD_BG: Record<string, string> = {
-  "0": "#CDE5F8",
-  "1": "#CDE5F8", // T1 蓝
-  "2": "#CDECEA", // T2 青
-  "3": "#F4EAD1", // T3 暖
-  "4": "#E5E8EC", // T4 灰
-  "5": "#E5E8EC",
-  "":  "transparent",
-};
+// 梯队卡片行背景色（适配深色模式和亮色模式）
+const TIER_CARD_BG = computed<Record<string, string>>(() => {
+  const isDark = dataTheme.value === "dark";
+  if (isDark) {
+    return {
+      "0": "rgba(59, 130, 246, 0.12)",
+      "1": "rgba(59, 130, 246, 0.12)", // T1 蓝
+      "2": "rgba(20, 184, 166, 0.12)", // T2 青
+      "3": "rgba(234, 179, 8, 0.08)",  // T3 金
+      "4": "rgba(148, 163, 184, 0.08)", // T4 灰
+      "5": "rgba(148, 163, 184, 0.08)",
+      "":  "transparent",
+    };
+  }
+  return {
+    "0": "#CDE5F8",
+    "1": "#CDE5F8", // T1 蓝
+    "2": "#CDECEA", // T2 青
+    "3": "#F4EAD1", // T3 暖
+    "4": "#E5E8EC", // T4 灰
+    "5": "#E5E8EC",
+    "":  "transparent",
+  };
+});
 
 // 出装标题栏复用同样配色
-const TIER_BG_COLORS: Record<string, string> = {
-  "0": "#CDE5F8",
-  "1": "#CDE5F8",
-  "2": "#CDECEA",
-  "3": "#F4EAD1",
-  "4": "#E5E8EC",
-  "5": "#E5E8EC",
-  "":  "#f8f9fa",
-};
+const TIER_BG_COLORS = computed<Record<string, string>>(() => {
+  const isDark = dataTheme.value === "dark";
+  if (isDark) {
+    return {
+      "0": "rgba(59, 130, 246, 0.12)",
+      "1": "rgba(59, 130, 246, 0.12)",
+      "2": "rgba(20, 184, 166, 0.12)",
+      "3": "rgba(234, 179, 8, 0.08)",
+      "4": "rgba(148, 163, 184, 0.08)",
+      "5": "rgba(148, 163, 184, 0.08)",
+      "":  "var(--card-bg)",
+    };
+  }
+  return {
+    "0": "#CDE5F8",
+    "1": "#CDE5F8",
+    "2": "#CDECEA",
+    "3": "#F4EAD1",
+    "4": "#E5E8EC",
+    "5": "#E5E8EC",
+    "":  "#f8f9fa",
+  };
+});
 
-const TIER_BORDER_COLORS: Record<string, string> = {
-  "0": "rgba(0, 0, 0, 0.095)",
-  "1": "rgba(0, 0, 0, 0.095)",
-  "2": "rgba(0, 0, 0, 0.095)",
-  "3": "rgba(0, 0, 0, 0.095)",
-  "4": "rgba(0, 0, 0, 0.095)",
-  "5": "rgba(0, 0, 0, 0.095)",
-  "":  "rgba(0, 0, 0, 0.095)",
-};
+const TIER_BORDER_COLORS = computed<Record<string, string>>(() => {
+  const isDark = dataTheme.value === "dark";
+  if (isDark) {
+    return {
+      "0": "rgba(59, 130, 246, 0.25)",
+      "1": "rgba(59, 130, 246, 0.25)",
+      "2": "rgba(20, 184, 166, 0.25)",
+      "3": "rgba(234, 179, 8, 0.2)",
+      "4": "rgba(148, 163, 184, 0.2)",
+      "5": "rgba(148, 163, 184, 0.2)",
+      "":  "var(--border-color)",
+    };
+  }
+  return {
+    "0": "rgba(0, 0, 0, 0.095)",
+    "1": "rgba(0, 0, 0, 0.095)",
+    "2": "rgba(0, 0, 0, 0.095)",
+    "3": "rgba(0, 0, 0, 0.095)",
+    "4": "rgba(0, 0, 0, 0.095)",
+    "5": "rgba(0, 0, 0, 0.095)",
+    "":  "rgba(0, 0, 0, 0.095)",
+  };
+});
 
-const TIER_CARD_BORDER: Record<string, string> = {
-  "0": "rgba(0, 0, 0, 0.095)",
-  "1": "rgba(0, 0, 0, 0.095)",
-  "2": "rgba(0, 0, 0, 0.095)",
-  "3": "rgba(0, 0, 0, 0.095)",
-  "4": "rgba(0, 0, 0, 0.095)",
-  "5": "rgba(0, 0, 0, 0.095)",
-  "":  "rgba(0, 0, 0, 0.095)",
-};
+const TIER_CARD_BORDER = computed<Record<string, string>>(() => TIER_BORDER_COLORS.value);
+const TIER_CARD_BORDER_PLACEHOLDER = "";
 
 // Tier 等级图标（盾牌 + 数字）
 const TIER_ICONS: Record<string, string> = {
@@ -163,6 +202,34 @@ const TIER_ICONS: Record<string, string> = {
 
 onMounted(async () => {
   document.addEventListener("click", closeAllDropdowns);
+
+  // 初始化获取主题
+  const savedTheme = localStorage.getItem("yuumi_theme");
+  const root = document.documentElement;
+  if (savedTheme === 'Dark') {
+    root.setAttribute('data-theme', 'dark');
+    dataTheme.value = "dark";
+  } else if (savedTheme === 'Light') {
+    root.setAttribute('data-theme', 'light');
+    dataTheme.value = "light";
+  } else {
+    // 默认为 Auto 或无设置，跟随系统
+    const isSystemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute('data-theme', isSystemDark ? 'dark' : 'light');
+    dataTheme.value = isSystemDark ? "dark" : "light";
+  }
+
+  // 监听 DOM 树的主题属性变化
+  themeObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === "attributes" && mutation.attributeName === "data-theme") {
+        const currentAttr = document.documentElement.getAttribute("data-theme");
+        dataTheme.value = currentAttr === "dark" ? "dark" : "light";
+      }
+    });
+  });
+  themeObserver.observe(document.documentElement, { attributes: true });
+
   try {
     gameDataAssets.value = await invoke("get_game_data_assets");
   } catch (e) {
@@ -204,6 +271,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener("click", closeAllDropdowns);
+  if (themeObserver) {
+    themeObserver.disconnect();
+  }
 });
 
 watch([region, mode, tier, position], () => {
@@ -762,10 +832,12 @@ async function setRunePage() {
 </template>
 
 <style scoped>
+
 .opgg-panel {
   width: 100%;
   height: 100vh;
   background: var(--bg-color);
+  color: var(--text-color);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -942,13 +1014,16 @@ async function setRunePage() {
 .tier-c-stat { width: 65px; text-align: center; flex-shrink: 0; }
 .tier-h-counters { width: 90px; text-align: center; flex-shrink: 0; }
 .tier-c-counters { display: flex; align-items: center; gap: 3px; flex-shrink: 0; width: 90px; justify-content: center; }
-.tier-counter-icon { width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.095); }
-
+.tier-counter-icon { width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--border-color); object-fit: cover; }
 /* ── 出装详情页 ── */
 
 /* 通用卡片美化 */
 .build-view-bg {
   background: #f1f3f7; /* 软灰背景，让白色卡片更具层次感 */
+  transition: background 0.3s;
+}
+[data-theme="dark"] .build-view-bg {
+  background: #0b0f19; /* 暗色模式深空黑背景 */
 }
 .build-card {
   background: var(--card-bg);
@@ -957,6 +1032,36 @@ async function setRunePage() {
   margin: 10px 14px;
   padding: 12px 16px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+/* 过滤下拉菜单悬浮背景 */
+.filter-item:hover {
+  background: var(--hover-bg);
+  color: var(--text-color);
+}
+
+/* 召唤师技能 */
+.spell-pair {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: var(--hover-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 12px;
+  gap: 12px;
+}
+
+/* 符文推荐树状图样式 */
+.rune-tree-container {
+  display: flex;
+  gap: 16px;
+  background: var(--hover-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 16px;
+  align-items: stretch;
+  width: 100%;
 }
 
 /* 英雄标题栏 */
@@ -1295,5 +1400,47 @@ async function setRunePage() {
 .toast-leave-to {
   opacity: 0;
   transform: translate(-50%, -10px);
+}
+</style>
+
+<!-- 非 scoped：CSS 变量需作用于 :root / html 元素，scoped 会加哈希导致选择器失效 -->
+<style>
+:root {
+  --primary-color: #00d2c4;
+  --primary-color-hover: #00b3a7;
+  --primary-color-alpha-15: rgba(0, 210, 196, 0.15);
+  --primary-color-alpha-30: rgba(0, 210, 196, 0.3);
+  --primary-color-alpha-40: rgba(0, 210, 196, 0.4);
+
+  --bg-color: #f8fafc;
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --card-bg-hover: rgba(255, 255, 255, 0.9);
+  --border-color: rgba(0, 0, 0, 0.05);
+  --hover-bg: rgba(0, 0, 0, 0.03);
+  --hover-bg-strong: rgba(0, 0, 0, 0.06);
+
+  --text-color: #0f172a;
+  --text-muted: #475569;
+  --text-dimmed: #64748b;
+
+  --win-color: #10b981;
+  --loss-color: #f43f5e;
+  --accent-color: #f59e0b;
+}
+
+[data-theme="dark"] {
+  --bg-color: #0b0f19;
+  --card-bg: rgba(30, 41, 59, 0.55);
+  --card-bg-hover: rgba(30, 41, 59, 0.75);
+  --border-color: rgba(255, 255, 255, 0.06);
+  --hover-bg: rgba(255, 255, 255, 0.04);
+  --hover-bg-strong: rgba(255, 255, 255, 0.08);
+
+  --text-color: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-dimmed: #64748b;
+
+  --win-color: #34d399;
+  --loss-color: #fb7185;
 }
 </style>

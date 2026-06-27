@@ -18,14 +18,13 @@ const appConfig = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | 
 
 const currentSummonerId = ref<number>(0);
 
-// ---- 组队开黑检测 ----
-// 预组队颜色方案（参考 Seraphine，扩展到 5 组）
+// 预组队颜色方案（降低饱和度与透明度，非常柔和剔透，不刺眼）
 const PREMADE_COLORS = [
-  { border: '#ff8c00', bg: 'rgba(255, 140, 0, 0.08)', dot: '#ff8c00' },   // 橙
-  { border: '#ec4899', bg: 'rgba(236, 72, 153, 0.08)', dot: '#ec4899' },   // 粉
-  { border: '#3b82f6', bg: 'rgba(59, 130, 246, 0.08)', dot: '#3b82f6' },   // 蓝
-  { border: '#22c55e', bg: 'rgba(34, 197, 94, 0.08)', dot: '#22c55e' },    // 绿
-  { border: '#a855f7', bg: 'rgba(168, 85, 247, 0.08)', dot: '#a855f7' },   // 紫
+  { border: 'rgba(249, 115, 22, 0.4)', bg: 'rgba(249, 115, 22, 0.04)', dot: '#f97316' },   // 柔橙
+  { border: 'rgba(236, 72, 153, 0.4)', bg: 'rgba(236, 72, 153, 0.04)', dot: '#ec4899' },   // 柔粉
+  { border: 'rgba(59, 130, 246, 0.4)', bg: 'rgba(59, 130, 246, 0.04)', dot: '#3b82f6' },   // 柔蓝
+  { border: 'rgba(16, 185, 129, 0.4)', bg: 'rgba(16, 185, 129, 0.04)', dot: '#10b981' },   // 柔绿
+  { border: 'rgba(168, 85, 247, 0.4)', bg: 'rgba(168, 85, 247, 0.04)', dot: '#a855f7' },   // 柔紫
 ];
 
 // summonerId → colorIndex（-1 = 单排，0+ = 组队颜色索引）
@@ -86,15 +85,12 @@ function getPremadeCardStyle(summonerId: number, side: 'my' | 'their'): Record<s
   const idx = getPremadeIdx(summonerId, side);
   if (idx < 0) return {};
   const c = PREMADE_COLORS[idx % PREMADE_COLORS.length];
-  return { borderLeftColor: c.border, borderLeftWidth: '3px' };
-}
-
-/** 右侧列头组队样式 */
-function getPremadeColumnStyle(summonerId: number, side: 'my' | 'their'): Record<string, string> {
-  const idx = getPremadeIdx(summonerId, side);
-  if (idx < 0) return {};
-  const c = PREMADE_COLORS[idx % PREMADE_COLORS.length];
-  return { borderTopColor: c.border, borderTopWidth: '3px' };
+  return { 
+    borderLeftColor: c.dot, 
+    borderLeftWidth: '2px',
+    backgroundColor: c.bg,
+    boxShadow: `inset 0 0 16px ${c.bg}, 0 2px 8px rgba(0, 0, 0, 0.04)`
+  };
 }
 
 /** 是否有组队信息 */
@@ -150,12 +146,18 @@ const TIER_MAP: Record<string, string> = {
 };
 
 const myTeam = computed(() => {
-  if (gameflowMyTeam.value.length > 0) return gameflowMyTeam.value;
-  return store.champSelectSession?.myTeam ?? [];
+  if (isGameActive.value) {
+    if (gameflowMyTeam.value.length > 0) return gameflowMyTeam.value;
+    return store.champSelectSession?.myTeam ?? [];
+  }
+  return gameflowMyTeam.value;
 });
 const theirTeam = computed(() => {
-  if (gameflowTheirTeam.value.length > 0) return gameflowTheirTeam.value;
-  return store.champSelectSession?.theirTeam ?? [];
+  if (isGameActive.value) {
+    if (gameflowTheirTeam.value.length > 0) return gameflowTheirTeam.value;
+    return store.champSelectSession?.theirTeam ?? [];
+  }
+  return gameflowTheirTeam.value;
 });
 const currentTeam = computed(() => activeTab.value === "my" ? myTeam.value : theirTeam.value);
 
@@ -197,6 +199,10 @@ watch(isGameActive, (active) => {
         if (parsed && Object.keys(parsed).length > 0) playerData.value = parsed;
       }
     } catch { /* ignore */ }
+  } else {
+    // 游戏再次活跃时，先清空以加载新状态
+    gameflowMyTeam.value = [];
+    gameflowTheirTeam.value = [];
   }
 });
 
@@ -466,10 +472,10 @@ onMounted(async () => {
 // 监听阶段变化：ChampSelect → 加载己方；InProgress/GameStart → 加载双方
 watch(() => store.gamePhase, (phase: string) => {
   if (phase === "ChampSelect") {
-    // 清除 gameflow 数据，回退到 champSelectSession
+    // 开启新一局选人时才清理上局快照数据以备载入新数据
     gameflowMyTeam.value = [];
     gameflowTheirTeam.value = [];
-    playerData.value = {}; // 清除上一局的旧玩家数据缓存
+    playerData.value = {};
     premadeColorsMy.value = {};
     premadeColorsTheir.value = {};
     try {
@@ -490,6 +496,16 @@ watch(() => store.champSelectSession, (session: any) => {
     loadAllPlayers();
     // 获取组队颜色（gameflow session 在选人阶段也有 teamParticipantId）
     fetchPremadeColors();
+
+    // 存储当前选人快照数据至 localStorage，以防秒退后头像等数据丢失
+    try {
+      if (session.myTeam && session.myTeam.length > 0) {
+        localStorage.setItem("yuumi_last_gameflow_my_team", JSON.stringify(session.myTeam));
+      }
+      if (session.theirTeam && session.theirTeam.length > 0) {
+        localStorage.setItem("yuumi_last_gameflow_their_team", JSON.stringify(session.theirTeam));
+      }
+    } catch { /* ignore */ }
   }
 }, { deep: true });
 
@@ -513,9 +529,6 @@ watch(activeTab, () => loadAllPlayers());
 
 <template>
   <div class="game-info">
-    <div class="page-header">
-      <h2 class="page-title">🎮 对局信息</h2>
-    </div>
 
     <div v-if="!store.isConnected" class="tip-container">
       <div class="offline-logo">🎮</div>
@@ -532,7 +545,7 @@ watch(activeTab, () => loadAllPlayers());
       <div class="left-panel">
         <div class="team-tabs">
           <button :class="['tab-btn', { active: activeTab === 'my' }]" @click="activeTab = 'my'">
-            己方 ({{ myTeam.length }})
+            乙方 ({{ myTeam.length }})
           </button>
           <button :class="['tab-btn', { active: activeTab === 'their' }]" @click="activeTab = 'their'">
             敌方 ({{ theirTeam.length }})
@@ -559,53 +572,62 @@ watch(activeTab, () => loadAllPlayers());
             :style="getPremadeCardStyle(p.summonerId, activeTab)"
           >
             <div class="pc-avatar-area">
-              <!-- 选人阶段：选了英雄或预选了英雄才显示英雄头像 -->
-              <template v-if="p.championId || p.championPickIntent">
-                <div class="pc-avatar">
-                  <LcuImage :src="getChampionIcon(p.championId || p.championPickIntent)" alt="champ" />
+              <div class="profile-icon-wrapper-mini">
+                <!-- 等级进度环形条 -->
+                <svg class="gauge-ring-svg-mini" viewBox="0 0 100 100">
+                  <circle class="gauge-track-mini" cx="50" cy="50" r="45" />
+                  <circle class="gauge-progress-mini" cx="50" cy="50" r="45"
+                          :style="{ '--progress': playerData[p.cellId]?.info?.percentCompleteForNextLevel || 0 }" />
+                </svg>
+                <div class="avatar-container-mini">
+                  <!-- 选人阶段：选了英雄或预选了英雄才显示英雄头像 -->
+                  <template v-if="p.championId || p.championPickIntent">
+                    <LcuImage :src="getChampionIcon(p.championId || p.championPickIntent)" class="profile-avatar-mini" alt="champ" />
+                  </template>
+                  <template v-else>
+                    <div class="profile-avatar-mini profile-avatar-empty-mini">?</div>
+                  </template>
                 </div>
-              </template>
-              <template v-else>
-                <div class="pc-avatar pc-avatar-empty">
-                  <div class="pc-avatar-placeholder">?</div>
+                <!-- 等级数字 -->
+                <div v-if="playerData[p.cellId]?.info?.summonerLevel" class="level-badge-mini">
+                  {{ playerData[p.cellId].info.summonerLevel }}
                 </div>
-              </template>
-              <div v-if="playerData[p.cellId]?.info?.summonerLevel" class="pc-level">
-                {{ playerData[p.cellId].info.summonerLevel }}
               </div>
             </div>
-            <div class="pc-info">
-              <div class="pc-name-row">
-                <span class="pc-name">
-                  <span
-                    v-if="getPremadeIdx(p.summonerId, activeTab) >= 0"
-                    class="premade-dot"
-                    :style="{ background: PREMADE_COLORS[getPremadeIdx(p.summonerId, activeTab) % PREMADE_COLORS.length].dot }"
-                    :title="`组队 ${getPremadeIdx(p.summonerId, activeTab) + 1}`"
-                  ></span>
-                  {{ playerData[p.cellId]?.info?.gameName || playerData[p.cellId]?.info?.displayName || p.displayName || '未知' }}
-                  <span v-if="playerData[p.cellId]?.info?.tagLine" class="pc-tag">#{{ playerData[p.cellId].info.tagLine }}</span>
-                </span>
-                <span v-if="playerData[p.cellId]?.winRate !== undefined" :class="['pc-winrate-badge', getWinRateClass(playerData[p.cellId].winRate)]">
+            
+            <div class="pc-info centered">
+              <div class="pc-row pc-name-row-centered">
+                <span
+                  v-if="getPremadeIdx(p.summonerId, activeTab) >= 0"
+                  class="premade-dot"
+                  :style="{ background: PREMADE_COLORS[getPremadeIdx(p.summonerId, activeTab) % PREMADE_COLORS.length].dot }"
+                  :title="`组队 ${getPremadeIdx(p.summonerId, activeTab) + 1}`"
+                ></span>
+                <span class="name-text">{{ playerData[p.cellId]?.info?.gameName || playerData[p.cellId]?.info?.displayName || p.displayName || '未知' }}</span>
+              </div>
+              
+              <div class="pc-row pc-winrate-row" v-if="playerData[p.cellId]?.winRate !== undefined">
+                <span :class="['pc-winrate-badge-clean', getWinRateClass(playerData[p.cellId].winRate)]">
                   {{ playerData[p.cellId].winRate }}% 胜率
                 </span>
               </div>
               
-              <div class="pc-meta-row">
-                <span v-if="playerData[p.cellId]?.avgKda !== undefined" :class="['pc-kda-badge', getKdaClass(playerData[p.cellId].avgKda)]">
+              <div class="pc-row pc-kda-row" v-if="playerData[p.cellId]?.avgKda !== undefined">
+                <span :class="['pc-kda-text', getKdaClass(playerData[p.cellId].avgKda)]">
                   KDA: {{ playerData[p.cellId]?.avgKda?.toFixed(2) ?? '0.00' }}
                 </span>
               </div>
+              
+              <div class="pc-row pc-rank-row">
+                <span class="rank-badge-clean" :title="formatRank(playerData[p.cellId]?.ranked?.solo) || '单双排: 无段位'">
+                  单双: {{ (playerData[p.cellId]?.ranked?.solo?.tier ? TIER_MAP[playerData[p.cellId].ranked.solo.tier] : '无') }}
+                </span>
+              </div>
 
-              <div class="pc-ranks">
-                <div class="pc-rank-line" :title="'单/双排'">
-                  <span class="rank-icon-wrapper">🏆</span>
-                  <span class="rank-text">{{ formatRank(playerData[p.cellId]?.ranked?.solo) || '单双排: 无段位' }}</span>
-                </div>
-                <div class="pc-rank-line" :title="'灵活排位'">
-                  <span class="rank-icon-wrapper">🎯</span>
-                  <span class="rank-text">{{ formatRank(playerData[p.cellId]?.ranked?.flex) || '灵活排: 无段位' }}</span>
-                </div>
+              <div class="pc-row pc-rank-row">
+                <span class="rank-badge-clean" :title="formatRank(playerData[p.cellId]?.ranked?.flex) || '灵活排: 无段位'">
+                  灵活: {{ (playerData[p.cellId]?.ranked?.flex?.tier ? TIER_MAP[playerData[p.cellId].ranked.flex.tier] : '无') }}
+                </span>
               </div>
             </div>
           </div>
@@ -620,7 +642,6 @@ watch(activeTab, () => loadAllPlayers());
             v-for="(p, i) in currentTeam"
             :key="p.cellId ?? i"
             class="player-column"
-            :style="getPremadeColumnStyle(p.summonerId, activeTab)"
           >
             <div class="col-header">
               <div class="col-header-top">
@@ -667,9 +688,6 @@ watch(activeTab, () => loadAllPlayers());
                 </div>
               </div>
             </template>
-            <template v-else>
-              <div class="col-empty">暂无</div>
-            </template>
           </div>
         </div>
       </div>
@@ -714,7 +732,7 @@ watch(activeTab, () => loadAllPlayers());
 /* 左右分栏 */
 .game-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 240px 1fr;
   gap: 16px;
   flex: 1;
   min-height: 0;
@@ -798,182 +816,153 @@ watch(activeTab, () => loadAllPlayers());
 .player-card {
   flex: 1;
   min-height: 0;
-  max-height: 140px;
+  max-height: 142px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.02);
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-left: 3px solid var(--border-color);
-  border-radius: 8px;
-  transition: all 0.2s ease-in-out;
+  border-left: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
   box-sizing: border-box;
-}
-.player-card.premade-card {
-  background: var(--premade-bg, rgba(0, 0, 0, 0.02));
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 .player-card:hover {
-  background: var(--hover-bg);
-  transform: translateY(-2px);
-  border-color: rgba(var(--primary-color-rgb, 59, 130, 246), 0.3);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  background: var(--card-bg-hover);
+  transform: translateY(-2px) scale(1.01);
+  border-color: var(--primary-color-alpha-40);
+  box-shadow: var(--shadow-md), 0 4px 16px var(--primary-color-alpha-15);
 }
 
 /* 组队标记圆点 */
 .premade-dot {
   display: inline-block;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  margin-right: 5px;
+  margin-right: 4px;
   vertical-align: middle;
   box-shadow: 0 0 4px currentColor;
 }
 
-/* 左侧：头像区域 */
-.pc-avatar-area {
+/* 头像区域：等级圆环 mini 版 */
+.profile-icon-wrapper-mini {
   position: relative;
+  width: 58px;
+  height: 58px;
   flex-shrink: 0;
+  margin: 0 auto;
 }
-.pc-avatar {
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 2px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
-}
-.pc-avatar-empty {
-  border-color: var(--border-color);
-}
-.pc-avatar-placeholder {
+.gauge-ring-svg-mini {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
+  overflow: visible;
+}
+.gauge-track-mini,
+.gauge-progress-mini {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-dasharray: 235.62 282.74;
+  transform: rotate(120deg);
+  transform-origin: center;
+}
+.gauge-track-mini {
+  stroke: var(--border-color);
+}
+.gauge-progress-mini {
+  stroke: var(--primary-color);
+  stroke-dashoffset: calc(235.62px * (1 - var(--progress) / 100));
+  transition: stroke-dashoffset 0.8s ease;
+}
+.avatar-container-mini {
+  position: absolute;
+  inset: 7px;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.profile-avatar-mini {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.profile-avatar-empty-mini {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.04);
-  font-size: 1rem;
+  background: var(--hover-bg);
   color: var(--text-dimmed);
-}
-.pc-level {
-  position: absolute;
-  bottom: -2px;
-  right: -2px;
-  background: var(--primary-color);
-  color: white;
-  font-size: 0.6rem;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 8px;
-  white-space: nowrap;
-  box-shadow: 0 2px 6px var(--primary-color-alpha-40);
-  border: 1px solid var(--border-color);
-}
-
-.pc-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-  gap: 4px;
-}
-.pc-name-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 4px;
-}
-.pc-name {
   font-size: 0.85rem;
   font-weight: 700;
+}
+.level-badge-mini {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
   color: var(--text-color);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pc-tag {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-/* 胜率徽章 */
-.pc-winrate-badge {
-  font-size: 0.68rem;
-  font-weight: 700;
-  padding: 2px 6px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  padding: 0 4px;
   border-radius: 4px;
+  z-index: 2;
   white-space: nowrap;
-}
-.pc-winrate-badge.wr-high {
-  color: var(--win-color);
-  background: var(--win-bg);
-}
-.pc-winrate-badge.wr-medium {
-  color: var(--tier-blue);
-  background: var(--tier-blue-bg);
-}
-.pc-winrate-badge.wr-low {
-  color: var(--text-dimmed);
-  background: var(--hover-bg);
+  line-height: 1.2;
 }
 
-.pc-meta-row {
-  display: flex;
-  align-items: center;
-}
-
-/* KDA 均值徽章 */
-.pc-kda-badge {
-  font-size: 0.7rem;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-.pc-kda-badge.kda-orange {
-  color: var(--accent-color);
-  background: var(--accent-bg);
-  border: 1px solid rgba(230, 162, 60, 0.2);
-  font-weight: 700;
-}
-.pc-kda-badge.kda-blue {
-  color: var(--tier-blue);
-  background: var(--tier-blue-bg);
-  border: 1px solid var(--tier-blue-border);
-}
-.pc-kda-badge.kda-green {
-  color: var(--win-color);
-  background: var(--win-bg);
-  border: 1px solid var(--win-border);
-}
-.pc-kda-badge.kda-gray {
-  color: var(--text-dimmed);
-  background: var(--hover-bg);
-}
-
-/* 排位段位格栅化 */
-.pc-ranks {
+/* 右侧文本完全居中，一行一个样式 */
+.pc-info.centered {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 5px;
+  width: 100%;
 }
-.pc-rank-line {
+.pc-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.72rem;
-  color: var(--text-muted);
+  justify-content: center;
+  width: 100%;
+  min-height: 20px;
 }
-.rank-icon-wrapper {
-  font-size: 0.75rem;
-}
-.rank-text {
+.name-text {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-color);
+  max-width: 110px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.pc-winrate-badge-clean {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.pc-kda-text {
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.pc-kda-text.kda-orange { color: var(--accent-color); }
+.pc-kda-text.kda-blue { color: var(--tier-blue); }
+.pc-kda-text.kda-green { color: var(--win-color); }
+.pc-kda-text.kda-gray { color: var(--text-dimmed); }
+
+.rank-badge-clean {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-dimmed);
 }
 
 /* 右侧：5 列战绩 */
@@ -1006,15 +995,20 @@ watch(activeTab, () => loadAllPlayers());
 }
 
 .col-header {
-  padding: 12px;
+  height: 58px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-color);
   background: rgba(0, 0, 0, 0.02);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
 }
 .col-header-top {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
 }
 .col-header-info {
   display: flex;
