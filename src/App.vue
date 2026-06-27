@@ -17,6 +17,7 @@ import TFT from "./views/TFT.vue";
 import Settings from "./views/Settings.vue";
 import Tools from "./views/Tools.vue";
 import LcuImage from "./components/LcuImage.vue";
+import UpdateDialog, { type UpdateInfo } from "./components/UpdateDialog.vue";
 import opggIcon from "./assets/opgg.svg";
 
 function applyThemeMode(mode: string) {
@@ -39,6 +40,9 @@ const pageHistory: string[] = [];
 const isSidebarExpanded = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
 const platformId = ref("");
+
+// 自动更新弹窗
+const updateInfo = ref<UpdateInfo | null>(null);
 
 // Toast 通知
 const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
@@ -95,6 +99,11 @@ onMounted(async () => {
   // 监听系统托盘菜单导航事件
   await listen<string>("tray-navigate", (event: { payload: string }) => {
     navigate(event.payload);
+  });
+
+  // 监听 Rust 后端推送的更新可用事件
+  await listen<UpdateInfo>("updater://update-available", (event) => {
+    updateInfo.value = event.payload;
   });
 
   // 自动启动 LOL 客户端并按需显示主窗口
@@ -384,6 +393,13 @@ async function handleClose() {
       <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">{{ toast.message }}</div>
     </Transition>
 
+    <!-- 自动更新弹窗 -->
+    <UpdateDialog
+      v-if="updateInfo"
+      :update-info="updateInfo"
+      @dismiss="updateInfo = null"
+    />
+
     <!-- 自定义标题栏 -->
     <div class="titlebar" data-tauri-drag-region>
       <div class="titlebar-left">
@@ -563,7 +579,7 @@ async function handleClose() {
             <p>Yuumi 已在后台为您开启 OP.GG 数据加速反代，保证国服和外服战绩的流畅拉取。</p>
             <div class="status-box">
               <span class="dot online"></span>
-              <span>OP.GG 代理地址: 127.0.0.1:10809</span>
+              <span>OP.GG 代理地址: 127.0.0.1:7897</span>
             </div>
             <p class="hint">您可以在系统设置中开启"对局自动上传战绩"，该功能将静默安全地同步数据。</p>
           </div>

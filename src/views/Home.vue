@@ -94,7 +94,6 @@ watch(() => store.isConnected, (connected) => {
       <h1 class="status-title">客户端未连接</h1>
       <p class="offline-desc">
         请先启动国服或外服的《英雄联盟》客户端。<br>
-        系统将通过底层进程侦测服务自动捕获凭证并建立长连接。
       </p>
       <button class="launch-btn" @click="handleLaunchClient">
         <svg class="launch-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

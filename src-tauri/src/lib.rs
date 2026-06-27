@@ -5,6 +5,7 @@ pub mod logging;
 pub mod parsers;
 pub mod signalr;
 pub mod tools;
+pub mod updater;
 pub mod upload;
 
 use base64::Engine;
@@ -66,6 +67,7 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // 加载配置
@@ -227,6 +229,33 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // ─── 启动时静默检查更新 ───
+            {
+                let cfg_snapshot = app_config_arc.blocking_read();
+                let enable_check = cfg_snapshot.general.enable_check_update;
+                drop(cfg_snapshot);
+                if enable_check {
+                    let app_handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        // 延迟 3 秒，等待主窗口完全加载后再检查
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        match updater::check_update(app_handle.clone()).await {
+                            Ok(Some(info)) => {
+                                log::info!("发现新版本: {} (当前: {})", info.version, info.current_version);
+                                // 通知前端弹出更新对话框
+                                let _ = app_handle.emit("updater://update-available", info);
+                            }
+                            Ok(None) => {
+                                log::info!("已是最新版本");
+                            }
+                            Err(e) => {
+                                log::warn!("启动时检查更新失败: {e}");
+                            }
+                        }
+                    });
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -261,6 +290,8 @@ pub fn run() {
             upload::upload_single_match,
             upload::batch_upload_matches,
             signalr::get_signalr_status,
+            updater::check_update,
+            updater::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

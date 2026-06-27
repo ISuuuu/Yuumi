@@ -2,12 +2,38 @@
 import { ref, onMounted, onUnmounted, inject, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import { updateThemeColor, updateDeathColor } from "../utils/theme";
 import ColorPicker from "../components/ColorPicker.vue";
+import UpdateDialog, { type UpdateInfo } from "../components/UpdateDialog.vue";
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
+
+// 当前版本号
+const appVersion = ref("");
+
+// 手动检查更新状态
+const checkingUpdate = ref(false);
+const updateInfo = ref<UpdateInfo | null>(null);
+
+async function manualCheckUpdate() {
+  if (checkingUpdate.value) return;
+  checkingUpdate.value = true;
+  try {
+    const result = await invoke<UpdateInfo | null>("check_update");
+    if (result) {
+      updateInfo.value = result;
+    } else {
+      showToast("已是最新版本！", "success");
+    }
+  } catch (e: any) {
+    showToast("检查更新失败: " + String(e), "error");
+  } finally {
+    checkingUpdate.value = false;
+  }
+}
 
 // Toast 通知
 const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
@@ -64,6 +90,14 @@ const unlistenFns = ref<Array<() => void>>([]);
 
 onMounted(async () => {
   document.addEventListener("click", closeAllDropdowns);
+
+  // 获取当前应用版本号
+  try {
+    appVersion.value = await getVersion();
+  } catch (e) {
+    console.warn("获取版本号失败:", e);
+  }
+
   if (!config.value) {
     try {
       config.value = await fetchConfig();
@@ -746,13 +780,37 @@ function applyThemeMode(mode: string) {
           <h3 class="card-title">检查更新</h3>
           <span class="card-desc">在 Yuumi 启动时自动检查更新</span>
         </div>
-        <div class="card-right">
+        <div class="card-right" style="flex-shrink:0; gap:10px">
+          <button
+            class="check-update-btn"
+            :disabled="checkingUpdate"
+            @click="manualCheckUpdate"
+            :title="checkingUpdate ? '检查中...' : '检查更新'"
+          >
+            <svg v-if="!checkingUpdate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
+              <path d="M21 2v6h-6"/>
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+              <path d="M3 22v-6h6"/>
+              <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+            </svg>
+            <svg v-else class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+            </svg>
+            {{ checkingUpdate ? '检查中...' : '检查更新' }}
+          </button>
           <div :class="['toggle-switch', config.General.EnableCheckUpdate ? 'on' : 'off']" @click="config.General.EnableCheckUpdate = !config.General.EnableCheckUpdate; autoSave()">
             <span class="toggle-text">{{ config.General.EnableCheckUpdate ? '开' : '关' }}</span>
             <span class="toggle-slider"></span>
           </div>
         </div>
       </div>
+
+      <!-- 手动检查更新对话框 -->
+      <UpdateDialog
+        v-if="updateInfo"
+        :update-info="updateInfo"
+        @dismiss="updateInfo = null"
+      />
 
       <div class="collapse-item">
         <div class="collapse-header" @click="toggleCollapse('githubproxy')">
@@ -782,7 +840,7 @@ function applyThemeMode(mode: string) {
       <div class="card-item">
         <div class="card-left">
           <h3 class="card-title">关于</h3>
-          <span class="card-desc">当前版本 0.1.0</span>
+          <span class="card-desc">当前版本 {{ appVersion ? `v${appVersion}` : '加载中...' }}</span>
         </div>
       </div>
     </div>
@@ -1236,5 +1294,41 @@ function applyThemeMode(mode: string) {
   margin-bottom: 10px;
   padding-left: 142px;
   text-align: left;
+}
+
+/* ── 检查更新按钮 ── */
+.check-update-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
+  background: var(--bg-secondary, rgba(255,255,255,0.04));
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.check-update-btn:hover:not(:disabled) {
+  background: var(--bg-hover, rgba(255,255,255,0.08));
+  color: var(--text-primary);
+  border-color: var(--theme-color, #009faa);
+}
+
+.check-update-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
 }
 </style>
