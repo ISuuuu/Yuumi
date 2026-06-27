@@ -372,18 +372,11 @@ pub async fn get_match_history(
     }
 
     let assets = app_state.game_data.read().await;
-    let skip = beg_index.unwrap_or(0) as usize;
-    let limit = match (beg_index, end_index) {
-        (Some(b), Some(e)) if e > b => (e - b) as usize,
-        _ => usize::MAX,
-    };
     let displays: Vec<MatchDisplay> = history
         .games
         .games
         .iter()
         .filter(|g| !g.participants.is_empty())
-        .skip(skip)
-        .take(limit)
         .map(|g| g.to_display(&assets))
         .collect();
 
