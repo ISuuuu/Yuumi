@@ -124,62 +124,30 @@ jobs:
 
       - name: Generate latest.json for updater
         shell: pwsh
-        run: |
-          # 调试：打印 bundle 目录内容
-          Write-Host "=== Bundle directory contents ==="
+        run: >
+          Write-Host "=== Bundle directory contents ===";
           if (Test-Path "src-tauri/target/release/bundle") {
             Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File | ForEach-Object { Write-Host $_.FullName }
           } else {
-            Write-Host "Bundle directory does not exist!"
-            exit 1
-          }
-
-          $VERSION = "${{ needs.create-release.outputs.version }}" -replace '^v', ''
-          $TAG = "${{ needs.create-release.outputs.version }}"
-
-          # 找 exe（排除 .sig）
-          $EXE_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | Where-Object { $_.Name -notlike "*.sig" } | Select-Object -First 1
-
-          if (-not $EXE_FILE) {
-            Write-Error "No .exe found in bundle/nsis/"
-            exit 1
-          }
-
-          # 找 .sig 文件，没有就自动生成
-          $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1
-
+            Write-Host "Bundle directory does not exist!"; exit 1
+          };
+          $VERSION = "${{ needs.create-release.outputs.version }}" -replace '^v', '';
+          $TAG = "${{ needs.create-release.outputs.version }}";
+          $EXE_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | Where-Object { $_.Name -notlike "*.sig" } | Select-Object -First 1;
+          if (-not $EXE_FILE) { Write-Error "No .exe found in bundle/nsis/"; exit 1 };
+          $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1;
           if (-not $SIG_FILE) {
-            Write-Host "No .sig found, generating..."
-            npx --yes tauri signer sign $EXE_FILE.FullName --private-key "${{ env.TAURI_SIGNING_PRIVATE_KEY }}" --password "${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
+            Write-Host "No .sig found, generating...";
+            npx --yes tauri signer sign $EXE_FILE.FullName --private-key "${{ env.TAURI_SIGNING_PRIVATE_KEY }}" --password "${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}";
             $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1
-          }
-
-          if (-not $SIG_FILE) {
-            Write-Error "Failed to generate .sig file"
-            exit 1
-          }
-
-          $SIGNATURE = Get-Content $SIG_FILE.FullName -Raw
-          $PUB_DATE = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
-
-          $CHANGELOG = @"
-${{ steps.changelog.outputs.notes }}
-"@
-
-          $LATEST_JSON = @{
-            version = $VERSION
-            notes = $CHANGELOG.Trim()
-            pub_date = $PUB_DATE
-            platforms = @{
-              "windows-x86_64" = @{
-                signature = $SIGNATURE.Trim()
-                url = "https://github.com/ISuuuu/Yuumi/releases/download/${TAG}/$($EXE_FILE.Name)"
-              }
-            }
-          }
-
-          $LATEST_JSON | ConvertTo-Json -Depth 10 | Set-Content "latest.json" -Encoding UTF8
-          Write-Host "Generated latest.json"
+          };
+          if (-not $SIG_FILE) { Write-Error "Failed to generate .sig file"; exit 1 };
+          $SIGNATURE = Get-Content $SIG_FILE.FullName -Raw;
+          $PUB_DATE = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ");
+          $CHANGELOG = "${{ steps.changelog.outputs.notes }}".Trim();
+          $LATEST_JSON = @{ version=$VERSION; notes=$CHANGELOG; pub_date=$PUB_DATE; platforms=@{ "windows-x86_64"=@{ signature=$SIGNATURE.Trim(); url="https://github.com/ISuuuu/Yuumi/releases/download/${TAG}/$($EXE_FILE.Name)" } } };
+          $LATEST_JSON | ConvertTo-Json -Depth 10 | Set-Content "latest.json" -Encoding UTF8;
+          Write-Host "Generated latest.json";
           Get-Content "latest.json" | Write-Host
 
       - name: Pack portable zip
@@ -204,9 +172,7 @@ ${{ steps.changelog.outputs.notes }}
         uses: actions/upload-artifact@v4
         with:
           name: yuumi-windows-installer
-          path: |
-            ./src-tauri/target/release/bundle/nsis/*.exe
-            ./src-tauri/target/release/bundle/nsis/*.exe.sig
+          path: ./src-tauri/target/release/bundle/nsis/*.exe, ./src-tauri/target/release/bundle/nsis/*.exe.sig
           retention-days: 7
           if-no-files-found: ignore
 
