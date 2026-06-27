@@ -188,7 +188,6 @@ const TIER_BORDER_COLORS = computed<Record<string, string>>(() => {
 });
 
 const TIER_CARD_BORDER = computed<Record<string, string>>(() => TIER_BORDER_COLORS.value);
-const TIER_CARD_BORDER_PLACEHOLDER = "";
 
 // Tier 等级图标（盾牌 + 数字）
 const TIER_ICONS: Record<string, string> = {

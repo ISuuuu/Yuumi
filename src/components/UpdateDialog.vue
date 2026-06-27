@@ -16,7 +16,7 @@ interface DownloadProgress {
   percent?: number;
 }
 
-const props = defineProps<{
+const { updateInfo } = defineProps<{
   updateInfo: UpdateInfo;
 }>();
 
