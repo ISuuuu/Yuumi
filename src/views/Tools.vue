@@ -177,6 +177,7 @@ async function confirmSkinSelection() {
 
 // 观战输入项
 const spectateSummonerName = ref("");
+const spectateMethod = ref<"LCU" | "CMD">("CMD");
 
 // 锁定游戏设置状态
 const isGameSettingsLocked = ref(false);
@@ -233,32 +234,54 @@ async function triggerAutoSave() {
   }
 }
 
-// 模拟观战启动
+// 观战启动
 async function handleSpectate() {
   if (!spectateSummonerName.value.trim()) return;
   loading.value = true;
   try {
-    // 第一步：通过召唤师名称获取 puuid
     const name = spectateSummonerName.value.trim().replace(/[⁦⁩]/g, '');
-    const summonerResp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners?name=${encodeURIComponent(name)}`);
-    if (!summonerResp.success || !summonerResp.data) {
-      showToast('未找到该召唤师，请检查名称后重试', 'error');
-      return;
-    }
-    const puuid = summonerResp.data.puuid;
 
-    // 第二步：通过 LCU API 发起观战
-    const resp = await lcuRequest<any>("POST", "/lol-spectator/v1/spectate/launch", {
-      allowObserveMode: "ALL",
-      dropInSpectateGameId: name,
-      gameQueueType: "",
-      puuid: puuid
-    });
-    if (resp.success) {
-      showToast('观战启动成功，请等待加载...');
+    if (spectateMethod.value === "CMD") {
+      // CMD 方式：通过 SGP 获取凭据后直接启动 League of Legends.exe
+      // 可绕开 "Already in gameflow" 错误
+      const result = await invoke<string>("spectate_directly", {
+        params: { summoner_name: name },
+      });
+      showToast(result || "观战启动成功（CMD 方式）");
     } else {
-      // 空 body 表示成功，非空表示该玩家不在游戏中
-      showToast('观战失败: ' + (resp.error || '该召唤师可能在游戏中'), 'error');
+      // LCU API 方式：通过 /lol-spectator/v1/spectate/launch
+      const summonerResp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners?name=${encodeURIComponent(name)}`);
+      if (!summonerResp.success || !summonerResp.data) {
+        showToast('未找到该召唤师，请检查名称后重试', 'error');
+        return;
+      }
+      const puuid = summonerResp.data.puuid;
+
+      const resp = await lcuRequest<any>("POST", "/lol-spectator/v1/spectate/launch", {
+        allowObserveMode: "ALL",
+        dropInSpectateGameId: name,
+        gameQueueType: "",
+        puuid: puuid
+      });
+      if (resp.success) {
+        showToast('观战启动成功，请等待加载...');
+      } else {
+        const errMsg = String(resp.error || '');
+        // "Already in gameflow" 时自动回退到 CMD 方式
+        if (errMsg.includes('Already in gameflow') || errMsg.includes('gameflow')) {
+          showToast('LCU 观战被拒绝（Already in gameflow），自动切换 CMD 方式...');
+          try {
+            const result = await invoke<string>("spectate_directly", {
+              params: { summoner_name: name },
+            });
+            showToast(result || "观战启动成功（CMD 方式自动回退）");
+          } catch (e2: any) {
+            showToast('CMD 回退也失败: ' + e2.toString(), 'error');
+          }
+        } else {
+          showToast('观战失败: ' + (resp.error || '该召唤师可能不在游戏中'), 'error');
+        }
+      }
     }
   } catch (e: any) {
     showToast('观战异常: ' + e.toString(), 'error');
@@ -832,6 +855,15 @@ async function handleToggleLockGameSettings() {
             <div class="input-with-button">
               <input v-model="spectateSummonerName" placeholder="输入要观战的召唤师名称..." class="text-input" />
               <button class="apply-btn" @click="handleSpectate" :disabled="!spectateSummonerName.trim()">观战</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">观战方式:</span>
+            <div class="input-with-button">
+              <select v-model="spectateMethod" class="text-input" style="cursor: pointer;">
+                <option value="CMD">CMD（推荐，绕开 gameflow 限制）</option>
+                <option value="LCU">LCU API</option>
+              </select>
             </div>
           </div>
         </div>

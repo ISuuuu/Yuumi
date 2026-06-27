@@ -23,6 +23,9 @@ pub struct LcuClient {
     pub pid: u32,
     pub port: u16,
     pub token: String,
+    /// 登录大区标识（来自 LeagueClientUx 命令行 --rso_platform_id=），
+    /// 用于 SGP 观战等需要大区信息的场景。非腾讯大区时为 None。
+    pub server: Option<String>,
     pub http_client: reqwest::Client,
 }
 
@@ -277,6 +280,7 @@ pub fn run() {
             tools::get_champion_skins,
             tools::get_game_settings_readonly,
             tools::set_game_settings_readonly,
+            tools::spectate_directly,
             get_config,
             update_config,
             get_config_load_error,
@@ -324,9 +328,10 @@ pub struct LcuConnectionDetails {
     pub pid: u32,
     pub port: u16,
     pub token: String,
+    pub server: Option<String>,
 }
 
-/// 获取当前 LCU 连接信息（PID、端口、Token）
+/// 获取当前 LCU 连接信息（PID、端口、Token、大区）
 #[tauri::command]
 async fn get_lcu_connection_info(
     app_state: tauri::State<'_, AppState>,
@@ -337,6 +342,7 @@ async fn get_lcu_connection_info(
             pid: client.pid,
             port: client.port,
             token: client.token.clone(),
+            server: client.server.clone(),
         })),
         None => Ok(None),
     }

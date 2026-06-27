@@ -589,4 +589,211 @@ pub async fn set_game_settings_readonly(
     }
 }
 
+// ─── CMD 方式观战（绕开 Already in gameflow）───
 
+/// 腾讯大区白名单（SGP 仅在这些大区可用）
+const TENCENT_SERVERS: &[&str] = &[
+    "tj100", "hn1", "cq100", "gz100", "nj100", "hn10", "tj101", "bgp2",
+];
+
+/// 需要 k8s-sgp 子域名的特殊大区
+const K8S_SGP_SERVERS: &[&str] = &["hn1", "hn10", "bgp2"];
+
+#[derive(Deserialize)]
+pub struct SpectateDirectlyParams {
+    pub summoner_name: String,
+}
+
+/// CMD 方式观战：通过 SGP 获取观战凭据，直接启动 League of Legends.exe。
+/// 与 LCU API 方式（/lol-spectator/v1/spectate/launch）相比，可绕开
+/// "Already in gameflow" 错误，无需等待客户端 gameflow 状态切换。
+#[tauri::command]
+pub async fn spectate_directly(
+    params: SpectateDirectlyParams,
+    app_state: State<'_, AppState>,
+) -> Result<String, String> {
+    let name = params.summoner_name.trim().to_string();
+    if name.is_empty() {
+        return Err("请输入召唤师名称".to_string());
+    }
+
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
+    let auth = build_auth_header(&lcu.token);
+    let lcu_base = format!("https://127.0.0.1:{}", lcu.port);
+
+    // ── 1. 获取大区标识 ──
+    let server = lcu
+        .server
+        .as_ref()
+        .ok_or_else(|| "无法获取大区信息（--rso_platform_id），请重启客户端后重试".to_string())?;
+    let server_lower = server.to_lowercase();
+
+    if !TENCENT_SERVERS.contains(&server_lower.as_str()) {
+        return Err(format!(
+            "CMD 观战仅支持腾讯大区，当前大区 {} 不支持",
+            server
+        ));
+    }
+
+    // ── 2. 通过 LCU 获取召唤师 puuid ──
+    let summoner_url = format!("{}/lol-summoner/v1/summoners", lcu_base);
+    let summoner_resp = lcu
+        .http_client
+        .get(&summoner_url)
+        .header("Authorization", &auth)
+        .query(&[("name", &name)])
+        .send()
+        .await
+        .map_err(|e| format!("获取召唤师信息失败: {}", e))?;
+
+    if !summoner_resp.status().is_success() {
+        return Err(format!(
+            "未找到召唤师 \"{}\" (HTTP {})",
+            name,
+            summoner_resp.status().as_u16()
+        ));
+    }
+
+    let summoner_data: serde_json::Value =
+        summoner_resp.json().await.map_err(|e| format!("解析召唤师数据失败: {}", e))?;
+    let puuid = summoner_data
+        .get("puuid")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "召唤师数据中缺少 puuid".to_string())?
+        .to_string();
+
+    // ── 3. 通过 LCU 获取 SGP token（/entitlements/v1/token → accessToken）──
+    let token_url = format!("{}/entitlements/v1/token", lcu_base);
+    let token_resp = lcu
+        .http_client
+        .get(&token_url)
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .map_err(|e| format!("获取 SGP token 失败: {}", e))?;
+
+    if !token_resp.status().is_success() {
+        return Err(format!("获取 SGP token 失败: HTTP {}", token_resp.status().as_u16()));
+    }
+
+    let token_data: serde_json::Value =
+        token_resp.json().await.map_err(|e| format!("解析 SGP token 失败: {}", e))?;
+    let sgp_token = token_data
+        .get("accessToken")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "SGP token 数据中缺少 accessToken".to_string())?
+        .to_string();
+
+    // ── 4. 构建 SGP base URL 并请求观战凭据 ──
+    let sgp_base = if K8S_SGP_SERVERS.contains(&server_lower.as_str()) {
+        format!("https://{}-k8s-sgp.lol.qq.com:21019", server_lower)
+    } else {
+        format!("https://{}-sgp.lol.qq.com:21019", server_lower)
+    };
+
+    let sgp_client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .no_proxy()
+        .build()
+        .map_err(|e| format!("创建 SGP HTTP 客户端失败: {}", e))?;
+
+    let sgp_url = format!(
+        "{}/gsm/v1/ledge/spectator/region/{}/puuid/{}",
+        sgp_base, server_lower, puuid
+    );
+
+    log::info!("CMD 观战: 请求 SGP {}", sgp_url);
+
+    let sgp_resp = sgp_client
+        .get(&sgp_url)
+        .header("Authorization", format!("Bearer {}", sgp_token))
+        .send()
+        .await
+        .map_err(|e| format!("SGP 请求失败: {}", e))?;
+
+    if !sgp_resp.status().is_success() {
+        let status = sgp_resp.status().as_u16();
+        let body = sgp_resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "SGP 返回错误 [{}]: {}（该召唤师可能不在游戏中）",
+            status, body
+        ));
+    }
+
+    let sgp_data: serde_json::Value =
+        sgp_resp.json().await.map_err(|e| format!("解析 SGP 响应失败: {}", e))?;
+
+    let credentials = sgp_data
+        .get("playerCredentials")
+        .ok_or_else(|| "该召唤师当前不在游戏中（SGP 未返回 playerCredentials）".to_string())?;
+
+    let observer_ip = credentials
+        .get("observerServerIp")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "观战凭据缺少 observerServerIp".to_string())?;
+    let observer_port = credentials
+        .get("observerServerPort")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| "观战凭据缺少 observerServerPort".to_string())?;
+    let encryption_key = credentials
+        .get("observerEncryptionKey")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "观战凭据缺少 observerEncryptionKey".to_string())?;
+    let game_id = credentials
+        .get("gameId")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| "观战凭据缺少 gameId".to_string())?;
+
+    // ── 5. 拼接命令行参数 ──
+    let spectate_cmd = format!(
+        "spectator {}:{} {} {} {}",
+        observer_ip, observer_port, encryption_key, game_id, server
+    );
+
+    log::info!("CMD 观战: 命令行参数 = {}", spectate_cmd);
+
+    // ── 6. 定位 Game 目录并启动 League of Legends.exe ──
+    let cfg = app_state.config.read().await;
+    let lol_path = cfg
+        .general
+        .lol_path
+        .first()
+        .ok_or_else(|| "未配置英雄联盟客户端路径，请在设置中配置".to_string())?
+        .clone();
+    drop(cfg);
+
+    // 优先尝试 lol_path/Game（Yuumi 配置的是含 LeagueClient.exe 的根目录）
+    // 回退尝试 lol_path/../Game（兼容 lol_path 指向 LeagueClient 子目录的情况）
+    let game_dir = {
+        let primary = std::path::Path::new(&lol_path).join("Game");
+        if primary.join("League of Legends.exe").exists() {
+            primary
+        } else {
+            let fallback = std::path::Path::new(&lol_path)
+                .parent()
+                .map(|p| p.join("Game"))
+                .unwrap_or(primary.clone());
+            if fallback.join("League of Legends.exe").exists() {
+                fallback
+            } else {
+                return Err(format!(
+                    "未找到游戏可执行文件。\n尝试过:\n  {}\n  {}\n请在设置中确认客户端安装路径",
+                    primary.join("League of Legends.exe").display(),
+                    fallback.join("League of Legends.exe").display()
+                ));
+            }
+        }
+    };
+    let game_exe = game_dir.join("League of Legends.exe");
+
+    log::info!("CMD 观战: 启动 {:?} (cwd={:?})", game_exe, game_dir);
+
+    std::process::Command::new(&game_exe)
+        .arg(&spectate_cmd)
+        .current_dir(&game_dir)
+        .spawn()
+        .map_err(|e| format!("启动游戏客户端失败: {}", e))?;
+
+    Ok(format!("观战启动成功（CMD 方式），目标: {}", name))
+}
