@@ -17,14 +17,15 @@ const activeTab = ref<"my" | "their">("my");
 const appConfig = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 
 const currentSummonerId = ref<number>(0);
+const currentSummonerPuuid = ref<string>("");
 
 // 预组队颜色方案（降低饱和度与透明度，非常柔和剔透，不刺眼）
 const PREMADE_COLORS = [
-  { border: 'rgba(249, 115, 22, 0.4)', bg: 'rgba(249, 115, 22, 0.04)', dot: '#f97316' },   // 柔橙
-  { border: 'rgba(236, 72, 153, 0.4)', bg: 'rgba(236, 72, 153, 0.04)', dot: '#ec4899' },   // 柔粉
-  { border: 'rgba(59, 130, 246, 0.4)', bg: 'rgba(59, 130, 246, 0.04)', dot: '#3b82f6' },   // 柔蓝
-  { border: 'rgba(16, 185, 129, 0.4)', bg: 'rgba(16, 185, 129, 0.04)', dot: '#10b981' },   // 柔绿
-  { border: 'rgba(168, 85, 247, 0.4)', bg: 'rgba(168, 85, 247, 0.04)', dot: '#a855f7' },   // 柔紫
+  { border: 'rgba(249, 115, 22, 0.4)', bg: 'rgba(249, 115, 22, 0.10)', dot: '#f97316' },   // 柔橙
+  { border: 'rgba(236, 72, 153, 0.4)', bg: 'rgba(236, 72, 153, 0.10)', dot: '#ec4899' },   // 柔粉
+  { border: 'rgba(59, 130, 246, 0.4)', bg: 'rgba(59, 130, 246, 0.10)', dot: '#3b82f6' },   // 柔蓝
+  { border: 'rgba(16, 185, 129, 0.4)', bg: 'rgba(16, 185, 129, 0.10)', dot: '#10b981' },   // 柔绿
+  { border: 'rgba(168, 85, 247, 0.4)', bg: 'rgba(168, 85, 247, 0.10)', dot: '#a855f7' },   // 柔紫
 ];
 
 // summonerId → colorIndex（-1 = 单排，0+ = 组队颜色索引）
@@ -86,10 +87,7 @@ function getPremadeCardStyle(summonerId: number, side: 'my' | 'their'): Record<s
   if (idx < 0) return {};
   const c = PREMADE_COLORS[idx % PREMADE_COLORS.length];
   return { 
-    borderLeftColor: c.dot, 
-    borderLeftWidth: '2px',
     backgroundColor: c.bg,
-    boxShadow: `inset 0 0 16px ${c.bg}, 0 2px 8px rgba(0, 0, 0, 0.04)`
   };
 }
 
@@ -136,6 +134,7 @@ interface PlayerData {
   winRate?: number;
   winCount?: number;
   lossesCount?: number;
+  fateFlag?: 'ally' | 'enemy' | null; // 上一局宿命：队友/对手/无
 }
 const playerData = ref<Record<number, PlayerData>>({});
 
@@ -219,9 +218,35 @@ async function refreshState() {
   loading.value = false;
 }
 
+/** 缓存 key 与 Career.vue 共享，避免各自独立缓存导致数据不互通 */
+const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_matches_cache_${puuid}`;
+function mergeMatchesWithCache(puuid: string, fresh: MatchDisplay[]): MatchDisplay[] {
+  let cached: MatchDisplay[] = [];
+  try {
+    const raw = localStorage.getItem(MATCHES_CACHE_KEY(puuid));
+    if (raw) cached = JSON.parse(raw);
+  } catch { /* ignore */ }
+
+  const merged = [...fresh, ...cached]
+    .filter((m, idx, arr) => arr.findIndex(x => x.gameId === m.gameId) === idx)
+    .sort((a, b) => b.timeStamp - a.timeStamp);
+
+  try {
+    localStorage.setItem(MATCHES_CACHE_KEY(puuid), JSON.stringify(merged));
+  } catch { /* ignore */ }
+
+  return merged;
+}
+
 /** 加载单个玩家的战绩/排位数据（通用，ChampSelect 和 InProgress 共用） */
 async function loadPlayerData(cellId: number, summonerId: number) {
-  if (!summonerId || playerData.value[cellId]?.info) return;
+  if (!summonerId) return;
+
+  const existing = playerData.value[cellId];
+  const existingIsCurrentPlayer =
+    summonerId === currentSummonerId.value ||
+    (!!existing?.info?.puuid && existing.info.puuid === currentSummonerPuuid.value);
+  if (existing?.info && (!existingIsCurrentPlayer || existing.matches.length >= 10)) return;
   playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: true };
 
   try {
@@ -235,15 +260,25 @@ async function loadPlayerData(cellId: number, summonerId: number) {
     const filterEnabled = appConfig.value?.Functions?.GameInfoFilter ?? false;
     const maxMatches = filterEnabled ? 50 : 10;
 
-    const [historyMatches, rankedResp] = await Promise.all([
+    const [rawMatches, rankedResp] = await Promise.all([
       info.puuid ? fetchMatchHistory(info.puuid, 0, maxMatches) : Promise.resolve([]),
       info.puuid ? lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${info.puuid}`) : Promise.resolve({ success: false } as any),
     ]);
 
-    let matches = historyMatches;
-    if (filterEnabled && currentQueueId.value !== null) {
-      matches = historyMatches.filter((m: MatchDisplay) => m.queueId === currentQueueId.value).slice(0, 10);
+    const isCurrentPlayer =
+      summonerId === currentSummonerId.value ||
+      (!!info.puuid && info.puuid === currentSummonerPuuid.value);
+
+    // 仅对"自己"的战绩与缓存合并去重（其他玩家不缓存）
+    let matches: MatchDisplay[] = rawMatches;
+    if (info.puuid && isCurrentPlayer) {
+      matches = mergeMatchesWithCache(info.puuid, rawMatches);
     }
+
+    if (filterEnabled && currentQueueId.value !== null) {
+      matches = matches.filter((m: MatchDisplay) => m.queueId === currentQueueId.value);
+    }
+    matches = matches.slice(0, 10);
 
     let solo = null, flex = null;
     if (rankedResp.success && rankedResp.data?.queues) {
@@ -283,6 +318,39 @@ async function loadPlayerData(cellId: number, summonerId: number) {
       avgKda = (totalKills + totalAssists) / deathsForCalc;
     }
 
+    // 宿命检测：取该玩家最近一局，查自己是否在其中（上局队友/对手）
+    let fateFlag: 'ally' | 'enemy' | null = null;
+    if (currentSummonerId.value && matches.length > 0) {
+      try {
+        const lastGameId = matches[0].gameId;
+        const gameResp = await lcuRequest<any>("GET", `/lol-match-history/v1/games/${lastGameId}`);
+        if (gameResp.success && gameResp.data?.participants) {
+          const participants: any[] = gameResp.data.participants;
+          // 找到该玩家自己在哪个 teamId
+          const targetParticipant = participants.find(
+            (pt: any) => pt.participantId === gameResp.data.participantIdentities?.find(
+              (id: any) => id.player?.summonerId === summonerId
+            )?.participantId
+          );
+          const targetTeamId = targetParticipant?.teamId;
+
+          // 找到当前用户（自己）在哪个 teamId
+          const selfIdentity = gameResp.data.participantIdentities?.find(
+            (id: any) => id.player?.summonerId === currentSummonerId.value
+          );
+          if (selfIdentity) {
+            const selfParticipant = participants.find(
+              (pt: any) => pt.participantId === selfIdentity.participantId
+            );
+            const selfTeamId = selfParticipant?.teamId;
+            if (targetTeamId !== undefined && selfTeamId !== undefined) {
+              fateFlag = selfTeamId === targetTeamId ? 'ally' : 'enemy';
+            }
+          }
+        }
+      } catch { /* 查询失败忽略，不影响主流程 */ }
+    }
+
     playerData.value[cellId] = {
       info,
       matches,
@@ -292,6 +360,7 @@ async function loadPlayerData(cellId: number, summonerId: number) {
       winRate,
       winCount,
       lossesCount,
+      fateFlag,
     };
     try {
       localStorage.setItem("yuumi_last_game_player_data", JSON.stringify(playerData.value));
@@ -325,6 +394,7 @@ async function loadFromGameflowSession() {
     try {
       const s = await fetchCurrentSummoner();
       if (s?.summonerId) currentSummonerId.value = s.summonerId;
+      if (s?.puuid) currentSummonerPuuid.value = s.puuid;
     } catch { /* ignore */ }
   }
 
@@ -371,7 +441,18 @@ async function loadFromGameflowSession() {
       localStorage.setItem("yuumi_last_gameflow_their_team", JSON.stringify(gameflowTheirTeam.value));
     } catch { /* ignore */ }
 
-    // 并行加载双方全部玩家
+    // 迁移 ChampSelect 阶段已加载的己方数据（key: cellId → summonerId）
+    // 避免 GameStart 时重新拉取，防止玩家列表闪烁
+    const champSession = store.champSelectSession;
+    if (champSession?.myTeam) {
+      for (const p of champSession.myTeam) {
+        if (p.summonerId && p.cellId !== undefined && playerData.value[p.cellId]) {
+          playerData.value[p.summonerId] = playerData.value[p.cellId];
+        }
+      }
+    }
+
+    // 并行加载双方全部玩家（己方若已迁移则 loadPlayerData 内部会跳过）
     await Promise.all([
       ...allyTeam.map((p: any) => loadPlayerData(p.summonerId, p.summonerId)),
       ...enemyTeam.map((p: any) => loadPlayerData(p.summonerId, p.summonerId)),
@@ -457,6 +538,7 @@ onMounted(async () => {
   try {
     const s = await fetchCurrentSummoner();
     if (s?.summonerId) currentSummonerId.value = s.summonerId;
+    if (s?.puuid) currentSummonerPuuid.value = s.puuid;
   } catch { /* ignore */ }
 
   // 获取应用配置（用于对局卡片颜色）
@@ -545,22 +627,11 @@ watch(activeTab, () => loadAllPlayers());
       <div class="left-panel">
         <div class="team-tabs">
           <button :class="['tab-btn', { active: activeTab === 'my' }]" @click="activeTab = 'my'">
-            乙方 ({{ myTeam.length }})
+            友方 ({{ myTeam.length }})
           </button>
           <button :class="['tab-btn', { active: activeTab === 'their' }]" @click="activeTab = 'their'">
             敌方 ({{ theirTeam.length }})
           </button>
-          <div v-if="hasPremadeInfo" class="premade-legend">
-            <span class="legend-label">组队:</span>
-            <span
-              v-for="idx in premadeLegendIndices"
-              :key="idx"
-              class="legend-item"
-            >
-              <span class="legend-dot" :style="{ background: PREMADE_COLORS[idx % PREMADE_COLORS.length].dot }"></span>
-              {{ idx + 1 }}
-            </span>
-          </div>
         </div>
 
         <div class="player-list">
@@ -604,6 +675,11 @@ watch(activeTab, () => loadAllPlayers());
                   :title="`组队 ${getPremadeIdx(p.summonerId, activeTab) + 1}`"
                 ></span>
                 <span class="name-text">{{ playerData[p.cellId]?.info?.gameName || playerData[p.cellId]?.info?.displayName || p.displayName || '未知' }}</span>
+                <span
+                  v-if="playerData[p.cellId]?.fateFlag"
+                  :class="['fate-badge', playerData[p.cellId].fateFlag]"
+                  :title="playerData[p.cellId].fateFlag === 'ally' ? '上一局队友' : '上一局对手'"
+                >{{ playerData[p.cellId].fateFlag === 'ally' ? '友' : '敌' }}</span>
               </div>
               
               <div class="pc-row pc-winrate-row" v-if="playerData[p.cellId]?.winRate !== undefined">
@@ -632,6 +708,18 @@ watch(activeTab, () => loadAllPlayers());
             </div>
           </div>
           <div v-if="currentTeam.length === 0" class="tip">暂无队伍数据</div>
+        </div>
+        <!-- 组队图例 -->
+        <div v-if="hasPremadeInfo" class="premade-legend">
+          <span class="legend-label">组队:</span>
+          <span
+            v-for="idx in premadeLegendIndices"
+            :key="idx"
+            class="legend-item"
+          >
+            <span class="legend-dot" :style="{ background: PREMADE_COLORS[idx % PREMADE_COLORS.length].dot }"></span>
+            {{ idx + 1 }}
+          </span>
         </div>
       </div>
 
@@ -783,9 +871,11 @@ watch(activeTab, () => loadAllPlayers());
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
+  padding: 8px 12px;
   font-size: 0.7rem;
   color: var(--text-dimmed);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 .legend-label {
   white-space: nowrap;
@@ -823,7 +913,6 @@ watch(activeTab, () => loadAllPlayers());
   padding: 12px 16px;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-left: 2px solid var(--border-color);
   border-radius: var(--radius-md);
   transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
   box-sizing: border-box;
@@ -847,6 +936,32 @@ watch(activeTab, () => loadAllPlayers());
   margin-right: 4px;
   vertical-align: middle;
   box-shadow: 0 0 4px currentColor;
+}
+
+/* 宿命标记徽章（上一局队友/对手） */
+.fate-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  font-weight: 800;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  letter-spacing: 0;
+}
+.fate-badge.ally {
+  background: rgba(5, 119, 72, 0.18);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.fate-badge.enemy {
+  background: rgba(191, 36, 42, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.4);
 }
 
 /* 头像区域：等级圆环 mini 版 */
