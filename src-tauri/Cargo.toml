@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-updater = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -55,6 +56,7 @@ rfd = "0.15"
 # 日志
 log = { version = "0.4", features = ["std"] }
 chrono = "0.4"
+url = "2.5.8"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
