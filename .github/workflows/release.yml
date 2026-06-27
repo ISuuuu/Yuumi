@@ -64,10 +64,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
           version: 8
           run_install: false
@@ -90,6 +90,37 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri'
+
+      - name: Install NSIS (required for Tauri Windows bundler)
+        shell: pwsh
+        run: |
+          Write-Host "Checking existing NSIS installation..."
+          # 先检查 runner 是否已自带 NSIS
+          $existingNsis = Get-Command makensis -ErrorAction SilentlyContinue
+          if ($existingNsis) {
+            Write-Host "NSIS already installed at: $($existingNsis.Source)"
+            & makensis -VERSION
+          } else {
+            Write-Host "NSIS not found, installing via Chocolatey..."
+            choco install nsis -y
+            $nsisPath = "C:\Program Files (x86)\NSIS"
+            if (Test-Path $nsisPath) {
+              echo "$nsisPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+              Write-Host "Added NSIS to PATH: $nsisPath"
+            } else {
+              Write-Error "NSIS installation failed - directory not found at $nsisPath"
+              exit 1
+            }
+          }
+          # 最终确认 makensis 可用
+          $nsisExe = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (Test-Path $nsisExe) {
+            Write-Host "makensis.exe found at: $nsisExe"
+            & "$nsisExe" -VERSION
+          } else {
+            Write-Error "makensis.exe not found! Tauri NSIS bundler will fail."
+            exit 1
+          }
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -125,7 +156,6 @@ jobs:
       - name: Generate latest.json for updater
         shell: pwsh
         run: |
-          # 调试：打印 bundle 目录内容
           Write-Host "=== Bundle directory contents ==="
           if (Test-Path "src-tauri/target/release/bundle") {
             Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File | ForEach-Object { Write-Host $_.FullName }
@@ -137,7 +167,6 @@ jobs:
           $VERSION = "${{ needs.create-release.outputs.version }}" -replace '^v', ''
           $TAG = "${{ needs.create-release.outputs.version }}"
 
-          # 找 exe（排除 .sig）
           $EXE_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | Where-Object { $_.Name -notlike "*.sig" } | Select-Object -First 1
 
           if (-not $EXE_FILE) {
@@ -145,7 +174,6 @@ jobs:
             exit 1
           }
 
-          # 找 .sig 文件，没有就自动生成
           $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1
 
           if (-not $SIG_FILE) {
@@ -161,14 +189,11 @@ jobs:
 
           $SIGNATURE = Get-Content $SIG_FILE.FullName -Raw
           $PUB_DATE = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
-
-          $CHANGELOG = @"
-${{ steps.changelog.outputs.notes }}
-"@
+          $CHANGELOG = "${{ steps.changelog.outputs.notes }}".Trim()
 
           $LATEST_JSON = @{
             version = $VERSION
-            notes = $CHANGELOG.Trim()
+            notes = $CHANGELOG
             pub_date = $PUB_DATE
             platforms = @{
               "windows-x86_64" = @{
@@ -208,7 +233,7 @@ ${{ steps.changelog.outputs.notes }}
             ./src-tauri/target/release/bundle/nsis/*.exe
             ./src-tauri/target/release/bundle/nsis/*.exe.sig
           retention-days: 7
-          if-no-files-found: ignore
+          if-no-files-found: error
 
       - name: Upload Windows portable artifact
         uses: actions/upload-artifact@v4
