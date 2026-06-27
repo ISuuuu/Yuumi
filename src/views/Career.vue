@@ -82,9 +82,31 @@ async function loadRankedStats(puuid: string) {
   }
 }
 
+const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_matches_cache_${puuid}`;
+
 async function loadMatches(puuid: string) {
   try {
-    matches.value = await fetchMatchHistory(puuid, 0, careerGamesNumber.value);
+    const fresh = await fetchMatchHistory(puuid, 0, careerGamesNumber.value);
+
+    // 读取之前缓存的战绩
+    let cached: MatchDisplay[] = [];
+    try {
+      const raw = localStorage.getItem(MATCHES_CACHE_KEY(puuid));
+      if (raw) cached = JSON.parse(raw);
+    } catch { /* ignore */ }
+
+    // 将新数据放前面，用 gameId 去重，按时间戳降序，截取配置数量
+    const merged = [...fresh, ...cached]
+      .filter((m, idx, arr) => arr.findIndex(x => x.gameId === m.gameId) === idx)
+      .sort((a, b) => b.timeStamp - a.timeStamp)
+      .slice(0, careerGamesNumber.value);
+
+    matches.value = merged;
+
+    // 更新缓存
+    try {
+      localStorage.setItem(MATCHES_CACHE_KEY(puuid), JSON.stringify(merged));
+    } catch { /* ignore */ }
   } catch (e) {
     console.error("获取战绩历史失败:", e);
   }
@@ -186,6 +208,10 @@ watch(() => store.isConnected, (connected) => {
   if (connected) {
     loadSummoner();
   } else {
+    // 断连时清空缓存，避免切号后数据混杂
+    if (summoner.value?.puuid) {
+      try { localStorage.removeItem(MATCHES_CACHE_KEY(summoner.value.puuid)); } catch { /* ignore */ }
+    }
     summoner.value = null;
     matches.value = [];
     rankedQueues.value = [];
@@ -193,14 +219,39 @@ watch(() => store.isConnected, (connected) => {
 }, { immediate: true });
 
 // 对局结束后自动刷新战绩
-watch(() => store.gamePhase, (phase: string, oldPhase: string | undefined) => {
+// 参考 Seraphine: 进入结算/大厅状态后等 2 秒，让 LCU 把对局数据落盘；
+// 然后重试 5 次 × 3 秒，因为 lol-match-history 同步新对局通常有几秒到十几秒延迟
+watch(() => store.gamePhase, async (phase: string, oldPhase: string | undefined) => {
   if (!summoner.value?.puuid) return;
-  // 从游戏相关状态 → 结束/空闲状态时刷新
   const gamePhases = ["InProgress", "GameStart", "ChampSelect", "ReadyCheck", "PreEndOfGame"];
   const endPhases = ["EndOfGame", "Lobby", "None"];
   if (gamePhases.includes(oldPhase ?? "") && endPhases.includes(phase ?? "")) {
-    console.log(`[Career] 对局结束 (${oldPhase} → ${phase})，刷新战绩`);
-    loadSummoner();
+    const puuid = summoner.value.puuid;
+    const prevLatestId = matches.value[0]?.gameId ?? null;
+    console.log(`[Career] 对局结束 (${oldPhase} → ${phase})，等待 LCU 同步并重试刷新`);
+
+    // 第一次延迟：让结算界面走完
+    await new Promise(r => setTimeout(r, 2000));
+
+    // 最多重试 5 次，每次间隔 3 秒；只要发现新对局 ID 就提前停止
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
+      try {
+        await loadMatches(puuid);
+        const latestId = matches.value[0]?.gameId ?? null;
+        if (latestId && latestId !== prevLatestId) {
+          console.log(`[Career] 第 ${attempt + 1} 次重试时已发现新对局 ${latestId}`);
+          return;
+        }
+        console.log(`[Career] 第 ${attempt + 1} 次刷新：尚未发现新对局，继续等待`);
+      } catch (e) {
+        console.warn(`[Career] 第 ${attempt + 1} 次刷新失败:`, e);
+      }
+    }
+    // 兜底刷新召唤师信息（段位变化等）
+    await loadRankedStats(puuid);
   }
 });
 
