@@ -40,6 +40,7 @@ const pageHistory: string[] = [];
 const isSidebarExpanded = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
 const platformId = ref("");
+const mapSideLabel = ref(""); // 蓝色方/红色方
 
 // 自动更新弹窗
 const updateInfo = ref<UpdateInfo | null>(null);
@@ -321,7 +322,29 @@ watch(gamePhase, (phase: string) => {
   // 更新窗口标题栏显示游戏状态
   const label = PHASE_LABELS[phase];
   const title = label ? `Yuumi · ${label}` : "Yuumi";
-  getCurrentWindow().setTitle(title).catch(() => {});
+  const setTitle = (t: string) => getCurrentWindow().setTitle(t).catch(() => {});
+
+  if (phase === "ChampSelect") {
+    // 异步获取队伍信息（蓝色方/红色方）追加到标题
+    (async () => {
+      try {
+        const side = await invoke<string | null>("get_map_side");
+        console.log("[watch gamePhase] get_map_side result:", side);
+        if (side) {
+          const sideLabel = side === "blue" ? "蓝色方" : "红色方";
+          mapSideLabel.value = sideLabel;
+          setTitle(`Yuumi · ${label} - ${sideLabel}`);
+          return;
+        }
+      } catch (e) {
+        console.warn("[watch gamePhase] get_map_side failed:", e);
+      }
+      setTitle(`Yuumi · ${label}`);
+    })();
+  } else {
+    mapSideLabel.value = ""; // 离开选人阶段时清除队伍信息
+    setTitle(title);
+  }
 
   // 进入选人/游戏加载/游戏中时自动跳转到对局信息页
   if (phase === "ChampSelect" || phase === "GameStart" || phase === "InProgress") {
@@ -412,7 +435,7 @@ async function handleClose() {
         <span class="titlebar-title">
           Yummi
           <span v-if="store.isConnected && gamePhase !== 'None'" class="titlebar-phase">
-            · {{ PHASE_LABELS[gamePhase] || gamePhase }}
+            · {{ PHASE_LABELS[gamePhase] || gamePhase }}<span v-if="mapSideLabel"> - {{ mapSideLabel }}</span>
           </span>
         </span>
       </div>
