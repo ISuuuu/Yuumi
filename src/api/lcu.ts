@@ -97,6 +97,10 @@ export async function fetchCurrentSummoner(maxRetries = 15): Promise<SummonerDis
 export const fetchMatchHistory = (puuid: string, begIndex?: number, endIndex?: number) =>
   invoke<MatchDisplay[]>("get_match_history", { puuid, begIndex, endIndex });
 
+/** 通过 SGP 接口获取战绩列表（支持分页，仅腾讯国服可用） */
+export const fetchMatchHistorySgp = (puuid: string, begIndex: number, endIndex: number) =>
+  invoke<MatchDisplay[]>("get_match_history_sgp", { puuid, begIndex, endIndex });
+
 /** 获取 LCU 静态资源（图片等），返回 data URL */
 export const fetchLcuAsset = (path: string) =>
   invoke<string>("get_lcu_asset", { path });

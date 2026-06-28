@@ -267,6 +267,7 @@ pub fn run() {
             lcu::client::get_lcu_asset,
             parsers::summoner::get_current_summoner,
             parsers::match_parser::get_match_history,
+            parsers::match_parser::get_match_history_sgp,
             parsers::game_info::get_game_player_summaries,
             parsers::tft::get_tft_data,
             tools::create_5v5_practice_lobby,

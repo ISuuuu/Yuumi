@@ -382,3 +382,227 @@ pub async fn get_match_history(
 
     Ok(displays)
 }
+
+/// 通过 SGP 接口获取战绩列表（支持分页，仅腾讯国服可用）
+/// 类似 Seraphine 的 getSummonerGamesByPuuidViaSGP
+#[tauri::command]
+pub async fn get_match_history_sgp(
+    puuid: String,
+    beg_index: u32,
+    end_index: u32,
+    app_state: State<'_, AppState>,
+) -> Result<Vec<MatchDisplay>, String> {
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
+    
+    // 仅腾讯国服支持 SGP
+    const TENCENT_SERVERS: &[&str] = &[
+        "hn1", "hn10", "bgp2", "tj100", "cq100", "gz100", "nj100", "tj101",
+    ];
+    let server = lcu.server.as_deref().ok_or_else(|| "无法获取服务器信息".to_string())?;
+    let server_lower = server.to_lowercase();
+    if !TENCENT_SERVERS.contains(&server_lower.as_str()) {
+        return Err("非腾讯国服，不支持 SGP 接口".to_string());
+    }
+    
+    let auth = build_auth_header(&lcu.token);
+
+    // ── 1. 通过 LCU 获取 SGP token ──
+    let token_url = format!("https://127.0.0.1:{}/entitlements/v1/token", lcu.port);
+    let token_resp = lcu
+        .http_client
+        .get(&token_url)
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .map_err(|e| format!("获取 SGP token 失败: {}", e))?;
+
+    if !token_resp.status().is_success() {
+        return Err(format!("获取 SGP token 失败: HTTP {}", token_resp.status().as_u16()));
+    }
+
+    let token_data: serde_json::Value =
+        token_resp.json().await.map_err(|e| format!("解析 SGP token 失败: {}", e))?;
+    let sgp_token = token_data
+        .get("accessToken")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "SGP token 数据中缺少 accessToken".to_string())?
+        .to_string();
+
+    // ── 2. 构建 SGP base URL ──
+    const K8S_SGP_SERVERS: &[&str] = &["hn1", "hn10", "bgp2"];
+    let sgp_base = if K8S_SGP_SERVERS.contains(&server_lower.as_str()) {
+        format!("https://{}-k8s-sgp.lol.qq.com:21019", server_lower)
+    } else {
+        format!("https://{}-sgp.lol.qq.com:21019", server_lower)
+    };
+
+    let sgp_client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .no_proxy()
+        .build()
+        .map_err(|e| format!("创建 SGP HTTP 客户端失败: {}", e))?;
+
+    // ── 3. 请求 SGP 战绩接口（同 Seraphine getSummonerGamesByPuuidViaSGP）──
+    let count = end_index - beg_index + 1;
+    let sgp_url = format!(
+        "{}/match-history-query/v1/products/lol/player/{}/SUMMARY",
+        sgp_base, puuid
+    );
+
+    let sgp_resp = sgp_client
+        .get(&sgp_url)
+        .header("Authorization", format!("Bearer {}", sgp_token))
+        .query(&[("startIndex", &beg_index.to_string()), ("count", &count.to_string())])
+        .send()
+        .await
+        .map_err(|e| format!("SGP 战绩请求失败: {}", e))?;
+
+    if !sgp_resp.status().is_success() {
+        return Err(format!("SGP 战绩返回错误: HTTP {}", sgp_resp.status().as_u16()));
+    }
+
+    let sgp_data: serde_json::Value =
+        sgp_resp.json().await.map_err(|e| format!("解析 SGP 响应失败: {}", e))?;
+
+    // ── 4. 解析 SGP 返回的对局数据 ──
+    // SGP 返回格式: { "games": { "gameCount": N, "games": [{ "json": {...} }] } }
+    // 或直接 { "games": [...] }
+    let games = sgp_data
+        .get("games")
+        .and_then(|g| {
+            if let Some(arr) = g.as_array() {
+                Some(arr.clone())
+            } else if let Some(inner) = g.get("games") {
+                inner.as_array().cloned()
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    if games.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 等待游戏资源加载完成
+    let mut check_count = 0;
+    while check_count < 50 {
+        {
+            let assets = app_state.game_data.read().await;
+            if !assets.spells.is_empty() {
+                break;
+            }
+        }
+        if app_state.lcu().await.is_err() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        check_count += 1;
+    }
+
+    let assets = app_state.game_data.read().await;
+    let mut displays = Vec::new();
+
+    for game_val in &games {
+        // SGP 的游戏数据可能在 json 字段里
+        let g = game_val.get("json").unwrap_or(game_val);
+
+        let game_id = g.get("gameId").and_then(|v| v.as_u64()).unwrap_or(0);
+        let game_creation = g.get("gameCreation").and_then(|v| v.as_u64()).unwrap_or(0);
+        let game_duration = g.get("gameDuration").and_then(|v| v.as_u64()).unwrap_or(0);
+        let queue_id = g.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let _map_id = g.get("mapId").and_then(|v| v.as_u64());
+
+        // 找到当前玩家的参与数据（SGP 用 puuid 匹配）
+        let participants = g.get("participants").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let participant = participants.iter().find(|p| {
+            p.get("puuid").and_then(|v| v.as_str()) == Some(&puuid)
+        });
+
+        let Some(participant) = participant else { continue };
+
+        let stats = participant.get("stats").unwrap_or(participant);
+
+        let win = stats.get("win").and_then(|v| v.as_bool()).unwrap_or(false);
+        let kills = stats.get("kills").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let deaths = stats.get("deaths").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let assists = stats.get("assists").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let champ_level = stats.get("champLevel").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let champion_id = participant.get("championId").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let spell1_id = participant.get("spell1Id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let spell2_id = participant.get("spell2Id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let perk0 = stats.get("perk0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let total_minions = stats.get("totalMinionsKilled").and_then(|v| v.as_i64()).unwrap_or(0)
+            + stats.get("neutralMinionsKilled").and_then(|v| v.as_i64()).unwrap_or(0);
+        let gold = stats.get("goldEarned").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let total_damage = stats.get("totalDamageDealtToChampions").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let total_heal = stats.get("totalHeal").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let remake = stats.get("gameEndedInEarlySurrender").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let item0 = stats.get("item0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item1 = stats.get("item1").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item2 = stats.get("item2").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item3 = stats.get("item3").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item4 = stats.get("item4").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item5 = stats.get("item5").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item6 = stats.get("item6").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+        let item_ids = vec![item0, item1, item2, item3, item4, item5, item6];
+        let queue_info = get_queue_info(queue_id);
+
+        let time = timestamp_to_str(game_creation);
+        let short_time = timestamp_to_short_str(game_creation);
+        let duration = secs_to_str(game_duration);
+
+        let kda = if deaths == 0 {
+            "Perfect".to_string()
+        } else {
+            format!("{:.2}", (kills as f64 + assists as f64) / deaths as f64)
+        };
+
+        let champion_icon_url =
+            format!("/lol-game-data/assets/v1/champion-icons/{}.png", champion_id);
+        let spell1_icon_url = assets.spells.get(&spell1_id).cloned().unwrap_or_default();
+        let spell2_icon_url = assets.spells.get(&spell2_id).cloned().unwrap_or_default();
+        let rune_icon_url = assets.runes.get(&perk0).cloned().unwrap_or_default();
+        let item_icon_urls: Vec<String> = item_ids.iter()
+            .filter(|&&id| id > 0)
+            .filter_map(|id| assets.items.get(id).cloned())
+            .collect();
+
+        displays.push(MatchDisplay {
+            queue_id,
+            game_id,
+            time,
+            short_time,
+            name: queue_info.name.to_string(),
+            map: queue_info.map.to_string(),
+            duration,
+            remake,
+            win,
+            champion_id,
+            spell1_id,
+            spell2_id,
+            champ_level,
+            kills,
+            deaths,
+            assists,
+            kda,
+            item_ids,
+            rune_id: perk0,
+            cs: total_minions as i32,
+            gold,
+            time_stamp: game_creation,
+            total_damage,
+            total_heal,
+            champion_icon_url,
+            spell1_icon_url,
+            spell2_icon_url,
+            rune_icon_url,
+            item_icon_urls,
+        });
+    }
+
+    Ok(displays)
+}

@@ -8,6 +8,7 @@ import LcuImage from "../components/LcuImage.vue";
 const store = useLcuStore();
 const summoner = ref<SummonerDisplay | null>(null);
 const matches = ref<MatchDisplay[]>([]);
+const recentMatches = ref<MatchDisplay[]>([]);
 const rankedQueues = ref<any[]>([]);
 const loading = ref(false);
 const error = ref("");
@@ -61,8 +62,10 @@ async function loadSummoner() {
     if (summoner.value?.puuid) {
       await Promise.all([
         loadRankedStats(summoner.value.puuid),
-        loadMatches(summoner.value.puuid)
+        loadMatches(summoner.value.puuid),
       ]);
+      // 异步加载近期统计缓存（不阻塞页面，不 await 避免覆盖翻页数据）
+      loadRecentMatches(summoner.value.puuid);
     }
   } catch (e: any) {
     error.value = e.toString();
@@ -86,30 +89,44 @@ const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_matches_cache_${puuid}`;
 
 async function loadMatches(puuid: string) {
   try {
-    const fresh = await fetchMatchHistory(puuid, 0, careerGamesNumber.value);
-
-    // 读取之前缓存的战绩
-    let cached: MatchDisplay[] = [];
-    try {
-      const raw = localStorage.getItem(MATCHES_CACHE_KEY(puuid));
-      if (raw) cached = JSON.parse(raw);
-    } catch { /* ignore */ }
-
-    // 将新数据放前面，用 gameId 去重，按时间戳降序，截取配置数量
-    const merged = [...fresh, ...cached]
-      .filter((m, idx, arr) => arr.findIndex(x => x.gameId === m.gameId) === idx)
-      .sort((a, b) => b.timeStamp - a.timeStamp)
-      .slice(0, careerGamesNumber.value);
-
-    matches.value = merged;
-
-    // 更新缓存
-    try {
-      localStorage.setItem(MATCHES_CACHE_KEY(puuid), JSON.stringify(merged));
-    } catch { /* ignore */ }
+    loading.value = true;
+    const targetCount = careerGamesNumber.value;
+    // endIndex 是 inclusive 的，所以传 targetCount - 1
+    // 使用稳定的 /v1/matchlists/by-puuid 接口，begIndex/endIndex 分页正常工作
+    matches.value = await fetchMatchHistory(puuid, 0, targetCount - 1);
   } catch (e) {
     console.error("获取战绩历史失败:", e);
+  } finally {
+    loading.value = false;
   }
+}
+
+async function loadRecentMatches(puuid: string) {
+  try {
+    const fresh = await fetchMatchHistory(puuid, 0, careerGamesNumber.value);
+    updateRecentMatchesCache(puuid, fresh);
+  } catch (e) {
+    console.error("获取近期战绩统计失败:", e);
+  }
+}
+
+function updateRecentMatchesCache(puuid: string, fresh: MatchDisplay[]) {
+  let cached: MatchDisplay[] = [];
+  try {
+    const raw = localStorage.getItem(MATCHES_CACHE_KEY(puuid));
+    if (raw) cached = JSON.parse(raw);
+  } catch { /* ignore */ }
+
+  const merged = [...fresh, ...cached]
+    .filter((m, idx, arr) => arr.findIndex(x => x.gameId === m.gameId) === idx)
+    .sort((a, b) => b.timeStamp - a.timeStamp)
+    .slice(0, careerGamesNumber.value);
+
+  recentMatches.value = merged;
+
+  try {
+    localStorage.setItem(MATCHES_CACHE_KEY(puuid), JSON.stringify(merged));
+  } catch { /* ignore */ }
 }
 
 function getKdaClass(kda: string): string {
@@ -214,6 +231,7 @@ watch(() => store.isConnected, (connected) => {
     }
     summoner.value = null;
     matches.value = [];
+    recentMatches.value = [];
     rankedQueues.value = [];
   }
 }, { immediate: true });
@@ -227,7 +245,7 @@ watch(() => store.gamePhase, async (phase: string, oldPhase: string | undefined)
   const endPhases = ["EndOfGame", "Lobby", "None"];
   if (gamePhases.includes(oldPhase ?? "") && endPhases.includes(phase ?? "")) {
     const puuid = summoner.value.puuid;
-    const prevLatestId = matches.value[0]?.gameId ?? null;
+    const prevLatestId = recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
     console.log(`[Career] 对局结束 (${oldPhase} → ${phase})，等待 LCU 同步并重试刷新`);
 
     // 第一次延迟：让结算界面走完
@@ -240,6 +258,8 @@ watch(() => store.gamePhase, async (phase: string, oldPhase: string | undefined)
       }
       try {
         await loadMatches(puuid);
+        // 异步更新近期统计缓存
+        loadRecentMatches(puuid);
         const latestId = matches.value[0]?.gameId ?? null;
         if (latestId && latestId !== prevLatestId) {
           console.log(`[Career] 第 ${attempt + 1} 次重试时已发现新对局 ${latestId}`);
@@ -264,9 +284,9 @@ const flexQueue = computed(() => {
   return rankedQueues.value.find(q => q.queueType === "RANKED_FLEX_SR") || null;
 });
 
-// 计算近期 20 场对局统计
+// 计算近期对局统计
 const statsSummary = computed(() => {
-  if (matches.value.length === 0) return null;
+  if (recentMatches.value.length === 0) return null;
   let wins = 0;
   let losses = 0;
   let kills = 0;
@@ -274,7 +294,7 @@ const statsSummary = computed(() => {
   let assists = 0;
   const champMap: Record<number, { id: number; icon: string; count: number }> = {};
 
-  for (const m of matches.value) {
+  for (const m of recentMatches.value) {
     if (m.win) wins++; else losses++;
     kills += m.kills;
     deaths += m.deaths;
@@ -410,7 +430,7 @@ const statsSummary = computed(() => {
       <!-- 近期数据看板 & 常用英雄 -->
       <div v-if="statsSummary" class="recent-summary-bar">
         <div class="summary-text">
-          <span class="summary-title">近期对局（最近 20 场）</span>
+          <span class="summary-title">近期对局（最近 {{ recentMatches.length }} 场）</span>
           <span class="win-color">胜: {{ statsSummary.wins }}</span>
           <span class="lose-color">负: {{ statsSummary.losses }}</span>
           <span class="kda-label">KDA:</span>
