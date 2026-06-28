@@ -304,8 +304,7 @@ fn find_via_lockfile(sys: &System) -> Option<(u32, u16, String, Option<String>)>
     // 解析 lockfile: name:pid:port:password:protocol
     let parts: Vec<&str> = content.trim().split(':').collect();
     if parts.len() < 4 {
-        log::warn!("lockfile 格式异常: {}", content.trim());
-        return None;
+        return None; // lockfile 未就绪或格式不完整（短暂竞态，下次轮询即可）
     }
 
     let pid: u32 = parts[1].parse().ok()?;
