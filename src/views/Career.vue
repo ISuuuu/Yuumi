@@ -322,6 +322,12 @@ const statsSummary = computed(() => {
     topChamps
   };
 });
+
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 </script>
 
 <template>
@@ -550,7 +556,7 @@ const statsSummary = computed(() => {
           <!-- 7. 地图模式与时长/日期 -->
           <div class="time-panel">
             <span class="map-name">{{ m.map }}</span>
-            <span class="match-time">{{ m.duration }} · {{ m.shortTime }}</span>
+            <span class="match-time">{{ m.duration }} · {{ formatTime(m.timeStamp) }}</span>
           </div>
         </div>
       </div>
