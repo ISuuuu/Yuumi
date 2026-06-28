@@ -285,10 +285,19 @@ fn process_event(text: &str, app_handle: &AppHandle) {
 
     if uri.starts_with("/lol-champ-select/v1/session") {
         if let Some(data) = event_data.get("data") {
-            if let Ok(session) =
-                serde_json::from_value::<crate::agents::auto_bp::ChampSelectSession>(data.clone())
-            {
-                let _ = state.bp_session_tx.try_send(session);
+            match serde_json::from_value::<crate::agents::auto_bp::ChampSelectSession>(
+                data.clone(),
+            ) {
+                Ok(session) => {
+                    let _ = state.bp_session_tx.try_send(session);
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[WS] 选人会话反序列化失败: {}, data keys: {:?}",
+                        e,
+                        data.as_object().map(|o| o.keys().collect::<Vec<_>>())
+                    );
+                }
             }
         }
     }
