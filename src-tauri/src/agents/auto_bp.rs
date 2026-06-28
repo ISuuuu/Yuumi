@@ -11,8 +11,11 @@ use crate::config::FunctionsConfig;
 #[serde(rename_all = "camelCase")]
 pub struct ChampSelectSession {
     pub actions: Vec<Vec<ChampSelectAction>>,
+    #[serde(default)]
     pub local_player_cell_id: i32,
+    #[serde(default)]
     pub my_team: Vec<ChampSelectPlayer>,
+    #[serde(default)]
     pub bans: ChampSelectBans,
     #[serde(default)]
     pub pick_order_swaps: Vec<ChampSelectSwap>,
@@ -51,7 +54,7 @@ pub struct ChampSelectPlayer {
     pub assigned_position: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChampSelectBans {
     #[serde(default)]
@@ -87,10 +90,7 @@ pub struct ChampSelectTimer {
 
 #[derive(Debug, Default)]
 struct ChampionSelection {
-    is_champion_picked: bool,
-    is_champion_banned: bool,
     is_summoner_spell_set: bool,
-    is_champion_showed: bool,
     is_champion_picked_completed: bool,
     _opgg_show_champion_id: i32,
 }
@@ -112,6 +112,20 @@ pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSe
         let mut selection = ChampionSelection::default();
 
         while let Some(session) = session_rx.recv().await {
+            log::debug!("[bp-agent] session received: cell_id={}, actions_groups={}, my_team_count={}",
+                session.local_player_cell_id,
+                session.actions.len(),
+                session.my_team.len());
+
+            // 检查 AtomicBool 重置标志（gameflow 阶段变化时设置，零阻塞、零丢失）
+            {
+                let state = app_handle.state::<crate::AppState>();
+                if state.bp_reset_flag.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                    log::info!("BP状态重置（gameflow阶段变化）");
+                    selection = ChampionSelection::default();
+                }
+            }
+
             // 收到重置信号时，重置 BP 跟踪状态并进入下一次循环
             if session.local_player_cell_id == -1 {
                 log::info!("收到重置选人代理状态的信号");
@@ -201,23 +215,24 @@ async fn do_auto_show(
     app_handle: &AppHandle,
     session: &ChampSelectSession,
     cfg: &FunctionsConfig,
-    selection: &mut ChampionSelection,
+    _selection: &mut ChampionSelection,
 ) {
-    if selection.is_champion_showed {
-        return;
-    }
+    log::debug!("[autoShow] called, enable_auto_hover_champion={}", cfg.enable_auto_hover_champion);
     if !cfg.enable_auto_hover_champion {
         return;
     }
 
     let cell_id = session.local_player_cell_id;
 
-    // 检查是否已选/已亮
+    // 从会话数据直接判断是否已经亮过/选过英雄（无状态，避免残留）
     if let Some(player) = session.my_team.iter().find(|p| p.cell_id == cell_id) {
+        log::debug!("[autoShow] player: champion_id={}, champion_pick_intent={}", player.champion_id, player.champion_pick_intent);
         if player.champion_id != 0 || player.champion_pick_intent != 0 {
-            selection.is_champion_showed = true;
+            log::debug!("[autoShow] skip: already has champion/shown");
             return;
         }
+    } else {
+        log::warn!("[autoShow] cannot find player with cell_id={}", cell_id);
     }
 
     // 获取位置 + 候选列表
@@ -230,9 +245,10 @@ async fn do_auto_show(
 
     let mut candidates = get_position_select_candidates(pos, cfg);
     candidates.extend(cfg.auto_select_champion.iter().copied());
+    log::debug!("[autoShow] pos={}, candidates={:?}", pos, candidates);
 
     if candidates.is_empty() {
-        selection.is_champion_showed = true;
+        log::warn!("[autoShow] abort: no champion candidates");
         return;
     }
 
@@ -247,14 +263,15 @@ async fn do_auto_show(
         .find(|a| a.actor_cell_id == cell_id && a.action_type == "pick");
 
     if let Some(action) = pick_action {
-        log::info!("自动亮英雄: {} (intent)", champion_id);
-        if lcu_patch_action(app_handle, action.id, champion_id, false).await {
-            selection.is_champion_showed = true;
-        }
+        log::debug!("[autoShow] PATCH action {} with champion_id={}", action.id, champion_id);
+        let ok = lcu_patch_action(app_handle, action.id, champion_id, false).await;
+        log::debug!("[autoShow] PATCH result: {}", ok);
+    } else {
+        log::warn!("[autoShow] cannot find pick action for cell_id={}", cell_id);
     }
 }
 
-// ─── 2.4 超时前自动锁定 ───
+// ─── 2.4 超时前自动锁定（不阻塞主循环） ───
 
 async fn do_auto_complete(
     app_handle: &AppHandle,
@@ -268,31 +285,17 @@ async fn do_auto_complete(
 
     let cell_id = session.local_player_cell_id;
 
-    // 找到 pick action 并检查状态
-    let mut action_in_progress = None;
-    for action_group in session.actions.iter().rev() {
-        for action in action_group {
-            if action.actor_cell_id != cell_id || action.action_type != "pick" {
-                continue;
-            }
-            if !action.is_in_progress {
-                return;
-            }
-            if action.completed {
-                selection.is_champion_picked_completed = true;
-                return;
-            }
-            action_in_progress = Some(action.clone());
-            break;
-        }
+    // 找到 pick action 并检查状态 — 确认是进行中的 pick 即可
+    let has_in_progress_pick = session
+        .actions
+        .iter()
+        .rev()
+        .flatten()
+        .any(|a| a.actor_cell_id == cell_id && a.action_type == "pick" && a.is_in_progress && !a.completed);
+
+    if !has_in_progress_pick {
+        return;
     }
-
-    let _action = match action_in_progress {
-        Some(a) => a,
-        None => return,
-    };
-
-    selection.is_champion_picked_completed = true;
 
     // 计算等待时间：剩余时间 - 4 秒
     let sleep_ms = session
@@ -300,55 +303,62 @@ async fn do_auto_complete(
         .as_ref()
         .and_then(|t| t.adjusted_time_left_in_phase)
         .unwrap_or(10000);
-    let sleep_secs = (sleep_ms / 1000).saturating_sub(4);
-    let sleep_secs = sleep_secs.max(0);
+    let sleep_secs = (sleep_ms / 1000).saturating_sub(4).max(0);
 
-    log::info!("自动锁定: 等待 {} 秒后锁定", sleep_secs);
-    tokio::time::sleep(std::time::Duration::from_secs(sleep_secs)).await;
+    // 标记防止重复进入
+    selection.is_champion_picked_completed = true;
 
-    // 重新获取会话数据（经过等待后状态可能已变化）
-    let fresh_session = match lcu_get_session(app_handle).await {
-        Some(s) => s,
-        None => return,
-    };
+    log::info!("自动锁定: 等待 {} 秒后锁定（后台任务不阻塞主循环）", sleep_secs);
 
-    // 收集不可选的英雄（已被其他人选走 + 已禁用）
-    let mut cant_select: Vec<i32> = Vec::new();
-    for ag in &fresh_session.actions {
-        for a in ag {
-            if a.action_type == "pick" && a.completed && a.actor_cell_id != cell_id {
-                cant_select.push(a.champion_id);
+    // 在后台任务中等待并锁定，不阻塞主循环（否则秒退后新选人事件无法处理）
+    let app_handle = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(sleep_secs)).await;
+
+        // 重新获取会话数据（经过等待后状态可能已变化）
+        let fresh_session = match lcu_get_session(&app_handle).await {
+            Some(s) => s,
+            None => return,
+        };
+
+        // 收集不可选的英雄（已被其他人选走 + 已禁用）
+        let mut cant_select: Vec<i32> = Vec::new();
+        for ag in &fresh_session.actions {
+            for a in ag {
+                if a.action_type == "pick" && a.completed && a.actor_cell_id != cell_id {
+                    cant_select.push(a.champion_id);
+                }
             }
         }
-    }
-    cant_select.extend(fresh_session.bans.my_team_bans.iter());
-    cant_select.extend(fresh_session.bans.their_team_bans.iter());
+        cant_select.extend(fresh_session.bans.my_team_bans.iter());
+        cant_select.extend(fresh_session.bans.their_team_bans.iter());
 
-    // 找到当前玩家的 pick action
-    let mut champion_intent = 0;
-    let mut action_id = 0;
-    for ag in &fresh_session.actions {
-        for a in ag {
-            if a.actor_cell_id != cell_id || a.action_type != "pick" {
-                continue;
+        // 找到当前玩家的 pick action
+        let mut champion_intent = 0;
+        let mut action_id = 0;
+        for ag in &fresh_session.actions {
+            for a in ag {
+                if a.actor_cell_id != cell_id || a.action_type != "pick" {
+                    continue;
+                }
+                if a.completed {
+                    return; // 已锁定，无需操作
+                }
+                champion_intent = a.champion_id;
+                action_id = a.id;
             }
-            if a.completed {
-                return; // 已锁定，无需操作
-            }
-            champion_intent = a.champion_id;
-            action_id = a.id;
         }
-    }
 
-    if champion_intent == 0 || action_id == 0 {
-        return;
-    }
+        if champion_intent == 0 || action_id == 0 {
+            return;
+        }
 
-    // 只有当英雄未被其他人选走时才锁定
-    if !cant_select.contains(&champion_intent) {
-        log::info!("超时自动锁定英雄: {}", champion_intent);
-        lcu_patch_action(app_handle, action_id, champion_intent, true).await;
-    }
+        // 只有当英雄未被其他人选走时才锁定
+        if !cant_select.contains(&champion_intent) {
+            log::info!("超时自动锁定英雄: {}", champion_intent);
+            lcu_patch_action(&app_handle, action_id, champion_intent, true).await;
+        }
+    });
 }
 
 // ─── 2.5 自动展示 OPGG 推荐配置 ───
@@ -439,21 +449,22 @@ async fn do_auto_ban(
     app_handle: &AppHandle,
     session: &ChampSelectSession,
     cfg: &FunctionsConfig,
-    selection: &mut ChampionSelection,
+    _selection: &mut ChampionSelection,
 ) {
-    if !cfg.enable_auto_ban_champion || selection.is_champion_banned {
+    if !cfg.enable_auto_ban_champion {
         return;
     }
 
     let cell_id = session.local_player_cell_id;
 
+    // 从会话数据判断：找到本地玩家的 ban action，如果已结束则跳过
     let ban_action = session.actions.iter().flatten().find(|a| {
         a.actor_cell_id == cell_id && a.action_type == "ban" && a.is_in_progress
     });
 
     let action = match ban_action {
         Some(a) => a,
-        None => return,
+        None => return, // 不在 ban 阶段，或已经 ban 完
     };
 
     let pos = session
@@ -490,16 +501,13 @@ async fn do_auto_ban(
     }
 
     if candidates.is_empty() {
-        selection.is_champion_banned = true;
         return;
     }
 
     let champion_id = candidates[0];
     log::info!("自动禁用英雄: {}", champion_id);
 
-    if lcu_patch_action(app_handle, action.id, champion_id, true).await {
-        selection.is_champion_banned = true;
-    }
+    lcu_patch_action(app_handle, action.id, champion_id, true).await;
 }
 
 // ─── 自动选人 ───
@@ -508,17 +516,17 @@ async fn do_auto_pick(
     app_handle: &AppHandle,
     session: &ChampSelectSession,
     cfg: &FunctionsConfig,
-    selection: &mut ChampionSelection,
+    _selection: &mut ChampionSelection,
 ) {
-    if !cfg.enable_auto_select_champion || selection.is_champion_picked {
+    if !cfg.enable_auto_select_champion {
         return;
     }
 
     let cell_id = session.local_player_cell_id;
 
+    // 从会话数据判断是否已选英雄（无状态）
     if let Some(player) = session.my_team.iter().find(|p| p.cell_id == cell_id) {
         if player.champion_id != 0 || player.champion_pick_intent != 0 {
-            selection.is_champion_picked = true;
             return;
         }
     }
@@ -543,7 +551,6 @@ async fn do_auto_pick(
     candidates.retain(|c| !all_bans.contains(c));
 
     if candidates.is_empty() {
-        selection.is_champion_picked = true;
         return;
     }
 
@@ -563,11 +570,7 @@ async fn do_auto_pick(
 
     log::info!("自动选择英雄: {} (预选，不锁定)", champion_id);
 
-    // 只预选英雄，不锁定（completed=false），让用户有时间反悔
-    // 如果开启了 auto_select_confirm_on_timeout，会在倒计时结束时自动锁定
-    if lcu_patch_action(app_handle, action.id, champion_id, false).await {
-        selection.is_champion_picked = true;
-    }
+    lcu_patch_action(app_handle, action.id, champion_id, false).await;
 }
 
 // ─── 自动设置召唤师技能 ───

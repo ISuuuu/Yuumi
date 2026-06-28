@@ -9,6 +9,7 @@ pub mod updater;
 pub mod upload;
 
 use base64::Engine;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -45,6 +46,8 @@ pub struct AppState {
     pub ws_cancel_tx: Mutex<Option<watch::Sender<bool>>>,
     /// LCU API 并发信号量（由 config.ApiConcurrencyNumber 控制）
     pub api_semaphore: Arc<Semaphore>,
+    /// BP 状态重置标志（gameflow 阶段变化时置为 true，BP agent 检查后置 false）
+    pub bp_reset_flag: AtomicBool,
 }
 
 impl AppState {
@@ -102,6 +105,7 @@ pub fn run() {
                 upload_queue,
                 ws_cancel_tx: Mutex::new(None),
                 api_semaphore: Arc::new(Semaphore::new(api_concurrency)),
+                bp_reset_flag: AtomicBool::new(false),
             };
             app.manage(state);
 

@@ -1427,7 +1427,7 @@ async function handleToggleLockGameSettings() {
   justify-content: flex-start;
   box-shadow: var(--toggle-glow);
 }
-.toggle-text { font-size: 0.75rem; font-weight: bold; color: white; }
+.toggle-text { font-size: 0.82rem; color: white; }
 .toggle-switch.off .toggle-text { color: var(--text-dimmed); }
 .toggle-slider {
   width: 22px; height: 22px; background-color: var(--toggle-slider);
