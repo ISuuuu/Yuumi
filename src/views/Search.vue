@@ -1,7 +1,7 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, watch, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
-import { fetchMatchHistory, lcuRequest, batchUploadMatches, fetchConfig, updateConfig } from "../api/lcu";
+import { fetchMatchHistory, fetchMatchHistorySgp, lcuRequest, batchUploadMatches, fetchConfig, updateConfig } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 import { invoke } from "@tauri-apps/api/core";
@@ -80,6 +80,13 @@ const gameDataAssets = ref<any>(null);
 // 分页相关
 const currentPageNum = ref(1);
 const matchesPerPage = 10;
+const hasMore = ref(false); // 是否有下一页
+const allMatchesSearch = ref<MatchDisplay[]>([]); // 全量数据，本地翻页用
+const loadedGameIndex = ref(0); // 已加载到的游标（类似 Seraphine loadedGameIndex）
+const loadingMore = ref(false); // 防止重复触发 SGP 加载
+const INITIAL_BATCH = 20; // 首次加载 20 条（2 页），同 Seraphine 的 0-19
+const LOAD_MORE_COUNT = 30; // 每次增量加载 30 条，同 Seraphine __loadMoreGames count=30
+const PREFETCH_PAGES = 3; // 提前 3 页预拉取，同 Seraphine prefetchPageCount=3
 
 // 搜索历史
 const searchHistory = ref<string[]>([]);
@@ -208,6 +215,8 @@ async function doSearch() {
   error.value = "";
   summoner.value = null;
   matches.value = [];
+  allMatchesSearch.value = [];
+  loadedGameIndex.value = 0;
   selectedGame.value = null;
   selectedGameId.value = null;
   currentPageNum.value = 1;
@@ -275,7 +284,27 @@ async function loadMatchHistoryList() {
   try {
     const beg = (currentPageNum.value - 1) * matchesPerPage;
     const end = beg + matchesPerPage;
-    matches.value = await fetchMatchHistory(summoner.value.puuid, beg, end);
+    
+    // 类似 Seraphine: 首次加载一波 + 翻到尽头时增量拉取
+    if (allMatchesSearch.value.length === 0) {
+      // 首次加载: 拉取 0~INITIAL_BATCH-1（类似 Seraphine getSummonerGamesByPuuid(puuid, 0, 19)）
+      const raw = await fetchMatchHistory(summoner.value.puuid, 0, INITIAL_BATCH - 1);
+      console.log(`[Search] 首次加载: raw.length=${raw.length}`);
+      allMatchesSearch.value = raw;
+      loadedGameIndex.value = INITIAL_BATCH;
+      
+      // 首次加载后立即预拉取更多（类似 Seraphine __loadGames → __loadMoreGames）
+      await loadMoreMatches();
+    } else if (end + matchesPerPage * PREFETCH_PAGES >= allMatchesSearch.value.length) {
+      // 提前 PREFETCH_PAGES 页预拉取（类似 Seraphine 的 prefetchPageCount）
+      await loadMoreMatches();
+    }
+    
+    // 从全量数据中切片当前页
+    matches.value = allMatchesSearch.value.slice(beg, end);
+    hasMore.value = allMatchesSearch.value.length > end;
+    
+    console.log(`[Search] 第${currentPageNum.value}页: gameId=${matches.value[0]?.gameId}, 共${matches.value.length}条, allMatches=${allMatchesSearch.value.length}, hasMore=${hasMore.value}`);
     
     // 默认载入第一局对局的详情
     if (matches.value.length > 0) {
@@ -309,6 +338,50 @@ async function loadMatchHistoryList() {
     }
   } catch (e) {
     console.error("抓取战绩列表失败:", e);
+  }
+}
+
+/** 类似 Seraphine __loadMoreGames: 先试 LCU，重复了降级 SGP */
+async function loadMoreMatches() {
+  if (!summoner.value || loadingMore.value) return; // 防抖：防止连续触发
+  loadingMore.value = true;
+  try {
+    const fetchBeg = loadedGameIndex.value;
+    const fetchEnd = fetchBeg + LOAD_MORE_COUNT - 1;
+    
+    // 1. 先试 LCU（Seraphine 同款逻辑）
+    let raw = await fetchMatchHistory(summoner.value.puuid, fetchBeg, fetchEnd);
+    console.log(`[Search] loadMoreMatches(LCU): beg=${fetchBeg}, end=${fetchEnd}, raw.length=${raw.length}`);
+    
+    // 2. Seraphine 式去重检测：所有 gameId 是否都已存在？
+    let existingIds = new Set(allMatchesSearch.value.map(m => m.gameId));
+    let newGames = raw.filter(m => !existingIds.has(m.gameId));
+    
+    // 3. LCU 全是重复 → 降级 SGP（同 Seraphine 的 added_count==0 fallback）
+    if (newGames.length === 0 && raw.length > 0) {
+      console.log(`[Search] LCU 返回全重复，降级 SGP`);
+      raw = await fetchMatchHistorySgp(summoner.value.puuid, fetchBeg, fetchEnd);
+      console.log(`[Search] loadMoreMatches(SGP): beg=${fetchBeg}, end=${fetchEnd}, raw.length=${raw.length}`);
+      existingIds = new Set(allMatchesSearch.value.map(m => m.gameId));
+      newGames = raw.filter(m => !existingIds.has(m.gameId));
+    }
+    
+    // 4. 追加新对局（上限 500 条，防内存泄漏）
+    if (newGames.length > 0) {
+      allMatchesSearch.value.push(...newGames);
+      if (allMatchesSearch.value.length > 500) {
+        allMatchesSearch.value = allMatchesSearch.value.slice(-500);
+      }
+      console.log(`[Search] 新增${newGames.length}条, 总计${allMatchesSearch.value.length}条`);
+    } else {
+      console.log(`[Search] 无新增数据`);
+    }
+    
+    loadedGameIndex.value = fetchEnd;
+  } catch (e) {
+    console.warn("[Search] 增量加载失败:", e);
+  } finally {
+    loadingMore.value = false;
   }
 }
 
@@ -382,15 +455,9 @@ async function handlePrevPage() {
 }
 
 async function handleNextPage() {
-  const prevPage = currentPageNum.value;
+  if (!hasMore.value || loadingMore.value) return;
   currentPageNum.value++;
-  const prevMatches = matches.value;
   await loadMatchHistoryList();
-  // 如果新页没有数据，回退页码并保留原有数据
-  if (matches.value.length === 0) {
-    currentPageNum.value = prevPage;
-    matches.value = prevMatches;
-  }
 }
 
 // 静态映射查找
@@ -659,7 +726,7 @@ const gameDetails = computed(() => {
           </div>
         </div>
 
-        <label class="checkbox-wrapper">
+        <label v-if="appConfig?.General?.UploadApiUrl" class="checkbox-wrapper">
           <input type="checkbox" :checked="uploadEnabled" @change="onUploadToggle" />
           <span>Upload matches</span>
         </label>
@@ -697,7 +764,7 @@ const gameDetails = computed(() => {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
             <span class="page-num">{{ currentPageNum }}</span>
-            <button class="page-btn" @click="handleNextPage" :disabled="matches.length < matchesPerPage">
+            <button class="page-btn" @click="handleNextPage" :disabled="!hasMore">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           </div>
