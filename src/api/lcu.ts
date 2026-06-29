@@ -7,6 +7,48 @@ export interface LcuApiResponse<T> {
 }
 
 /**
+ * 净化错误消息，若包含 JSON 则尝试解析提取 message，若有“LCU 返回错误”前缀则过滤
+ */
+export function cleanError(error: unknown): string {
+  let msg = error instanceof Error ? error.message : String(error);
+  if (msg.includes('{') && msg.includes('}')) {
+    try {
+      const start = msg.indexOf('{');
+      const end = msg.lastIndexOf('}');
+      const jsonStr = msg.slice(start, end + 1);
+      const obj = JSON.parse(jsonStr);
+      let cleanMsg = obj.message || obj.errorMessage || obj.description;
+      if (cleanMsg) {
+        if (cleanMsg.includes("Error response for ") && cleanMsg.includes(":")) {
+          const parts = cleanMsg.split(":");
+          cleanMsg = parts[parts.length - 1].trim();
+        }
+        msg = cleanMsg;
+      }
+    } catch { /* ignore */ }
+  }
+  if (msg.startsWith("LCU 返回错误")) {
+    const parts = msg.split("]:");
+    if (parts.length > 1) {
+      msg = parts[1].trim();
+    }
+  }
+
+  // 1. 去除两端可能残留的无意义的双引号、单引号或右大括号
+  msg = msg.trim().replace(/^["'\s]+|["'\s}]+$/g, '');
+
+  // 2. 友好汉化经典的观战业务报错
+  if (msg.includes("Already in gameflow")) {
+    return "你当前已处于对局中，无法重复观战";
+  }
+  if (msg.includes("Cannot spectate game because spectator key is missing")) {
+    return "该召唤师当前不在游戏中（观战密钥缺失）";
+  }
+
+  return msg;
+}
+
+/**
  * 统一的 LCU API 调用封装。
  * 所有请求通过 Tauri IPC 转发到 Rust 侧的 call_lcu_api 命令。
  */
@@ -19,8 +61,7 @@ export async function lcuRequest<T>(
     const data = await invoke<T>("call_lcu_api", { method, path, body });
     return { success: true, data };
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return { success: false, error: msg };
+    return { success: false, error: cleanError(error) };
   }
 }
 

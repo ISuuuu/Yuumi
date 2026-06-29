@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { lcuRequest, fetchConfig } from "../api/lcu";
+import { lcuRequest, fetchConfig, cleanError } from "../api/lcu";
 import LcuImage from "./LcuImage.vue";
 import opggIcon from "../assets/opgg.svg";
 import tierIcon1 from "../assets/tier/tier-1.svg";
@@ -495,7 +495,7 @@ async function setRunePage() {
     });
     showToast("符文页应用成功：" + name, "success");
   } catch (e: any) {
-    showToast("应用符文页失败: " + e.toString(), "error");
+    showToast("应用符文页失败: " + cleanError(e), "error");
   }
 }
 </script>

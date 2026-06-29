@@ -318,9 +318,9 @@ async function loadPlayerData(cellId: number, summonerId: number) {
       avgKda = (totalKills + totalAssists) / deathsForCalc;
     }
 
-    // 宿命检测：取该玩家最近一局，查自己是否在其中（上局队友/对手）
+    // 宿命检测：取该玩家最近一局，查自己是否在其中（上局队友/对手），排除自己本身
     let fateFlag: 'ally' | 'enemy' | null = null;
-    if (currentSummonerId.value && matches.length > 0) {
+    if (currentSummonerId.value && matches.length > 0 && !isCurrentPlayer) {
       try {
         const lastGameId = matches[0].gameId;
         const gameResp = await lcuRequest<any>("GET", `/lol-match-history/v1/games/${lastGameId}`);
@@ -736,7 +736,7 @@ watch(activeTab, () => loadAllPlayers());
                 <div class="col-header-info">
                   <span class="col-name">{{ playerData[p.cellId]?.info?.gameName || p.displayName || `玩家${i+1}` }}</span>
                   <span v-if="playerData[p.cellId]?.winRate !== undefined" class="col-summary">
-                    近10局: <span class="summary-wins">{{ playerData[p.cellId].winCount }}胜</span>
+                    <span class="summary-wins">{{ playerData[p.cellId].winCount }}胜</span>
                     <span class="summary-losses">{{ playerData[p.cellId].lossesCount }}负</span>
                   </span>
                 </div>

@@ -61,6 +61,10 @@ pub async fn call_lcu_api(
                         .map_err(|e| format!("JSON 解析失败: {}", e));
                 } else {
                     // HTTP 状态码错误不重试，直接返回
+                    log::warn!(
+                        "LCU API 请求失败: {} {}, 状态码: {}, 响应: {}",
+                        method, path, status.as_u16(), text
+                    );
                     return Err(format!("LCU 返回错误 [{}]: {}", status.as_u16(), text));
                 }
             }
