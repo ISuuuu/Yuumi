@@ -165,6 +165,10 @@ function toggleSidebar() {
 }
 
 async function openOpggWindow() {
+  if (!store.isConnected) {
+    showToast("LCU 未连接，请先启动英雄联盟客户端", "success");
+    return;
+  }
   const existing = await WebviewWindow.getByLabel("opgg");
   if (existing) {
     await existing.setFocus();
