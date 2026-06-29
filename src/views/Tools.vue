@@ -256,23 +256,24 @@ async function handleSpectate() {
       }
       const puuid = summonerResp.data.puuid;
 
-      // 1. 从全量好友列表中匹配目标 puuid 提取对局 ID
+      // 1. 安全地从全量好友列表中匹配目标 puuid 提取对局 ID（使用可选链，并对无效的 0/null 值进行过滤）
       let gameIdFromFriend = "";
       const friendsResp = await lcuRequest<any[]>("GET", "/lol-chat/v1/friends");
       if (friendsResp.success && Array.isArray(friendsResp.data)) {
         const friend = friendsResp.data.find((f: any) => f.puuid === puuid || f.id === puuid);
-        if (friend && friend.lol) {
-          gameIdFromFriend = friend.lol.gameId ? String(friend.lol.gameId) : "";
+        const rawGameId = friend?.lol?.gameId;
+        if (rawGameId && String(rawGameId) !== "0" && String(rawGameId) !== "null") {
+          gameIdFromFriend = String(rawGameId);
           console.log("从好友列表匹配到当前对局 ID:", gameIdFromFriend);
         }
       }
 
-      // 2. 从 Lobby 大厅中匹配当前自定义房间的对局 ID
+      // 2. 从 Lobby 大厅中匹配当前自定义房间的对局 ID（排除无效的 0/null 值）
       let gameIdFromLobby = "";
       const lobbyResp = await lcuRequest<any>("GET", "/lol-lobby/v2/lobby");
       if (lobbyResp.success && lobbyResp.data) {
         const config = lobbyResp.data.gameConfig;
-        if (config && config.id) {
+        if (config && config.id && String(config.id) !== "0" && String(config.id) !== "null") {
           gameIdFromLobby = String(config.id);
           console.log("从 Lobby 大厅匹配到自定义对局 ID:", gameIdFromLobby);
         }
@@ -291,14 +292,23 @@ async function handleSpectate() {
       if (resp.success) {
         showToast('观战启动成功，正在拉起游戏客户端...', 'success');
       } else {
-        console.warn("观战失败调试信息:", {
-          friendsCount: Array.isArray(friendsResp.data) ? friendsResp.data.length : 0,
-          lobbyState: lobbyResp.success ? "成功" : "失败",
+        // 5. 观战降级兜底：LCU 方式发生任何失败（如 missing key/gameflow），立刻尝试通过 CMD 方式静默唤醒启动以提高可靠性
+        console.warn("LCU 观战失败，尝试通过 CMD 方式兜底拉起...", {
           targetGameId,
           puuid,
-          resp
+          error: resp.error
         });
-        showToast('观战失败: ' + cleanError(resp.error || '该召唤师当前可能无法被观战') + ' (自定义/新开局请先在官方客户端右键尝试观战以同步密钥)', 'error');
+        
+        try {
+          const cmdResult = await invoke<string>("spectate_directly", {
+            params: { summoner_name: name },
+          });
+          showToast(cmdResult || "已自动切换至 CMD 方式成功唤醒观战", "success");
+        } catch (cmdErr: any) {
+          // 如果 CMD 方式也最终失败，向控制台记录详细信息，并报出最原始直观的友好 Toast 引导
+          console.error("CMD 兜底观战亦告失败:", cmdErr);
+          showToast('观战失败: ' + cleanError(resp.error || '该召唤师当前可能无法被观战') + ' (自定义/新开局请先在官方客户端右键尝试观战以同步密钥)', 'error');
+        }
       }
     }
   } catch (e: any) {

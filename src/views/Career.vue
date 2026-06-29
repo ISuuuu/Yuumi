@@ -87,31 +87,31 @@ async function loadRankedStats(puuid: string) {
 
 const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_matches_cache_${puuid}`;
 
+// 公共战绩拉取函数，包含 LCU 数据滞后时的 SGP 加速降级兜底逻辑
+async function fetchMatchHistoryWithFallback(puuid: string, begIndex: number, endIndex: number): Promise<MatchDisplay[]> {
+  let raw = await fetchMatchHistory(puuid, begIndex, endIndex);
+  const prevLatestId = recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
+  const latestId = raw[0]?.gameId ?? null;
+
+  if (raw.length === 0 || (prevLatestId && latestId === prevLatestId)) {
+    try {
+      const sgpRaw = await fetchMatchHistorySgp(puuid, begIndex, endIndex);
+      if (sgpRaw && sgpRaw.length > 0) {
+        console.log("[Career] LCU 战绩未更新，已降级 SGP 加速拉取新战绩");
+        raw = sgpRaw;
+      }
+    } catch (e) {
+      console.warn("[Career] SGP 战绩降级/加速获取失败:", e);
+    }
+  }
+  return raw;
+}
+
 async function loadMatches(puuid: string) {
   try {
     loading.value = true;
     const targetCount = careerGamesNumber.value;
-    // endIndex 是 inclusive 的，所以传 targetCount - 1
-    // 使用稳定的 /v1/matchlists/by-puuid 接口，begIndex/endIndex 分页正常工作
-    let raw = await fetchMatchHistory(puuid, 0, targetCount - 1);
-
-    const prevLatestId = recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
-    const latestId = raw[0]?.gameId ?? null;
-
-    // 若拉取结果为空，或者拉取出来的最新 gameId 并没有变化（表示 LCU 写入滞后），则尝试使用 SGP 接口作为降级/加速
-    if (raw.length === 0 || (prevLatestId && latestId === prevLatestId)) {
-      try {
-        const sgpRaw = await fetchMatchHistorySgp(puuid, 0, targetCount - 1);
-        if (sgpRaw && sgpRaw.length > 0) {
-          console.log("[Career] LCU 战绩未更新，已降级 SGP 加速拉取新战绩");
-          raw = sgpRaw;
-        }
-      } catch (e) {
-        console.warn("[Career] SGP 战绩降级失败:", e);
-      }
-    }
-
-    matches.value = raw;
+    matches.value = await fetchMatchHistoryWithFallback(puuid, 0, targetCount - 1);
   } catch (e) {
     console.error("获取战绩历史失败:", e);
   } finally {
@@ -122,22 +122,7 @@ async function loadMatches(puuid: string) {
 async function loadRecentMatches(puuid: string) {
   try {
     const targetCount = careerGamesNumber.value;
-    let fresh = await fetchMatchHistory(puuid, 0, targetCount);
-
-    const prevLatestId = recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
-    const latestId = fresh[0]?.gameId ?? null;
-
-    if (fresh.length === 0 || (prevLatestId && latestId === prevLatestId)) {
-      try {
-        const sgpRaw = await fetchMatchHistorySgp(puuid, 0, targetCount);
-        if (sgpRaw && sgpRaw.length > 0) {
-          fresh = sgpRaw;
-        }
-      } catch (e) {
-        console.warn("[Career] SGP 近期统计战绩降级失败:", e);
-      }
-    }
-
+    const fresh = await fetchMatchHistoryWithFallback(puuid, 0, targetCount);
     updateRecentMatchesCache(puuid, fresh);
   } catch (e) {
     console.error("获取近期战绩统计失败:", e);
