@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, inject, onMounted, onUnmounted, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
-import { fetchCurrentSummoner, fetchMatchHistory, lcuRequest, fetchConfig } from "../api/lcu";
+import { fetchCurrentSummoner, fetchMatchHistory, fetchMatchHistorySgp, lcuRequest, fetchConfig } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 
@@ -93,7 +93,25 @@ async function loadMatches(puuid: string) {
     const targetCount = careerGamesNumber.value;
     // endIndex 是 inclusive 的，所以传 targetCount - 1
     // 使用稳定的 /v1/matchlists/by-puuid 接口，begIndex/endIndex 分页正常工作
-    matches.value = await fetchMatchHistory(puuid, 0, targetCount - 1);
+    let raw = await fetchMatchHistory(puuid, 0, targetCount - 1);
+
+    const prevLatestId = recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
+    const latestId = raw[0]?.gameId ?? null;
+
+    // 若拉取结果为空，或者拉取出来的最新 gameId 并没有变化（表示 LCU 写入滞后），则尝试使用 SGP 接口作为降级/加速
+    if (raw.length === 0 || (prevLatestId && latestId === prevLatestId)) {
+      try {
+        const sgpRaw = await fetchMatchHistorySgp(puuid, 0, targetCount - 1);
+        if (sgpRaw && sgpRaw.length > 0) {
+          console.log("[Career] LCU 战绩未更新，已降级 SGP 加速拉取新战绩");
+          raw = sgpRaw;
+        }
+      } catch (e) {
+        console.warn("[Career] SGP 战绩降级失败:", e);
+      }
+    }
+
+    matches.value = raw;
   } catch (e) {
     console.error("获取战绩历史失败:", e);
   } finally {
@@ -103,7 +121,23 @@ async function loadMatches(puuid: string) {
 
 async function loadRecentMatches(puuid: string) {
   try {
-    const fresh = await fetchMatchHistory(puuid, 0, careerGamesNumber.value);
+    const targetCount = careerGamesNumber.value;
+    let fresh = await fetchMatchHistory(puuid, 0, targetCount);
+
+    const prevLatestId = recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
+    const latestId = fresh[0]?.gameId ?? null;
+
+    if (fresh.length === 0 || (prevLatestId && latestId === prevLatestId)) {
+      try {
+        const sgpRaw = await fetchMatchHistorySgp(puuid, 0, targetCount);
+        if (sgpRaw && sgpRaw.length > 0) {
+          fresh = sgpRaw;
+        }
+      } catch (e) {
+        console.warn("[Career] SGP 近期统计战绩降级失败:", e);
+      }
+    }
+
     updateRecentMatchesCache(puuid, fresh);
   } catch (e) {
     console.error("获取近期战绩统计失败:", e);

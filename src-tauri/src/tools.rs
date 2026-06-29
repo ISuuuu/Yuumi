@@ -695,15 +695,17 @@ pub async fn spectate_directly(
     let sgp_client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .no_proxy()
+        .user_agent("RiotClient/78.0.1.1352 (Windows;10;co;red)")
+        .http1_only()
         .build()
         .map_err(|e| format!("创建 SGP HTTP 客户端失败: {}", e))?;
 
     let sgp_url = format!(
         "{}/gsm/v1/ledge/spectator/region/{}/puuid/{}",
-        sgp_base, server_lower, puuid
+        sgp_base, server, puuid
     );
 
-    log::info!("CMD 观战: 请求 SGP {}", sgp_url);
+    log::info!("CMD 观战: 请求 SGP 完整 URL = {}", sgp_url);
 
     let sgp_resp = sgp_client
         .get(&sgp_url)
@@ -713,12 +715,16 @@ pub async fn spectate_directly(
         .map_err(|e| format!("SGP 请求失败: {}", e))?;
 
     if !sgp_resp.status().is_success() {
-        let status = sgp_resp.status().as_u16();
+        let status = sgp_resp.status();
         let body = sgp_resp.text().await.unwrap_or_default();
-        return Err(format!(
-            "SGP 返回错误 [{}]: {}（该召唤师可能不在游戏中）",
-            status, body
-        ));
+        log::warn!("SGP 观战请求失败: HTTP {}, body: {}", status, body);
+
+        let friendly_err = if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::METHOD_NOT_ALLOWED || body.contains("NOT_IN_GAME") || body.contains("not found") {
+            "该召唤师当前不在游戏中".to_string()
+        } else {
+            format!("获取观战数据失败 (HTTP {})", status.as_u16())
+        };
+        return Err(friendly_err);
     }
 
     let sgp_data: serde_json::Value =
@@ -726,7 +732,7 @@ pub async fn spectate_directly(
 
     let credentials = sgp_data
         .get("playerCredentials")
-        .ok_or_else(|| "该召唤师当前不在游戏中（SGP 未返回 playerCredentials）".to_string())?;
+        .ok_or_else(|| "该召唤师当前不在游戏中".to_string())?;
 
     let observer_ip = credentials
         .get("observerServerIp")

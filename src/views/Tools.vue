@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed, inject, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { fetchConfig, updateConfig, lcuRequest } from "../api/lcu";
+import { fetchConfig, updateConfig, lcuRequest, cleanError } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import ChampionPicker from "../components/ChampionPicker.vue";
 import SpellPicker from "../components/SpellPicker.vue";
@@ -177,7 +177,7 @@ async function confirmSkinSelection() {
 
 // 观战输入项
 const spectateSummonerName = ref("");
-const spectateMethod = ref<"LCU" | "CMD">("CMD");
+const spectateMethod = ref<"LCU" | "CMD">("LCU");
 
 // 锁定游戏设置状态
 const isGameSettingsLocked = ref(false);
@@ -243,13 +243,12 @@ async function handleSpectate() {
 
     if (spectateMethod.value === "CMD") {
       // CMD 方式：通过 SGP 获取凭据后直接启动 League of Legends.exe
-      // 可绕开 "Already in gameflow" 错误
       const result = await invoke<string>("spectate_directly", {
         params: { summoner_name: name },
       });
       showToast(result || "观战启动成功（CMD 方式）");
     } else {
-      // LCU API 方式：通过 /lol-spectator/v1/spectate/launch
+      // LCU API 方式：通过 LCU 接口进行好友/对局观战
       const summonerResp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners?name=${encodeURIComponent(name)}`);
       if (!summonerResp.success || !summonerResp.data) {
         showToast('未找到该召唤师，请检查名称后重试', 'error');
@@ -257,34 +256,53 @@ async function handleSpectate() {
       }
       const puuid = summonerResp.data.puuid;
 
+      // 1. 从全量好友列表中匹配目标 puuid 提取对局 ID
+      let gameIdFromFriend = "";
+      const friendsResp = await lcuRequest<any[]>("GET", "/lol-chat/v1/friends");
+      if (friendsResp.success && Array.isArray(friendsResp.data)) {
+        const friend = friendsResp.data.find((f: any) => f.puuid === puuid || f.id === puuid);
+        if (friend && friend.lol) {
+          gameIdFromFriend = friend.lol.gameId ? String(friend.lol.gameId) : "";
+          console.log("从好友列表匹配到当前对局 ID:", gameIdFromFriend);
+        }
+      }
+
+      // 2. 从 Lobby 大厅中匹配当前自定义房间的对局 ID
+      let gameIdFromLobby = "";
+      const lobbyResp = await lcuRequest<any>("GET", "/lol-lobby/v2/lobby");
+      if (lobbyResp.success && lobbyResp.data) {
+        const config = lobbyResp.data.gameConfig;
+        if (config && config.id) {
+          gameIdFromLobby = String(config.id);
+          console.log("从 Lobby 大厅匹配到自定义对局 ID:", gameIdFromLobby);
+        }
+      }
+
+      // 3. 自定义对局必须传对局 ID 才能加载观战，否则退化为名字匹配
+      const targetGameId = gameIdFromFriend || gameIdFromLobby || name;
+
+      // 4. 发送 LCU 观战启动请求
       const resp = await lcuRequest<any>("POST", "/lol-spectator/v1/spectate/launch", {
         allowObserveMode: "ALL",
-        dropInSpectateGameId: name,
+        dropInSpectateGameId: targetGameId,
         gameQueueType: "",
         puuid: puuid
       });
       if (resp.success) {
-        showToast('观战启动成功，请等待加载...');
+        showToast('观战启动成功，正在拉起游戏客户端...', 'success');
       } else {
-        const errMsg = String(resp.error || '');
-        // "Already in gameflow" 时自动回退到 CMD 方式
-        if (errMsg.includes('Already in gameflow') || errMsg.includes('gameflow')) {
-          showToast('LCU 观战被拒绝（Already in gameflow），自动切换 CMD 方式...');
-          try {
-            const result = await invoke<string>("spectate_directly", {
-              params: { summoner_name: name },
-            });
-            showToast(result || "观战启动成功（CMD 方式自动回退）");
-          } catch (e2: any) {
-            showToast('CMD 回退也失败: ' + e2.toString(), 'error');
-          }
-        } else {
-          showToast('观战失败: ' + (resp.error || '该召唤师可能不在游戏中'), 'error');
-        }
+        console.warn("观战失败调试信息:", {
+          friendsCount: Array.isArray(friendsResp.data) ? friendsResp.data.length : 0,
+          lobbyState: lobbyResp.success ? "成功" : "失败",
+          targetGameId,
+          puuid,
+          resp
+        });
+        showToast('观战失败: ' + cleanError(resp.error || '该召唤师当前可能无法被观战') + ' (自定义/新开局请先在官方客户端右键尝试观战以同步密钥)', 'error');
       }
     }
   } catch (e: any) {
-    showToast('观战异常: ' + e.toString(), 'error');
+    showToast('观战异常: ' + cleanError(e), 'error');
   } finally {
     loading.value = false;
   }
@@ -861,8 +879,8 @@ async function handleToggleLockGameSettings() {
             <span class="setting-label">观战方式:</span>
             <div class="input-with-button">
               <select v-model="spectateMethod" class="text-input" style="cursor: pointer;">
-                <option value="CMD">CMD（推荐，绕开 gameflow 限制）</option>
                 <option value="LCU">LCU API</option>
+                <option value="CMD">CMD</option>
               </select>
             </div>
           </div>
