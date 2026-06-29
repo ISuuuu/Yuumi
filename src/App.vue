@@ -376,7 +376,7 @@ function handleReconnect() {
   // 先查询当前游戏阶段，按情况处理
   lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase").then(resp => {
     if (!resp.success) {
-      showToast("LCU 未连接，请先启动英雄联盟客户端", "error");
+      showToast("LCU 未连接，请先启动英雄联盟客户端", "success");
       return;
     }
     const phase = resp.data;
@@ -386,7 +386,7 @@ function handleReconnect() {
         if (r.success) {
           showToast("🔄 已触发游戏重连");
         } else {
-          showToast("重连请求失败: " + (r.error || ""), "error");
+          showToast("重连请求失败: " + (r.error || ""), "success");
         }
       });
     } else {
