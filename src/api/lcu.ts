@@ -11,7 +11,18 @@ export interface LcuApiResponse<T> {
  */
 export function cleanError(error: unknown): string {
   let msg = error instanceof Error ? error.message : String(error);
-  if (msg.includes('{') && msg.includes('}')) {
+
+  // 1. 优先使用正则表达式从可能含有 JSON (甚至是残破 JSON) 的文本中，安全且精准地提取核心 message 字段
+  const jsonMessageMatch = msg.match(/"(?:error)?Message"\s*:\s*"([^"]+)"/i);
+  if (jsonMessageMatch && jsonMessageMatch[1]) {
+    let cleanMsg = jsonMessageMatch[1];
+    if (cleanMsg.includes("Error response for ") && cleanMsg.includes(":")) {
+      const parts = cleanMsg.split(":");
+      cleanMsg = parts[parts.length - 1].trim();
+    }
+    msg = cleanMsg;
+  } else if (msg.includes('{') && msg.includes('}')) {
+    // 降级：如果正则未匹配上但含有完整大括号，依然尝试标准 JSON 序列化解析
     try {
       const start = msg.indexOf('{');
       const end = msg.lastIndexOf('}');
@@ -27,6 +38,8 @@ export function cleanError(error: unknown): string {
       }
     } catch { /* ignore */ }
   }
+
+  // 2. 如果包含“LCU 返回错误”前缀，提取后面的纯消息
   if (msg.startsWith("LCU 返回错误")) {
     const parts = msg.split("]:");
     if (parts.length > 1) {
@@ -34,10 +47,10 @@ export function cleanError(error: unknown): string {
     }
   }
 
-  // 1. 去除两端可能残留的无意义的双引号、单引号或右大括号
-  msg = msg.trim().replace(/^["'\s]+|["'\s}]+$/g, '');
+  // 3. 仅安全剥离最外层可能残留的包围单双引号，不损伤任何合法的 {} 符号
+  msg = msg.trim().replace(/^["']+|["']+$/g, '');
 
-  // 2. 友好汉化经典的观战业务报错
+  // 4. 友好汉化经典的观战业务报错
   if (msg.includes("Already in gameflow")) {
     return "你当前已处于对局中，无法重复观战";
   }
