@@ -294,6 +294,7 @@ export interface FunctionsConfig {
   LcuRealtimeEnabled: boolean;
   LcuUserId: string;
   UploadEnabled: boolean;
+  HideTft: boolean;
 }
 
 export interface OtherConfig {
