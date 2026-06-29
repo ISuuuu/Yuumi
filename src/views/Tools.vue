@@ -3,11 +3,13 @@ import { ref, onMounted, onUnmounted, watch, computed, inject, type Ref } from "
 import { invoke } from "@tauri-apps/api/core";
 import { fetchConfig, updateConfig, lcuRequest, cleanError } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
+import { useLcuStore } from "../store/lcuStore";
 import ChampionPicker from "../components/ChampionPicker.vue";
 import SpellPicker from "../components/SpellPicker.vue";
 import LcuImage from "../components/LcuImage.vue";
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
+const store = useLcuStore();
 const loading = ref(false);
 
 // Toast 通知
@@ -509,6 +511,9 @@ async function handleToggleLockGameSettings() {
 
     <div v-else class="tools-container">
       <h1 class="page-title">其他功能</h1>
+
+      <!-- 未连接 LCU 覆盖层 -->
+      <div v-if="!store.isConnected" class="offline-overlay"></div>
 
       <!-- 1. 英雄选择组 -->
       <div class="group-header">英雄选择</div>
@@ -1256,6 +1261,11 @@ async function handleToggleLockGameSettings() {
   margin-top: 12px;
 }
 
+.offline-logo {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
 .loading-spinner {
   width: 36px;
   height: 36px;
@@ -1273,6 +1283,7 @@ async function handleToggleLockGameSettings() {
   max-width: 800px;
   margin: 0 auto;
   animation: fadeIn 0.3s ease-out;
+  position: relative;
 }
 
 .page-title {
@@ -1513,6 +1524,13 @@ async function handleToggleLockGameSettings() {
 .setting-row.no-border {
   border-bottom: none;
   padding-bottom: 6px;
+}
+
+/* 未连接 LCU 覆盖层 */
+.offline-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
 }
 
 .setting-row.justify-end {
