@@ -584,9 +584,13 @@ function formatTime(ts: number): string {
 
 <style scoped>
 .career {
-  padding: 1.5rem 1.5rem 1.5rem 0.6rem;
+  padding: 1rem 1.5rem 1rem 0.6rem;
   background-color: transparent;
-  min-height: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .tip-container {
@@ -594,8 +598,9 @@ function formatTime(ts: number): string {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 8rem 2rem;
+  padding: 6rem 2rem;
   color: var(--text-muted);
+  flex: 1;
 }
 
 .offline-logo {
@@ -606,6 +611,7 @@ function formatTime(ts: number): string {
 .tip {
   font-size: 0.95rem;
   color: var(--text-dimmed);
+  margin: 0;
 }
 
 .error {

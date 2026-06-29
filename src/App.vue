@@ -506,7 +506,7 @@ async function handleClose() {
           <span class="nav-label">对局信息</span>
         </div>
 
-        <div :class="['nav-item', { active: currentPage === 'tft' }]" @click="navigate('tft')" title="Teamfight Tactics">
+        <div v-if="!appConfig?.Functions?.HideTft" :class="['nav-item', { active: currentPage === 'tft' }]" @click="navigate('tft')" title="Teamfight Tactics">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polygon points="12 2 2 7 12 12 22 7 12 2"/>
@@ -577,17 +577,15 @@ async function handleClose() {
 
     <!-- 右侧内容区域 -->
     <main class="content-wrapper">
-      <!-- Search 和 GameInfo 用 v-show 保持状态，切页面不清空数据 -->
-      <div v-show="currentPage === 'search'" style="height:100%;overflow-y:auto;">
-        <Search />
-      </div>
+      <!-- GameInfo 用 v-show 保持状态，切页面不清空数据 -->
       <div v-show="currentPage === 'gameinfo'" style="height:100%;overflow-y:auto;">
         <GameInfo />
       </div>
-      <template v-if="currentPage !== 'search' && currentPage !== 'gameinfo'">
-        <Home v-if="currentPage === 'home'" @navigate="navigate" />
+      <template v-if="currentPage !== 'gameinfo'">
+        <Search v-if="currentPage === 'search'" />
+        <Home v-else-if="currentPage === 'home'" @navigate="navigate" />
         <Career v-else-if="currentPage === 'career'" />
-        <TFT v-else-if="currentPage === 'tft'" />
+        <TFT v-else-if="currentPage === 'tft' && !appConfig?.Functions?.HideTft" />
         <Settings v-else-if="currentPage === 'settings'" />
         <Tools v-else-if="currentPage === 'tools'" />
 

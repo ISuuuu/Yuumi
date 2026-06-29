@@ -571,6 +571,20 @@ function applyThemeMode(mode: string) {
         </div>
       </div>
 
+      <!-- 隐藏云顶之弈 -->
+      <div class="card-item border-bottom">
+        <div class="card-left">
+          <h3 class="card-title">隐藏云顶之弈</h3>
+          <span class="card-desc">在左侧菜单中隐藏 Teamfight Tactics 入口，关闭后立即生效</span>
+        </div>
+        <div class="card-right">
+          <div :class="['toggle-switch', config.Functions.HideTft ? 'on' : 'off']" @click="config.Functions.HideTft = !config.Functions.HideTft; autoSave()">
+            <span class="toggle-text">{{ config.Functions.HideTft ? '开' : '关' }}</span>
+            <span class="toggle-slider"></span>
+          </div>
+        </div>
+      </div>
+
       <!-- 4. 日志 -->
       <div class="group-header">日志</div>
 

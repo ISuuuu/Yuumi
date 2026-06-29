@@ -658,17 +658,17 @@ const gameDetails = computed(() => {
 
 <template>
   <div class="search-view">
-    <!-- Toast -->
-    <Transition name="toast">
-      <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">{{ toast.message }}</div>
-    </Transition>
 
     <div v-if="!store.isConnected" class="tip-container">
-      <div class="offline-logo">🔍</div>
+      <div class="offline-logo">🎮</div>
       <p class="tip">请先启动英雄联盟客户端</p>
     </div>
 
     <div v-else class="search-container">
+      <!-- Toast -->
+      <Transition name="toast">
+        <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">{{ toast.message }}</div>
+      </Transition>
       <!-- 顶部搜索工具栏 -->
       <div class="search-bar">
         <div class="search-input-wrapper">
@@ -924,11 +924,13 @@ const gameDetails = computed(() => {
 
 <style scoped>
 .search-view {
-  padding: 1rem 1.5rem 1.5rem 0.6rem;
+  padding: 1rem 1.5rem 1rem 0.6rem;
   background-color: transparent;
-  min-height: 100%;
-  font-family: "Segoe UI", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
-  font-variant-numeric: tabular-nums;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .tip-container {
@@ -936,8 +938,9 @@ const gameDetails = computed(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 8rem 2rem;
+  padding: 6rem 2rem;
   color: var(--text-muted);
+  flex: 1;
 }
 
 .offline-logo {
@@ -948,6 +951,7 @@ const gameDetails = computed(() => {
 .tip {
   font-size: 0.95rem;
   color: var(--text-dimmed);
+  margin: 0;
 }
 
 .error {

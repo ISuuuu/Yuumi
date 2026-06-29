@@ -167,6 +167,10 @@ pub struct FunctionsConfig {
 
     #[serde(default = "default_true")]
     pub upload_enabled: bool,
+
+    /// 隐藏云顶之弈模式（默认隐藏）
+    #[serde(default = "default_true")]
+    pub hide_tft: bool,
 }
 
 impl Default for FunctionsConfig {
@@ -215,6 +219,7 @@ impl Default for FunctionsConfig {
             auto_select_confirm_on_timeout: true,
             lcu_user_id: String::new(),
             upload_enabled: true,
+            hide_tft: true,
         }
     }
 }
