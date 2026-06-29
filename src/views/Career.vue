@@ -225,10 +225,6 @@ watch(() => store.isConnected, (connected) => {
   if (connected) {
     loadSummoner();
   } else {
-    // 断连时清空缓存，避免切号后数据混杂
-    if (summoner.value?.puuid) {
-      try { localStorage.removeItem(MATCHES_CACHE_KEY(summoner.value.puuid)); } catch { /* ignore */ }
-    }
     summoner.value = null;
     matches.value = [];
     recentMatches.value = [];

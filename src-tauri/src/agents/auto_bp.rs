@@ -122,6 +122,7 @@ pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSe
                 let state = app_handle.state::<crate::AppState>();
                 if state.bp_reset_flag.swap(false, std::sync::atomic::Ordering::SeqCst) {
                     log::info!("BP状态重置（gameflow阶段变化）");
+                    state.bp_task_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     selection = ChampionSelection::default();
                 }
             }
@@ -129,6 +130,8 @@ pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSe
             // 收到重置信号时，重置 BP 跟踪状态并进入下一次循环
             if session.local_player_cell_id == -1 {
                 log::info!("收到重置选人代理状态的信号");
+                let state = app_handle.state::<crate::AppState>();
+                state.bp_task_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 selection = ChampionSelection::default();
                 continue;
             }
@@ -308,12 +311,27 @@ async fn do_auto_complete(
     // 标记防止重复进入
     selection.is_champion_picked_completed = true;
 
-    log::info!("自动锁定: 等待 {} 秒后锁定（后台任务不阻塞主循环）", sleep_secs);
+    // 递增全局任务版本，产生本次独占任务 ID
+    let current_id = {
+        let state = app_handle.state::<crate::AppState>();
+        state.bp_task_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    };
+
+    log::info!("自动锁定: 等待 {} 秒后锁定 (任务版本: {})", sleep_secs, current_id);
 
     // 在后台任务中等待并锁定，不阻塞主循环（否则秒退后新选人事件无法处理）
     let app_handle = app_handle.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(sleep_secs)).await;
+
+        // 验证该任务是否已被取消或被后续任务覆盖
+        {
+            let state = app_handle.state::<crate::AppState>();
+            if state.bp_task_id.load(std::sync::atomic::Ordering::SeqCst) != current_id {
+                log::info!("后台锁定任务已失效 (版本不匹配，可能已重置或有新任务)，退出");
+                return;
+            }
+        }
 
         // 重新获取会话数据（经过等待后状态可能已变化）
         let fresh_session = match lcu_get_session(&app_handle).await {

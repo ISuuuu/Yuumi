@@ -114,6 +114,8 @@ pub struct UploadTrigger {
     puuid: Arc<Mutex<Option<String>>>,
     last_game_id: Arc<Mutex<u64>>,
     current_game_id: Arc<Mutex<Option<u64>>>,
+    /// 标记当前对局的上传是否已完成，避免退回 Lobby/None 时重复查询 LCU
+    upload_completed: Arc<Mutex<bool>>,
 }
 
 impl UploadTrigger {
@@ -124,6 +126,7 @@ impl UploadTrigger {
             puuid: Arc::new(Mutex::new(None)),
             last_game_id: Arc::new(Mutex::new(0)),
             current_game_id: Arc::new(Mutex::new(None)),
+            upload_completed: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -140,6 +143,7 @@ impl UploadTrigger {
         }
 
         if matches!(phase, "GameStart" | "InProgress") {
+            *self.upload_completed.lock().await = false;
             match fetch_gameflow_game_id(app_handle).await {
                 Ok(Some(id)) => {
                     log::info!("记录当前对局 ID: {} (phase={})", id, phase);
@@ -167,6 +171,15 @@ impl UploadTrigger {
             "检测到游戏结束转换: {} → {}，准备上传...",
             prev, phase
         );
+
+        // 如果该对局已完成上传，跳过重复处理
+        {
+            let completed = self.upload_completed.lock().await;
+            if *completed {
+                log::debug!("该对局的上传已完成，跳过重复处理 (phase={})", phase);
+                return;
+            }
+        }
 
         // 延迟 2 秒等待 LCU 数据写入
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -196,6 +209,7 @@ impl UploadTrigger {
         if game_id == *last_id {
             log::debug!("对局 {} 已上传过，跳过", game_id);
             *self.current_game_id.lock().await = None;
+            *self.upload_completed.lock().await = true;
             return;
         }
         *last_id = game_id;
@@ -204,6 +218,7 @@ impl UploadTrigger {
         // 推入上传队列
         self.queue.enqueue(game_id).await;
         *self.current_game_id.lock().await = None;
+        *self.upload_completed.lock().await = true;
     }
 
     async fn get_or_fetch_puuid(&self, app_handle: &AppHandle) -> Result<String, String> {

@@ -370,7 +370,7 @@ async function loadMoreMatches() {
     if (newGames.length > 0) {
       allMatchesSearch.value.push(...newGames);
       if (allMatchesSearch.value.length > 500) {
-        allMatchesSearch.value = allMatchesSearch.value.slice(-500);
+        allMatchesSearch.value = allMatchesSearch.value.slice(0, 500);
       }
       console.log(`[Search] 新增${newGames.length}条, 总计${allMatchesSearch.value.length}条`);
     } else {
