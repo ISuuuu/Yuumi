@@ -9,7 +9,7 @@ pub mod updater;
 pub mod upload;
 
 use base64::Engine;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -48,6 +48,8 @@ pub struct AppState {
     pub api_semaphore: Arc<Semaphore>,
     /// BP 状态重置标志（gameflow 阶段变化时置为 true，BP agent 检查后置 false）
     pub bp_reset_flag: AtomicBool,
+    /// BP 锁定后台任务版本号（用于标记和防止残留协程竞态）
+    pub bp_task_id: AtomicU64,
 }
 
 impl AppState {
@@ -106,6 +108,7 @@ pub fn run() {
                 ws_cancel_tx: Mutex::new(None),
                 api_semaphore: Arc::new(Semaphore::new(api_concurrency)),
                 bp_reset_flag: AtomicBool::new(false),
+                bp_task_id: AtomicU64::new(0),
             };
             app.manage(state);
 

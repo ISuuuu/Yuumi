@@ -745,15 +745,7 @@ pub async fn spectate_directly(
         .and_then(|v| v.as_i64())
         .ok_or_else(|| "观战凭据缺少 gameId".to_string())?;
 
-    // ── 5. 拼接命令行参数 ──
-    let spectate_cmd = format!(
-        "spectator {}:{} {} {} {}",
-        observer_ip, observer_port, encryption_key, game_id, server
-    );
-
-    log::info!("CMD 观战: 命令行参数 = {}", spectate_cmd);
-
-    // ── 6. 定位 Game 目录并启动 League of Legends.exe ──
+    // ── 5. 定位 Game 目录并启动 League of Legends.exe ──
     let cfg = app_state.config.read().await;
     let lol_path = cfg
         .general
@@ -787,10 +779,19 @@ pub async fn spectate_directly(
     };
     let game_exe = game_dir.join("League of Legends.exe");
 
-    log::info!("CMD 观战: 启动 {:?} (cwd={:?})", game_exe, game_dir);
+    log::info!(
+        "CMD 观战: 启动 {:?} spectator {}:{} {} {} {} (cwd={:?})",
+        game_exe, observer_ip, observer_port, encryption_key, game_id, server, game_dir
+    );
 
     std::process::Command::new(&game_exe)
-        .arg(&spectate_cmd)
+        .args(&[
+            "spectator",
+            &format!("{}:{}", observer_ip, observer_port),
+            encryption_key,
+            &game_id.to_string(),
+            server,
+        ])
         .current_dir(&game_dir)
         .spawn()
         .map_err(|e| format!("启动游戏客户端失败: {}", e))?;

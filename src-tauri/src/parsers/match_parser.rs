@@ -444,6 +444,9 @@ pub async fn get_match_history_sgp(
         .map_err(|e| format!("创建 SGP HTTP 客户端失败: {}", e))?;
 
     // ── 3. 请求 SGP 战绩接口（同 Seraphine getSummonerGamesByPuuidViaSGP）──
+    if end_index < beg_index {
+        return Err("参数错误: end_index 不能小于 beg_index".to_string());
+    }
     let count = end_index - beg_index + 1;
     let sgp_url = format!(
         "{}/match-history-query/v1/products/lol/player/{}/SUMMARY",
