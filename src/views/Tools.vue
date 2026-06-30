@@ -631,7 +631,7 @@ async function handleToggleLockGameSettings() {
           <div class="setting-row">
             <span class="setting-label">启用自动亮起:</span>
             <div :class="['toggle-switch', config.Functions.EnableAutoHoverChampion ? 'on' : 'off']" @click="config.Functions.EnableAutoHoverChampion = !config.Functions.EnableAutoHoverChampion; triggerAutoSave()">
-              <span class="toggle-text{{ config.Functions.EnableAutoHoverChampion ? ' on' : '' }}">{{ config.Functions.EnableAutoHoverChampion ? '开' : '关' }}</span>
+              <span class="toggle-text">{{ config.Functions.EnableAutoHoverChampion ? '开' : '关' }}</span>
               <span class="toggle-slider"></span>
             </div>
           </div>
@@ -783,6 +783,29 @@ async function handleToggleLockGameSettings() {
             <SpellPicker v-else-if="spellActiveLane === 'mid'" v-model="config.Functions.AutoSetSummonerSpellMid" @update:modelValue="onPickerChange" />
             <SpellPicker v-else-if="spellActiveLane === 'bot'" v-model="config.Functions.AutoSetSummonerSpellBot" @update:modelValue="onPickerChange" />
             <SpellPicker v-else-if="spellActiveLane === 'sup'" v-model="config.Functions.AutoSetSummonerSpellSup" @update:modelValue="onPickerChange" />
+          </div>
+        </div>
+      </div>
+
+      <!-- 大乱斗板凳席悬浮窗 -->
+      <div class="card-item border-bottom">
+        <div class="card-left">
+          <div class="icon-container">
+            <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+          </div>
+          <div class="title-container">
+            <h3 class="card-title">大乱斗板凳席悬浮窗</h3>
+            <span class="card-desc">在大乱斗选人阶段显示半透明置顶悬浮窗，可无 CD 抢板凳席英雄</span>
+          </div>
+        </div>
+        <div class="card-right">
+          <div :class="['toggle-switch', config.Functions.EnableBenchOverlay ? 'on' : 'off']" @click="config.Functions.EnableBenchOverlay = !config.Functions.EnableBenchOverlay; triggerAutoSave()">
+            <span class="toggle-text">{{ config.Functions.EnableBenchOverlay ? '开' : '关' }}</span>
+            <span class="toggle-slider"></span>
           </div>
         </div>
       </div>

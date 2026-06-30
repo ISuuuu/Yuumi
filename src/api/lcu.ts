@@ -295,6 +295,7 @@ export interface FunctionsConfig {
   LcuUserId: string;
   UploadEnabled: boolean;
   HideTft: boolean;
+  EnableBenchOverlay: boolean;
 }
 
 export interface OtherConfig {

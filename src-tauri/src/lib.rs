@@ -305,6 +305,7 @@ pub fn run() {
             signalr::get_signalr_status,
             updater::check_update,
             updater::install_update,
+            show_bench_overlay_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -641,6 +642,62 @@ async fn get_close_to_tray(app_state: tauri::State<'_, AppState>) -> Result<bool
     let cfg = app_state.config.read().await;
     Ok(cfg.general.enable_close_to_tray.unwrap_or(false))
 }
+
+/// 大乱斗板凳席置顶悬浮窗控制命令
+#[tauri::command]
+async fn show_bench_overlay_window(
+    app_handle: tauri::AppHandle,
+    show: bool,
+) -> Result<(), String> {
+    let window = app_handle.get_webview_window("bench-overlay");
+    if show {
+        if let Some(win) = window {
+            let _ = win.show();
+            let _ = win.set_focus();
+            if let Ok(Some(monitor)) = win.current_monitor() {
+                let pos = monitor.position().to_logical::<f64>(monitor.scale_factor());
+                let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+                let x = pos.x + (size.width - 550.0) / 2.0;
+                let y = pos.y; // 动态定位至该显示器的最顶端
+                let _ = win.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+            }
+        } else {
+            // 计算默认的顶部居中位置
+            let mut x = 0.0;
+            let mut y = 0.0;
+            if let Ok(Some(monitor)) = app_handle.primary_monitor() {
+                let pos = monitor.position().to_logical::<f64>(monitor.scale_factor());
+                let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+                x = pos.x + (size.width - 550.0) / 2.0;
+                y = pos.y; // 动态定位至主显示器的最顶端
+            }
+
+            let win = tauri::WebviewWindowBuilder::new(
+                &app_handle,
+                "bench-overlay",
+                tauri::WebviewUrl::App("index.html?window=bench-overlay".into())
+            )
+            .title("Yuumi - ARAM Bench")
+            .inner_size(550.0, 70.0)
+            .position(x, y)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .resizable(false)
+            .skip_taskbar(true)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+            let _ = win.show();
+        }
+    } else {
+        if let Some(win) = window {
+            let _ = win.close();
+        }
+    }
+    Ok(())
+}
+
 
 
 
