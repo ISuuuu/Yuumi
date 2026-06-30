@@ -16,6 +16,7 @@ import GameInfo from "./views/GameInfo.vue";
 import TFT from "./views/TFT.vue";
 import Settings from "./views/Settings.vue";
 import Tools from "./views/Tools.vue";
+import Notice from "./views/Notice.vue";
 import BenchOverlay from "./views/BenchOverlay.vue";
 import LcuImage from "./components/LcuImage.vue";
 import UpdateDialog, { type UpdateInfo } from "./components/UpdateDialog.vue";
@@ -606,13 +607,13 @@ async function handleClose() {
           <span class="nav-label">修复无限加载</span>
         </div>
 
-        <div :class="['nav-item', { active: currentPage === 'notice' }]" @click="navigate('notice')" title="公告">
+        <div :class="['nav-item', { active: currentPage === 'notice' }]" @click="navigate('notice')" title="更新日志">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>
             </svg>
           </span>
-          <span class="nav-label">公告</span>
+          <span class="nav-label">更新日志</span>
         </div>
 
         <!-- 召唤师简短信息 -->
@@ -669,23 +670,8 @@ async function handleClose() {
           </div>
         </div>
 
-        <!-- 内建 公告 占位页面 -->
-        <div v-else-if="currentPage === 'notice'" class="placeholder-view">
-          <div class="view-header">
-            <h2>系统公告</h2>
-          </div>
-          <div class="changelog-card">
-            <div class="version-tag">v0.1.0</div>
-            <h3>Yuumi 辅助工具重构完成</h3>
-            <p class="date">发布时间: 2026-06-24</p>
-            <ul class="changelog-list">
-              <li>✨ <strong>全新 1:1 Seraphine 风格重构</strong>：支持垂直折叠侧边栏，带来极致沉浸式的原生大厅体验。</li>
-              <li>🚀 <strong>Rust (Tauri v2) 高效重写</strong>：用 Rust 重构底层 LCU 数据抓取，内存降低 80%，响应即刻响应。</li>
-              <li>⚙️ <strong>对局选人自动化</strong>：自动接受对局、极速自动 Ban/Pick，支持分路配置候选英雄。</li>
-              <li>📊 <strong>数据看板美化</strong>：全面美化生涯战绩、单场表现分析以及选人面板 10 人近期段位和胜率展现。</li>
-            </ul>
-          </div>
-        </div>
+        <!-- 更新日志页 -->
+        <Notice v-else-if="currentPage === 'notice'" />
       </template>
     </main>
     </div>

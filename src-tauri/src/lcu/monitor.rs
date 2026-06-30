@@ -318,7 +318,7 @@ fn find_via_lockfile(sys: &System) -> Option<(u32, u16, String, Option<String>)>
     Some((pid, port, password, server))
 }
 
-/// 方式二：从进程命令行参数提取（对应 Seraphine getPortTokenServerByPidViaPsutil）
+/// 方式二：从进程命令行参数提取
 fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> {
     for (pid, process) in sys.processes() {
         let name = process.name().to_string_lossy().to_lowercase();
@@ -376,7 +376,7 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> 
     None
 }
 
-/// 方式三：通过 WMIC 获取命令行参数（对应 Seraphine getPortTokenServerByPidViaWmic）
+/// 方式三：通过 WMIC 获取命令行参数
 fn find_via_wmic() -> Option<(u32, u16, String, Option<String>)> {
     #[cfg(target_os = "windows")]
     {
