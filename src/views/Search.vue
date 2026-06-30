@@ -62,6 +62,16 @@ function selectQueue(id: number | null) {
   selectedQueue.value = id;
 }
 
+// 点击对局中的其他召唤师名称 → 在当前页面搜索（用 summonerId 避免 400/404/422 错误）
+const pendingSummonerId = ref<number>(0);
+
+function searchPlayerBySummonerId(summonerId: number, displayName: string) {
+  if (!summonerId) return;
+  pendingSummonerId.value = summonerId;
+  searchName.value = displayName || String(summonerId);
+  doSearch();
+}
+
 // 对局详情相关
 const selectedGameId = ref<number | null>(null);
 const selectedGame = ref<any | null>(null);
@@ -486,16 +496,6 @@ function getItemUrl(itemId: number) {
 function copyGameId(gameId: number) {
   navigator.clipboard.writeText(String(gameId));
   alert(`📋 游戏 ID: ${gameId} 已复制到剪贴板`);
-}
-
-// 点击对局中的其他召唤师名称 → 在当前页面搜索（用 summonerId 避免 400/404/422 错误）
-const pendingSummonerId = ref<number>(0);
-
-function searchPlayerBySummonerId(summonerId: number, displayName: string) {
-  if (!summonerId) return;
-  pendingSummonerId.value = summonerId;
-  searchName.value = displayName || String(summonerId);
-  doSearch();
 }
 
 // 整理后的对局详情
