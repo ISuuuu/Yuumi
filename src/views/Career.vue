@@ -252,7 +252,7 @@ watch(() => store.isConnected, (connected) => {
 }, { immediate: true });
 
 // 对局结束后自动刷新战绩
-// 参考 Seraphine: 进入结算/大厅状态后等 2 秒，让 LCU 把对局数据落盘；
+// 参考: 进入结算/大厅状态后等 2 秒，让 LCU 把对局数据落盘；
 // 然后重试 5 次 × 3 秒，因为 lol-match-history 同步新对局通常有几秒到十几秒延迟
 watch(() => store.gamePhase, async (phase: string, oldPhase: string | undefined) => {
   if (!summoner.value?.puuid) return;

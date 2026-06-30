@@ -369,7 +369,7 @@ async fn get_map_side(
     let auth = build_auth_header(&lcu.token);
     let base = format!("https://127.0.0.1:{}", lcu.port);
 
-    // 方法1: 从 pin-drop-notification 获取 mapSide（Seraphine 原始方案）
+    // 方法1: 从 pin-drop-notification 获取 mapSide
     // 重试最多 5 次因为选人会话初始化可能稍有延迟
     let map_side_url = format!("{}/lol-champ-select/v1/pin-drop-notification", base);
     for i in 0..5 {

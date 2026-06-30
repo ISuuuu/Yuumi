@@ -92,11 +92,11 @@ const currentPageNum = ref(1);
 const matchesPerPage = 10;
 const hasMore = ref(false); // 是否有下一页
 const allMatchesSearch = ref<MatchDisplay[]>([]); // 全量数据，本地翻页用
-const loadedGameIndex = ref(0); // 已加载到的游标（类似 Seraphine loadedGameIndex）
+const loadedGameIndex = ref(0); // 已加载到的游标
 const loadingMore = ref(false); // 防止重复触发 SGP 加载
-const INITIAL_BATCH = 20; // 首次加载 20 条（2 页），同 Seraphine 的 0-19
-const LOAD_MORE_COUNT = 30; // 每次增量加载 30 条，同 Seraphine __loadMoreGames count=30
-const PREFETCH_PAGES = 3; // 提前 3 页预拉取，同 Seraphine prefetchPageCount=3
+const INITIAL_BATCH = 20; // 首次加载 20 条（2 页）
+const LOAD_MORE_COUNT = 30; // 每次增量加载 30 条
+const PREFETCH_PAGES = 3; // 提前 3 页预拉取
 
 // 搜索历史
 const searchHistory = ref<string[]>([]);
@@ -295,18 +295,18 @@ async function loadMatchHistoryList() {
     const beg = (currentPageNum.value - 1) * matchesPerPage;
     const end = beg + matchesPerPage;
     
-    // 类似 Seraphine: 首次加载一波 + 翻到尽头时增量拉取
+    // 首次加载一波 + 翻到尽头时增量拉取
     if (allMatchesSearch.value.length === 0) {
-      // 首次加载: 拉取 0~INITIAL_BATCH-1（类似 Seraphine getSummonerGamesByPuuid(puuid, 0, 19)）
+      // 首次加载: 拉取 0~INITIAL_BATCH-1
       const raw = await fetchMatchHistory(summoner.value.puuid, 0, INITIAL_BATCH - 1);
       console.log(`[Search] 首次加载: raw.length=${raw.length}`);
       allMatchesSearch.value = raw;
       loadedGameIndex.value = INITIAL_BATCH;
       
-      // 首次加载后立即预拉取更多（类似 Seraphine __loadGames → __loadMoreGames）
+      // 首次加载后立即预拉取更多
       await loadMoreMatches();
     } else if (end + matchesPerPage * PREFETCH_PAGES >= allMatchesSearch.value.length) {
-      // 提前 PREFETCH_PAGES 页预拉取（类似 Seraphine 的 prefetchPageCount）
+      // 提前 PREFETCH_PAGES 页预拉取
       await loadMoreMatches();
     }
     
@@ -351,7 +351,7 @@ async function loadMatchHistoryList() {
   }
 }
 
-/** 类似 Seraphine __loadMoreGames: 先试 LCU，重复了降级 SGP */
+/** 先试 LCU，重复了降级 SGP */
 async function loadMoreMatches() {
   if (!summoner.value || loadingMore.value) return; // 防抖：防止连续触发
   loadingMore.value = true;
@@ -359,15 +359,15 @@ async function loadMoreMatches() {
     const fetchBeg = loadedGameIndex.value;
     const fetchEnd = fetchBeg + LOAD_MORE_COUNT - 1;
     
-    // 1. 先试 LCU（Seraphine 同款逻辑）
+    // 1. 先试 LCU
     let raw = await fetchMatchHistory(summoner.value.puuid, fetchBeg, fetchEnd);
     console.log(`[Search] loadMoreMatches(LCU): beg=${fetchBeg}, end=${fetchEnd}, raw.length=${raw.length}`);
     
-    // 2. Seraphine 式去重检测：所有 gameId 是否都已存在？
+    // 2. 去重检测：所有 gameId 是否都已存在？
     let existingIds = new Set(allMatchesSearch.value.map(m => m.gameId));
     let newGames = raw.filter(m => !existingIds.has(m.gameId));
     
-    // 3. LCU 全是重复 → 降级 SGP（同 Seraphine 的 added_count==0 fallback）
+    // 3. LCU 全是重复 → 降级 SGP
     if (newGames.length === 0 && raw.length > 0) {
       console.log(`[Search] LCU 返回全重复，降级 SGP`);
       raw = await fetchMatchHistorySgp(summoner.value.puuid, fetchBeg, fetchEnd);

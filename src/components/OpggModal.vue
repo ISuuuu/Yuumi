@@ -970,7 +970,7 @@ async function setRunePage() {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* 梯队卡片列表（Python Seraphine 风格） */
+/* 梯队卡片列表 */
 .tier-list-body { padding: 8px 10px; }
 
 .tier-header {

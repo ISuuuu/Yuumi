@@ -384,7 +384,7 @@ pub async fn get_match_history(
 }
 
 /// 通过 SGP 接口获取战绩列表（支持分页，仅腾讯国服可用）
-/// 类似 Seraphine 的 getSummonerGamesByPuuidViaSGP
+/// 类似 getSummonerGamesByPuuidViaSGP
 #[tauri::command]
 pub async fn get_match_history_sgp(
     puuid: String,
@@ -443,7 +443,7 @@ pub async fn get_match_history_sgp(
         .build()
         .map_err(|e| format!("创建 SGP HTTP 客户端失败: {}", e))?;
 
-    // ── 3. 请求 SGP 战绩接口（同 Seraphine getSummonerGamesByPuuidViaSGP）──
+    // ── 3. 请求 SGP 战绩接口 ──
     if end_index < beg_index {
         return Err("参数错误: end_index 不能小于 beg_index".to_string());
     }
