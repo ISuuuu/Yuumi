@@ -488,6 +488,9 @@ function formatTime(ts: number): string {
         </div>
       </div>
 
+      <!-- 局部滚动包裹区域：保留头像、排位与近期对局看板，仅滚动对局战绩列表 -->
+      <div class="career-scroll-area">
+
       <!-- 战绩对局历史列表 -->
       <div v-if="filteredMatches.length > 0" class="match-history-list">
         <div
@@ -578,6 +581,7 @@ function formatTime(ts: number): string {
       <div v-else-if="!loading" class="tip-container">
         <p class="tip">暂无战绩记录</p>
       </div>
+      </div>
     </div>
   </div>
 </template>
@@ -625,8 +629,22 @@ function formatTime(ts: number): string {
 
 .career-content {
   max-width: 1000px;
+  width: 100%;
   margin: 0 auto;
   animation: fadeIn 0.3s ease-out;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* 战绩及看板局部滚动区域 */
+.career-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+  margin-top: 1rem;
 }
 
 /* 召唤师头部卡片 */

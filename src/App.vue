@@ -16,6 +16,7 @@ import GameInfo from "./views/GameInfo.vue";
 import TFT from "./views/TFT.vue";
 import Settings from "./views/Settings.vue";
 import Tools from "./views/Tools.vue";
+import BenchOverlay from "./views/BenchOverlay.vue";
 import LcuImage from "./components/LcuImage.vue";
 import UpdateDialog, { type UpdateInfo } from "./components/UpdateDialog.vue";
 import opggIcon from "./assets/opgg.svg";
@@ -41,6 +42,9 @@ const isSidebarExpanded = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
 const platformId = ref("");
 const mapSideLabel = ref(""); // 蓝色方/红色方
+
+// 检测当前是否是悬浮窗窗口（bench-overlay）
+const isOverlayWindow = ref(window.location.search.includes("window=bench-overlay"));
 
 // 自动更新弹窗
 const updateInfo = ref<UpdateInfo | null>(null);
@@ -96,6 +100,11 @@ const regionName = computed(() => {
 
 onMounted(async () => {
   await initLcuListeners();
+
+  if (isOverlayWindow.value) {
+    loadLcuState();
+    return;
+  }
 
   // 监听系统托盘菜单导航事件
   await listen<string>("tray-navigate", (event: { payload: string }) => {
@@ -316,11 +325,27 @@ watch(navigateSearchPayload, (payload) => {
   }
 });
 
+async function showBenchOverlay(show: boolean = true) {
+  console.log("[bench-debug] showBenchOverlay 被调用: show =", show, "EnableBenchOverlay 配置值 =", appConfig.value?.Functions?.EnableBenchOverlay);
+  // 检查配置开关
+  if (show && appConfig.value?.Functions?.EnableBenchOverlay === false) {
+    console.log("[bench-debug] 悬浮窗已被配置开关禁用，不执行开启");
+    return;
+  }
+  try {
+    console.log("[bench-debug] 正在通过 invoke 向 Rust 发送窗口控制命令: show =", show);
+    await invoke("show_bench_overlay_window", { show });
+  } catch (err) {
+    console.error("[bench] 控制悬浮窗失败:", err);
+  }
+}
+
 // lcu-client-started 事件触发时重新加载（游戏中重启等场景）
 // isConnected watcher 已覆盖此场景，无需额外监听
 
 // 游戏阶段变化 → 更新窗口标题 + 自动跳转对局信息页
 watch(gamePhase, (phase: string) => {
+  if (isOverlayWindow.value) return;
   console.log("[watch gamePhase] phase changed:", phase);
 
   // 更新窗口标题栏显示游戏状态
@@ -369,7 +394,35 @@ watch(gamePhase, (phase: string) => {
       runAutoShow();
     }
   }
+
+  // ─── 大乱斗板凳席悬浮窗生命周期控制 ───
+  if (phase === "ChampSelect") {
+    console.log("[bench-debug] 进入选人阶段，等待 1.5 秒后检测大乱斗板凳席状态...");
+    setTimeout(async () => {
+      const session = store.champSelectSession;
+      console.log("[bench-debug] 1.5秒检测结果: session 存在 =", !!session, "benchEnabled =", session?.benchEnabled);
+      if (session && session.benchEnabled) {
+        console.log("[bench-debug] 满足创建悬浮窗条件，准备开启...");
+        await showBenchOverlay();
+      } else {
+        console.log("[bench-debug] 不满足创建悬浮窗条件: session 为空或 benchEnabled 为 false");
+      }
+    }, 1500);
+  } else {
+    // 离开选人阶段，关闭悬浮窗
+    showBenchOverlay(false);
+  }
 });
+
+// 动态监听选人会话变化，双重保证在大乱斗模式（板凳席开启）时自动拉起悬浮窗
+watch(() => store.champSelectSession, async (session) => {
+  if (isOverlayWindow.value) return;
+  console.log("[bench-debug] watch(session) 触发：session 存在 =", !!session, "benchEnabled =", session?.benchEnabled);
+  if (store.gamePhase === "ChampSelect" && session && session.benchEnabled) {
+    console.log("[bench-debug] watch(session) 条件满足，准备开启悬浮窗...");
+    await showBenchOverlay();
+  }
+}, { deep: true });
 
 function handleReconnect() {
   initLcuListeners();
@@ -414,7 +467,13 @@ async function handleClose() {
 </script>
 
 <template>
-  <div class="app-layout">
+  <!-- 如果是悬浮窗窗口，仅渲染悬浮窗组件 -->
+  <div v-if="isOverlayWindow" class="overlay-container">
+    <BenchOverlay />
+  </div>
+
+  <!-- 否则渲染常规的主程序界面 -->
+  <div v-else class="app-layout">
     <!-- Toast -->
     <Transition name="toast">
       <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">{{ toast.message }}</div>
@@ -761,6 +820,14 @@ body {
   color: var(--text-color);
   overflow: hidden;
   user-select: none;
+}
+
+/* 悬浮窗容器：全透明背景，无滚动 */
+.overlay-container {
+  width: 100vw;
+  height: 100vh;
+  background: transparent !important;
+  overflow: hidden;
 }
 
 /* 美化全局滚动条 */

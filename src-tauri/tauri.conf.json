@@ -20,6 +20,19 @@
         "decorations": false,
         "visible": false,
         "devtools": true
+      },
+      {
+        "label": "bench-overlay",
+        "url": "index.html?window=bench-overlay",
+        "title": "Yuumi - ARAM Bench",
+        "width": 550,
+        "height": 70,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "visible": false,
+        "skipTaskbar": true
       }
     ],
     "security": {

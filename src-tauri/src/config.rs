@@ -171,6 +171,10 @@ pub struct FunctionsConfig {
     /// 隐藏云顶之弈模式（默认隐藏）
     #[serde(default = "default_true")]
     pub hide_tft: bool,
+
+    /// 大乱斗板凳席悬浮窗（默认开启）
+    #[serde(default = "default_true")]
+    pub enable_bench_overlay: bool,
 }
 
 impl Default for FunctionsConfig {
@@ -220,6 +224,7 @@ impl Default for FunctionsConfig {
             lcu_user_id: String::new(),
             upload_enabled: true,
             hide_tft: true,
+            enable_bench_overlay: true,
         }
     }
 }
