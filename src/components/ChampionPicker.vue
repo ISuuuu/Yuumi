@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from "vue";
-import { lcuRequest } from "../api/lcu";
 import LcuImage from "./LcuImage.vue";
+import {
+  fetchChampions,
+  fetchKeywords,
+  getCachedChampions,
+  getCachedKeywords,
+  type ChampionEntry,
+} from "../utils/championCache";
 
 const props = defineProps<{
   modelValue: number[];
@@ -12,18 +18,12 @@ const emit = defineEmits<{
   (e: "update:modelValue", value: number[]): void;
 }>();
 
-interface ChampionEntry {
-  id: number;
-  name: string;
-  iconPath: string;
-}
-
-const champions = ref<ChampionEntry[]>([]);
-const loading = ref(true);
+const champions = ref<ChampionEntry[]>(getCachedChampions() || []);
+const tencentKeywords = ref<Record<number, string>>(getCachedKeywords() || {});
+const loading = ref(champions.value.length === 0);
 const searchQuery = ref("");
 const showPicker = ref(false);
 const searchInputRef = ref<HTMLInputElement | null>(null);
-const tencentKeywords = ref<Record<number, string>>({});
 
 const selected = computed(() => props.modelValue || []);
 
@@ -52,107 +52,22 @@ const selectedChampions = computed(() => {
   return selected.value.map((id) => map.get(id)).filter(Boolean) as ChampionEntry[];
 });
 
-async function loadChampions() {
-  if (champions.value.length > 0) return;
-  loading.value = true;
-  
-  let success = false;
-  let rawData: any = null;
-
-  // 尝试 1: champion-summary.json (标准轻量汇总)
-  try {
-    const resp = await lcuRequest<any>("GET", "/lol-game-data/assets/v1/champion-summary.json");
-    if (resp.success && resp.data) {
-      rawData = resp.data;
-      success = true;
-      console.log("Yuumi - 成功通过 champion-summary.json 获取英雄列表");
-    }
-  } catch (e) {
-    console.error("Yuumi - 通过 champion-summary.json 获取失败:", e);
-  }
-
-  // 尝试 2: champions.json (常规备选)
-  if (!success) {
-    try {
-      const resp = await lcuRequest<any>("GET", "/lol-game-data/assets/v1/champions.json");
-      if (resp.success && resp.data) {
-        rawData = resp.data;
-        success = true;
-        console.log("Yuumi - 成功通过 champions.json 获取英雄列表");
-      }
-    } catch (e) {
-      console.error("Yuumi - 通过 champions.json 获取失败:", e);
-    }
-  }
-
-  // 解析并格式化数据，兼容数组和键值对字典结构
-  if (success && rawData) {
-    let list: any[] = [];
-    if (Array.isArray(rawData)) {
-      list = rawData;
-    } else if (typeof rawData === "object" && rawData !== null) {
-      list = Object.values(rawData);
-    }
-
-    if (list.length > 0) {
-      champions.value = list
-        .filter((c: any) => c && c.id > 0)
-        .map((c: any) => ({
-          id: c.id,
-          name: c.name || c.alias || `#${c.id}`,
-          iconPath: c.squarePortraitPath || `/lol-game-data/assets/v1/champion-icons/${c.id}.png`,
-        }))
-        .sort((a: ChampionEntry, b: ChampionEntry) => a.name.localeCompare(b.name, "zh"));
-      console.log(`Yuumi - 成功渲染了 ${champions.value.length} 个英雄`);
-    } else {
-      console.error("Yuumi - 提取的英雄列表为空");
-    }
-  } else {
-    console.error("Yuumi - 所有英雄端点请求均失败");
-  }
-  
+onMounted(async () => {
+  const [list, keywords] = await Promise.all([
+    fetchChampions(),
+    fetchKeywords(),
+  ]);
+  champions.value = list;
+  tencentKeywords.value = keywords;
   loading.value = false;
-}
-
-// 异步加载腾讯的英雄关键字（用于支持中文拼音和别称搜索）
-async function loadTencentKeywords() {
-  try {
-    const res = await fetch("https://game.gtimg.cn/images/lol/act/img/js/heroList/hero_list.js");
-    if (res.ok) {
-      const data = await res.json();
-      if (data && Array.isArray(data.hero)) {
-        const map: Record<number, string> = {};
-        for (const h of data.hero) {
-          const id = Number(h.heroId);
-          if (id > 0) {
-            map[id] = (h.keywords || "") + "," + (h.title || "") + "," + (h.alias || "");
-          }
-        }
-        // 补充 Python 项目里的额外自定义别名（Smolder, Naafiri, Milio, K'Sante 等较新英雄的戏称）
-        if (map[901]) map[901] += ",小火龙";
-        if (map[950]) map[950] += ",狗,那亚菲利";
-        if (map[902]) map[902] += ",丁真,米利欧";
-        if (map[897]) map[897] += ",黑龙,奎桑提";
-        
-        tencentKeywords.value = map;
-        console.log("Yuumi - 成功加载腾讯英雄别称/拼音检索库");
-      }
-    }
-  } catch (e) {
-    console.warn("Yuumi - 载入腾讯别称接口失败 (将回退到默认本地搜索):", e);
-  }
-}
-
-onMounted(() => {
-  loadChampions();
-  loadTencentKeywords();
 });
 
-// 监听弹窗打开状态，自动聚焦输入框并重置搜索词，且触发加载英雄列表（防初次未连接失败）
+// 监听弹窗打开状态，自动聚焦输入框并重置搜索词
 watch(showPicker, (newVal) => {
   if (newVal) {
     searchQuery.value = "";
-    loadChampions();
+    // 确保数据已加载（缓存命中时立即返回）
+    fetchChampions().then(list => { champions.value = list; });
     nextTick(() => {
       searchInputRef.value?.focus();
     });
