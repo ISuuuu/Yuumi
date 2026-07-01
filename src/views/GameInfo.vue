@@ -787,7 +787,7 @@ watch(activeTab, () => loadAllPlayers());
 .game-info {
   padding: 1rem 1.5rem 1rem 0.6rem;
   background-color: transparent;
-  height: 100%;
+  flex: 1;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;

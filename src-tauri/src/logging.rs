@@ -18,6 +18,7 @@ struct RotatingFileWriter {
     current_index: u32,
     current_size: u64,
     file: Option<File>,
+    is_first_open: bool,
 }
 
 impl RotatingFileWriter {
@@ -32,6 +33,7 @@ impl RotatingFileWriter {
             current_index: 0,
             current_size: 0,
             file: None,
+            is_first_open: true,
         }
     }
 
@@ -41,6 +43,18 @@ impl RotatingFileWriter {
             format!("{}_{}.{}", self.basename, date, self.suffix)
         } else {
             format!("{}_{}-{}.{}", self.basename, date, index, self.suffix)
+        }
+    }
+
+    fn find_next_unused_index(&self, date: &str) -> u32 {
+        let mut index = 0;
+        loop {
+            let name = self.make_filename(date, index);
+            let path = self.dir.join(&name);
+            if !path.exists() {
+                return index;
+            }
+            index += 1;
         }
     }
 
@@ -92,6 +106,10 @@ impl RotatingFileWriter {
         }
 
         if self.file.is_none() {
+            if self.is_first_open {
+                self.is_first_open = false;
+                self.current_index = self.find_next_unused_index(&self.current_date);
+            }
             self.open_file()?;
         }
 
