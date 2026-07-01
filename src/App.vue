@@ -364,6 +364,7 @@ watch(() => store.isConnected, (connected) => {
   } else {
     summoner.value = null;
     platformId.value = "";
+    mapSideLabel.value = ""; // 断开连接时清空队伍阵营信息
     // 断开连接时回到首页
     currentPage.value = "home";
   }
@@ -421,8 +422,27 @@ watch(gamePhase, (phase: string) => {
       }
       setTitle(`Yuumi · ${label}`);
     })();
+  } else if (phase === "GameStart" || phase === "InProgress") {
+    // 游戏加载或进行中时，如果已经存了红蓝方标识，则标题保持带红蓝方的格式，否则尝试再异步拉取一次（如中途重启）
+    if (mapSideLabel.value) {
+      setTitle(`Yuumi · ${label} - ${mapSideLabel.value}`);
+    } else {
+      (async () => {
+        try {
+          const side = await invoke<string | null>("get_map_side");
+          if (side) {
+            const sideLabel = side === "blue" ? "蓝色方" : "红色方";
+            mapSideLabel.value = sideLabel;
+            setTitle(`Yuumi · ${label} - ${sideLabel}`);
+            return;
+          }
+        } catch { /* ignore */ }
+        setTitle(`Yuumi · ${label}`);
+      })();
+    }
   } else {
-    mapSideLabel.value = ""; // 离开选人阶段时清除队伍信息
+    // 离开活跃对局（如 Lobby, None, EndOfGame 等）时清除阵营数据并复原标题
+    mapSideLabel.value = "";
     setTitle(title);
   }
 

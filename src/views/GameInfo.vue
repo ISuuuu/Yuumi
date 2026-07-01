@@ -419,6 +419,16 @@ async function loadFromGameflowSession() {
     const allyTeam = isTeamOne ? teamOne : teamTwo;
     const enemyTeam = isTeamOne ? teamTwo : teamOne;
 
+    // 迁移 ChampSelect 阶段已加载的己方数据（key: cellId → summonerId）
+    // 此时内存中的 gameflowMyTeam 仍保留着选人阶段的旧席位快照，避免依赖已置空的 store.champSelectSession
+    if (gameflowMyTeam.value && gameflowMyTeam.value.length > 0) {
+      for (const p of gameflowMyTeam.value) {
+        if (p.summonerId && p.cellId !== undefined && playerData.value[p.cellId]) {
+          playerData.value[p.summonerId] = playerData.value[p.cellId];
+        }
+      }
+    }
+
     // 将 gameflow session 的数据注入队伍列表
     // 使用 summonerId 作为 cellId（gameflow 无 cellId 字段）
     gameflowMyTeam.value = allyTeam.map((p: any) => ({
@@ -440,17 +450,6 @@ async function loadFromGameflowSession() {
       localStorage.setItem("yuumi_last_gameflow_my_team", JSON.stringify(gameflowMyTeam.value));
       localStorage.setItem("yuumi_last_gameflow_their_team", JSON.stringify(gameflowTheirTeam.value));
     } catch { /* ignore */ }
-
-    // 迁移 ChampSelect 阶段已加载的己方数据（key: cellId → summonerId）
-    // 避免 GameStart 时重新拉取，防止玩家列表闪烁
-    const champSession = store.champSelectSession;
-    if (champSession?.myTeam) {
-      for (const p of champSession.myTeam) {
-        if (p.summonerId && p.cellId !== undefined && playerData.value[p.cellId]) {
-          playerData.value[p.summonerId] = playerData.value[p.cellId];
-        }
-      }
-    }
 
     // 并行加载双方全部玩家（己方若已迁移则 loadPlayerData 内部会跳过）
     await Promise.all([
@@ -575,6 +574,8 @@ watch(() => store.champSelectSession, (session: any) => {
   if (session && store.gamePhase === "ChampSelect") {
     loading.value = false;
     error.value = "";
+    // 实现在 ChampSelect 选人更新时就同步填充 gameflowMyTeam 列表快照，防范进入游戏加载页时数据由于 Session 销毁发生短暂的清空闪烁
+    gameflowMyTeam.value = session.myTeam || [];
     loadAllPlayers();
     // 获取组队颜色（gameflow session 在选人阶段也有 teamParticipantId）
     fetchPremadeColors();
