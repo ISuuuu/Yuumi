@@ -57,7 +57,7 @@ impl UploadQueue {
 async fn upload_worker(
     app_handle: AppHandle,
     mut rx: mpsc::Receiver<u64>,
-    _enqueued: Arc<Mutex<HashSet<u64>>>,
+    enqueued: Arc<Mutex<HashSet<u64>>>,
 ) {
     log::info!("上传 Worker 已启动");
 
@@ -71,6 +71,9 @@ async fn upload_worker(
             let raw = cfg.general.upload_api_url.clone();
             if raw.is_empty() {
                 log::warn!("对局 {} 跳过上传: 未配置上传 API 地址", game_id);
+                // 未配置 API 时也移出去重缓存，避免后续配置填上后依然被拦截无法上传
+                let mut set = enqueued.lock().await;
+                set.remove(&game_id);
                 continue;
             }
             build_upload_url(&raw)
@@ -95,9 +98,15 @@ async fn upload_worker(
             }
             Ok(Err(e)) => {
                 log::warn!("对局 {} 上传失败: {}", game_id, e);
+                // 失败时从去重集合中移出，允许后续重试
+                let mut set = enqueued.lock().await;
+                set.remove(&game_id);
             }
             Err(_) => {
                 log::warn!("对局 {} 上传超时 (30s)", game_id);
+                // 超时从去重集合中移出，允许后续重试
+                let mut set = enqueued.lock().await;
+                set.remove(&game_id);
             }
         }
     }
@@ -364,10 +373,10 @@ async fn upload_single_game(app_handle: &AppHandle, game_id: u64, upload_url: &s
         payload.participants.len()
     );
 
-    // POST 到外部 API（最多重试 2 次，使用独立的外部 HTTP Client）
+    // POST 到外部 API（最多重试 5 次，使用独立的外部 HTTP Client）
     let ext_client = external_http_client();
     let mut last_err = String::new();
-    for retry in 0..=2 {
+    for retry in 0..=5 {
         match ext_client
             .post(upload_url)
             .header("Content-Type", "application/json")
@@ -409,8 +418,8 @@ async fn upload_single_game(app_handle: &AppHandle, game_id: u64, upload_url: &s
             }
         }
 
-        if retry < 2 {
-            log::warn!("对局 {} 上传失败 ({}), 重试 {}/2", game_id, last_err, retry + 1);
+        if retry < 5 {
+            log::warn!("对局 {} 上传失败 ({}), 重试 {}/5", game_id, last_err, retry + 1);
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     }
