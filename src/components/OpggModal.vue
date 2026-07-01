@@ -8,6 +8,7 @@ import tierIcon1 from "../assets/tier/tier-1.svg";
 import tierIcon2 from "../assets/tier/tier-2.svg";
 import tierIcon3 from "../assets/tier/tier-3.svg";
 import tierIcon4 from "../assets/tier/tier-4.svg";
+import { useToast } from "../composables/useToast";
 
 // 筛选状态
 const region = ref("kr");
@@ -48,16 +49,7 @@ const perksMap = ref<Map<number, any>>(new Map());
 const championsMap = ref<Map<number, string>>(new Map());
 const opggVersion = ref<string>("");
 
-// Toast 通知状态
-const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
-  message: '', type: 'success', visible: false
-});
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
-function showToast(message: string, type: 'success' | 'error' = 'success') {
-  if (toastTimer) clearTimeout(toastTimer);
-  toast.value = { message, type, visible: true };
-  toastTimer = setTimeout(() => { toast.value.visible = false; }, 2500);
-}
+const { showToast } = useToast();
 
 // 主题监听响应
 const dataTheme = ref("light");
@@ -821,12 +813,6 @@ async function setRunePage() {
         </div>
       </div>
     </div>
-    <!-- Toast 通知 -->
-    <Transition name="toast">
-      <div v-if="toast.visible" :class="['toast-message', toast.type]">
-        {{ toast.message }}
-      </div>
-    </Transition>
   </div>
 </template>
 
@@ -1367,39 +1353,6 @@ async function setRunePage() {
 .wr-good { color: var(--win-color); }
 .wr-bad { color: var(--loss-color); }
 
-/* Toast 样式 */
-.toast-message {
-  position: fixed;
-  bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 8px 18px;
-  border-radius: 6px;
-  color: white;
-  font-size: 0.78rem;
-  font-weight: 600;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 9999;
-}
-.toast-message.success {
-  background: var(--primary-color);
-}
-.toast-message.error {
-  background: #f03e3e;
-}
-
-/* Toast 过渡效果 */
-.toast-enter-active, .toast-leave-active {
-  transition: all 0.25s ease;
-}
-.toast-enter-from {
-  opacity: 0;
-  transform: translate(-50%, 10px);
-}
-.toast-leave-to {
-  opacity: 0;
-  transform: translate(-50%, -10px);
-}
 </style>
 
 <!-- 非 scoped：CSS 变量需作用于 :root / html 元素，scoped 会加哈希导致选择器失效 -->

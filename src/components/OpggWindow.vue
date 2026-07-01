@@ -2,6 +2,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { onMounted } from "vue";
 import OpggModal from "./OpggModal.vue";
+import NaiveUIBridge from "./NaiveUIBridge.vue";
 
 function handleClose() {
   getCurrentWindow().close();
@@ -32,7 +33,14 @@ onMounted(() => {
 </script>
 
 <template>
-  <OpggModal @close="handleClose" />
+  <n-config-provider>
+    <n-message-provider>
+      <n-dialog-provider>
+        <NaiveUIBridge />
+        <OpggModal @close="handleClose" />
+      </n-dialog-provider>
+    </n-message-provider>
+  </n-config-provider>
 </template>
 
 <style>

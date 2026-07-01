@@ -3,12 +3,14 @@ import { ref, onMounted, watch, computed, provide } from "vue";
 import { useLcuStore, initLcuListeners } from "./store/lcuStore";
 import { storeToRefs } from "pinia";
 import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
-import { updateThemeColor, updateDeathColor, applyDpiScale } from "./utils/theme";
+import { updateThemeColor, updateDeathColor, applyDpiScale, toHex6 } from "./utils/theme";
 import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { SummonerDisplay, AppConfig } from "./api/lcu";
+import { darkTheme, type GlobalThemeOverrides } from "naive-ui";
+import NaiveUIBridge from "./components/NaiveUIBridge.vue";
 import Home from "./views/Home.vue";
 import Career from "./views/Career.vue";
 import Search from "./views/Search.vue";
@@ -33,6 +35,33 @@ function applyThemeMode(mode: string) {
   }
 }
 
+// 水晶极光主题覆盖（动态响应系统主题色）
+const themeOverrides = computed<GlobalThemeOverrides>(() => {
+  const customColor = appConfig.value?.Personalization?.ThemeColor
+    ? toHex6(appConfig.value.Personalization.ThemeColor)
+    : "#a78bfa";
+  
+  return {
+    common: {
+      primaryColor: customColor,
+      primaryColorHover: customColor + "d9", // 85% alpha hover
+      primaryColorPressed: customColor + "a6", // 65% alpha pressed
+      borderRadius: "10px",
+    },
+    Card: {
+      color: "rgba(255, 255, 255, 0.15)",
+      borderColor: "rgba(255, 255, 255, 0.2)",
+    },
+    Dialog: {
+      color: "rgba(255, 255, 255, 0.25)",
+      borderColor: "rgba(255, 255, 255, 0.2)",
+    },
+    Button: {
+      textColorPrimary: "#ffffff",
+    },
+  };
+});
+
 const store = useLcuStore();
 const { gamePhase } = storeToRefs(store);
 const currentPage = ref("home");
@@ -50,15 +79,20 @@ const isOverlayWindow = ref(window.location.search.includes("window=bench-overla
 // 自动更新弹窗
 const updateInfo = ref<UpdateInfo | null>(null);
 
-// Toast 通知
-const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
-  message: '', type: 'success', visible: false
-});
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
+// Toast 通知（通过 Naive UI Message API）
 function showToast(message: string, type: 'success' | 'error' = 'success') {
-  if (toastTimer) clearTimeout(toastTimer);
-  toast.value = { message, type, visible: true };
-  toastTimer = setTimeout(() => { toast.value.visible = false; }, 2500);
+  try {
+    const msg = (window as any).$message;
+    if (msg) {
+      if (type === 'error') {
+        msg.error(message);
+      } else {
+        msg.success(message);
+      }
+    }
+  } catch (e) {
+    console.warn("[Toast] Naive UI message not available yet:", e);
+  }
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -79,6 +113,22 @@ const PHASE_LABELS: Record<string, string> = {
 const navigateSearchPayload = ref<{ name: string; gameId: number | null } | null>(null);
 
 provide("navigateSearchPayload", navigateSearchPayload);
+
+const isSystemDark = ref(window.matchMedia("(prefers-color-scheme: dark)").matches);
+onMounted(() => {
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const handler = (e: MediaQueryListEvent) => {
+    isSystemDark.value = e.matches;
+  };
+  media.addEventListener("change", handler);
+});
+
+const isDarkTheme = computed(() => {
+  const mode = appConfig.value?.Personalization?.ThemeMode || "Auto";
+  if (mode === "Dark") return true;
+  if (mode === "Light") return false;
+  return isSystemDark.value;
+});
 
 // 供子组件跳转页面
 function navigateTo(page: string) {
@@ -468,6 +518,11 @@ async function handleClose() {
 </script>
 
 <template>
+  <n-config-provider :theme-overrides="themeOverrides" :theme="isDarkTheme ? darkTheme : null">
+    <n-message-provider>
+      <n-dialog-provider>
+        <NaiveUIBridge />
+
   <!-- 如果是悬浮窗窗口，仅渲染悬浮窗组件 -->
   <div v-if="isOverlayWindow" class="overlay-container">
     <BenchOverlay />
@@ -475,10 +530,6 @@ async function handleClose() {
 
   <!-- 否则渲染常规的主程序界面 -->
   <div v-else class="app-layout">
-    <!-- Toast -->
-    <Transition name="toast">
-      <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">{{ toast.message }}</div>
-    </Transition>
 
     <!-- 自动更新弹窗 -->
     <UpdateDialog
@@ -642,7 +693,7 @@ async function handleClose() {
     <!-- 右侧内容区域 -->
     <main class="content-wrapper">
       <!-- GameInfo 用 v-show 保持状态，切页面不清空数据 -->
-      <div v-show="currentPage === 'gameinfo'" style="height:100%;overflow-y:auto;">
+      <div v-show="currentPage === 'gameinfo'" style="flex:1;display:flex;flex-direction:column;overflow-y:auto;min-height:0;">
         <GameInfo />
       </div>
       <template v-if="currentPage !== 'gameinfo'">
@@ -676,9 +727,192 @@ async function handleClose() {
     </main>
     </div>
   </div>
+      </n-dialog-provider>
+    </n-message-provider>
+  </n-config-provider>
 </template>
 
 <style>
+/* 全局 Naive UI 折叠面板卡片化定制与完美右对齐 */
+.collapse-card {
+  padding: 0 !important;
+  border: 1px solid var(--settings-card-border, var(--border-color)) !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  background: var(--settings-card-bg, var(--card-bg)) !important;
+  margin-bottom: 12px !important; /* 增加卡片底部间距 */
+  box-shadow: var(--shadow-sm) !important;
+}
+.collapse-card .n-collapse-item__header {
+  padding: 16px 24px !important;
+  font-size: 0.88rem !important;
+  font-weight: bold !important;
+  color: var(--text-color) !important;
+  transition: background-color 0.25s !important;
+  display: flex !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+.collapse-card .n-collapse-item__header:hover {
+  background-color: var(--settings-card-bg-hover, var(--card-bg-hover)) !important;
+}
+.collapse-card .n-collapse-item__header-main {
+  flex: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+.collapse-card .n-collapse-item__header-extra {
+  margin-left: auto !important;
+  margin-right: 12px !important;
+  display: none !important; /* 完全隐藏自带的以使手写插槽对齐生效 */
+}
+.collapse-card .n-collapse-item__content {
+  padding: 20px 48px !important;
+  border-top: 1px dashed var(--border-color) !important;
+  background-color: rgba(0, 0, 0, 0.015) !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+}
+.collapse-card .n-collapse-item__content-inner {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+}
+
+.setting-label {
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+}
+
+.collapse-card .n-color-picker {
+  width: 100px !important;
+  flex-shrink: 0 !important;
+}
+
+/* 统一的手写头部 flex 排版布局，确保 100% 撑开并右对齐状态文本 */
+.collapse-header-wrapper {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  width: 100% !important;
+  flex: 1 !important;
+  padding-right: 8px !important;
+}
+.collapse-left {
+  display: flex !important;
+  align-items: center !important;
+  gap: 16px !important;
+}
+.collapse-left-simple {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 !important;
+}
+.collapse-right-status {
+  flex-shrink: 0 !important;
+  margin-left: 12px !important;
+  color: var(--primary-color) !important;
+  font-weight: 600 !important;
+}
+
+/* 设置与工具页面中的输入/按钮行右对齐重写 */
+.input-row {
+  display: flex !important;
+  width: 100% !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+/* 1. 外观装饰统一归并 (卡片化底色与内缩边距) */
+.setting-input-row,
+.setting-row,
+.path-actions,
+.color-pickers-row,
+.reset-row,
+.setting-picker-row {
+  background: var(--settings-row-bg) !important;
+  border: 1px solid var(--settings-row-border) !important;
+  padding: 12px 20px !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.01) !important;
+  box-sizing: border-box !important;
+  margin-bottom: 0 !important;
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}
+.setting-input-row:hover,
+.setting-row:hover,
+.path-actions:hover,
+.color-pickers-row:hover,
+.reset-row:hover,
+.setting-picker-row:hover {
+  background: var(--settings-row-bg-hover) !important;
+  border-color: var(--settings-row-border-hover) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02) !important;
+  transform: translateY(-0.5px);
+}
+
+/* 2. 布局特性各自保留 */
+.setting-input-row,
+.setting-row {
+  display: flex !important;
+  width: 100% !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 16px !important;
+}
+.setting-row.justify-end {
+  justify-content: flex-end !important;
+}
+.path-actions {
+  display: flex !important;
+  width: 100% !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 12px !important;
+}
+.color-pickers-row {
+  display: flex !important;
+  width: 100% !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 16px !important;
+  flex-wrap: wrap !important;
+}
+.reset-row {
+  display: flex !important;
+  width: 100% !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+}
+.setting-picker-row {
+  display: flex !important;
+  width: 100% !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+}
+.setting-picker-row .champion-picker {
+  width: 100% !important;
+}
+.setting-picker-row .picker-trigger {
+  justify-content: flex-end !important;
+}
+.setting-picker-row .selected-chips {
+  flex: none !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+}
+
 :root {
   --primary-color: #00d2c4;
   --primary-color-hover: #00b3a7;
@@ -726,6 +960,12 @@ async function handleClose() {
   --shadow-md: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 8px -1px rgba(0, 0, 0, 0.03);
   --shadow-lg: 0 20px 25px -5px rgba(0,0,0,0.08), 0 10px 10px -5px rgba(0,0,0,0.04);
   --glass-filter: blur(20px) saturate(190%);
+
+  /* Settings UI 亮色子行卡片变量 */
+  --settings-row-bg: rgba(255, 255, 255, 0.45);
+  --settings-row-bg-hover: rgba(255, 255, 255, 0.75);
+  --settings-row-border: rgba(0, 0, 0, 0.04);
+  --settings-row-border-hover: rgba(0, 0, 0, 0.08);
 }
 
 [data-theme="dark"] {
@@ -778,6 +1018,12 @@ async function handleClose() {
   --settings-card-border-hover: rgba(0, 210, 196, 0.4);
   --settings-collapse-bg: rgba(17, 24, 39, 0.8);
   --settings-separator: rgba(255, 255, 255, 0.04);
+
+  /* Settings UI 暗色子行卡片变量 */
+  --settings-row-bg: rgba(255, 255, 255, 0.04);
+  --settings-row-bg-hover: rgba(255, 255, 255, 0.08);
+  --settings-row-border: rgba(255, 255, 255, 0.03);
+  --settings-row-border-hover: rgba(255, 255, 255, 0.08);
 }
 
 [data-theme="light"] {
@@ -793,6 +1039,12 @@ async function handleClose() {
   --settings-card-border-hover: rgba(0, 210, 196, 0.5);
   --settings-collapse-bg: rgba(243, 244, 246, 0.8);
   --settings-separator: rgba(0, 0, 0, 0.04);
+
+  /* Settings UI 亮色子行卡片变量 */
+  --settings-row-bg: rgba(255, 255, 255, 0.45);
+  --settings-row-bg-hover: rgba(255, 255, 255, 0.75);
+  --settings-row-border: rgba(0, 0, 0, 0.04);
+  --settings-row-border-hover: rgba(0, 0, 0, 0.08);
 }
 
 * {
@@ -1184,8 +1436,10 @@ body {
 
 /* 右侧内容区域 */
 .content-wrapper {
+  display: flex;
+  flex-direction: column;
   flex: 1;
-  height: 100%;
+  min-height: 0;
   overflow-y: auto;
   background-color: transparent;
 }
@@ -1347,17 +1601,4 @@ body {
   color: var(--text-color);
 }
 
-/* Toast */
-.toast {
-  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-  padding: 10px 24px; border-radius: 8px; font-size: 0.82rem;
-  font-weight: 600; color: white; z-index: 9999;
-  box-shadow: var(--shadow-md); pointer-events: none;
-}
-.toast-success { background-color: var(--primary-color); }
-.toast-error { background-color: var(--loss-color); }
-.toast-enter-active { transition: all 0.25s ease-out; }
-.toast-leave-active { transition: all 0.2s ease-in; }
-.toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
-.toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 </style>

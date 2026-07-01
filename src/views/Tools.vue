@@ -7,29 +7,14 @@ import { useLcuStore } from "../store/lcuStore";
 import ChampionPicker from "../components/ChampionPicker.vue";
 import SpellPicker from "../components/SpellPicker.vue";
 import LcuImage from "../components/LcuImage.vue";
+import { useToast } from "../composables/useToast";
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 const store = useLcuStore();
 const loading = ref(false);
 
-// Toast 通知
-const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
-  message: '', type: 'success', visible: false
-});
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
+const { showToast } = useToast();
 
-function showToast(message: string, type: 'success' | 'error' = 'success') {
-  if (toastTimer) clearTimeout(toastTimer);
-  toast.value = { message, type, visible: true };
-  toastTimer = setTimeout(() => { toast.value.visible = false; }, 2000);
-}
-
-// 折叠面板状态
-const activeCollapse = ref<string | null>(null);
-
-function toggleCollapse(panelName: string) {
-  activeCollapse.value = activeCollapse.value === panelName ? null : panelName;
-}
 
 // 自动选人/禁人/技能分路配置展示状态
 const hoverActiveLane = ref<'default' | 'top' | 'jug' | 'mid' | 'bot' | 'sup'>('default');
@@ -63,7 +48,7 @@ function closeAllDropdowns() {
   showSpoofTierDropdown.value = false;
   showSpoofDivisionDropdown.value = false;
 }
-const currentGameModeName = computed(() => GAME_MODES.find(m => m.id === config.value?.Functions?.DefaultGameMode)?.name || '未知');
+
 const SPOOF_QUEUE_LABELS: Record<string, string> = { RANKED_TFT: '云顶之弈', RANKED_SOLO_5x5: '单双排位', RANKED_FLEX_SR: '灵活排位' };
 const SPOOF_TIER_LABELS: Record<string, string> = { UNRANKED: '未定级', CHALLENGER: '最强王者', GRANDMASTER: '傲世宗师', MASTER: '超凡大师', DIAMOND: '璀璨钻石', EMERALD: '流光翡翠', PLATINUM: '华贵铂金', GOLD: '荣耀黄金', SILVER: '不屈白银', BRONZE: '英勇黄铜', IRON: '坚韧黑铁' };
 const bgChampion = ref<number[]>([]);
@@ -497,12 +482,6 @@ async function handleToggleLockGameSettings() {
 
 <template>
   <div class="tools-view">
-    <!-- Toast 通知 -->
-    <Transition name="toast">
-      <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">
-        {{ toast.message }}
-      </div>
-    </Transition>
 
     <div v-if="!config" class="tip-container">
       <div class="loading-spinner"></div>
@@ -519,128 +498,111 @@ async function handleToggleLockGameSettings() {
       <div class="group-header">英雄选择</div>
 
       <!-- 自动接受对局 -->
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('autoaccept')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                <polyline points="22 4 12 14.01 9 11.01"></polyline>
-              </svg>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="autoaccept">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">自动接受对局</h3>
+                  <span class="card-desc">在你设置的秒数之后自动接受对局匹配</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">
+                  {{ config.Functions.EnableAutoAcceptMatching 
+                    ? `已启用，延迟: ${config.Functions.AutoAcceptMatchingDelay} 秒` 
+                    : '未启用' 
+                  }}
+                </span>
+              </div>
             </div>
-            <div class="title-container">
-              <h3 class="card-title">自动接受对局</h3>
-              <span class="card-desc">在你设置的秒数之后自动接受对局匹配</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">
-              {{ config.Functions.EnableAutoAcceptMatching 
-                ? `已启用，延迟: ${config.Functions.AutoAcceptMatchingDelay} 秒` 
-                : '未启用' 
-              }}
-            </span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'autoaccept' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'autoaccept'" class="collapse-content">
+          </template>
           <div class="setting-row">
             <span class="setting-label">在对局找到后接受对局前延迟的秒数:</span>
-            <input type="number" v-model.number="config.Functions.AutoAcceptMatchingDelay" class="number-input" min="0" max="11" @change="triggerAutoSave" />
+            <n-input-number v-model:value="config.Functions.AutoAcceptMatchingDelay" :min="0" :max="11" @update:value="triggerAutoSave" style="width:120px" size="small" />
           </div>
           <div class="setting-row justify-end">
-            <div :class="['toggle-switch', config.Functions.EnableAutoAcceptMatching ? 'on' : 'off']" @click="config.Functions.EnableAutoAcceptMatching = !config.Functions.EnableAutoAcceptMatching; triggerAutoSave()">
-              <span class="toggle-text">{{ config.Functions.EnableAutoAcceptMatching ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
+            <n-switch v-model:value="config.Functions.EnableAutoAcceptMatching" @update:value="triggerAutoSave" />
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 自动接受交换请求 -->
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('autoswap')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="8" y1="6" x2="21" y2="6"></line>
-                <line x1="8" y1="12" x2="21" y2="12"></line>
-                <line x1="8" y1="18" x2="21" y2="18"></line>
-                <line x1="3" y1="6" x2="3.01" y2="6"></line>
-                <line x1="3" y1="12" x2="3.01" y2="12"></line>
-                <line x1="3" y1="18" x2="3.01" y2="18"></line>
-              </svg>
+      <!-- 自动接受交换请求 -->
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="autoswap">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="8" y1="6" x2="21" y2="6"></line>
+                    <line x1="8" y1="12" x2="21" y2="12"></line>
+                    <line x1="8" y1="18" x2="21" y2="18"></line>
+                    <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                    <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                    <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">自动接受交换请求</h3>
+                  <span class="card-desc">自动接受队友的交换楼层或英雄的请求</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">
+                  {{ (config.Functions.AutoAcceptCeilSwap || config.Functions.AutoAcceptChampTrade) ? '已启用' : '未启用' }}
+                </span>
+              </div>
             </div>
-            <div class="title-container">
-              <h3 class="card-title">自动接受交换请求</h3>
-              <span class="card-desc">自动接受队友的交换楼层或英雄的请求</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">
-              {{ (config.Functions.AutoAcceptCeilSwap || config.Functions.AutoAcceptChampTrade) ? '已启用' : '未启用' }}
-            </span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'autoswap' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'autoswap'" class="collapse-content">
+          </template>
           <div class="setting-row">
             <span class="setting-label">自动接受楼层交换请求:</span>
-            <div :class="['toggle-switch', config.Functions.AutoAcceptCeilSwap ? 'on' : 'off']" @click="config.Functions.AutoAcceptCeilSwap = !config.Functions.AutoAcceptCeilSwap; triggerAutoSave()">
-              <span class="toggle-text">{{ config.Functions.AutoAcceptCeilSwap ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
+            <n-switch v-model:value="config.Functions.AutoAcceptCeilSwap" @update:value="triggerAutoSave" />
           </div>
           <div class="setting-row">
             <span class="setting-label">自动接受英雄交换请求:</span>
-            <div :class="['toggle-switch', config.Functions.AutoAcceptChampTrade ? 'on' : 'off']" @click="config.Functions.AutoAcceptChampTrade = !config.Functions.AutoAcceptChampTrade; triggerAutoSave()">
-              <span class="toggle-text">{{ config.Functions.AutoAcceptChampTrade ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
+            <n-switch v-model:value="config.Functions.AutoAcceptChampTrade" @update:value="triggerAutoSave" />
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 自动亮起/选用英雄 -->
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('autohover')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="9 11 12 14 22 4"></polyline>
-                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-              </svg>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="autohover">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 11 12 14 22 4"></polyline>
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">自动选用/预选英雄</h3>
+                  <span class="card-desc">在你进入英雄选择时自动亮起/预选英雄</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">{{ config.Functions.EnableAutoHoverChampion ? '已启用' : '未启用' }}</span>
+              </div>
             </div>
-            <div class="title-container">
-              <h3 class="card-title">自动选用/预选英雄</h3>
-              <span class="card-desc">在你进入英雄选择时自动亮起/预选英雄</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">{{ config.Functions.EnableAutoHoverChampion ? '已启用' : '未启用' }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'autohover' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'autohover'" class="collapse-content">
+          </template>
           <div class="setting-row">
             <span class="setting-label">启用自动亮起:</span>
-            <div :class="['toggle-switch', config.Functions.EnableAutoHoverChampion ? 'on' : 'off']" @click="config.Functions.EnableAutoHoverChampion = !config.Functions.EnableAutoHoverChampion; triggerAutoSave()">
-              <span class="toggle-text">{{ config.Functions.EnableAutoHoverChampion ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
+            <n-switch v-model:value="config.Functions.EnableAutoHoverChampion" @update:value="triggerAutoSave" />
           </div>
           <div class="setting-row">
             <span class="setting-label">在结束时确认选择 (防秒退):</span>
-            <div :class="['toggle-switch', config.Functions.AutoSelectConfirmOnTimeout ? 'on' : 'off']" @click="config.Functions.AutoSelectConfirmOnTimeout = !config.Functions.AutoSelectConfirmOnTimeout; triggerAutoSave()">
-              <span class="toggle-text">{{ config.Functions.AutoSelectConfirmOnTimeout ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
+            <n-switch v-model:value="config.Functions.AutoSelectConfirmOnTimeout" @update:value="triggerAutoSave" />
           </div>
           
           <!-- 分路选择选项卡 -->
@@ -663,50 +625,43 @@ async function handleToggleLockGameSettings() {
             <ChampionPicker v-else-if="hoverActiveLane === 'bot'" v-model="config.Functions.AutoSelectChampionBot" :maxCount="1" @update:modelValue="onPickerChange" />
             <ChampionPicker v-else-if="hoverActiveLane === 'sup'" v-model="config.Functions.AutoSelectChampionSup" :maxCount="1" @update:modelValue="onPickerChange" />
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 自动禁用英雄 -->
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('autoban')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                <line x1="9" y1="9" x2="15" y2="15"></line>
-                <line x1="15" y1="9" x2="9" y2="15"></line>
-              </svg>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="autoban">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="9" y1="9" x2="15" y2="15"></line>
+                    <line x1="15" y1="9" x2="9" y2="15"></line>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">自动禁用英雄</h3>
+                  <span class="card-desc">在你的禁用环节开始时自动禁用英雄</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">{{ config.Functions.EnableAutoBanChampion ? '已启用' : '未启用' }}</span>
+              </div>
             </div>
-            <div class="title-container">
-              <h3 class="card-title">自动禁用英雄</h3>
-              <span class="card-desc">在你的禁用环节开始时自动禁用英雄</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">{{ config.Functions.EnableAutoBanChampion ? '已启用' : '未启用' }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'autoban' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'autoban'" class="collapse-content">
+          </template>
           <div class="setting-row">
             <span class="setting-label">禁用环节自动禁用设定英雄:</span>
-            <div :class="['toggle-switch', config.Functions.EnableAutoBanChampion ? 'on' : 'off']" @click="config.Functions.EnableAutoBanChampion = !config.Functions.EnableAutoBanChampion; triggerAutoSave()">
-              <span class="toggle-text">{{ config.Functions.EnableAutoBanChampion ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
+            <n-switch v-model:value="config.Functions.EnableAutoBanChampion" @update:value="triggerAutoSave" />
           </div>
           <div class="setting-row">
             <span class="setting-label">避开队友已预选的英雄 (假禁用):</span>
-            <div :class="['toggle-switch', config.Functions.PretendBan ? 'on' : 'off']" @click="config.Functions.PretendBan = !config.Functions.PretendBan; triggerAutoSave()">
-              <span class="toggle-text">{{ config.Functions.PretendBan ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
+            <n-switch v-model:value="config.Functions.PretendBan" @update:value="triggerAutoSave" />
           </div>
           <div class="setting-row">
             <span class="setting-label">自动禁用前等待延迟 (秒):</span>
-            <input type="number" v-model.number="config.Functions.AutoBanDelay" class="number-input" min="0" max="15" step="0.5" @change="triggerAutoSave" />
+            <n-input-number v-model:value="config.Functions.AutoBanDelay" :min="0" :max="15" :step="0.5" @update:value="triggerAutoSave" style="width:120px" size="small" />
           </div>
 
           <!-- 分路选择选项卡 -->
@@ -729,39 +684,35 @@ async function handleToggleLockGameSettings() {
             <ChampionPicker v-else-if="banActiveLane === 'bot'" v-model="config.Functions.AutoBanChampionBot" :maxCount="1" @update:modelValue="onPickerChange" />
             <ChampionPicker v-else-if="banActiveLane === 'sup'" v-model="config.Functions.AutoBanChampionSup" :maxCount="1" @update:modelValue="onPickerChange" />
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 自动设置召唤师技能 -->
-      <div class="collapse-item">
-        <div class="collapse-header" @click="toggleCollapse('autospells')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                <polyline points="2 17 12 22 22 17"></polyline>
-                <polyline points="2 12 12 17 22 12"></polyline>
-              </svg>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="autospells">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                    <polyline points="2 17 12 22 22 17"></polyline>
+                    <polyline points="2 12 12 17 22 12"></polyline>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">自动设置召唤师技能</h3>
+                  <span class="card-desc">当你的英雄选择开始时自动设置召唤师技能</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">{{ config.Functions.EnableAutoSetSpells ? '已启用' : '未启用' }}</span>
+              </div>
             </div>
-            <div class="title-container">
-              <h3 class="card-title">自动设置召唤师技能</h3>
-              <span class="card-desc">当你的英雄选择开始时自动设置召唤师技能</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">{{ config.Functions.EnableAutoSetSpells ? '已启用' : '未启用' }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'autospells' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'autospells'" class="collapse-content">
+          </template>
           <div class="setting-row">
             <span class="setting-label">锁定英雄后自动写入配置好的技能组:</span>
-            <div :class="['toggle-switch', config.Functions.EnableAutoSetSpells ? 'on' : 'off']" @click="config.Functions.EnableAutoSetSpells = !config.Functions.EnableAutoSetSpells; triggerAutoSave()">
-              <span class="toggle-text">{{ config.Functions.EnableAutoSetSpells ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
+            <n-switch v-model:value="config.Functions.EnableAutoSetSpells" @update:value="triggerAutoSave" />
           </div>
 
           <!-- 分路选择选项卡 -->
@@ -784,8 +735,8 @@ async function handleToggleLockGameSettings() {
             <SpellPicker v-else-if="spellActiveLane === 'bot'" v-model="config.Functions.AutoSetSummonerSpellBot" @update:modelValue="onPickerChange" />
             <SpellPicker v-else-if="spellActiveLane === 'sup'" v-model="config.Functions.AutoSetSummonerSpellSup" @update:modelValue="onPickerChange" />
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 大乱斗板凳席悬浮窗 -->
       <div class="card-item border-bottom">
@@ -836,94 +787,107 @@ async function handleToggleLockGameSettings() {
       </div>
 
       <!-- 自动创建大厅 -->
-      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showGameModeDropdown }]">
-        <div class="collapse-header" @click="toggleCollapse('createlobby')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                <polyline points="9 22 9 12 15 12 15 22"></polyline>
-              </svg>
+      <!-- 自动创建大厅 -->
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="createlobby">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">自动创建大厅</h3>
+                  <span class="card-desc">启动 LOL 客户端后自动创建默认模式的大厅</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">
+                  {{ config?.Functions.EnableAutoCreateLobby
+                    ? `已启用: ${GAME_MODES.find(m => m.id === config?.Functions.DefaultGameMode)?.name || '未知模式'}`
+                    : '未启用'
+                  }}
+                </span>
+              </div>
             </div>
-            <div class="title-container">
-              <h3 class="card-title">自动创建大厅</h3>
-              <span class="card-desc">启动 LOL 客户端后自动创建默认模式的大厅</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">
-              {{ config?.Functions.EnableAutoCreateLobby
-                ? `已启用: ${GAME_MODES.find(m => m.id === config?.Functions.DefaultGameMode)?.name || '未知模式'}`
-                : '未启用'
-              }}
-            </span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'createlobby' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'createlobby'" class="collapse-content">
+          </template>
           <div class="setting-row">
             <span class="setting-label">客户端引导就绪后自动拉入指定大厅房间:</span>
-            <div :class="['toggle-switch', config.Functions.EnableAutoCreateLobby ? 'on' : 'off']" @click="config.Functions.EnableAutoCreateLobby = !config.Functions.EnableAutoCreateLobby; triggerAutoSave()">
-              <span class="toggle-text">{{ config.Functions.EnableAutoCreateLobby ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
+            <n-switch v-model:value="config.Functions.EnableAutoCreateLobby" @update:value="triggerAutoSave" />
           </div>
           <div class="setting-row">
             <span class="setting-label">默认游戏模式:</span>
-            <div class="dropdown-trigger" :class="{ disabled: !config.Functions.EnableAutoCreateLobby }" @click.stop="config.Functions.EnableAutoCreateLobby && (showGameModeDropdown = !showGameModeDropdown)">
-              <span>{{ currentGameModeName }}</span>
-              <svg :class="['arrow-icon', { expanded: showGameModeDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-              <div v-if="showGameModeDropdown" class="dropdown-menu" @click.stop>
-                <div v-for="mode in GAME_MODES" :key="mode.id" :class="['dropdown-item', { active: config.Functions.DefaultGameMode === mode.id }]" @click="config.Functions.DefaultGameMode = mode.id; triggerAutoSave(); showGameModeDropdown = false">{{ mode.name }}</div>
-              </div>
-            </div>
+            <n-select
+              v-model:value="config.Functions.DefaultGameMode"
+              :options="GAME_MODES.map(m => ({ label: m.name, value: m.id }))"
+              :disabled="!config.Functions.EnableAutoCreateLobby"
+              @update:value="triggerAutoSave"
+              style="width: 140px;"
+              size="small"
+            />
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 观战 -->
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('spectate')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-              </svg>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="spectate">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">观战</h3>
+                  <span class="card-desc">观战同大区玩家正在进行的实时游戏</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">点击展开</span>
+              </div>
             </div>
-            <div class="title-container">
-              <h3 class="card-title">观战</h3>
-              <span class="card-desc">观战同大区玩家正在进行的实时游戏</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">点击展开</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'spectate' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'spectate'" class="collapse-content">
+          </template>
           <div class="setting-row">
             <span class="setting-label">观战召唤师名称:</span>
-            <div class="input-with-button">
-              <input v-model="spectateSummonerName" placeholder="输入要观战的召唤师名称..." class="text-input" />
-              <button class="apply-btn" @click="handleSpectate" :disabled="!spectateSummonerName.trim()">观战</button>
-            </div>
+            <n-input
+              v-model:value="spectateSummonerName"
+              placeholder="输入要观战的召唤师名称..."
+              clearable
+              style="max-width: 300px;"
+            >
+              <template #suffix>
+                <n-button
+                  size="small"
+                  type="primary"
+                  :disabled="!spectateSummonerName.trim()"
+                  @click="handleSpectate"
+                >
+                  观战
+                </n-button>
+              </template>
+            </n-input>
           </div>
           <div class="setting-row">
             <span class="setting-label">观战方式:</span>
-            <div class="input-with-button">
-              <select v-model="spectateMethod" class="text-input" style="cursor: pointer;">
-                <option value="LCU">LCU API</option>
-                <option value="CMD">CMD</option>
-              </select>
-            </div>
+            <n-select
+              v-model:value="spectateMethod"
+              :options="[
+                { label: 'LCU API', value: 'LCU' },
+                { label: 'CMD', value: 'CMD' }
+              ]"
+              style="width: 120px;"
+              size="small"
+            />
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 锁定游戏设置 -->
       <div class="card-item">
@@ -988,60 +952,74 @@ async function handleToggleLockGameSettings() {
       <div class="group-header">个人主页</div>
 
       <!-- 个人签名 -->
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('signature')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 20h9"></path>
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-              </svg>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="signature">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20h9"></path>
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">个人签名</h3>
+                  <span class="card-desc">修改你个人卡片的签名</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">点击展开</span>
+              </div>
             </div>
-            <div class="title-container">
-              <h3 class="card-title">个人签名</h3>
-              <span class="card-desc">修改你个人卡片的签名</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'signature' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'signature'" class="collapse-content">
+          </template>
           <div class="setting-row">
             <span class="setting-label">输入新的个性化签名:</span>
-            <div class="input-with-button">
-              <input v-model="statusInput" placeholder="输入新的个性化签名..." class="text-input" />
-              <button class="apply-btn" @click="handleApplyStatus" :disabled="loading || !statusInput.trim()">应用</button>
-            </div>
+            <n-input
+              v-model:value="statusInput"
+              placeholder="输入新的个性化签名..."
+              clearable
+              style="max-width: 300px;"
+              size="small"
+            >
+              <template #suffix>
+                <n-button
+                  size="small"
+                  type="primary"
+                  :disabled="loading || !statusInput.trim()"
+                  @click="handleApplyStatus"
+                >
+                  应用
+                </n-button>
+              </template>
+            </n-input>
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 个人主页背景 -->
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('profilebg')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                <polyline points="21 15 16 10 5 21"></polyline>
-              </svg>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="profilebg">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">个人主页背景</h3>
+                  <span class="card-desc">修改你个人主页背景皮肤图片</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">点击展开</span>
+              </div>
             </div>
-            <div class="title-container">
-              <h3 class="card-title">个人主页背景</h3>
-              <span class="card-desc">修改你个人主页背景皮肤图片</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'profilebg' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'profilebg'" class="collapse-content">
+          </template>
           <div class="setting-row no-border">
             <span class="setting-label">选择英雄并更换皮肤背景:</span>
           </div>
@@ -1063,104 +1041,100 @@ async function handleToggleLockGameSettings() {
               <div class="preview-info-box">
                 <span class="preview-title">已选背景皮肤</span>
                 <span class="preview-skin-name">{{ currentSelectedSkin?.name }}</span>
-                <button class="select-skin-btn" @click="openSkinModal">更换背景皮肤</button>
+                <n-button size="small" type="primary" @click="openSkinModal">更换背景皮肤</n-button>
               </div>
             </div>
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 段位展示 -->
-      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showSpoofQueueDropdown || showSpoofTierDropdown || showSpoofDivisionDropdown }]">
-        <div class="collapse-header" @click="toggleCollapse('rankdisplay')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
-                <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
-                <path d="M4 22h16"></path>
-                <path d="M10 14.66V17c0 .55-.45 1-1 1H4v2h16v-2h-5c-.55 0-1-.45-1-1v-2.34"></path>
-                <path d="M12 2a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z"></path>
-              </svg>
-            </div>
-            <div class="title-container">
-              <h3 class="card-title">段位展示</h3>
-              <span class="card-desc">修改你个人卡片显示的段位</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'rankdisplay' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'rankdisplay'" class="collapse-content">
-          <div class="setting-row">
-            <span class="setting-label">选择排位队列模式:</span>
-            <div class="dropdown-trigger" @click.stop="showSpoofQueueDropdown = !showSpoofQueueDropdown">
-              <span>{{ SPOOF_QUEUE_LABELS[spoofQueue] || spoofQueue }}</span>
-              <svg :class="['arrow-icon', { expanded: showSpoofQueueDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-              <div v-if="showSpoofQueueDropdown" class="dropdown-menu" @click.stop>
-                <div :class="['dropdown-item', { active: spoofQueue === 'RANKED_TFT' }]" @click="spoofQueue = 'RANKED_TFT'; showSpoofQueueDropdown = false">云顶之弈</div>
-                <div :class="['dropdown-item', { active: spoofQueue === 'RANKED_SOLO_5x5' }]" @click="spoofQueue = 'RANKED_SOLO_5x5'; showSpoofQueueDropdown = false">单双排位</div>
-                <div :class="['dropdown-item', { active: spoofQueue === 'RANKED_FLEX_SR' }]" @click="spoofQueue = 'RANKED_FLEX_SR'; showSpoofQueueDropdown = false">灵活排位</div>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="rankdisplay">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+                    <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+                    <path d="M4 22h16"></path>
+                    <path d="M10 14.66V17c0 .55-.45 1-1 1H4v2h16v-2h-5c-.55 0-1-.45-1-1v-2.34"></path>
+                    <path d="M12 2a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z"></path>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">段位展示</h3>
+                  <span class="card-desc">修改你个人卡片显示的段位</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">点击展开</span>
               </div>
             </div>
+          </template>
+          <div class="setting-row">
+            <span class="setting-label">选择排位队列模式:</span>
+            <n-select
+              v-model:value="spoofQueue"
+              :options="Object.entries(SPOOF_QUEUE_LABELS).map(([k, v]) => ({ label: v, value: k }))"
+              style="width: 140px;"
+              size="small"
+            />
           </div>
           <div class="setting-row">
             <span class="setting-label">段位与级数等级:</span>
             <div class="rank-select-group">
-              <div class="dropdown-trigger" @click.stop="showSpoofTierDropdown = !showSpoofTierDropdown">
-                <span>{{ SPOOF_TIER_LABELS[spoofTier] || spoofTier }}</span>
-                <svg :class="['arrow-icon', { expanded: showSpoofTierDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                <div v-if="showSpoofTierDropdown" class="dropdown-menu" @click.stop>
-                  <div v-for="t in ['UNRANKED','CHALLENGER','GRANDMASTER','MASTER','DIAMOND','EMERALD','PLATINUM','GOLD','SILVER','BRONZE','IRON']" :key="t" :class="['dropdown-item', { active: spoofTier === t }]" @click="spoofTier = t; showSpoofTierDropdown = false">{{ SPOOF_TIER_LABELS[t] }}</div>
-                </div>
-              </div>
-              <div class="dropdown-trigger" :class="{ disabled: ['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier) }" @click.stop="!['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier) && (showSpoofDivisionDropdown = !showSpoofDivisionDropdown)">
-                <span>{{ ['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier) ? '-' : spoofDivision }}</span>
-                <svg :class="['arrow-icon', { expanded: showSpoofDivisionDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                <div v-if="showSpoofDivisionDropdown" class="dropdown-menu" @click.stop>
-                  <div v-for="d in ['I','II','III','IV']" :key="d" :class="['dropdown-item', { active: spoofDivision === d }]" @click="spoofDivision = d; showSpoofDivisionDropdown = false">{{ d }}</div>
-                </div>
-              </div>
-              <button class="apply-btn" @click="handleApplyRankSpoof" :disabled="loading">应用</button>
+              <n-select
+                v-model:value="spoofTier"
+                :options="['UNRANKED','CHALLENGER','GRANDMASTER','MASTER','DIAMOND','EMERALD','PLATINUM','GOLD','SILVER','BRONZE','IRON'].map(t => ({ label: SPOOF_TIER_LABELS[t], value: t }))"
+                style="width: 130px;"
+                size="small"
+              />
+              <n-select
+                v-model:value="spoofDivision"
+                :options="['I','II','III','IV'].map(d => ({ label: d, value: d }))"
+                :disabled="['UNRANKED','MASTER','GRANDMASTER','CHALLENGER'].includes(spoofTier)"
+                style="width: 80px;"
+                size="small"
+              />
+              <n-button size="small" type="primary" @click="handleApplyRankSpoof" :disabled="loading">应用</n-button>
             </div>
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 在线状态 -->
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('onlinestate')">
-          <div class="collapse-left">
-            <div class="icon-container">
-              <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
-              </svg>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="onlinestate">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left">
+                <div class="icon-container">
+                  <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+                  </svg>
+                </div>
+                <div class="title-container">
+                  <h3 class="card-title">在线状态</h3>
+                  <span class="card-desc">修改你的在线状态</span>
+                </div>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">点击展开</span>
+              </div>
             </div>
-            <div class="title-container">
-              <h3 class="card-title">在线状态</h3>
-              <span class="card-desc">修改你的在线状态</span>
-            </div>
-          </div>
-          <div class="collapse-right">
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'onlinestate' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'onlinestate'" class="collapse-content">
+          </template>
           <div class="setting-row">
             <span class="setting-label">选择当前呈报的状态:</span>
             <div class="btn-group">
-              <button class="status-btn online" @click="handleApplyAvailability('chat')" :disabled="loading">在线</button>
-              <button class="status-btn away" @click="handleApplyAvailability('away')" :disabled="loading">离开</button>
-              <button class="status-btn offline" @click="handleApplyAvailability('offline')" :disabled="loading">隐身</button>
+              <n-button class="status-btn online" size="small" @click="handleApplyAvailability('chat')" :disabled="loading">在线</n-button>
+              <n-button class="status-btn away" size="small" @click="handleApplyAvailability('away')" :disabled="loading">离开</n-button>
+              <n-button class="status-btn offline" size="small" @click="handleApplyAvailability('offline')" :disabled="loading">隐身</n-button>
             </div>
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 卸下勋章 -->
       <div class="card-item border-bottom">
@@ -1524,7 +1498,7 @@ async function handleToggleLockGameSettings() {
 
 .collapse-content {
   border-top: 1px solid var(--settings-separator);
-  padding: 14px 20px 16px;
+  padding: 14px 36px 16px;
   animation: slideDown 0.2s ease-out;
   background-color: rgba(0, 0, 0, 0.02);
   border-bottom-left-radius: 12px;
@@ -2198,48 +2172,6 @@ async function handleToggleLockGameSettings() {
 .confirm-action-btn:hover {
   background: var(--primary-color-hover);
   box-shadow: 0 6px 16px var(--primary-color-alpha-40);
-}
-
-/* Toast 通知 */
-.toast {
-  position: fixed;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 10px 24px;
-  border-radius: 8px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: white;
-  z-index: 9999;
-  box-shadow: var(--shadow-md);
-  pointer-events: none;
-}
-
-.toast-success {
-  background-color: var(--primary-color);
-}
-
-.toast-error {
-  background-color: var(--loss-color);
-}
-
-.toast-enter-active {
-  transition: all 0.25s ease-out;
-}
-
-.toast-leave-active {
-  transition: all 0.2s ease-in;
-}
-
-.toast-enter-from {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-12px);
-}
-
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-8px);
 }
 
 .lane-tab-group {

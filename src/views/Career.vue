@@ -590,7 +590,7 @@ function formatTime(ts: number): string {
 .career {
   padding: 1rem 1.5rem 1rem 0.6rem;
   background-color: transparent;
-  height: 100%;
+  flex: 1;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -899,14 +899,16 @@ function formatTime(ts: number): string {
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  background-color: var(--card-bg);
+  background-color: var(--settings-collapse-bg, var(--card-bg)) !important;
+  backdrop-filter: blur(15px) !important;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   margin-bottom: 1rem;
   box-shadow: var(--shadow-sm);
   transition: all 0.25s ease;
-  position: relative;
-  z-index: 10;
+  position: sticky;
+  top: 0;
+  z-index: 100 !important;
 }
 
 .recent-summary-bar:hover {
