@@ -60,6 +60,9 @@ function searchPlayerBySummonerId(summonerId: number, displayName: string) {
   if (!summonerId) return;
   pendingSummonerId.value = summonerId;
   searchName.value = displayName || String(summonerId);
+  // 重置上一个人的对局详情，为新玩家数据腾出空间并确保重新加载第一局
+  selectedGame.value = null;
+  selectedGameId.value = null;
   doSearch();
 }
 
@@ -210,14 +213,7 @@ async function doSearch() {
   if (!searchName.value.trim()) return;
   searching.value = true;
   error.value = "";
-  summoner.value = null;
-  matches.value = [];
-  allMatchesSearch.value = [];
-  loadedGameIndex.value = 0;
-  selectedGame.value = null;
-  selectedGameId.value = null;
-  currentPageNum.value = 1;
-  uploadedGameIds.value = new Set();
+  // 保留旧数据作为模糊背景，等拉取成功后再覆盖，防止界面生硬闪烁
 
   try {
     const name = searchName.value.trim();
@@ -242,8 +238,22 @@ async function doSearch() {
 
     if (!resp.success || !resp.data) {
       error.value = resp.error || "未找到该召唤师";
+      summoner.value = null;
+      matches.value = [];
+      allMatchesSearch.value = [];
+      selectedGame.value = null;
+      selectedGameId.value = null;
       return;
     }
+
+    // 成功后，开始准备赋新值前，清空旧的分页/详情等局部变量
+    allMatchesSearch.value = [];
+    loadedGameIndex.value = 0;
+    selectedGame.value = null;
+    selectedGameId.value = null;
+    currentPageNum.value = 1;
+    uploadedGameIds.value = new Set();
+
     const data = resp.data;
     summoner.value = {
       accountId: data.accountId ?? 0,
@@ -268,9 +278,18 @@ async function doSearch() {
 
     if (summoner.value.puuid) {
       await loadMatchHistoryList();
+      // 双重保障：如果在查询新人数据后，确认第一局战绩正确载入，强制调用 selectMatch 载入右侧详情
+      if (matches.value.length > 0) {
+        await selectMatch(matches.value[0].gameId);
+      }
     }
   } catch (e: any) {
     error.value = e.toString();
+    summoner.value = null;
+    matches.value = [];
+    allMatchesSearch.value = [];
+    selectedGame.value = null;
+    selectedGameId.value = null;
   } finally {
     searching.value = false;
   }
@@ -725,188 +744,204 @@ const gameDetails = computed(() => {
       <div v-if="error" class="error">{{ error }}</div>
 
       <!-- 分栏对局面板 -->
-      <div v-if="summoner && matches.length > 0" class="panel-layout">
-        <!-- 左侧：迷你对局卡片列表 -->
-        <div class="left-match-list-panel">
-          <div class="mini-match-list">
-            <div
-              v-for="m in filteredMatches"
-              :key="m.gameId"
-              :class="['mini-match-card', m.win ? 'win' : 'lose', { selected: selectedGameId === m.gameId }]"
-              @click="selectMatch(m.gameId)"
-            >
-              <div class="mini-avatar">
-                <LcuImage :src="m.championIconUrl" alt="champ" />
-              </div>
-              <div class="mini-info">
-                <span class="mini-mode">{{ m.name }}</span>
-                <span class="mini-time-kda">
-                  {{ m.shortTime.split(' ')[0] }} &nbsp;&nbsp;
-                  {{ m.kills }}/<span class="death-red">{{ m.deaths }}</span>/{{ m.assists }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 翻页控制 -->
-          <div class="pagination">
-            <button class="page-btn" @click="handlePrevPage" :disabled="currentPageNum <= 1">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
-            <span class="page-num">{{ currentPageNum }}</span>
-            <button class="page-btn" @click="handleNextPage" :disabled="!hasMore">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-          </div>
-        </div>
-
-        <!-- 右侧：对局详情 -->
-        <div class="right-detail-panel">
-          <div v-if="gameLoading && !gameDetails" class="detail-loading">
-            <div class="loading-spinner"></div>
-            <span>拉取对局详情数据中...</span>
-          </div>
-
-          <div v-show="gameDetails" class="detail-content">
-            <!-- 头部大 Banner -->
-            <div v-if="gameDetails" :class="['detail-banner', gameDetails.win ? 'win' : 'lose']">
-              <div class="banner-main">
-                <div class="banner-map-icon">
-                  <img :src="gameDetails.mapIconUrl" alt="map" />
+      <!-- 分栏对局面板容器 -->
+      <div class="panel-layout-container">
+        <div class="panel-layout">
+          <!-- 左侧：迷你对局卡片列表 -->
+          <div class="left-match-list-panel">
+            <div v-if="summoner && matches.length > 0" class="mini-match-list">
+              <div
+                v-for="m in filteredMatches"
+                :key="m.gameId"
+                :class="['mini-match-card', m.win ? 'win' : 'lose', { selected: selectedGameId === m.gameId }]"
+                @click="selectMatch(m.gameId)"
+              >
+                <div class="mini-avatar">
+                  <LcuImage :src="m.championIconUrl" alt="champ" />
                 </div>
-                <div class="banner-left">
-                  <h2 :class="['banner-result', gameDetails.win ? 'win' : 'lose']">
-                    {{ gameDetails.win ? '胜利' : '失败' }}
-                  </h2>
-                  <span class="banner-subtext">
-                    {{ gameDetails.mapName }} · {{ gameDetails.queueName }} · {{ gameDetails.duration }} · {{ gameDetails.date }} · 游戏 ID: {{ gameDetails.gameId }}
+                <div class="mini-info">
+                  <span class="mini-mode">{{ m.name }}</span>
+                  <span class="mini-time-kda">
+                    {{ m.shortTime.split(' ')[0] }} &nbsp;&nbsp;
+                    {{ m.kills }}/<span class="death-red">{{ m.deaths }}</span>/{{ m.assists }}
                   </span>
                 </div>
               </div>
-              <button class="copy-btn" @click="copyGameId(gameDetails.gameId)" title="复制游戏 ID">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                </svg>
+            </div>
+            <!-- 如果没有战绩，左侧展示 10 个等高的骨架空白卡片框 -->
+            <div v-else class="mini-match-list-skeleton">
+              <div v-for="i in 10" :key="i" class="mini-match-card skeleton-card"></div>
+            </div>
+
+            <!-- 翻页控制 -->
+            <div v-if="summoner && matches.length > 0" class="pagination">
+              <button class="page-btn" @click="handlePrevPage" :disabled="currentPageNum <= 1">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <span class="page-num">{{ currentPageNum }}</span>
+              <button class="page-btn" @click="handleNextPage" :disabled="!hasMore">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
             </div>
+            <!-- 如果没有数据，渲染一个同等高度的空白骨架翻页占位框 -->
+            <div v-else class="pagination-skeleton"></div>
+          </div>
 
-            <!-- 队伍详细数据 -->
-            <div v-if="gameDetails" class="teams-container">
-              <!-- 胜方 / 败方 -->
-              <div v-for="team in [gameDetails.blue, gameDetails.red]" :key="team.win ? 'win' : 'lose'" :class="['team-block', team.win ? 'win-block' : 'lose-block']">
-                <!-- 队头资源概览 -->
-                <div :class="['team-header-bar', team.win ? 'win-bar' : 'lose-bar']">
-                  <span :class="['team-result-label', team.win ? 'win-text' : 'lose-text']">
-                    {{ team.win ? '胜方' : '败方' }}
-                  </span>
+          <!-- 右侧：对局详情 -->
+          <div class="right-detail-panel">
+            <div v-if="gameLoading && !gameDetails" class="detail-loading">
+              <div class="loading-spinner"></div>
+            </div>
 
-                  <div class="team-objectives">
-                    <span class="obj-item" title="击杀"><span class="obj-icon">⚔️</span> {{ team.kills }}</span>
-                    <span class="obj-item" title="摧毁防御塔"><span class="obj-icon">🏰</span> {{ team.towerKills }}</span>
-                    <span class="obj-item" title="摧毁水晶"><span class="obj-icon">💎</span> {{ team.inhibitorKills }}</span>
-                    <span class="obj-item" title="击杀纳什男爵"><span class="obj-icon">👾</span> {{ team.baronKills }}</span>
-                    <span class="obj-item" title="击杀巨龙"><span class="obj-icon">🐉</span> {{ team.dragonKills }}</span>
-                    <span class="obj-item" title="击杀峡谷先锋 / 虚空巢虫"><span class="obj-icon">🦀</span> {{ team.riftHeraldKills }}</span>
+            <div v-show="gameDetails" class="detail-content">
+              <!-- 头部大 Banner -->
+              <div v-if="gameDetails" :class="['detail-banner', gameDetails.win ? 'win' : 'lose']">
+                <div class="banner-main">
+                  <div class="banner-map-icon">
+                    <img :src="gameDetails.mapIconUrl" alt="map" />
                   </div>
-
-                  <div class="team-header-spacer"></div>
-
-                  <div class="team-header-right">
-                    <span class="header-items">装备</span>
-                    <span class="header-kda">KDA</span>
-                    <span class="header-cs">补CS</span>
-                    <span class="header-gold">金币</span>
-                    <span class="header-damage">伤害</span>
+                  <div class="banner-left">
+                    <h2 :class="['banner-result', gameDetails.win ? 'win' : 'lose']">
+                      {{ gameDetails.win ? '胜利' : '失败' }}
+                    </h2>
+                    <span class="banner-subtext">
+                      {{ gameDetails.mapName }} · {{ gameDetails.queueName }} · {{ gameDetails.duration }} · {{ gameDetails.date }} · 游戏 ID: {{ gameDetails.gameId }}
+                    </span>
                   </div>
                 </div>
+                <button class="copy-btn" @click="copyGameId(gameDetails.gameId)" title="复制游戏 ID">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                </button>
+              </div>
 
-                <!-- 玩家列表 -->
-                <div class="players-table">
-                  <div
-                    v-for="p in team.players"
-                    :key="p.participantId"
-                    :class="['player-row', { 'highlight-row': summoner && p.puuid === summoner.puuid, 'win-row': team.win, 'lose-row': !team.win }]"
-                  >
-                    <!-- 头像及技能/符文 -->
-                    <div class="player-avatar-col">
-                      <div class="row-avatar-box">
-                        <LcuImage :src="p.championIconUrl" class="row-avatar" alt="champ" />
-                        <span class="row-level-overlay">{{ p.level }}</span>
-                      </div>
-                      <div class="row-spell-rune-row">
-                        <div class="row-spell-col">
-                          <LcuImage :src="p.spell1Url" class="row-spell" alt="s1" />
-                          <LcuImage :src="p.spell2Url" class="row-spell" alt="s2" />
+              <!-- 队伍详细数据 -->
+              <div v-if="gameDetails" class="teams-container">
+                <!-- 胜方 / 败方 -->
+                <div v-for="team in [gameDetails.blue, gameDetails.red]" :key="team.win ? 'win' : 'lose'" :class="['team-block', team.win ? 'win-block' : 'lose-block']">
+                  <!-- 队头资源概览 -->
+                  <div :class="['team-header-bar', team.win ? 'win-bar' : 'lose-bar']">
+                    <span :class="['team-result-label', team.win ? 'win-text' : 'lose-text']">
+                      {{ team.win ? '胜方' : '败方' }}
+                    </span>
+
+                    <div class="team-objectives">
+                      <span class="obj-item" title="击杀"><span class="obj-icon">⚔️</span> {{ team.kills }}</span>
+                      <span class="obj-item" title="摧毁防御塔"><span class="obj-icon">🏰</span> {{ team.towerKills }}</span>
+                      <span class="obj-item" title="摧毁水晶"><span class="obj-icon">💎</span> {{ team.inhibitorKills }}</span>
+                      <span class="obj-item" title="击杀纳什男爵"><span class="obj-icon">👾</span> {{ team.baronKills }}</span>
+                      <span class="obj-item" title="击杀巨龙"><span class="obj-icon">🐉</span> {{ team.dragonKills }}</span>
+                      <span class="obj-item" title="击杀峡谷先锋 / 虚空巢虫"><span class="obj-icon">🦀</span> {{ team.riftHeraldKills }}</span>
+                    </div>
+
+                    <div class="team-header-spacer"></div>
+
+                    <div class="team-header-right">
+                      <span class="header-items">装备</span>
+                      <span class="header-kda">KDA</span>
+                      <span class="header-cs">补CS</span>
+                      <span class="header-gold">金币</span>
+                      <span class="header-damage">伤害</span>
+                    </div>
+                  </div>
+
+                  <!-- 玩家列表 -->
+                  <div class="players-table">
+                    <div
+                      v-for="p in team.players"
+                      :key="p.participantId"
+                      :class="['player-row', { 'highlight-row': summoner && p.puuid === summoner.puuid, 'win-row': team.win, 'lose-row': !team.win }]"
+                    >
+                      <!-- 头像及技能/符文 -->
+                      <div class="player-avatar-col">
+                        <div class="row-avatar-box">
+                          <LcuImage :src="p.championIconUrl" class="row-avatar" alt="champ" />
+                          <span class="row-level-overlay">{{ p.level }}</span>
                         </div>
-                        <div v-if="selectedGame?.queueId !== 2400" class="row-rune">
-                          <LcuImage :src="p.runeUrl" class="row-rune-img" alt="rune" />
+                        <div class="row-spell-rune-row">
+                          <div class="row-spell-col">
+                            <LcuImage :src="p.spell1Url" class="row-spell" alt="s1" />
+                            <LcuImage :src="p.spell2Url" class="row-spell" alt="s2" />
+                          </div>
+                          <div v-if="selectedGame?.queueId !== 2400" class="row-rune">
+                            <LcuImage :src="p.runeUrl" class="row-rune-img" alt="rune" />
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <!-- 名字（可点击搜索，机器人除外） -->
-                    <div class="player-name-col">
-                      <span
-                        :class="['row-name', { 'highlight-user': summoner && p.puuid === summoner.puuid, 'bot-player': !p.summonerId }]"
-                        @click="p.summonerId && searchPlayerBySummonerId(p.summonerId, p.name)"
-                        :title="p.summonerId ? `搜索 ${p.name}` : '机器人'"
-                      >
-                        {{ p.name }}
-                      </span>
-                      <span v-if="participantRanks[p.puuid]" class="row-rank-badge" :title="`段位: ${participantRanks[p.puuid]}`">
-                        {{ participantRanks[p.puuid] }}
-                      </span>
-                    </div>
+                      <!-- 名字（可点击搜索，机器人除外） -->
+                      <div class="player-name-col">
+                        <span
+                          :class="['row-name', { 'highlight-user': summoner && p.puuid === summoner.puuid, 'bot-player': !p.summonerId }]"
+                          @click="p.summonerId && searchPlayerBySummonerId(p.summonerId, p.name)"
+                          :title="p.summonerId ? `搜索 ${p.name}` : '机器人'"
+                        >
+                          {{ p.name }}
+                        </span>
+                        <span v-if="participantRanks[p.puuid]" class="row-rank-badge" :title="`段位: ${participantRanks[p.puuid]}`">
+                          {{ participantRanks[p.puuid] }}
+                        </span>
+                      </div>
 
-                    <div class="player-spacer"></div>
+                      <div class="player-spacer"></div>
 
-                    <!-- 装备栏 -->
-                    <div class="player-items-col">
-                      <div class="row-items-grid">
-                        <div v-for="idx in 6" :key="idx" class="row-item-slot">
-                          <LcuImage v-if="p.items[idx-1]" :src="p.items[idx-1]" class="row-item-img" alt="item" />
+                      <!-- 装备栏 -->
+                      <div class="player-items-col">
+                        <div class="row-items-grid">
+                          <div v-for="idx in 6" :key="idx" class="row-item-slot">
+                            <LcuImage v-if="p.items[idx-1]" :src="p.items[idx-1]" class="row-item-img" alt="item" />
+                          </div>
+                        </div>
+                        <div class="row-ward-slot">
+                          <LcuImage v-if="p.ward" :src="p.ward" class="row-item-img" alt="ward" />
                         </div>
                       </div>
-                      <div class="row-ward-slot">
-                        <LcuImage v-if="p.ward" :src="p.ward" class="row-item-img" alt="ward" />
+
+                      <!-- KDA -->
+                      <div class="player-kda-col">
+                        <span class="row-kda-text">
+                          {{ p.kills }}/<span class="death-red">{{ p.deaths }}</span>/{{ p.assists }}
+                        </span>
                       </div>
-                    </div>
 
-                    <!-- KDA -->
-                    <div class="player-kda-col">
-                      <span class="row-kda-text">
-                        {{ p.kills }}/<span class="death-red">{{ p.deaths }}</span>/{{ p.assists }}
-                      </span>
-                    </div>
+                      <!-- 补兵 -->
+                      <div class="player-cs-col">
+                        <span class="row-cs-text">{{ p.cs }}</span>
+                      </div>
 
-                    <!-- 补兵 -->
-                    <div class="player-cs-col">
-                      <span class="row-cs-text">{{ p.cs }}</span>
-                    </div>
+                      <!-- 金币 -->
+                      <div class="player-gold-col">
+                        <span class="row-gold-text">{{ p.gold.toLocaleString() }}</span>
+                      </div>
 
-                    <!-- 金币 -->
-                    <div class="player-gold-col">
-                      <span class="row-gold-text">{{ p.gold.toLocaleString() }}</span>
-                    </div>
-
-                    <!-- 伤害 -->
-                    <div class="player-damage-col">
-                      <span class="row-damage-text">{{ p.damage.toLocaleString() }}</span>
+                      <!-- 伤害 -->
+                      <div class="player-damage-col">
+                        <span class="row-damage-text">{{ p.damage.toLocaleString() }}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div v-if="!gameDetails" class="detail-empty">
-            <p>请在左侧选择一局对局查看详情</p>
+            
+            <div v-if="!gameDetails && !gameLoading" class="detail-empty"></div>
           </div>
         </div>
-      </div>
 
-      <div v-else-if="summoner && !searching" class="detail-empty">
-        <p>暂无战绩记录</p>
+        <!-- 搜索过程中的高斯模糊半透明遮罩 -->
+        <Transition name="fade">
+          <div v-if="searching" class="panel-searching-overlay">
+            <div class="overlay-glass">
+              <n-spin size="large">
+                <template #description>
+                  <span class="searching-text">正在为您读取最新对局数据...</span>
+                </template>
+              </n-spin>
+            </div>
+          </div>
+        </Transition>
       </div>
     </div>
   </div>
@@ -955,7 +990,9 @@ const gameDetails = computed(() => {
 }
 
 .search-container {
-  max-width: 1080px;
+  width: 100%;
+  max-width: 1380px;
+  box-sizing: border-box;
   margin: 0 auto;
   animation: fadeIn 0.3s ease-out;
 }
@@ -974,13 +1011,15 @@ const gameDetails = computed(() => {
   position: sticky;
   top: 0;
   z-index: 999 !important;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .search-input-wrapper {
   position: relative;
   display: flex;
   flex: 1;
-  max-width: 600px;
+  max-width: 580px;
 }
 
 /* 搜索历史下拉框 */
@@ -1037,7 +1076,7 @@ const gameDetails = computed(() => {
   border-radius: 14px;
   cursor: pointer;
   transition: all 0.2s ease-in-out;
-  max-width: 160px;
+  max-width: 260px;
   box-sizing: border-box;
 }
 
@@ -1234,6 +1273,7 @@ const gameDetails = computed(() => {
   grid-template-columns: 180px 1fr;
   gap: 16px;
   align-items: stretch;
+  animation: fadeInUp 0.45s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
 }
 
 /* 左侧迷你列表 */
@@ -1257,11 +1297,17 @@ const gameDetails = computed(() => {
   display: flex;
   align-items: center;
   padding: 10px 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
   background: var(--card-bg);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.015);
+}
+
+.mini-match-card:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 16px rgba(31, 38, 135, 0.06);
 }
 
 .mini-match-card.win {
@@ -1271,10 +1317,11 @@ const gameDetails = computed(() => {
 
 .mini-match-card.win:hover {
   background-color: var(--win-bg);
+  box-shadow: 0 6px 16px rgba(34, 197, 94, 0.12);
 }
 
 [data-theme="dark"] .mini-match-card.win:hover {
-  background-color: rgba(34, 197, 94, 0.15);
+  background-color: rgba(34, 197, 94, 0.12);
 }
 
 .mini-match-card.lose {
@@ -1284,18 +1331,21 @@ const gameDetails = computed(() => {
 
 .mini-match-card.lose:hover {
   background-color: var(--loss-bg);
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.12);
 }
 
 [data-theme="dark"] .mini-match-card.lose:hover {
-  background-color: rgba(239, 68, 68, 0.15);
+  background-color: rgba(239, 68, 68, 0.12);
 }
 
 .mini-match-card.selected.win {
   border: 2px solid var(--win-color);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.2);
 }
 
 .mini-match-card.selected.lose {
   border: 2px solid var(--loss-color);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
 }
 
 .mini-avatar {
@@ -1401,13 +1451,15 @@ const gameDetails = computed(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 640px;
+  height: 700px;
   color: var(--text-muted);
   font-size: 0.85rem;
   background: var(--card-bg);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 8px;
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.04);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
 }
 
 .loading-spinner {
@@ -1893,6 +1945,107 @@ const gameDetails = computed(() => {
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 战绩面板过渡与搜索遮罩 */
+.panel-layout-container {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel-searching-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  border-radius: 12px;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+[data-theme="dark"] .panel-searching-overlay {
+  background: rgba(10, 10, 15, 0.45);
+}
+
+.overlay-glass {
+  background: rgba(255, 255, 255, 0.65);
+  padding: 24px 40px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 16px 36px rgba(31, 38, 135, 0.08), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+[data-theme="dark"] .overlay-glass {
+  background: rgba(30, 30, 45, 0.7);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+}
+
+.searching-text {
+  color: var(--text-color);
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin-top: 8px;
+}
+
+.searching-welcome-text {
+  color: var(--text-color);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+/* 首次欢迎与加载占位 */
+.mini-match-list-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.mini-match-card.skeleton-card {
+  height: 58px;
+  box-sizing: border-box;
+  cursor: default;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.015);
+  border: 1px dashed var(--border-color);
+  box-shadow: none;
+}
+
+.pagination-skeleton {
+  height: 38px;
+  margin-top: 10px;
+  box-sizing: border-box;
+}
+
+[data-theme="dark"] .mini-match-card.skeleton-card {
+  background: rgba(255, 255, 255, 0.01);
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
