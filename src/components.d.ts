@@ -26,6 +26,7 @@ declare module 'vue' {
     NInputNumber: typeof import('naive-ui')['NInputNumber']
     NMessageProvider: typeof import('naive-ui')['NMessageProvider']
     NSelect: typeof import('naive-ui')['NSelect']
+    NSpin: typeof import('naive-ui')['NSpin']
     NSwitch: typeof import('naive-ui')['NSwitch']
     OpggModal: typeof import('./components/OpggModal.vue')['default']
     OpggWindow: typeof import('./components/OpggWindow.vue')['default']
