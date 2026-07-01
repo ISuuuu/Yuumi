@@ -5,6 +5,13 @@ import { fetchCurrentSummoner, fetchMatchHistory, fetchMatchHistorySgp, lcuReque
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 
+// 模块作用域内存缓存单例，防止频繁切换标签页触发无意义的 API 数据刷新
+let cachedSummoner: SummonerDisplay | null = null;
+let cachedMatches: MatchDisplay[] = [];
+let cachedRecentMatches: MatchDisplay[] = [];
+let cachedRankedQueues: any[] = [];
+let lastFetchedTime = 0;
+
 const store = useLcuStore();
 const summoner = ref<SummonerDisplay | null>(null);
 const matches = ref<MatchDisplay[]>([]);
@@ -54,7 +61,17 @@ const TIER_MAP: Record<string, string> = {
   CHALLENGER: "最强王者",
 };
 
-async function loadSummoner() {
+async function loadSummoner(forceRefresh = false) {
+  // 如果距离上次成功加载小于 20 秒，且已有缓存数据，且不是强刷，则直接使用缓存，不发起 API 请求
+  const now = Date.now();
+  if (!forceRefresh && cachedSummoner && (now - lastFetchedTime < 20000)) {
+    summoner.value = cachedSummoner;
+    rankedQueues.value = cachedRankedQueues;
+    matches.value = cachedMatches;
+    recentMatches.value = cachedRecentMatches;
+    return;
+  }
+
   loading.value = true;
   error.value = "";
   try {
@@ -65,7 +82,14 @@ async function loadSummoner() {
         loadMatches(summoner.value.puuid),
       ]);
       // 异步加载近期统计缓存（不阻塞页面，不 await 避免覆盖翻页数据）
-      loadRecentMatches(summoner.value.puuid);
+      await loadRecentMatches(summoner.value.puuid);
+
+      // 同步写回模块单例缓存，记录成功拉取时间
+      cachedSummoner = summoner.value;
+      cachedRankedQueues = rankedQueues.value;
+      cachedMatches = matches.value;
+      cachedRecentMatches = recentMatches.value;
+      lastFetchedTime = Date.now();
     }
   } catch (e: any) {
     error.value = e.toString();
@@ -79,6 +103,8 @@ async function loadRankedStats(puuid: string) {
     const resp = await lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${puuid}`);
     if (resp.success && resp.data && resp.data.queues) {
       rankedQueues.value = resp.data.queues;
+      // 同步写回顶级缓存
+      cachedRankedQueues = rankedQueues.value;
     }
   } catch (e) {
     console.error("获取排位段位数据失败:", e);
@@ -88,12 +114,20 @@ async function loadRankedStats(puuid: string) {
 const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_matches_cache_${puuid}`;
 
 // 公共战绩拉取函数，包含 LCU 数据滞后时的 SGP 加速降级兜底逻辑
-async function fetchMatchHistoryWithFallback(puuid: string, begIndex: number, endIndex: number): Promise<MatchDisplay[]> {
+async function fetchMatchHistoryWithFallback(
+  puuid: string,
+  begIndex: number,
+  endIndex: number,
+  isGameEndSync = false
+): Promise<MatchDisplay[]> {
   let raw = await fetchMatchHistory(puuid, begIndex, endIndex);
   const prevLatestId = recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
   const latestId = raw[0]?.gameId ?? null;
 
-  if (raw.length === 0 || (prevLatestId && latestId === prevLatestId)) {
+  // 只有当 LCU 拉出来为空，或者在游戏刚结束的自动刷新流中且最新 ID 仍为旧的最新 ID（证明 LCU 数据滞后）时，才降级到 SGP 加速拉取
+  const shouldFallback = raw.length === 0 || (isGameEndSync && prevLatestId && latestId === prevLatestId);
+
+  if (shouldFallback) {
     try {
       const sgpRaw = await fetchMatchHistorySgp(puuid, begIndex, endIndex);
       if (sgpRaw && sgpRaw.length > 0) {
@@ -107,11 +141,13 @@ async function fetchMatchHistoryWithFallback(puuid: string, begIndex: number, en
   return raw;
 }
 
-async function loadMatches(puuid: string) {
+async function loadMatches(puuid: string, isGameEndSync = false) {
   try {
     loading.value = true;
     const targetCount = careerGamesNumber.value;
-    matches.value = await fetchMatchHistoryWithFallback(puuid, 0, targetCount - 1);
+    matches.value = await fetchMatchHistoryWithFallback(puuid, 0, targetCount - 1, isGameEndSync);
+    // 同步更新顶级缓存
+    cachedMatches = matches.value;
   } catch (e) {
     console.error("获取战绩历史失败:", e);
   } finally {
@@ -119,10 +155,10 @@ async function loadMatches(puuid: string) {
   }
 }
 
-async function loadRecentMatches(puuid: string) {
+async function loadRecentMatches(puuid: string, isGameEndSync = false) {
   try {
     const targetCount = careerGamesNumber.value;
-    const fresh = await fetchMatchHistoryWithFallback(puuid, 0, targetCount);
+    const fresh = await fetchMatchHistoryWithFallback(puuid, 0, targetCount, isGameEndSync);
     updateRecentMatchesCache(puuid, fresh);
   } catch (e) {
     console.error("获取近期战绩统计失败:", e);
@@ -142,6 +178,8 @@ function updateRecentMatchesCache(puuid: string, fresh: MatchDisplay[]) {
     .slice(0, careerGamesNumber.value);
 
   recentMatches.value = merged;
+  // 同步更新顶级缓存
+  cachedRecentMatches = merged;
 
   try {
     localStorage.setItem(MATCHES_CACHE_KEY(puuid), JSON.stringify(merged));
@@ -248,6 +286,12 @@ watch(() => store.isConnected, (connected) => {
     matches.value = [];
     recentMatches.value = [];
     rankedQueues.value = [];
+    // 断开连接时，同步清空内存缓存，避免恢复连接时加载旧人的数据
+    cachedSummoner = null;
+    cachedMatches = [];
+    cachedRecentMatches = [];
+    cachedRankedQueues = [];
+    lastFetchedTime = 0;
   }
 }, { immediate: true });
 
@@ -272,9 +316,9 @@ watch(() => store.gamePhase, async (phase: string, oldPhase: string | undefined)
         await new Promise(r => setTimeout(r, 3000));
       }
       try {
-        await loadMatches(puuid);
+        await loadMatches(puuid, true);
         // 异步更新近期统计缓存
-        loadRecentMatches(puuid);
+        loadRecentMatches(puuid, true);
         const latestId = matches.value[0]?.gameId ?? null;
         if (latestId && latestId !== prevLatestId) {
           console.log(`[Career] 第 ${attempt + 1} 次重试时已发现新对局 ${latestId}`);
@@ -388,7 +432,7 @@ function formatTime(ts: number): string {
         </div>
 
         <div class="header-actions">
-          <button class="action-btn" @click="loadSummoner" :disabled="loading">刷新</button>
+          <button class="action-btn" @click="loadSummoner(true)" :disabled="loading">刷新</button>
           <button class="action-btn" @click="goToHistory" :disabled="loading">历史战绩</button>
         </div>
       </div>
