@@ -5,7 +5,7 @@ Tauri v2 + Vue 3 + TypeScript 桌面应用。
 
 ## 技术栈
 
-- **前端**: Vue 3 + TypeScript + Vite + Pinia
+- **前端**: Vue 3 + TypeScript + Vite + Pinia + Naive UI
 - **后端**: Tauri v2 (Rust)
 - **包管理**: pnpm
 
@@ -34,7 +34,8 @@ Yuumi/
 │   ├── utils/
 │   │   └── theme.ts                # 主题色动态更新
 │   ├── composables/
-│   │   └── useLcuAsset.ts          # LCU 资源路径 → data URL（缓存 + 去重）
+│   │   ├── useLcuAsset.ts          # LCU 资源路径 → data URL（缓存 + 去重）
+│   │   └── useToast.ts             # Naive UI 消息提示 Hook (多窗口安全降级)
 │   ├── assets/                     # 静态资源（图片等）
 │   ├── views/
 │   │   ├── Home.vue                # 首页（LCU 状态 + 快捷导航）
@@ -49,7 +50,8 @@ Yuumi/
 │       ├── OpggWindow.vue          # OP.GG 独立窗口组件
 │       ├── LcuImage.vue            # LCU 资源图片组件（loading/error 状态）
 │       ├── ChampionPicker.vue      # 英雄选择器（v-model: number[]）
-│       └── SpellPicker.vue         # 召唤师技能选择器（v-model: number[]）
+│       ├── SpellPicker.vue         # 召唤师技能选择器（v-model: number[]）
+│       └── NaiveUIBridge.vue       # Naive UI 全局 API 桥接组件
 ├── src-tauri/                      # Tauri/Rust 后端
 │   ├── src/
 │   │   ├── main.rs                 # Rust 入口

@@ -6,8 +6,9 @@ import { getVersion } from "@tauri-apps/api/app";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import { updateThemeColor, updateDeathColor } from "../utils/theme";
-import ColorPicker from "../components/ColorPicker.vue";
+
 import UpdateDialog, { type UpdateInfo } from "../components/UpdateDialog.vue";
+import { useToast } from "../composables/useToast";
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 
@@ -35,34 +36,12 @@ async function manualCheckUpdate() {
   }
 }
 
-// Toast 通知
-const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
-  message: '', type: 'success', visible: false
-});
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
-function showToast(message: string, type: 'success' | 'error' = 'success') {
-  if (toastTimer) clearTimeout(toastTimer);
-  toast.value = { message, type, visible: true };
-  toastTimer = setTimeout(() => { toast.value.visible = false; }, 2000);
-}
+const { showToast } = useToast();
 
-// 手风琴折叠状态管理
-const activeCollapse = ref<string | null>(null);
-function toggleCollapse(panelName: string) {
-  activeCollapse.value = activeCollapse.value === panelName ? null : panelName;
-}
+// activeCollapse and toggleCollapse are no longer needed - replaced by n-collapse
 
-// 自定义下拉状态
-const showLogLevelDropdown = ref(false);
-const showDpiDropdown = ref(false);
-const showLangDropdown = ref(false);
-const showThemeModeDropdown = ref(false);
-function closeAllDropdowns() {
-  showLogLevelDropdown.value = false;
-  showDpiDropdown.value = false;
-  showLangDropdown.value = false;
-  showThemeModeDropdown.value = false;
-}
+// activeCollapse and toggleCollapse are no longer needed - replaced by n-collapse
+
 
 // ─── 自动保存（防抖 500ms）───
 let saveDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -89,7 +68,6 @@ const signalrError = ref('');
 const unlistenFns = ref<Array<() => void>>([]);
 
 onMounted(async () => {
-  document.addEventListener("click", closeAllDropdowns);
 
   // 获取当前应用版本号
   try {
@@ -144,7 +122,6 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  document.removeEventListener("click", closeAllDropdowns);
   unlistenFns.value.forEach(fn => fn());
 });
 
@@ -200,11 +177,13 @@ async function handleRemovePath(index: number) {
 }
 
 // 修改指定路径
-async function handleEditPath(index: number, e: Event) {
+
+
+async function handleEditPathDirect(index: number, val: string) {
   if (!config.value) return;
-  const val = (e.target as HTMLInputElement).value.trim();
-  if (!val) return;
-  config.value.General.LolPath[index] = val;
+  const pathVal = val.trim();
+  if (!pathVal) return;
+  config.value.General.LolPath[index] = pathVal;
   await updateConfig(config.value);
 }
 
@@ -243,24 +222,28 @@ function toColor8(color: string): string {
   return color;
 }
 
-function onThemeColorInput(e: Event) {
-  const target = e.target as HTMLInputElement;
+
+
+function onThemeColorSelect(color: string) {
   if (config.value?.Personalization) {
-    config.value.Personalization.ThemeColor = target.value;
+    config.value.Personalization.ThemeColor = color;
   }
-  updateThemeColor(target.value);
+  updateThemeColor(color);
+  autoSave();
 }
 
-function onDeathColorInput(e: Event, field: 'LightDeathsNumberColor' | 'DarkDeathsNumberColor') {
-  const target = e.target as HTMLInputElement;
-  const color8 = toColor8(target.value);
+
+
+function onDeathColorSelect(color: string, field: 'LightDeathsNumberColor' | 'DarkDeathsNumberColor') {
+  const color8 = toColor8(color);
   if (config.value?.Personalization) {
     config.value.Personalization[field] = color8;
   }
   // 实时更新 CSS 变量
-  const light = field === 'LightDeathsNumberColor' ? target.value : toColor6(config.value?.Personalization?.LightDeathsNumberColor);
-  const dark  = field === 'DarkDeathsNumberColor'  ? target.value : toColor6(config.value?.Personalization?.DarkDeathsNumberColor);
+  const light = field === 'LightDeathsNumberColor' ? color : toColor6(config.value?.Personalization?.LightDeathsNumberColor);
+  const dark  = field === 'DarkDeathsNumberColor'  ? color : toColor6(config.value?.Personalization?.DarkDeathsNumberColor);
   updateDeathColor(light, dark);
+  autoSave();
 }
 
 const DEFAULT_COLORS = {
@@ -310,11 +293,6 @@ function applyThemeMode(mode: string) {
 
 <template>
   <div class="settings-view">
-    <!-- Toast -->
-    <Transition name="toast">
-      <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">{{ toast.message }}</div>
-    </Transition>
-
     <div v-if="!config" class="tip-container">
       <div class="loading-spinner"></div>
       <p class="tip">加载配置数据中...</p>
@@ -326,39 +304,40 @@ function applyThemeMode(mode: string) {
       <!-- 1. 功能组 -->
       <div class="group-header">功能</div>
 
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('concurrency')">
-          <div class="collapse-left">
-            <h3 class="card-title">LCU API 并发数</h3>
-            <span class="card-desc">该值越大数据加载速度越快，但越可能引起客户端闪退</span>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">当前值: {{ config.Functions.ApiConcurrencyNumber }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'concurrency' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
+      <!-- LCU API 并发数 -->
+      <div class="card-item border-bottom">
+        <div class="card-left">
+          <h3 class="card-title">LCU API 并发数</h3>
+          <span class="card-desc">该值越大数据加载速度越快，但越可能引起客户端闪退</span>
         </div>
-        <div v-show="activeCollapse === 'concurrency'" class="collapse-content">
-          <div class="input-row">
-            <input type="number" v-model.number="config.Functions.ApiConcurrencyNumber" class="number-input" min="1" max="10" @change="autoSave" />
-          </div>
+        <div class="card-right">
+          <n-input-number
+            v-model:value="config.Functions.ApiConcurrencyNumber"
+            :min="1"
+            :max="10"
+            @update:value="autoSave"
+            style="width: 140px;"
+            size="small"
+          />
         </div>
       </div>
 
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('matchcount')">
-          <div class="collapse-left">
-            <h3 class="card-title">默认对局数量</h3>
-            <span class="card-desc">调整在个人生涯界面中显示的最大对局数量</span>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">当前值: {{ config.Functions.CareerGamesNumber }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'matchcount' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
+      <!-- 默认对局数量 -->
+      <div class="card-item border-bottom">
+        <div class="card-left">
+          <h3 class="card-title">默认对局数量</h3>
+          <span class="card-desc">调整在个人生涯界面中显示的最大对局数量</span>
         </div>
-        <div v-show="activeCollapse === 'matchcount'" class="collapse-content">
-          <div class="input-row">
-            <input type="number" v-model.number="config.Functions.CareerGamesNumber" class="number-input" min="1" max="100" step="5" @change="autoSave" />
-          </div>
+        <div class="card-right">
+          <n-input-number
+            v-model:value="config.Functions.CareerGamesNumber"
+            :min="1"
+            :max="100"
+            :step="5"
+            @update:value="autoSave"
+            style="width: 140px;"
+            size="small"
+          />
         </div>
       </div>
 
@@ -368,10 +347,7 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">基于你当前游戏模式（地图/队列）筛选战绩，只显示相同模式的玩家历史数据</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Functions.GameInfoFilter ? 'on' : 'off']" @click="config.Functions.GameInfoFilter = !config.Functions.GameInfoFilter; autoSave()">
-            <span class="toggle-text">{{ config.Functions.GameInfoFilter ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.Functions.GameInfoFilter" @update:value="autoSave" />
         </div>
       </div>
 
@@ -381,10 +357,7 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">保留上一局的对局信息内容直到下一次对局开始</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Functions.EnableReserveGameinfo ? 'on' : 'off']" @click="config.Functions.EnableReserveGameinfo = !config.Functions.EnableReserveGameinfo; autoSave()">
-            <span class="toggle-text">{{ config.Functions.EnableReserveGameinfo ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.Functions.EnableReserveGameinfo" @update:value="autoSave" />
         </div>
       </div>
 
@@ -394,10 +367,7 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">在搜索界面对局详情界面中显示段位，启动该选项将影响加载界面的速度</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Functions.ShowTierInGameInfo ? 'on' : 'off']" @click="config.Functions.ShowTierInGameInfo = !config.Functions.ShowTierInGameInfo; autoSave()">
-            <span class="toggle-text">{{ config.Functions.ShowTierInGameInfo ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.Functions.ShowTierInGameInfo" @update:value="autoSave" />
         </div>
       </div>
 
@@ -410,10 +380,7 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">在英雄选择开始时自动显示 OP.GG 窗口</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Functions.AutoShowOpgg ? 'on' : 'off']" @click="config.Functions.AutoShowOpgg = !config.Functions.AutoShowOpgg; autoSave()">
-            <span class="toggle-text">{{ config.Functions.AutoShowOpgg ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.Functions.AutoShowOpgg" @update:value="autoSave" />
         </div>
       </div>
 
@@ -423,62 +390,59 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">在英雄选择时将 OP.GG 窗口置顶</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Functions.EnableOpggOnTop ? 'on' : 'off']" @click="config.Functions.EnableOpggOnTop = !config.Functions.EnableOpggOnTop; autoSave()">
-            <span class="toggle-text">{{ config.Functions.EnableOpggOnTop ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.Functions.EnableOpggOnTop" @update:value="autoSave" />
         </div>
       </div>
 
-      <div class="collapse-item">
-        <div class="collapse-header" @click="toggleCollapse('opggproxy')">
-          <div class="collapse-left">
-            <h3 class="card-title">OP.GG HTTP 代理</h3>
-            <span class="card-desc">连接 OP.GG 时启用 HTTP 代理</span>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">{{ config.General.EnableOpggProxy ? '已启用' : '未启用' }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'opggproxy' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'opggproxy'" class="collapse-content">
-          <div class="input-row align-center">
-            <div :class="['toggle-switch', config.General.EnableOpggProxy ? 'on' : 'off']" @click="config.General.EnableOpggProxy = !config.General.EnableOpggProxy; autoSave()">
-              <span class="toggle-text">{{ config.General.EnableOpggProxy ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="opggproxy">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left-simple">
+                <span class="card-title">OP.GG HTTP 代理</span>
+                <span class="card-desc">连接 OP.GG 时启用 HTTP 代理</span>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">{{ config.General.EnableOpggProxy ? '已启用' : '未启用' }}</span>
+              </div>
             </div>
-            <input v-model="config.General.OpggProxyAddr" placeholder="127.0.0.1:10809" class="text-input" :disabled="!config.General.EnableOpggProxy" @change="autoSave" />
+          </template>
+          <div class="setting-row">
+            <n-switch v-model:value="config.General.EnableOpggProxy" @update:value="autoSave" />
+            <n-input v-model:value="config.General.OpggProxyAddr" placeholder="127.0.0.1:10809" :disabled="!config.General.EnableOpggProxy" clearable @change="autoSave" style="max-width:300px" />
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 3. 通用 -->
       <div class="group-header">通用</div>
 
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('lolpath')">
-          <div class="collapse-left">
-            <h3 class="card-title">客户端路径</h3>
-            <span class="card-desc">{{ config?.General?.LolPath?.length ? `已设置 ${config.General.LolPath.length} 个路径` : '未设置' }}</span>
-          </div>
-          <div class="collapse-right">
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'lolpath' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'lolpath'" class="collapse-content">
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="lolpath">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left-simple">
+                <span class="card-title">客户端路径</span>
+                <span class="card-desc">选择或自动检测 LOL 客户端的安装路径</span>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">{{ config?.General?.LolPath?.length ? `已设置 ${config.General.LolPath.length} 个路径` : '未设置' }}</span>
+              </div>
+            </div>
+          </template>
           <!-- 已保存的路径列表 -->
           <div v-for="(path, index) in (config?.General?.LolPath || [])" :key="index" class="path-item">
-            <input class="path-input" :value="path" @change="handleEditPath(index, $event)" placeholder="客户端安装路径" />
-            <button class="path-remove-btn" @click="handleRemovePath(index)" title="删除">✕</button>
+            <n-input class="path-input" :value="path" @change="(val) => handleEditPathDirect(index, val)" placeholder="客户端安装路径" style="flex:1; margin-right:8px" />
+            <n-button size="tiny" circle @click="handleRemovePath(index)" title="删除">✕</n-button>
           </div>
           <div v-if="!config?.General?.LolPath?.length" class="path-empty">暂无已保存的客户端路径</div>
           <!-- 操作按钮 -->
           <div class="path-actions">
-            <button class="action-btn" @click="handleDetectPath">自动检测</button>
-            <button class="action-btn" @click="handleBrowseFolder">添加目录</button>
+            <n-button size="small" @click="handleDetectPath">自动检测</n-button>
+            <n-button size="small" @click="handleBrowseFolder">添加目录</n-button>
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <div class="card-item border-bottom">
         <div class="card-left">
@@ -486,10 +450,7 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">启动 Yuumi 时自动启动 LOL 客户端</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.General.EnableStartLolWithApp ? 'on' : 'off']" @click="config.General.EnableStartLolWithApp = !config.General.EnableStartLolWithApp; autoSave()">
-            <span class="toggle-text">{{ config.General.EnableStartLolWithApp ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.General.EnableStartLolWithApp" @update:value="autoSave" />
         </div>
       </div>
 
@@ -499,7 +460,7 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">删除所有游戏资源的缓存（建议在游戏资源有更新时使用）</span>
         </div>
         <div class="card-right">
-          <button class="action-btn" @click="handleClearCache">删除</button>
+          <n-button size="small" @click="handleClearCache">删除</n-button>
         </div>
       </div>
 
@@ -509,10 +470,7 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">点击右上角关闭时将程序最小化到托盘</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.General.EnableCloseToTray ? 'on' : 'off']" @click="config.General.EnableCloseToTray = !config.General.EnableCloseToTray; autoSave()">
-            <span class="toggle-text">{{ config.General.EnableCloseToTray ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch :value="!!config?.General?.EnableCloseToTray" @update:value="(val) => { if (config) { config.General.EnableCloseToTray = val; autoSave(); } }" />
         </div>
       </div>
 
@@ -522,54 +480,50 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">启动 Yuumi 后最小化窗口到任务栏托盘</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.General.EnableGameStartMinimize ? 'on' : 'off']" @click="config.General.EnableGameStartMinimize = !config.General.EnableGameStartMinimize; autoSave()">
-            <span class="toggle-text">{{ config.General.EnableGameStartMinimize ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.General.EnableGameStartMinimize" @update:value="autoSave" />
         </div>
       </div>
 
       <!-- 云端服务 -->
-      <div class="collapse-item">
-        <div class="collapse-header" @click="toggleCollapse('upload_and_signalr')">
-          <div class="collapse-left">
-            <h3 class="card-title">云端服务</h3>
-            <span class="card-desc">配置战绩自动上报、LCU 实时数据同步与查询服务</span>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">
-              {{ config.General.UploadApiUrl ? '已配置上传' : '未配置' }}
-              <template v-if="config.Functions.LcuRealtimeEnabled">
-                / 
-                <span :class="['signalr-status-badge', signalrStatus]">
-                  {{ signalrStatus === 'connected' ? '云端已连接' : signalrStatus === 'connecting' ? '云端连接中...' : signalrStatus === 'error' ? '云端连接失败' : '云端未连接' }}
+      <!-- 云端服务 -->
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="upload_and_signalr">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left-simple">
+                <span class="card-title">云端服务</span>
+                <span class="card-desc">LCU 实时数据上传及 SignalR 实时查询服务</span>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">
+                  {{ config.General.UploadApiUrl ? '已配置上传' : '未配置' }}
+                  <template v-if="config.Functions.LcuRealtimeEnabled">
+                    / 
+                    <span :class="['signalr-status-badge', signalrStatus]">
+                      {{ signalrStatus === 'connected' ? '云端已连接' : signalrStatus === 'connecting' ? '云端连接中...' : signalrStatus === 'error' ? '云端连接失败' : '云端未连接' }}
+                    </span>
+                  </template>
                 </span>
-              </template>
-            </span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'upload_and_signalr' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'upload_and_signalr'" class="collapse-content">
+              </div>
+            </div>
+          </template>
           <div class="setting-input-row">
             <span class="setting-input-label">服务器 API 地址:</span>
-            <input v-model="config.General.UploadApiUrl" placeholder="http://example.com" class="text-input" @change="if (config.Functions.LcuRealtimeEnabled && config.General.UploadApiUrl) { signalrStatus = 'connecting'; }; autoSave()" />
+            <n-input v-model:value="config.General.UploadApiUrl" placeholder="http://example.com" clearable @change="if (config.Functions.LcuRealtimeEnabled && config.General.UploadApiUrl) { signalrStatus = 'connecting'; }; autoSave()" style="max-width:300px" />
           </div>
           <div class="setting-input-row">
             <span class="setting-input-label">LCU 实时查询:</span>
-            <div :class="['toggle-switch', config.Functions.LcuRealtimeEnabled ? 'on' : 'off']" @click="config.Functions.LcuRealtimeEnabled = !config.Functions.LcuRealtimeEnabled; if (config.Functions.LcuRealtimeEnabled && config.General.UploadApiUrl) { signalrStatus = 'connecting'; } else { signalrStatus = 'disconnected'; }; autoSave()">
-              <span class="toggle-text">{{ config.Functions.LcuRealtimeEnabled ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
-            </div>
+            <n-switch v-model:value="config.Functions.LcuRealtimeEnabled" @update:value="if (config.Functions.LcuRealtimeEnabled && config.General.UploadApiUrl) { signalrStatus = 'connecting'; } else { signalrStatus = 'disconnected'; }; autoSave()" />
           </div>
           <div v-if="signalrStatus === 'error' && signalrError" class="setting-error-tip">
             连接异常: {{ signalrError }}
           </div>
           <div class="setting-input-row">
             <span class="setting-input-label">userid:</span>
-            <input v-model="config.General.SignalrUserId" placeholder="留空默认使用 lcu_user_001" class="text-input" @change="autoSave" />
+            <n-input v-model:value="config.General.SignalrUserId" placeholder="留空默认使用 lcu_user_001" clearable @change="autoSave" style="max-width:300px" />
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 隐藏云顶之弈 -->
       <div class="card-item border-bottom">
@@ -578,33 +532,31 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">在左侧菜单中隐藏 Teamfight Tactics 入口，关闭后立即生效</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Functions.HideTft ? 'on' : 'off']" @click="config.Functions.HideTft = !config.Functions.HideTft; autoSave()">
-            <span class="toggle-text">{{ config.Functions.HideTft ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.Functions.HideTft" @update:value="autoSave" />
         </div>
       </div>
 
       <!-- 4. 日志 -->
       <div class="group-header">日志</div>
 
-      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showLogLevelDropdown }]">
-        <div class="collapse-header" @click="toggleCollapse('loglevel')">
-          <div class="collapse-left">
-            <h3 class="card-title">日志等级</h3>
-            <span class="card-desc">修改 Yuumi 记录日志的等级（重启后生效）</span>
-          </div>
-          <div class="collapse-right">
-            <div class="dropdown-trigger" @click.stop="showLogLevelDropdown = !showLogLevelDropdown">
-              <span>{{ config.General.LogLevel === 0 ? 'Debug' : config.General.LogLevel === 1 ? 'Info' : 'Error' }}</span>
-              <svg :class="['arrow-icon', { expanded: showLogLevelDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-              <div v-if="showLogLevelDropdown" class="dropdown-menu" @click.stop>
-                <div :class="['dropdown-item', { active: config.General.LogLevel === 0 }]" @click="config.General.LogLevel = 0; autoSave(); showLogLevelDropdown = false">Debug</div>
-                <div :class="['dropdown-item', { active: config.General.LogLevel === 1 }]" @click="config.General.LogLevel = 1; autoSave(); showLogLevelDropdown = false">Info</div>
-                <div :class="['dropdown-item', { active: config.General.LogLevel === 2 }]" @click="config.General.LogLevel = 2; autoSave(); showLogLevelDropdown = false">Error</div>
-              </div>
-            </div>
-          </div>
+      <!-- 日志等级 -->
+      <div class="card-item border-bottom">
+        <div class="card-left">
+          <h3 class="card-title">日志等级</h3>
+          <span class="card-desc">日志写入文件记录的等级（Debug, Info, Error）</span>
+        </div>
+        <div class="card-right">
+          <n-select
+            v-model:value="config.General.LogLevel"
+            :options="[
+              { label: 'Debug', value: 0 },
+              { label: 'Info', value: 1 },
+              { label: 'Error', value: 2 }
+            ]"
+            @update:value="autoSave"
+            style="width: 120px;"
+            size="small"
+          />
         </div>
       </div>
 
@@ -614,7 +566,7 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">&lt;exe 目录&gt;/log/</span>
         </div>
         <div class="card-right">
-          <button class="action-btn" @click="handleOpenLogFolder">打开文件夹</button>
+          <n-button size="small" @click="handleOpenLogFolder">打开文件夹</n-button>
         </div>
       </div>
 
@@ -627,162 +579,193 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">窗口和表面显示半透明（仅在 Win11 上可用）</span>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Personalization.MicaEnabled ? 'on' : 'off']" @click="config.Personalization.MicaEnabled = !config.Personalization.MicaEnabled; autoSave(); invoke('set_mica_effect', { enabled: config.Personalization.MicaEnabled })">
-            <span class="toggle-text">{{ config.Personalization.MicaEnabled ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.Personalization.MicaEnabled" @update:value="autoSave(); invoke('set_mica_effect', { enabled: config.Personalization.MicaEnabled })" />
         </div>
       </div>
 
       <!-- 应用主题 -->
-      <div :class="['card-item', 'border-bottom', { 'has-dropdown-open': showThemeModeDropdown }]">
+      <div class="card-item border-bottom">
         <div class="card-left">
           <h3 class="card-title">应用主题</h3>
           <span class="card-desc">选择 Yuumi 的显示主题</span>
         </div>
         <div class="card-right">
-          <div class="dropdown-trigger" @click.stop="showThemeModeDropdown = !showThemeModeDropdown">
-            <span>
-              {{ config.Personalization.ThemeMode === 'Light' ? '浅色' :
-                 config.Personalization.ThemeMode === 'Dark' ? '深色' : '跟随系统' }}
-            </span>
-            <svg :class="['arrow-icon', { expanded: showThemeModeDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-            <div v-if="showThemeModeDropdown" class="dropdown-menu" @click.stop>
-              <div :class="['dropdown-item', { active: config.Personalization.ThemeMode === 'Light' }]" @click="if(config.Personalization.ThemeMode !== 'Light') { config.Personalization.ThemeMode = 'Light'; applyThemeMode('Light'); autoSave(); }; showThemeModeDropdown = false">浅色</div>
-              <div :class="['dropdown-item', { active: config.Personalization.ThemeMode === 'Dark' }]" @click="if(config.Personalization.ThemeMode !== 'Dark') { config.Personalization.ThemeMode = 'Dark'; applyThemeMode('Dark'); autoSave(); }; showThemeModeDropdown = false">深色</div>
-              <div :class="['dropdown-item', { active: config.Personalization.ThemeMode === 'Auto' }]" @click="if(config.Personalization.ThemeMode !== 'Auto') { config.Personalization.ThemeMode = 'Auto'; applyThemeMode('Auto'); autoSave(); }; showThemeModeDropdown = false">跟随系统</div>
-            </div>
-          </div>
+          <n-select
+            v-model:value="config.Personalization.ThemeMode"
+            :options="[
+              { label: '浅色', value: 'Light' },
+              { label: '深色', value: 'Dark' },
+              { label: '跟随系统', value: 'Auto' }
+            ]"
+            @update:value="(val) => { applyThemeMode(val); autoSave(); }"
+            style="width: 140px;"
+            size="small"
+          />
         </div>
       </div>
 
       <!-- 主题色 -->
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('themecolor')">
-          <div class="collapse-left">
-            <h3 class="card-title">主题色</h3>
-            <span class="card-desc">调整 Yuumi 的主题色</span>
-          </div>
-          <div class="collapse-right">
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'themecolor' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'themecolor'" class="collapse-content">
-          <div class="input-row align-center">
-            <label class="color-picker-label">调色盘:</label>
-            <input type="color" class="color-picker" :value="toColor6(config.Personalization.ThemeColor)" @input="onThemeColorInput" @change="autoSave" />
-          </div>
-          <div class="reset-row">
-            <button class="action-btn" @click="resetThemeColor">恢复默认</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 对局卡片颜色 -->
-      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': activeCollapse === 'cardcolors' }]">
-        <div class="collapse-header" @click="toggleCollapse('cardcolors')">
-          <div class="collapse-left">
-            <h3 class="card-title">对局卡片颜色</h3>
-            <span class="card-desc">改变对局卡片提示胜利 / 失败的颜色</span>
-          </div>
-          <div class="collapse-right">
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'cardcolors' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'cardcolors'" class="collapse-content">
-          <div class="color-pickers-row">
-            <div class="color-picker-item">
-              <label>胜利卡片:</label>
-              <ColorPicker v-model="config.Personalization.WinCardColor" @change="autoSave" />
-            </div>
-            <div class="color-picker-item">
-              <label>失败卡片:</label>
-              <ColorPicker v-model="config.Personalization.LoseCardColor" @change="autoSave" />
-            </div>
-            <div class="color-picker-item">
-              <label>重开卡片:</label>
-              <ColorPicker v-model="config.Personalization.RemakeCardColor" @change="autoSave" />
-            </div>
-          </div>
-          <div class="reset-row">
-            <button class="action-btn" @click="resetCardColors">恢复默认</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 死亡数字体颜色 -->
-      <div class="collapse-item border-bottom">
-        <div class="collapse-header" @click="toggleCollapse('deathfontcolor')">
-          <div class="collapse-left">
-            <h3 class="card-title">死亡数字体颜色</h3>
-            <span class="card-desc">改变 KDA 标签中死亡数字的字体颜色</span>
-          </div>
-          <div class="collapse-right">
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'deathfontcolor' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'deathfontcolor'" class="collapse-content">
-          <div class="color-pickers-row">
-            <div class="color-picker-item">
-              <label>浅色主题下颜色:</label>
-              <input type="color" :value="toColor6(config.Personalization.LightDeathsNumberColor)" @input="onDeathColorInput($event, 'LightDeathsNumberColor')" @change="autoSave" />
-            </div>
-            <div class="color-picker-item">
-              <label>深色主题下颜色:</label>
-              <input type="color" :value="toColor6(config.Personalization.DarkDeathsNumberColor)" @input="onDeathColorInput($event, 'DarkDeathsNumberColor')" @change="autoSave" />
-            </div>
-          </div>
-          <div class="reset-row">
-            <button class="action-btn" @click="resetDeathColors">恢复默认</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 界面缩放 -->
-      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showDpiDropdown }]">
-        <div class="collapse-header" @click.stop>
-          <div class="collapse-left">
-            <h3 class="card-title">界面缩放</h3>
-            <span class="card-desc">调整部件和字体的大小（重启后生效）</span>
-          </div>
-          <div class="collapse-right">
-            <div class="dropdown-trigger" @click.stop="showDpiDropdown = !showDpiDropdown">
-              <span>{{ config.Personalization.DpiScale === 'Auto' ? '跟随系统' : config.Personalization.DpiScale + '%' }}</span>
-              <svg :class="['arrow-icon', { expanded: showDpiDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-              <div v-if="showDpiDropdown" class="dropdown-menu" @click.stop>
-                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === 'Auto' }]" @click="if(config.Personalization.DpiScale !== 'Auto') { config.Personalization.DpiScale = 'Auto'; skipAutoSaveToast = true; autoSave(); showToast('缩放已修改，重启后生效'); }; showDpiDropdown = false">跟随系统</div>
-                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '100' }]" @click="if(config.Personalization.DpiScale !== '100') { config.Personalization.DpiScale = '100'; skipAutoSaveToast = true; autoSave(); showToast('缩放已修改，重启后生效'); }; showDpiDropdown = false">100%</div>
-                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '125' }]" @click="if(config.Personalization.DpiScale !== '125') { config.Personalization.DpiScale = '125'; skipAutoSaveToast = true; autoSave(); showToast('缩放已修改，重启后生效'); }; showDpiDropdown = false">125%</div>
-                <div :class="['dropdown-item', { active: config.Personalization.DpiScale === '150' }]" @click="if(config.Personalization.DpiScale !== '150') { config.Personalization.DpiScale = '150'; skipAutoSaveToast = true; autoSave(); showToast('缩放已修改，重启后生效'); }; showDpiDropdown = false">150%</div>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="themecolor">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left-simple">
+                <span class="card-title">主题色</span>
+                <span class="card-desc">选择 Yuumi 的全局视觉主题色</span>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">#{{ toColor6(config.Personalization.ThemeColor)?.replace('#', '') }}</span>
               </div>
             </div>
+          </template>
+          <div class="setting-row">
+            <span class="setting-label">选择调色盘颜色:</span>
+            <n-color-picker
+              :value="toColor6(config.Personalization.ThemeColor)"
+              :show-alpha="false"
+              @update:value="onThemeColorSelect"
+              style="width: 100px; flex-shrink: 0;"
+              size="small"
+            />
           </div>
+          <div class="reset-row">
+            <n-button size="small" @click="resetThemeColor">恢复默认</n-button>
+          </div>
+        </n-collapse-item>
+      </n-collapse>
+
+      <!-- 对局卡片颜色 -->
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="cardcolors">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left-simple">
+                <span class="card-title">对局卡片颜色</span>
+                <span class="card-desc">自定义胜利、失败与重开对局卡片的背景色</span>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">已设置自定义颜色</span>
+              </div>
+            </div>
+          </template>
+          <div class="setting-row">
+            <span class="setting-label">胜利对局卡片:</span>
+            <n-color-picker
+              :value="config ? toColor6(config.Personalization.WinCardColor) : ''"
+              :show-alpha="false"
+              @update:value="(val) => { if (config) { config.Personalization.WinCardColor = val; autoSave(); } }"
+              style="width: 100px; flex-shrink: 0;"
+              size="small"
+            />
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">失败对局卡片:</span>
+            <n-color-picker
+              :value="config ? toColor6(config.Personalization.LoseCardColor) : ''"
+              :show-alpha="false"
+              @update:value="(val) => { if (config) { config.Personalization.LoseCardColor = val; autoSave(); } }"
+              style="width: 100px; flex-shrink: 0;"
+              size="small"
+            />
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">重开对局卡片:</span>
+            <n-color-picker
+              :value="config ? toColor6(config.Personalization.RemakeCardColor) : ''"
+              :show-alpha="false"
+              @update:value="(val) => { if (config) { config.Personalization.RemakeCardColor = val; autoSave(); } }"
+              style="width: 100px; flex-shrink: 0;"
+              size="small"
+            />
+          </div>
+          <div class="reset-row">
+            <n-button size="small" @click="resetCardColors">恢复默认</n-button>
+          </div>
+        </n-collapse-item>
+      </n-collapse>
+
+      <!-- 死亡数字体颜色 -->
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="deathfontcolor">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left-simple">
+                <span class="card-title">死亡数字体颜色</span>
+                <span class="card-desc">针对亮色与暗色模式分别自定义死亡文字的着色</span>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">已设置自定义颜色</span>
+              </div>
+            </div>
+          </template>
+          <div class="setting-row">
+            <span class="setting-label">浅色主题死亡数字:</span>
+            <n-color-picker
+              :value="config ? toColor6(config.Personalization.LightDeathsNumberColor) : ''"
+              :show-alpha="false"
+              @update:value="(val) => onDeathColorSelect(val, 'LightDeathsNumberColor')"
+              style="width: 100px; flex-shrink: 0;"
+              size="small"
+            />
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">深色主题死亡数字:</span>
+            <n-color-picker
+              :value="config ? toColor6(config.Personalization.DarkDeathsNumberColor) : ''"
+              :show-alpha="false"
+              @update:value="(val) => onDeathColorSelect(val, 'DarkDeathsNumberColor')"
+              style="width: 100px; flex-shrink: 0;"
+              size="small"
+            />
+          </div>
+          <div class="reset-row">
+            <n-button size="small" @click="resetDeathColors">恢复默认</n-button>
+          </div>
+        </n-collapse-item>
+      </n-collapse>
+
+      <!-- 界面缩放 -->
+      <!-- 界面缩放 -->
+      <div class="card-item border-bottom">
+        <div class="card-left">
+          <h3 class="card-title">界面缩放</h3>
+          <span class="card-desc">支持调整客户端视图的 DPI 缩放大小比例</span>
+        </div>
+        <div class="card-right">
+          <n-select
+            v-model:value="config.Personalization.DpiScale"
+            :options="[
+              { label: '跟随系统', value: 'Auto' },
+              { label: '100%', value: '100' },
+              { label: '125%', value: '125' },
+              { label: '150%', value: '150' }
+            ]"
+            @update:value="() => { skipAutoSaveToast = true; autoSave(); showToast('缩放已修改，重启后生效'); }"
+            style="width: 140px;"
+            size="small"
+          />
         </div>
       </div>
 
       <!-- 语言 -->
-      <div :class="['collapse-item', 'border-bottom', { 'has-dropdown-open': showLangDropdown }]">
-        <div class="collapse-header" @click.stop>
-          <div class="collapse-left">
-            <h3 class="card-title">语言</h3>
-            <span class="card-desc">选择 Yuumi 所使用的语言（重启后生效）</span>
-          </div>
-          <div class="collapse-right">
-            <div class="dropdown-trigger" @click.stop="showLangDropdown = !showLangDropdown">
-              <span>
-                {{ config.Personalization.Language === 'Auto' ? '跟随系统' :
-                   config.Personalization.Language === 'zh_CN' ? '简体中文' :
-                   config.Personalization.Language === 'zh_TW' ? '繁體中文' : 'English' }}
-              </span>
-              <svg :class="['arrow-icon', { expanded: showLangDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-              <div v-if="showLangDropdown" class="dropdown-menu" @click.stop>
-                <div :class="['dropdown-item', { active: config.Personalization.Language === 'Auto' }]" @click="if(config.Personalization.Language !== 'Auto') { config.Personalization.Language = 'Auto'; skipAutoSaveToast = true; autoSave(); showToast('语言已保存，重启后生效'); }; showLangDropdown = false">跟随系统</div>
-                <div :class="['dropdown-item', { active: config.Personalization.Language === 'zh_CN' }]" @click="if(config.Personalization.Language !== 'zh_CN') { config.Personalization.Language = 'zh_CN'; skipAutoSaveToast = true; autoSave(); showToast('语言已保存，重启后生效'); }; showLangDropdown = false">简体中文</div>
-                <div :class="['dropdown-item', { active: config.Personalization.Language === 'zh_TW' }]" @click="if(config.Personalization.Language !== 'zh_TW') { config.Personalization.Language = 'zh_TW'; skipAutoSaveToast = true; autoSave(); showToast('语言已保存，重启后生效'); }; showLangDropdown = false">繁體中文</div>
-                <div :class="['dropdown-item', { active: config.Personalization.Language === 'en_US' }]" @click="if(config.Personalization.Language !== 'en_US') { config.Personalization.Language = 'en_US'; skipAutoSaveToast = true; autoSave(); showToast('语言已保存，重启后生效'); }; showLangDropdown = false">English</div>
-              </div>
-            </div>
-          </div>
+      <div class="card-item border-bottom">
+        <div class="card-left">
+          <h3 class="card-title">语言</h3>
+          <span class="card-desc">选择软件界面语言选项</span>
+        </div>
+        <div class="card-right">
+          <n-select
+            v-model:value="config.Personalization.Language"
+            :options="[
+              { label: '跟随系统', value: 'Auto' },
+              { label: '简体中文', value: 'zh_CN' },
+              { label: '繁體中文', value: 'zh_TW' },
+              { label: 'English', value: 'en_US' }
+            ]"
+            @update:value="() => { skipAutoSaveToast = true; autoSave(); showToast('语言已保存，重启后生效'); }"
+            style="width: 140px;"
+            size="small"
+          />
         </div>
       </div>
 
@@ -795,27 +778,21 @@ function applyThemeMode(mode: string) {
           <span class="card-desc">在 Yuumi 启动时自动检查更新</span>
         </div>
         <div class="card-right" style="flex-shrink:0; gap:10px">
-          <button
-            class="check-update-btn"
-            :disabled="checkingUpdate"
-            @click="manualCheckUpdate"
-            :title="checkingUpdate ? '检查中...' : '检查更新'"
-          >
-            <svg v-if="!checkingUpdate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
-              <path d="M21 2v6h-6"/>
-              <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-              <path d="M3 22v-6h6"/>
-              <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-            </svg>
-            <svg v-else class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
-              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-            </svg>
+          <n-button size="small" :disabled="checkingUpdate" @click="manualCheckUpdate" :title="checkingUpdate ? '检查中...' : '检查更新'">
+            <template #icon>
+              <svg v-if="!checkingUpdate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
+                <path d="M21 2v6h-6"/>
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                <path d="M3 22v-6h6"/>
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+              </svg>
+              <svg v-else class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+              </svg>
+            </template>
             {{ checkingUpdate ? '检查中...' : '检查更新' }}
-          </button>
-          <div :class="['toggle-switch', config.General.EnableCheckUpdate ? 'on' : 'off']" @click="config.General.EnableCheckUpdate = !config.General.EnableCheckUpdate; autoSave()">
-            <span class="toggle-text">{{ config.General.EnableCheckUpdate ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          </n-button>
+          <n-switch v-model:value="config.General.EnableCheckUpdate" @update:value="autoSave" />
         </div>
       </div>
 
@@ -826,27 +803,25 @@ function applyThemeMode(mode: string) {
         @dismiss="updateInfo = null"
       />
 
-      <div class="collapse-item">
-        <div class="collapse-header" @click="toggleCollapse('githubproxy')">
-          <div class="collapse-left">
-            <h3 class="card-title">GitHub HTTP 代理</h3>
-            <span class="card-desc">连接 GitHub 时启用 HTTP 代理</span>
-          </div>
-          <div class="collapse-right">
-            <span class="status-preview">{{ config.General.EnableGithubProxy ? '已启用' : '未启用' }}</span>
-            <svg :class="['arrow-icon', { expanded: activeCollapse === 'githubproxy' }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-        </div>
-        <div v-show="activeCollapse === 'githubproxy'" class="collapse-content">
-          <div class="input-row align-center">
-            <div :class="['toggle-switch', config.General.EnableGithubProxy ? 'on' : 'off']" @click="config.General.EnableGithubProxy = !config.General.EnableGithubProxy; autoSave()">
-              <span class="toggle-text">{{ config.General.EnableGithubProxy ? '开' : '关' }}</span>
-              <span class="toggle-slider"></span>
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="githubproxy">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left-simple">
+                <span class="card-title">GitHub HTTP 代理</span>
+                <span class="card-desc">软件检查与拉取版本更新时走 HTTP 代理通道</span>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">{{ config.General.EnableGithubProxy ? '已启用' : '未启用' }}</span>
+              </div>
             </div>
-            <input v-model="config.General.GithubProxyAddr" placeholder="127.0.0.1:7897" class="text-input" :disabled="!config.General.EnableGithubProxy" @change="autoSave" />
+          </template>
+          <div class="setting-row">
+            <n-input v-model:value="config.General.GithubProxyAddr" placeholder="127.0.0.1:7897" :disabled="!config.General.EnableGithubProxy" clearable @change="autoSave" style="max-width:300px" />
+            <n-switch v-model:value="config.General.EnableGithubProxy" @update:value="autoSave" />
           </div>
-        </div>
-      </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 7. 关于 -->
       <div class="group-header">关于</div>
@@ -882,31 +857,6 @@ function applyThemeMode(mode: string) {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.action-btn, .github-btn {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  color: var(--text-color);
-  padding: 6px 16px;
-  border-radius: 6px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  outline: none;
-  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  box-shadow: var(--shadow-sm);
-}
-.action-btn:hover, .github-btn:hover {
-  background: var(--hover-bg-strong);
-  border-color: var(--primary-color);
-  transform: translateY(-0.5px);
-}
-.action-btn:active, .github-btn:active {
-  background: var(--hover-bg);
-  transform: translateY(0.5px);
-}
 
 .feedback-btn {
   background: var(--win-color);
@@ -938,7 +888,7 @@ function applyThemeMode(mode: string) {
   margin: 1.8rem 0 0.6rem 6px; text-transform: uppercase; letter-spacing: 0.5px;
 }
 
-.card-item, .collapse-item {
+.card-item {
   background: var(--settings-card-bg);
   padding: 16px 24px;
   display: flex;
@@ -954,14 +904,14 @@ function applyThemeMode(mode: string) {
               transform 0.2s;
   position: relative;
 }
-.collapse-item.has-dropdown-open,
 .card-item.has-dropdown-open { z-index: 20; }
-.card-item:hover, .collapse-item:hover {
+.card-item:hover {
   border-color: var(--settings-card-border-hover);
   background-color: var(--settings-card-bg-hover);
   box-shadow: var(--card-glow-hover);
   transform: translateY(-1px);
 }
+
 /* 底部分隔线 — 卡片组内用细线分隔 */
 .card-item.border-bottom {
   border-radius: 12px 12px 0 0;
@@ -970,24 +920,12 @@ function applyThemeMode(mode: string) {
 }
 .card-item.border-bottom + .card-item { border-radius: 0; margin-top: 0; }
 .card-item.border-bottom + .card-item:last-child { border-radius: 0 0 12px 12px; }
-.collapse-item.border-bottom {
-  border-radius: 12px 12px 0 0;
-  border-bottom: 1px solid var(--settings-separator);
-  margin-bottom: 0;
-}
-.collapse-item.border-bottom + .card-item { border-radius: 0; margin-top: 0; }
-.collapse-item.border-bottom + .collapse-item { border-radius: 0; margin-top: 0; }
-.collapse-item.border-bottom + .card-item:last-child { border-radius: 0 0 12px 12px; }
-.collapse-item.border-bottom + .collapse-item:last-child { border-radius: 0 0 12px 12px; }
-/* 折叠项内部内容面板 */
-.collapse-item .collapse-content {
-  border-top: 1px solid var(--settings-separator);
-}
+/* removed */
+.card-item.border-bottom + .card-item:last-child { border-radius: 0 0 12px 12px; }
+/* removed */
 /* 分组最后的卡片恢复圆角 */
 .card-item.border-bottom:last-of-type { border-radius: 0 0 12px 12px; border-bottom: 1px solid var(--settings-separator); }
-.collapse-item.border-bottom:last-of-type { border-radius: 0 0 12px 12px; border-bottom: 1px solid var(--settings-separator); }
-/* 整体折叠项（带内容）底部有圆角 */
-.collapse-item:not(.border-bottom) { border-bottom: none; }
+/* removed */
 
 .card-left { display: flex; flex-direction: column; flex: 1; }
 .card-title { font-size: 0.88rem; font-weight: bold; color: var(--text-color); margin: 0; }
@@ -1001,46 +939,13 @@ function applyThemeMode(mode: string) {
 
 .github-icon { width: 16px; height: 16px; }
 
-.toggle-switch {
-  display: flex; align-items: center; width: 58px; height: 28px;
-  border-radius: 14px; cursor: pointer; position: relative;
-  transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s; padding: 0 8px;
-  flex-shrink: 0;
-}
-.toggle-switch.off { background-color: var(--toggle-track-off); justify-content: flex-end; }
-.toggle-switch.on {
-  background-color: var(--primary-color);
-  justify-content: flex-start;
-  box-shadow: var(--toggle-glow);
-}
-.toggle-text { font-size: 0.75rem; font-weight: bold; color: white; }
-.toggle-switch.off .toggle-text { color: var(--text-dimmed); }
-.toggle-slider {
-  width: 22px; height: 22px; background-color: var(--toggle-slider);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.12);
-  border-radius: 50%; position: absolute; top: 3px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255,255,255,0.08);
-  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.toggle-switch.on .toggle-slider { right: 3px; }
-.toggle-switch.off .toggle-slider { left: 3px; }
-.toggle-desc { font-size: 0.8rem; color: var(--text-muted); margin-left: 10px; }
 
-.collapse-item { flex-direction: column; align-items: stretch; padding: 0; }
-.collapse-header {
-  padding: 14px 20px; display: flex; align-items: center;
-  justify-content: space-between; cursor: pointer;
-}
 .collapse-left { display: flex; flex-direction: column; flex: 1; }
 .collapse-right { margin-left: auto; color: var(--text-dimmed); display: flex; align-items: center; }
 .arrow-icon { width: 18px; height: 18px; transition: transform 0.2s; }
 .arrow-icon.expanded { transform: rotate(180deg); }
-.collapse-content {
-  padding: 0 20px 16px; border-top: 1px dashed var(--border-color);
-  padding-top: 14px; animation: slideDown 0.2s ease-out; width: 100%;
-}
 
-.input-row { display: flex; gap: 8px; width: 100%; }
+.input-row { display: flex; gap: 8px; width: 100%; justify-content: flex-end; }
 .input-row.align-center { align-items: center; }
 
 /* 客户端路径列表 */
@@ -1100,29 +1005,8 @@ function applyThemeMode(mode: string) {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+  justify-content: flex-end;
 }
-.text-input {
-  flex: 1;
-  padding: 10px 12px 6px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  font-size: 0.82rem;
-  line-height: 1;
-  outline: none;
-  background-color: var(--card-bg);
-  transition: all 0.2s ease;
-  color: var(--text-color);
-}
-.text-input:hover {
-  background-color: var(--card-bg-hover);
-  border-color: var(--border-color-hover);
-}
-.text-input:focus {
-  background-color: var(--card-bg-hover);
-  border-color: var(--primary-color);
-  box-shadow: 0 0 8px var(--primary-color-alpha-15);
-}
-
 /* 分段控制组件（扁平化按钮组） */
 .segmented-control {
   display: inline-flex;
@@ -1208,67 +1092,23 @@ function applyThemeMode(mode: string) {
   background: var(--primary-color-alpha-15);
 }
 
-.number-input {
-  width: 100px;
-  padding: 8px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  font-size: 0.82rem;
-  outline: none;
-  background-color: var(--card-bg);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  color: var(--text-color);
-  text-align: center;
-  box-shadow: var(--shadow-sm);
-  appearance: textfield;
-  -moz-appearance: textfield;
-}
-.number-input::-webkit-inner-spin-button,
-.number-input::-webkit-outer-spin-button {
-  opacity: 1;
-  height: 28px;
-}
-.number-input:hover {
-  background-color: var(--card-bg-hover);
-  border-color: var(--primary-color-alpha-40);
-}
-.number-input:focus {
-  background-color: var(--card-bg-hover);
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px var(--primary-color-alpha-15);
-}
-
 .color-picker-label { font-size: 0.82rem; color: var(--text-muted); }
 .color-picker {
   border: 1px solid var(--border-color); background: var(--card-bg); padding: 2px;
   width: 44px; height: 28px; cursor: pointer; border-radius: 4px;
 }
-.color-pickers-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.color-pickers-row { display: flex; gap: 16px; flex-wrap: wrap; justify-content: flex-end; }
 .color-picker-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-muted); }
 .reset-row {
   display: flex; justify-content: flex-end; margin-top: 8px;
 }
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes slideDown { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
-
-/* Toast */
-.toast {
-  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-  padding: 10px 24px; border-radius: 8px; font-size: 0.82rem;
-  font-weight: 600; color: white; z-index: 9999;
-  box-shadow: var(--shadow-md); pointer-events: none;
-}
-.toast-success { background-color: var(--primary-color); }
-.toast-error { background-color: var(--loss-color); }
-.toast-enter-active { transition: all 0.25s ease-out; }
-.toast-leave-active { transition: all 0.2s ease-in; }
-.toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
-.toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 
 .setting-input-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   width: 100%;
   margin-bottom: 12px;
@@ -1346,3 +1186,4 @@ function applyThemeMode(mode: string) {
   animation: spin 0.9s linear infinite;
 }
 </style>
+

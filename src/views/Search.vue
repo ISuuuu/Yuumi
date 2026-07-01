@@ -6,31 +6,22 @@ import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useToast } from "../composables/useToast";
 
 const store = useLcuStore();
 const navigateTo = inject<(page: string) => void>("navigateTo")!;
 const searchName = ref("");
 
-// Toast 通知
-const toast = ref<{ message: string; type: 'success' | 'error'; visible: boolean }>({
-  message: '', type: 'success', visible: false
-});
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
-function showToast(message: string, type: 'success' | 'error' = 'success') {
-  if (toastTimer) clearTimeout(toastTimer);
-  toast.value = { message, type, visible: true };
-  toastTimer = setTimeout(() => { toast.value.visible = false; }, 3000);
-}
+const { showToast } = useToast();
 const searching = ref(false);
 const error = ref("");
 const summoner = ref<SummonerDisplay | null>(null);
 const matches = ref<MatchDisplay[]>([]);
 
 // 游戏模式筛选
-const selectedQueue = ref<number | null>(null); // null = 全部
-const showQueueDropdown = ref(false);
+const selectedQueue = ref<number>(-1); // -1 = 全部
 const QUEUE_OPTIONS = [
-  { id: null, label: '全部' },
+  { id: -1, label: '全部' },
   { id: 2400, label: '海克斯大乱斗' },
   { id: 450, label: '极地大乱斗' },
   { id: 430, label: '匹配模式' },
@@ -41,8 +32,8 @@ const QUEUE_OPTIONS = [
 // 上传相关
 const uploadEnabled = ref(true);
 
-async function onUploadToggle() {
-  uploadEnabled.value = !uploadEnabled.value;
+async function onUploadToggle(val: boolean) {
+  uploadEnabled.value = val;
   try {
     const cfg = await fetchConfig();
     cfg.Functions.UploadEnabled = uploadEnabled.value;
@@ -54,11 +45,11 @@ async function onUploadToggle() {
 const uploadedGameIds = ref(new Set<number>());
 
 const filteredMatches = computed(() => {
-  if (selectedQueue.value === null) return matches.value;
+  if (selectedQueue.value === -1) return matches.value;
   return matches.value.filter((m: MatchDisplay) => m.queueId === selectedQueue.value);
 });
 
-function selectQueue(id: number | null) {
+function selectQueue(id: number) {
   selectedQueue.value = id;
 }
 
@@ -157,7 +148,6 @@ let unlistenGameDataReady: (() => void) | null = null;
 
 onMounted(async () => {
   loadSearchHistory();
-  document.addEventListener("click", onDocClick);
   try {
     const cfg = await fetchConfig();
     appConfig.value = cfg;
@@ -179,15 +169,12 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  document.removeEventListener("click", onDocClick);
   if (unlistenGameDataReady) {
     unlistenGameDataReady();
   }
 });
 
-function onDocClick() {
-  showQueueDropdown.value = false;
-}
+
 
 // 监听 LCU 连接状态，当连接成功后重新拉取静态资源映射
 watch(
@@ -665,29 +652,38 @@ const gameDetails = computed(() => {
     </div>
 
     <div v-else class="search-container">
-      <!-- Toast -->
-      <Transition name="toast">
-        <div v-if="toast.visible" :class="['toast', `toast-${toast.type}`]">{{ toast.message }}</div>
-      </Transition>
       <!-- 顶部搜索工具栏 -->
       <div class="search-bar">
         <div class="search-input-wrapper">
-          <input
-            v-model="searchName"
+          <n-input
+            v-model:value="searchName"
             placeholder="输入召唤师名称（如 你好#5201）"
+            :disabled="searching"
+            clearable
             @keyup.enter="doSearch"
             @focus="showHistory = true"
             @click="showHistory = true"
             @blur="hideHistoryDelayed"
-            :disabled="searching"
-            class="search-input"
-          />
-          <button class="search-trigger-btn" @click="doSearch" :disabled="searching || !searchName.trim()">
-            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"/>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            </svg>
-          </button>
+            style="width: 100%;"
+            size="small"
+          >
+            <template #suffix>
+              <n-button
+                quaternary
+                circle
+                size="tiny"
+                :disabled="searching || !searchName.trim()"
+                @click="doSearch"
+              >
+                <template #icon>
+                  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                  </svg>
+                </template>
+              </n-button>
+            </template>
+          </n-input>
           <!-- 搜索历史下拉框 -->
           <div v-if="showHistory && filteredHistory.length > 0" class="history-dropdown">
             <div class="history-header">
@@ -707,29 +703,23 @@ const gameDetails = computed(() => {
           </div>
         </div>
         
-        <button class="tab-btn active" @click="navigateTo('career')">生涯</button>
+        <n-button size="small" @click="navigateTo('career')">生涯</n-button>
 
-        <div class="dropdown-trigger" @click.stop="showQueueDropdown = !showQueueDropdown">
-          <span>{{ QUEUE_OPTIONS.find(q => q.id === selectedQueue)?.label || '全部' }}</span>
-          <svg :class="['arrow-icon', { expanded: showQueueDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-          <div v-if="showQueueDropdown" class="queue-dropdown-menu" @click.stop>
-            <div
-              v-for="q in QUEUE_OPTIONS"
-              :key="q.id ?? -1"
-              :class="['queue-dropdown-item', { active: selectedQueue === q.id }]"
-              @click="selectQueue(q.id); showQueueDropdown = false"
-            >
-              {{ q.label }}
-            </div>
-          </div>
-        </div>
+        <n-select
+          v-model:value="selectedQueue"
+          :options="QUEUE_OPTIONS.map(q => ({ label: q.label, value: q.id }))"
+          @update:value="selectQueue"
+          style="width: 130px;"
+          size="small"
+        />
 
-        <label v-if="appConfig?.General?.UploadApiUrl" class="checkbox-wrapper">
-          <input type="checkbox" :checked="uploadEnabled" @change="onUploadToggle" />
-          <span>Upload matches</span>
-        </label>
+        <n-checkbox
+          v-if="appConfig?.General?.UploadApiUrl"
+          :checked="uploadEnabled"
+          @update:checked="onUploadToggle"
+        >
+          Upload matches
+        </n-checkbox>
       </div>
 
       <div v-if="error" class="error">{{ error }}</div>
@@ -926,7 +916,7 @@ const gameDetails = computed(() => {
 .search-view {
   padding: 1rem 1.5rem 1rem 0.6rem;
   background-color: transparent;
-  height: 100%;
+  flex: 1;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -983,7 +973,7 @@ const gameDetails = computed(() => {
   box-shadow: var(--shadow-sm);
   position: sticky;
   top: 0;
-  z-index: 50;
+  z-index: 999 !important;
 }
 
 .search-input-wrapper {
@@ -999,7 +989,8 @@ const gameDetails = computed(() => {
   top: 100%;
   left: 0;
   right: 0;
-  background: var(--card-bg);
+  background: var(--settings-collapse-bg, var(--card-bg)) !important;
+  backdrop-filter: blur(15px) !important;
   border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0 0 8px 8px;
@@ -1905,18 +1896,5 @@ const gameDetails = computed(() => {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Toast 通知 */
-.toast {
-  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-  padding: 10px 24px; border-radius: 8px; font-size: 0.82rem;
-  font-weight: 600; color: white; z-index: 9999;
-  box-shadow: var(--shadow-md); pointer-events: none;
-}
-.toast-success { background-color: var(--primary-color); }
-.toast-error { background-color: var(--loss-color); }
-.toast-enter-active { transition: all 0.25s ease-out; }
-.toast-leave-active { transition: all 0.2s ease-in; }
-.toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
-.toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 </style>
 
