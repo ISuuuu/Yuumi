@@ -7,6 +7,7 @@ import { useLcuStore } from "../store/lcuStore";
 import ChampionPicker from "../components/ChampionPicker.vue";
 import SpellPicker from "../components/SpellPicker.vue";
 import LcuImage from "../components/LcuImage.vue";
+import { useDialog } from "naive-ui";
 import { useToast } from "../composables/useToast";
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
@@ -14,6 +15,7 @@ const store = useLcuStore();
 const loading = ref(false);
 
 const { showToast } = useToast();
+const dialog = useDialog();
 
 
 // 自动选人/禁人/技能分路配置展示状态
@@ -319,21 +321,29 @@ async function handleFixWindow() {
 }
 
 // 重启客户端
-async function handleRestartClient() {
-  if (!confirm("⚡ 您确定要重启 LOL 客户端吗？(无需重新登录或排队)")) return;
-  loading.value = true;
-  try {
-    const resp = await lcuRequest<any>("POST", "/riotclient/kill-and-restart-ux");
-    if (resp.success) {
-      showToast('重启指令已发送，客户端正在重新引导...');
-    } else {
-      showToast('重启失败: ' + resp.error, 'error');
+function handleRestartClient() {
+  dialog.warning({
+    title: "重启客户端",
+    content: "⚡ 您确定要重启 LOL 客户端吗？(该操作无需重新登录或排队，会关闭并重新引导 LeagueClientUx)",
+    positiveText: "确定",
+    negativeText: "取消",
+    positiveButtonProps: { type: 'primary' },
+    onPositiveClick: async () => {
+      loading.value = true;
+      try {
+        const resp = await lcuRequest<any>("POST", "/riotclient/kill-and-restart-ux");
+        if (resp.success) {
+          showToast('重启指令已发送，客户端正在重新引导...');
+        } else {
+          showToast('重启失败: ' + resp.error, 'error');
+        }
+      } catch (e: any) {
+        showToast('重启异常: ' + e.toString(), 'error');
+      } finally {
+        loading.value = false;
+      }
     }
-  } catch (e: any) {
-    showToast('重启异常: ' + e.toString(), 'error');
-  } finally {
-    loading.value = false;
-  }
+  });
 }
 
 // 更换状态签名
@@ -423,48 +433,62 @@ async function handleApplyAvailability(avail: string) {
 }
 
 // 卸载全部勋章
-async function handleClearBadges() {
-  if (!confirm("🏅 确定要清除个人主页展示的所有挑战勋章吗？")) return;
-  loading.value = true;
-  try {
-    // Python: POST /lol-challenges/v1/update-player-preferences/ with challengeIds: []
-    // 先获取当前 banner 信息
-    const meResp = await lcuRequest<any>("GET", "/lol-chat/v1/me");
-    const banner = meResp.data?.lol?.bannerIdSelected || "";
-    const resp = await lcuRequest<any>("POST", "/lol-challenges/v1/update-player-preferences/", {
-      challengeIds: [],
-      bannerAccent: banner
-    });
-    if (resp.success) {
-      showToast('勋章已全部卸下');
-    } else {
-      showToast('勋章卸下失败: ' + resp.error, 'error');
+function handleClearBadges() {
+  dialog.warning({
+    title: "卸下勋章",
+    content: "🏅 确定要清除个人主页展示的所有挑战勋章吗？",
+    positiveText: "确定",
+    negativeText: "取消",
+    positiveButtonProps: { type: 'primary' },
+    onPositiveClick: async () => {
+      loading.value = true;
+      try {
+        const meResp = await lcuRequest<any>("GET", "/lol-chat/v1/me");
+        const banner = meResp.data?.lol?.bannerIdSelected || "";
+        const resp = await lcuRequest<any>("POST", "/lol-challenges/v1/update-player-preferences/", {
+          challengeIds: [],
+          bannerAccent: banner
+        });
+        if (resp.success) {
+          showToast('勋章已全部卸下');
+        } else {
+          showToast('勋章卸下失败: ' + resp.error, 'error');
+        }
+      } catch (e: any) {
+        showToast('勋章卸下异常: ' + e.toString(), 'error');
+      } finally {
+        loading.value = false;
+      }
     }
-  } catch (e: any) {
-    showToast('勋章卸下异常: ' + e.toString(), 'error');
-  } finally {
-    loading.value = false;
-  }
+  });
 }
 
 // 卸载头像框
-async function handleClearBorder() {
-  if (!confirm("🖼️ 确定要清除你的召唤师头像框吗？")) return;
-  loading.value = true;
-  try {
-    const resp = await lcuRequest<any>("PUT", "/lol-regalia/v2/current-regalia", {
-      preferredBorderType: "NONE"
-    });
-    if (resp.success) {
-      showToast('头像框已卸下');
-    } else {
-      showToast('头像框卸下失败: ' + resp.error, 'error');
+function handleClearBorder() {
+  dialog.warning({
+    title: "卸下头像框",
+    content: "🖼️ 确定要清除你的召唤师头像框吗？",
+    positiveText: "确定",
+    negativeText: "取消",
+    positiveButtonProps: { type: 'primary' },
+    onPositiveClick: async () => {
+      loading.value = true;
+      try {
+        const resp = await lcuRequest<any>("PUT", "/lol-regalia/v2/current-regalia", {
+          preferredBorderType: "NONE"
+        });
+        if (resp.success) {
+          showToast('头像框已卸下');
+        } else {
+          showToast('头像框卸下失败: ' + resp.error, 'error');
+        }
+      } catch (e: any) {
+        showToast('卸下头像框异常: ' + e.toString(), 'error');
+      } finally {
+        loading.value = false;
+      }
     }
-  } catch (e: any) {
-    showToast('卸下头像框异常: ' + e.toString(), 'error');
-  } finally {
-    loading.value = false;
-  }
+  });
 }
 
 // 切换锁定游戏设置
@@ -754,10 +778,7 @@ async function handleToggleLockGameSettings() {
           </div>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Functions.EnableBenchOverlay ? 'on' : 'off']" @click="config.Functions.EnableBenchOverlay = !config.Functions.EnableBenchOverlay; triggerAutoSave()">
-            <span class="toggle-text">{{ config.Functions.EnableBenchOverlay ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.Functions.EnableBenchOverlay" @update:value="triggerAutoSave" />
         </div>
       </div>
 
@@ -779,10 +800,7 @@ async function handleToggleLockGameSettings() {
           </div>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', config.Functions.EnableAutoReconnect ? 'on' : 'off']" @click="config.Functions.EnableAutoReconnect = !config.Functions.EnableAutoReconnect; triggerAutoSave()">
-            <span class="toggle-text">{{ config.Functions.EnableAutoReconnect ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch v-model:value="config.Functions.EnableAutoReconnect" @update:value="triggerAutoSave" />
         </div>
       </div>
 
@@ -904,10 +922,7 @@ async function handleToggleLockGameSettings() {
           </div>
         </div>
         <div class="card-right">
-          <div :class="['toggle-switch', isGameSettingsLocked ? 'on' : 'off']" @click="handleToggleLockGameSettings">
-            <span class="toggle-text">{{ isGameSettingsLocked ? '开' : '关' }}</span>
-            <span class="toggle-slider"></span>
-          </div>
+          <n-switch :value="isGameSettingsLocked" @update:value="handleToggleLockGameSettings" />
         </div>
       </div>
 
@@ -944,7 +959,7 @@ async function handleToggleLockGameSettings() {
           </div>
         </div>
         <div class="card-right">
-          <button class="action-btn" @click="handleRestartClient" :disabled="loading">重启</button>
+          <n-button class="action-btn" @click="handleRestartClient" :loading="loading">重启</n-button>
         </div>
       </div>
 
@@ -1151,7 +1166,7 @@ async function handleToggleLockGameSettings() {
           </div>
         </div>
         <div class="card-right">
-          <button class="action-btn text-danger" @click="handleClearBadges" :disabled="loading">卸下</button>
+          <n-button class="action-btn text-danger" @click="handleClearBadges" :loading="loading">卸下</n-button>
         </div>
       </div>
 
@@ -1170,7 +1185,7 @@ async function handleToggleLockGameSettings() {
           </div>
         </div>
         <div class="card-right">
-          <button class="action-btn text-danger" @click="handleClearBorder" :disabled="loading">卸下</button>
+          <n-button class="action-btn text-danger" @click="handleClearBorder" :loading="loading">卸下</n-button>
         </div>
       </div>
 
@@ -1408,11 +1423,13 @@ async function handleToggleLockGameSettings() {
 }
 
 /* 按钮样式 */
-.action-btn {
+.action-btn,
+.action-btn.n-button {
   background: var(--settings-card-bg);
   border: 1px solid var(--settings-card-border);
   color: var(--text-color);
   padding: 6px 20px;
+  height: auto;
   border-radius: 6px;
   font-size: 0.82rem;
   font-weight: 600;
@@ -1420,21 +1437,27 @@ async function handleToggleLockGameSettings() {
   outline: none;
   transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
   box-shadow: var(--shadow-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.action-btn:hover {
+.action-btn:hover,
+.action-btn.n-button:hover {
   border-color: var(--primary-color);
   background-color: var(--settings-card-bg-hover);
   box-shadow: 0 0 0 1px rgba(0, 159, 170, 0.3);
   transform: translateY(-0.5px);
 }
 
-.action-btn:active {
+.action-btn:active,
+.action-btn.n-button:active {
   background: var(--settings-card-bg);
   transform: translateY(0.5px);
 }
 
-.action-btn:disabled {
+.action-btn:disabled,
+.action-btn.n-button:disabled {
   opacity: 0.3;
   cursor: not-allowed;
   transform: none !important;
@@ -1448,6 +1471,14 @@ async function handleToggleLockGameSettings() {
 .text-danger:hover {
   background-color: var(--loss-bg);
   border-color: var(--loss-border);
+}
+
+/* 兼容 n-button 内部的 loading 和字体 */
+.action-btn.n-button .n-button__content {
+  color: inherit !important;
+}
+.action-btn.n-button .n-base-loading {
+  color: inherit !important;
 }
 
 /* 统一 Toggle 开关样式 */
