@@ -48,7 +48,16 @@ async function loadSpells() {
       const sortedData = [...resp.data].sort((a, b) => (a.id || 0) - (b.id || 0));
       for (const s of sortedData) {
         const name = (s.name || "").trim();
-        if (s.id > 0 && name && !name.toLowerCase().includes("placeholder") && !name.includes("占位") && !seenNames.has(name)) {
+        if (
+          s.id > 0 && 
+          name && 
+          !name.toLowerCase().includes("placeholder") && 
+          !name.includes("占位") && 
+          !name.includes("魄罗") && 
+          !name.includes("闪人") && 
+          !name.includes("原始惩戒") && 
+          !seenNames.has(name)
+        ) {
           seenNames.add(name);
           unique.push({
             id: s.id,
@@ -129,29 +138,29 @@ function removeSpell(slot: 'D' | 'F') {
     <div class="slots-container">
       <!-- D 键技能 -->
       <div class="spell-slot-card" @click="openPicker('D')">
-        <span class="slot-badge">D 键</span>
+        <span class="slot-badge">{{ $t('spellPicker.keyD') }}</span>
         <div v-if="dSpell" class="slot-content">
           <LcuImage :src="dSpell.iconPath" class="slot-icon" alt="spell" />
-          <span class="slot-name">{{ dSpell.name }}</span>
+          <span class="slot-name">{{ $te('spells.' + dSpell.id) ? $t('spells.' + dSpell.id) : dSpell.name }}</span>
           <span class="slot-remove" @click.stop="removeSpell('D')">✕</span>
         </div>
         <div v-else class="slot-placeholder">
           <span class="plus-icon">+</span>
-          <span>选择技能</span>
+          <span>{{ $t('spellPicker.selectSpell') }}</span>
         </div>
       </div>
 
       <!-- F 键技能 -->
       <div class="spell-slot-card" @click="openPicker('F')">
-        <span class="slot-badge">F 键</span>
+        <span class="slot-badge">{{ $t('spellPicker.keyF') }}</span>
         <div v-if="fSpell" class="slot-content">
           <LcuImage :src="fSpell.iconPath" class="slot-icon" alt="spell" />
-          <span class="slot-name">{{ fSpell.name }}</span>
+          <span class="slot-name">{{ $te('spells.' + fSpell.id) ? $t('spells.' + fSpell.id) : fSpell.name }}</span>
           <span class="slot-remove" @click.stop="removeSpell('F')">✕</span>
         </div>
         <div v-else class="slot-placeholder">
           <span class="plus-icon">+</span>
-          <span>选择技能</span>
+          <span>{{ $t('spellPicker.selectSpell') }}</span>
         </div>
       </div>
     </div>
@@ -159,10 +168,10 @@ function removeSpell(slot: 'D' | 'F') {
     <!-- 技能选择面板 -->
     <div v-show="showPicker" class="picker-panel">
       <div class="panel-header">
-        <span class="panel-title">选择绑定到 {{ activeSlot }} 键的技能</span>
+        <span class="panel-title">{{ $t('spellPicker.panelTitle', { slot: activeSlot }) }}</span>
         <button class="panel-close" @click="showPicker = false; activeSlot = null">✕</button>
       </div>
-      <div v-if="loading" class="picker-loading">加载中...</div>
+      <div v-if="loading" class="picker-loading">{{ $t('spellPicker.loading') }}</div>
       <div v-else class="spell-grid">
         <div
           v-for="spell in spells"
@@ -171,11 +180,11 @@ function removeSpell(slot: 'D' | 'F') {
             selected: (activeSlot === 'D' && dSpell?.id === spell.id) || (activeSlot === 'F' && fSpell?.id === spell.id),
             disabled: (activeSlot === 'D' && fSpell?.id === spell.id) || (activeSlot === 'F' && dSpell?.id === spell.id)
           }]"
-          :title="spell.name"
+          :title="$te('spells.' + spell.id) ? $t('spells.' + spell.id) : spell.name"
           @click="selectSpell(spell.id)"
         >
           <LcuImage :src="spell.iconPath" class="spell-icon" alt="spell" />
-          <span class="spell-name">{{ spell.name }}</span>
+          <span class="spell-name">{{ $te('spells.' + spell.id) ? $t('spells.' + spell.id) : spell.name }}</span>
         </div>
       </div>
     </div>
@@ -187,18 +196,19 @@ function removeSpell(slot: 'D' | 'F') {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
 }
 
 .slots-container {
   display: flex;
   gap: 16px;
   margin-bottom: 8px;
+  width: 100%;
 }
 
 .spell-slot-card {
   position: relative;
   flex: 1;
-  max-width: 140px;
   height: 56px;
   border: 1.5px dashed var(--settings-card-border);
   border-radius: 10px;
@@ -292,6 +302,8 @@ function removeSpell(slot: 'D' | 'F') {
   flex-direction: column;
   gap: 10px;
   animation: slide-down 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 @keyframes slide-down {

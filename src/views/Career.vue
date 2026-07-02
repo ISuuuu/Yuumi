@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, inject, onMounted, onUnmounted, type Ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useLcuStore } from "../store/lcuStore";
 import { fetchCurrentSummoner, fetchMatchHistory, fetchMatchHistorySgp, lcuRequest, fetchConfig } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
@@ -13,6 +14,7 @@ let cachedRankedQueues: any[] = [];
 let lastFetchedTime = 0;
 
 const store = useLcuStore();
+const { t } = useI18n();
 const summoner = ref<SummonerDisplay | null>(null);
 const matches = ref<MatchDisplay[]>([]);
 const recentMatches = ref<MatchDisplay[]>([]);
@@ -387,13 +389,22 @@ function formatTime(ts: number): string {
   const pad = (n: number) => n.toString().padStart(2, '0');
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+function translateMapName(name: string): string {
+  if (!name) return "";
+  if (name.includes("峡谷") || name.includes("Rift")) return t("maps.11");
+  if (name.includes("深渊") || name.includes("Abyss")) return t("maps.12");
+  if (name.includes("闪击") || name.includes("Blitz")) return t("maps.21");
+  if (name.includes("大厅") || name.includes("Lobby")) return t("maps.22");
+  return name;
+}
 </script>
 
 <template>
   <div class="career">
     <div v-if="!store.isConnected" class="tip-container">
       <div class="offline-logo">🎮</div>
-      <p class="tip">请先启动英雄联盟客户端</p>
+      <p class="tip">{{ $t('gameInfo.launchLolPrompt') }}</p>
     </div>
 
     <div v-else class="career-content">
@@ -425,15 +436,15 @@ function formatTime(ts: number): string {
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                 </svg>
               </button>
-              <span v-if="copied" class="copied-text">✓ 已复制</span>
+              <span v-if="copied" class="copied-text">✓ {{ $t('career.copied') }}</span>
             </div>
             <span class="tagline"># {{ summoner.tagLine }}</span>
           </div>
         </div>
 
         <div class="header-actions">
-          <button class="action-btn" @click="loadSummoner(true)" :disabled="loading">刷新</button>
-          <button class="action-btn" @click="goToHistory" :disabled="loading">历史战绩</button>
+          <button class="action-btn" @click="loadSummoner(true)" :disabled="loading">{{ $t('career.refresh') }}</button>
+          <button class="action-btn" @click="goToHistory" :disabled="loading">{{ $t('career.historyBtn') }}</button>
         </div>
       </div>
 
@@ -442,21 +453,21 @@ function formatTime(ts: number): string {
         <table class="rank-table">
           <thead>
             <tr>
-              <th>类型</th>
-              <th>总场次</th>
-              <th>胜率</th>
-              <th>胜场</th>
-              <th>负场</th>
-              <th>段位</th>
-              <th>胜点</th>
-              <th>赛季最高</th>
-              <th>上赛季结算</th>
+              <th>{{ $t('career.type') }}</th>
+              <th>{{ $t('career.totalGames') }}</th>
+              <th>{{ $t('career.winRate') }}</th>
+              <th>{{ $t('career.winsLabel') }}</th>
+              <th>{{ $t('career.lossesLabel') }}</th>
+              <th>{{ $t('career.tier') }}</th>
+              <th>{{ $t('career.lp') }}</th>
+              <th>{{ $t('career.highest') }}</th>
+              <th>{{ $t('career.prevSeason') }}</th>
             </tr>
           </thead>
           <tbody>
             <!-- 单双排 -->
             <tr>
-              <td class="type-name">单 / 双排</td>
+              <td class="type-name">{{ $t('gameModes.420') }}</td>
               <td>{{ soloQueue ? soloQueue.wins + soloQueue.losses : 0 }}</td>
               <td>
                 {{ soloQueue && soloQueue.wins + soloQueue.losses > 0 
@@ -473,7 +484,7 @@ function formatTime(ts: number): string {
             </tr>
             <!-- 灵活排位 -->
             <tr>
-              <td class="type-name">灵活排位</td>
+              <td class="type-name">{{ $t('gameModes.440') }}</td>
               <td>{{ flexQueue ? flexQueue.wins + flexQueue.losses : 0 }}</td>
               <td>
                 {{ flexQueue && flexQueue.wins + flexQueue.losses > 0 
@@ -495,9 +506,9 @@ function formatTime(ts: number): string {
       <!-- 近期数据看板 & 常用英雄 -->
       <div v-if="statsSummary" class="recent-summary-bar">
         <div class="summary-text">
-          <span class="summary-title">近期对局（最近 {{ recentMatches.length }} 场）</span>
-          <span class="win-color">胜: {{ statsSummary.wins }}</span>
-          <span class="lose-color">负: {{ statsSummary.losses }}</span>
+          <span class="summary-title">{{ $t('career.recentGamesTitle', { count: recentMatches.length }) }}</span>
+          <span class="win-color">{{ $t('career.win') }}: {{ statsSummary.wins }}</span>
+          <span class="lose-color">{{ $t('career.lose') }}: {{ statsSummary.losses }}</span>
           <span class="kda-label">KDA:</span>
           <span class="kda-values">
             {{ statsSummary.kills }} / <span class="death-red">{{ statsSummary.deaths }}</span> / {{ statsSummary.assists }}
@@ -506,15 +517,15 @@ function formatTime(ts: number): string {
         </div>
 
         <div class="recent-champs">
-          <div v-for="c in statsSummary.topChamps" :key="c.id" class="recent-champ-icon" :title="`近期使用 ${c.count} 场`">
+          <div v-for="c in statsSummary.topChamps" :key="c.id" class="recent-champ-icon" :title="t('career.gamesCount', { count: c.count })">
             <LcuImage :src="c.icon" alt="champ" />
           </div>
         </div>
 
         <div class="summary-actions">
-          <button class="summary-action-btn">最近队友</button>
+          <button class="summary-action-btn">{{ $t('career.recentTeammates') }}</button>
           <div class="dropdown-trigger" @click.stop="showQueueDropdown = !showQueueDropdown">
-            <span>{{ QUEUE_OPTIONS.find(q => q.id === selectedQueue)?.label || '全部' }}</span>
+            <span>{{ selectedQueue === null ? $t('career.all') : $t('gameModes.' + selectedQueue) }}</span>
             <svg :class="['arrow-icon', { expanded: showQueueDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="6 9 12 15 18 9"/>
             </svg>
@@ -525,7 +536,7 @@ function formatTime(ts: number): string {
                 :class="['queue-dropdown-item', { active: selectedQueue === q.id }]"
                 @click="selectQueue(q.id)"
               >
-                {{ q.label }}
+                {{ q.id === null ? $t('career.all') : $t('gameModes.' + q.id) }}
               </div>
             </div>
           </div>
@@ -568,9 +579,9 @@ function formatTime(ts: number): string {
           <!-- 2. 胜负状态与游戏模式 -->
           <div class="result-panel">
             <span :class="['result-text', m.win ? 'win-text' : 'lose-text']">
-              {{ m.win ? '胜利' : '失败' }}
+              {{ m.win ? $t('career.victory') : $t('career.defeat') }}
             </span>
-            <span class="queue-mode">{{ m.name }}</span>
+            <span class="queue-mode">{{ $te('gameModes.' + m.queueId) ? $t('gameModes.' + m.queueId) : m.name }}</span>
           </div>
 
           <!-- 3. KDA 数字与文字 -->
@@ -617,13 +628,13 @@ function formatTime(ts: number): string {
 
           <!-- 7. 地图模式与时长/日期 -->
           <div class="time-panel">
-            <span class="map-name">{{ m.map }}</span>
+            <span class="game-map">{{ translateMapName(m.map) }}</span>
             <span class="match-time">{{ m.duration }} · {{ formatTime(m.timeStamp) }}</span>
           </div>
         </div>
       </div>
       <div v-else-if="!loading" class="tip-container">
-        <p class="tip">暂无战绩记录</p>
+        <p class="tip">{{ $t('career.empty') }}</p>
       </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, inject, type Ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useLcuStore } from "../store/lcuStore";
 import {
   getGameflowPhase, getChampSelectSession, fetchMatchHistory,
@@ -9,6 +10,7 @@ import type { MatchDisplay, AppConfig } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 
 const store = useLcuStore();
+const { t } = useI18n();
 const loading = ref(false);
 const error = ref("");
 const activeTab = ref<"my" | "their">("my");
@@ -139,11 +141,11 @@ interface PlayerData {
 }
 const playerData = ref<Record<number, PlayerData>>({});
 
-const TIER_MAP: Record<string, string> = {
-  NONE: "", IRON: "黑铁", BRONZE: "黄铜", SILVER: "白银", GOLD: "黄金",
-  PLATINUM: "铂金", EMERALD: "翡翠", DIAMOND: "钻石",
-  MASTER: "大师", GRANDMASTER: "宗师", CHALLENGER: "王者",
-};
+const TIER_MAP = computed<Record<string, string>>(() => ({
+  NONE: "", IRON: t("tools.spoofTier.IRON"), BRONZE: t("tools.spoofTier.BRONZE"), SILVER: t("tools.spoofTier.SILVER"), GOLD: t("tools.spoofTier.GOLD"),
+  PLATINUM: t("tools.spoofTier.PLATINUM"), EMERALD: t("tools.spoofTier.EMERALD"), DIAMOND: t("tools.spoofTier.DIAMOND"),
+  MASTER: t("tools.spoofTier.MASTER"), GRANDMASTER: t("tools.spoofTier.GRANDMASTER"), CHALLENGER: t("tools.spoofTier.CHALLENGER"),
+}));
 
 const myTeam = computed(() => {
   if (isGameActive.value) {
@@ -504,7 +506,7 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 
 function formatRank(q: any): string {
   if (!q || !q.tier || q.tier === "NONE") return "";
-  const tier = TIER_MAP[q.tier] || q.tier;
+  const tier = TIER_MAP.value[q.tier] || q.tier;
   const div = q.rank && q.rank !== "NA" ? q.rank : "";
   const lp = q.leaguePoints !== undefined ? ` ${q.leaguePoints} LP` : "";
   return `${tier}${div}${lp}`;
@@ -616,12 +618,12 @@ watch(activeTab, () => loadAllPlayers());
 
     <div v-if="!store.isConnected" class="tip-container">
       <div class="offline-logo">🎮</div>
-      <p class="tip">请先启动英雄联盟客户端</p>
+      <p class="tip">{{ $t('gameInfo.launchLolPrompt') }}</p>
     </div>
 
     <div v-else-if="!shouldShowContent" class="tip-container">
       <div class="offline-logo">⏳</div>
-      <p class="tip">进入选人阶段后将自动加载对局信息</p>
+      <p class="tip">{{ $t('gameInfo.awaitingLoad') }}</p>
     </div>
 
     <div v-else class="game-layout">
@@ -629,10 +631,10 @@ watch(activeTab, () => loadAllPlayers());
       <div class="left-panel">
         <div class="team-tabs">
           <button :class="['tab-btn', { active: activeTab === 'my' }]" @click="activeTab = 'my'">
-            友方 ({{ myTeam.length }})
+            {{ $t('gameInfo.myTeam', { count: myTeam.length }) }}
           </button>
           <button :class="['tab-btn', { active: activeTab === 'their' }]" @click="activeTab = 'their'">
-            敌方 ({{ theirTeam.length }})
+            {{ $t('gameInfo.theirTeam', { count: theirTeam.length }) }}
           </button>
         </div>
 
@@ -674,19 +676,19 @@ watch(activeTab, () => loadAllPlayers());
                   v-if="getPremadeIdx(p.summonerId, activeTab) >= 0"
                   class="premade-dot"
                   :style="{ background: PREMADE_COLORS[getPremadeIdx(p.summonerId, activeTab) % PREMADE_COLORS.length].dot }"
-                  :title="`组队 ${getPremadeIdx(p.summonerId, activeTab) + 1}`"
+                  :title="t('gameInfo.premadeIdx', { idx: getPremadeIdx(p.summonerId, activeTab) + 1 })"
                 ></span>
                 <span class="name-text">{{ playerData[p.cellId]?.info?.gameName || playerData[p.cellId]?.info?.displayName || p.displayName || '未知' }}</span>
                 <span
                   v-if="playerData[p.cellId]?.fateFlag"
                   :class="['fate-badge', playerData[p.cellId].fateFlag]"
-                  :title="playerData[p.cellId].fateFlag === 'ally' ? '上一局队友' : '上一局对手'"
-                >{{ playerData[p.cellId].fateFlag === 'ally' ? '友' : '敌' }}</span>
+                  :title="playerData[p.cellId].fateFlag === 'ally' ? $t('gameInfo.fateAllyTitle') : $t('gameInfo.fateEnemyTitle')"
+                >{{ playerData[p.cellId].fateFlag === 'ally' ? $t('gameInfo.fateAllyText') : $t('gameInfo.fateEnemyText') }}</span>
               </div>
               
               <div class="pc-row pc-winrate-row" v-if="playerData[p.cellId]?.winRate !== undefined">
                 <span :class="['pc-winrate-badge-clean', getWinRateClass(playerData[p.cellId].winRate)]">
-                  {{ playerData[p.cellId].winRate }}% 胜率
+                  {{ playerData[p.cellId].winRate }}{{ $t('gameInfo.winRateSuffix') }}
                 </span>
               </div>
               
@@ -697,23 +699,23 @@ watch(activeTab, () => loadAllPlayers());
               </div>
               
               <div class="pc-row pc-rank-row">
-                <span class="rank-badge-clean" :title="formatRank(playerData[p.cellId]?.ranked?.solo) || '单双排: 无段位'">
-                  单双: {{ (playerData[p.cellId]?.ranked?.solo?.tier ? TIER_MAP[playerData[p.cellId].ranked.solo.tier] : '无') }}
+                <span class="rank-badge-clean" :title="formatRank(playerData[p.cellId]?.ranked?.solo) || $t('gameInfo.soloRankTitle')">
+                  {{ $t('gameInfo.soloRank') }}: {{ (playerData[p.cellId]?.ranked?.solo?.tier ? TIER_MAP[playerData[p.cellId].ranked.solo.tier] : $t('gameInfo.noRank')) }}
                 </span>
               </div>
 
               <div class="pc-row pc-rank-row">
-                <span class="rank-badge-clean" :title="formatRank(playerData[p.cellId]?.ranked?.flex) || '灵活排: 无段位'">
-                  灵活: {{ (playerData[p.cellId]?.ranked?.flex?.tier ? TIER_MAP[playerData[p.cellId].ranked.flex.tier] : '无') }}
+                <span class="rank-badge-clean" :title="formatRank(playerData[p.cellId]?.ranked?.flex) || $t('gameInfo.flexRankTitle')">
+                  {{ $t('gameInfo.flexRank') }}: {{ (playerData[p.cellId]?.ranked?.flex?.tier ? TIER_MAP[playerData[p.cellId].ranked.flex.tier] : $t('gameInfo.noRank')) }}
                 </span>
               </div>
             </div>
           </div>
-          <div v-if="currentTeam.length === 0" class="tip">暂无队伍数据</div>
+          <div v-if="currentTeam.length === 0" class="tip">{{ $t('gameInfo.noTeamData') }}</div>
         </div>
         <!-- 组队图例 -->
         <div v-if="hasPremadeInfo" class="premade-legend">
-          <span class="legend-label">组队:</span>
+          <span class="legend-label">{{ $t('gameInfo.premadeLegend') }}</span>
           <span
             v-for="idx in premadeLegendIndices"
             :key="idx"
@@ -764,7 +766,7 @@ watch(activeTab, () => loadAllPlayers());
                   </div>
                   <div class="cm-detail">
                     <div class="cm-top-row">
-                      <span class="cm-mode">{{ m.name.replace("排位赛 ", "") }}</span>
+                      <span class="cm-mode">{{ $te('gameModes.' + m.queueId) ? $t('gameModes.' + m.queueId) : m.name }}</span>
                     </div>
                     <div class="cm-bottom">
                       <span class="cm-kda">

@@ -10,6 +10,7 @@ static OPGG_CACHE: OnceLock<Mutex<HashMap<String, serde_json::Value>>> = OnceLoc
 
 fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .danger_accept_invalid_certs(true);
 
     if enable_proxy && !proxy_addr.is_empty() {

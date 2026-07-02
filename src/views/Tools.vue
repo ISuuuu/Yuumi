@@ -9,6 +9,7 @@ import SpellPicker from "../components/SpellPicker.vue";
 import LcuImage from "../components/LcuImage.vue";
 import { useDialog } from "naive-ui";
 import { useToast } from "../composables/useToast";
+import { useI18n } from 'vue-i18n';
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 const store = useLcuStore();
@@ -16,20 +17,21 @@ const loading = ref(false);
 
 const { showToast } = useToast();
 const dialog = useDialog();
+const { t } = useI18n();
 
 
 // 自动选人/禁人/技能分路配置展示状态
 const hoverActiveLane = ref<'default' | 'top' | 'jug' | 'mid' | 'bot' | 'sup'>('default');
 const banActiveLane = ref<'default' | 'top' | 'jug' | 'mid' | 'bot' | 'sup'>('default');
 const spellActiveLane = ref<'default' | 'top' | 'jug' | 'mid' | 'bot' | 'sup'>('default');
-const LANE_OPTIONS = [
-  { value: 'default', label: '默认' },
-  { value: 'top', label: '上单 (Top)' },
-  { value: 'jug', label: '打野 (Jungle)' },
-  { value: 'mid', label: '中单 (Mid)' },
-  { value: 'bot', label: '下路 (Bot)' },
-  { value: 'sup', label: '辅助 (Support)' }
-] as const;
+const LANE_OPTIONS = computed(() => [
+  { value: 'default', label: t('tools.lane.default') },
+  { value: 'top', label: t('tools.lane.top') },
+  { value: 'jug', label: t('tools.lane.jug') },
+  { value: 'mid', label: t('tools.lane.mid') },
+  { value: 'bot', label: t('tools.lane.bot') },
+  { value: 'sup', label: t('tools.lane.sup') }
+] as const);
 
 // 个人主页状态项
 const statusInput = ref("");
@@ -51,8 +53,24 @@ function closeAllDropdowns() {
   showSpoofDivisionDropdown.value = false;
 }
 
-const SPOOF_QUEUE_LABELS: Record<string, string> = { RANKED_TFT: '云顶之弈', RANKED_SOLO_5x5: '单双排位', RANKED_FLEX_SR: '灵活排位' };
-const SPOOF_TIER_LABELS: Record<string, string> = { UNRANKED: '未定级', CHALLENGER: '最强王者', GRANDMASTER: '傲世宗师', MASTER: '超凡大师', DIAMOND: '璀璨钻石', EMERALD: '流光翡翠', PLATINUM: '华贵铂金', GOLD: '荣耀黄金', SILVER: '不屈白银', BRONZE: '英勇黄铜', IRON: '坚韧黑铁' };
+const SPOOF_QUEUE_LABELS = computed(() => ({
+  RANKED_TFT: t('tools.spoofQueue.RANKED_TFT'),
+  RANKED_SOLO_5x5: t('tools.spoofQueue.RANKED_SOLO_5x5'),
+  RANKED_FLEX_SR: t('tools.spoofQueue.RANKED_FLEX_SR')
+}));
+const SPOOF_TIER_LABELS = computed<Record<string, string>>(() => ({
+  UNRANKED: t('tools.spoofTier.UNRANKED'),
+  CHALLENGER: t('tools.spoofTier.CHALLENGER'),
+  GRANDMASTER: t('tools.spoofTier.GRANDMASTER'),
+  MASTER: t('tools.spoofTier.MASTER'),
+  DIAMOND: t('tools.spoofTier.DIAMOND'),
+  EMERALD: t('tools.spoofTier.EMERALD'),
+  PLATINUM: t('tools.spoofTier.PLATINUM'),
+  GOLD: t('tools.spoofTier.GOLD'),
+  SILVER: t('tools.spoofTier.SILVER'),
+  BRONZE: t('tools.spoofTier.BRONZE'),
+  IRON: t('tools.spoofTier.IRON'),
+}));
 const bgChampion = ref<number[]>([]);
 
 // 皮肤列表（选英雄后加载）
@@ -93,11 +111,11 @@ watch(bgChampion, async (newVal: number[]) => {
       skinIdInput.value = skinList.value[0].id;
       activeSkinIndex.value = 0;
     } else {
-      showToast('该英雄暂无皮肤数据', 'error');
+      showToast(t('tools.background.noSkinData'), 'error');
     }
   } catch (e) {
     console.error("加载皮肤列表失败:", e);
-    showToast('加载皮肤失败', 'error');
+    showToast(t('tools.background.skinLoadFailed'), 'error');
   } finally {
     skinLoading.value = false;
   }
@@ -128,7 +146,7 @@ watch(showSkinModal, (val) => {
 
 function openSkinModal() {
   if (skinList.value.length === 0) {
-    showToast('请先选择英雄以加载皮肤列表', 'error');
+    showToast(t('tools.background.pickHeroFirst'), 'error');
     return;
   }
   const idx = skinList.value.findIndex(s => s.id === selectedSkinId.value);
@@ -232,15 +250,15 @@ async function handleSpectate() {
 
     if (spectateMethod.value === "CMD") {
       // CMD 方式：通过 SGP 获取凭据后直接启动 League of Legends.exe
-      const result = await invoke<string>("spectate_directly", {
+      await invoke<string>("spectate_directly", {
         params: { summoner_name: name },
       });
-      showToast(result || "观战启动成功（CMD 方式）");
+      showToast(t('tools.spectate.startedCmd'));
     } else {
       // LCU API 方式：通过 LCU 接口进行好友/对局观战
       const summonerResp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners?name=${encodeURIComponent(name)}`);
       if (!summonerResp.success || !summonerResp.data) {
-        showToast('未找到该召唤师，请检查名称后重试', 'error');
+        showToast(t('tools.spectate.notFound'), 'error');
         return;
       }
       const puuid = summonerResp.data.puuid;
@@ -279,7 +297,7 @@ async function handleSpectate() {
         puuid: puuid
       });
       if (resp.success) {
-        showToast('观战启动成功，正在拉起游戏客户端...', 'success');
+        showToast(t('tools.spectate.success'), 'success');
       } else {
         // 5. 观战降级兜底：LCU 方式发生任何失败（如 missing key/gameflow），立刻尝试通过 CMD 方式静默唤醒启动以提高可靠性
         console.warn("LCU 观战失败，尝试通过 CMD 方式兜底拉起...", {
@@ -289,19 +307,19 @@ async function handleSpectate() {
         });
         
         try {
-          const cmdResult = await invoke<string>("spectate_directly", {
+          await invoke<string>("spectate_directly", {
             params: { summoner_name: name },
           });
-          showToast(cmdResult || "已自动切换至 CMD 方式成功唤醒观战", "success");
+          showToast(t('tools.spectate.fallbackCmd'), "success");
         } catch (cmdErr: any) {
           // 如果 CMD 方式也最终失败，向控制台记录详细信息，并报出最原始直观的友好 Toast 引导
           console.error("CMD 兜底观战亦告失败:", cmdErr);
-          showToast('观战失败: ' + cleanError(resp.error || '该召唤师当前可能无法被观战') + ' (自定义/新开局请先在官方客户端右键尝试观战以同步密钥)', 'error');
+          showToast(t('tools.spectate.failed', { error: cleanError(resp.error || '该召唤师当前可能无法被观战') + ' (自定义/新开局请先在官方客户端右键尝试观战以同步密钥)' }), 'error');
         }
       }
     }
   } catch (e: any) {
-    showToast('观战异常: ' + cleanError(e), 'error');
+    showToast(t('tools.spectate.error', { error: cleanError(e) }), 'error');
   } finally {
     loading.value = false;
   }
@@ -312,9 +330,9 @@ async function handleFixWindow() {
   loading.value = true;
   try {
     await invoke("fix_lcu_window");
-    showToast('客户端窗口已重设，未生效请用管理员模式启动');
+    showToast(t('tools.fixWindow.success'));
   } catch (e: any) {
-    showToast('修复失败: ' + e.toString(), 'error');
+    showToast(t('tools.fixWindow.failed', { error: e.toString() }), 'error');
   } finally {
     loading.value = false;
   }
@@ -323,22 +341,22 @@ async function handleFixWindow() {
 // 重启客户端
 function handleRestartClient() {
   dialog.warning({
-    title: "重启客户端",
-    content: "⚡ 您确定要重启 LOL 客户端吗？(该操作无需重新登录或排队，会关闭并重新引导 LeagueClientUx)",
-    positiveText: "确定",
-    negativeText: "取消",
+    title: t('tools.restartClient.dialogTitle'),
+    content: t('tools.restartClient.dialogContent'),
+    positiveText: t('tools.confirm'),
+    negativeText: t('tools.cancel'),
     positiveButtonProps: { type: 'primary' },
     onPositiveClick: async () => {
       loading.value = true;
       try {
         const resp = await lcuRequest<any>("POST", "/riotclient/kill-and-restart-ux");
         if (resp.success) {
-          showToast('重启指令已发送，客户端正在重新引导...');
+          showToast(t('tools.restartClient.success'));
         } else {
-          showToast('重启失败: ' + resp.error, 'error');
+          showToast(t('tools.restartClient.failed', { error: resp.error }), 'error');
         }
       } catch (e: any) {
-        showToast('重启异常: ' + e.toString(), 'error');
+        showToast(t('tools.restartClient.error', { error: e.toString() }), 'error');
       } finally {
         loading.value = false;
       }
@@ -355,13 +373,13 @@ async function handleApplyStatus() {
       statusMessage: statusInput.value.trim()
     });
     if (resp.success) {
-      showToast('签名已更新');
+      showToast(t('tools.signature.success'));
       statusInput.value = "";
     } else {
-      showToast('修改失败: ' + resp.error, 'error');
+      showToast(t('tools.signature.failed', { error: resp.error }), 'error');
     }
   } catch (e: any) {
-    showToast('修改异常: ' + e.toString(), 'error');
+    showToast(t('tools.signature.error', { error: e.toString() }), 'error');
   } finally {
     loading.value = false;
   }
@@ -378,12 +396,12 @@ async function handleApplyBackground() {
       value: skinIdInput.value
     });
     if (resp.success) {
-      showToast('背景皮肤更换成功');
+      showToast(t('tools.background.success'));
     } else {
-      showToast('更换失败: ' + resp.error, 'error');
+      showToast(t('tools.background.failed', { error: resp.error }), 'error');
     }
   } catch (e: any) {
-    showToast('更换异常: ' + e.toString(), 'error');
+    showToast(t('tools.background.error', { error: e.toString() }), 'error');
   } finally {
     loading.value = false;
   }
@@ -401,12 +419,12 @@ async function handleApplyRankSpoof() {
       }
     });
     if (resp.success) {
-      showToast('段位伪装已应用');
+      showToast(t('tools.rankSpoof.success'));
     } else {
-      showToast('段位伪装失败: ' + resp.error, 'error');
+      showToast(t('tools.rankSpoof.failed', { error: resp.error }), 'error');
     }
   } catch (e: any) {
-    showToast('伪装异常: ' + e.toString(), 'error');
+    showToast(t('tools.rankSpoof.error', { error: e.toString() }), 'error');
   } finally {
     loading.value = false;
   }
@@ -420,13 +438,13 @@ async function handleApplyAvailability(avail: string) {
       availability: avail
     });
     if (resp.success) {
-      const availText = avail === 'chat' ? '在线' : avail === 'away' ? '离开' : '隐身';
-      showToast('在线状态已切换: ' + availText);
+      const availText = avail === 'chat' ? t('tools.status.online') : avail === 'away' ? t('tools.status.away') : t('tools.status.invisible');
+      showToast(t('tools.status.success', { status: availText }));
     } else {
-      showToast('状态切换失败: ' + resp.error, 'error');
+      showToast(t('tools.status.failed', { error: resp.error }), 'error');
     }
   } catch (e: any) {
-    showToast('状态切换异常: ' + e.toString(), 'error');
+    showToast(t('tools.status.error', { error: e.toString() }), 'error');
   } finally {
     loading.value = false;
   }
@@ -435,10 +453,10 @@ async function handleApplyAvailability(avail: string) {
 // 卸载全部勋章
 function handleClearBadges() {
   dialog.warning({
-    title: "卸下勋章",
-    content: "🏅 确定要清除个人主页展示的所有挑战勋章吗？",
-    positiveText: "确定",
-    negativeText: "取消",
+    title: t('tools.badges.title'),
+    content: "🏅 " + t('tools.badges.confirmText'),
+    positiveText: t('tools.confirm'),
+    negativeText: t('tools.cancel'),
     positiveButtonProps: { type: 'primary' },
     onPositiveClick: async () => {
       loading.value = true;
@@ -450,12 +468,12 @@ function handleClearBadges() {
           bannerAccent: banner
         });
         if (resp.success) {
-          showToast('勋章已全部卸下');
+          showToast(t('tools.badges.success'));
         } else {
-          showToast('勋章卸下失败: ' + resp.error, 'error');
+          showToast(t('tools.badges.failed', { error: resp.error }), 'error');
         }
       } catch (e: any) {
-        showToast('勋章卸下异常: ' + e.toString(), 'error');
+        showToast(t('tools.badges.error', { error: e.toString() }), 'error');
       } finally {
         loading.value = false;
       }
@@ -466,10 +484,10 @@ function handleClearBadges() {
 // 卸载头像框
 function handleClearBorder() {
   dialog.warning({
-    title: "卸下头像框",
-    content: "🖼️ 确定要清除你的召唤师头像框吗？",
-    positiveText: "确定",
-    negativeText: "取消",
+    title: t('tools.border.title'),
+    content: "🖼️ " + t('tools.border.confirmText'),
+    positiveText: t('tools.confirm'),
+    negativeText: t('tools.cancel'),
     positiveButtonProps: { type: 'primary' },
     onPositiveClick: async () => {
       loading.value = true;
@@ -478,12 +496,12 @@ function handleClearBorder() {
           preferredBorderType: "NONE"
         });
         if (resp.success) {
-          showToast('头像框已卸下');
+          showToast(t('tools.border.success'));
         } else {
-          showToast('头像框卸下失败: ' + resp.error, 'error');
+          showToast(t('tools.border.failed', { error: resp.error }), 'error');
         }
       } catch (e: any) {
-        showToast('卸下头像框异常: ' + e.toString(), 'error');
+        showToast(t('tools.border.error', { error: e.toString() }), 'error');
       } finally {
         loading.value = false;
       }
@@ -509,17 +527,17 @@ async function handleToggleLockGameSettings() {
 
     <div v-if="!config" class="tip-container">
       <div class="loading-spinner"></div>
-      <p class="tip">加载功能模块中...</p>
+      <p class="tip">{{ $t('tools.loading') }}</p>
     </div>
 
     <div v-else class="tools-container">
-      <h1 class="page-title">其他功能</h1>
+      <h1 class="page-title">{{ $t('tools.title') }}</h1>
 
       <!-- 未连接 LCU 覆盖层 -->
       <div v-if="!store.isConnected" class="offline-overlay"></div>
 
       <!-- 1. 英雄选择组 -->
-      <div class="group-header">英雄选择</div>
+      <div class="group-header">{{ $t('tools.groupChampSelect') }}</div>
 
       <!-- 自动接受对局 -->
       <n-collapse arrow-placement="right" class="collapse-card">
@@ -534,22 +552,22 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">自动接受对局</h3>
-                  <span class="card-desc">在你设置的秒数之后自动接受对局匹配</span>
+                  <h3 class="card-title">{{ $t('tools.autoAccept.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.autoAccept.desc') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
                 <span class="status-preview">
                   {{ config.Functions.EnableAutoAcceptMatching 
-                    ? `已启用，延迟: ${config.Functions.AutoAcceptMatchingDelay} 秒` 
-                    : '未启用' 
+                    ? $t('tools.autoAccept.statusEnabled', { delay: config.Functions.AutoAcceptMatchingDelay }) 
+                    : $t('tools.autoAccept.statusDisabled') 
                   }}
                 </span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">在对局找到后接受对局前延迟的秒数:</span>
+            <span class="setting-label">{{ $t('tools.autoAccept.delayLabel') }}</span>
             <n-input-number v-model:value="config.Functions.AutoAcceptMatchingDelay" :min="0" :max="11" @update:value="triggerAutoSave" style="width:120px" size="small" />
           </div>
           <div class="setting-row justify-end">
@@ -576,23 +594,23 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">自动接受交换请求</h3>
-                  <span class="card-desc">自动接受队友的交换楼层或英雄的请求</span>
+                  <h3 class="card-title">{{ $t('tools.autoSwap.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.autoSwap.desc') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
                 <span class="status-preview">
-                  {{ (config.Functions.AutoAcceptCeilSwap || config.Functions.AutoAcceptChampTrade) ? '已启用' : '未启用' }}
+                  {{ (config.Functions.AutoAcceptCeilSwap || config.Functions.AutoAcceptChampTrade) ? $t('tools.autoSwap.statusEnabled') : $t('tools.autoSwap.statusDisabled') }}
                 </span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">自动接受楼层交换请求:</span>
+            <span class="setting-label">{{ $t('tools.autoSwap.floorLabel') }}</span>
             <n-switch v-model:value="config.Functions.AutoAcceptCeilSwap" @update:value="triggerAutoSave" />
           </div>
           <div class="setting-row">
-            <span class="setting-label">自动接受英雄交换请求:</span>
+            <span class="setting-label">{{ $t('tools.autoSwap.champLabel') }}</span>
             <n-switch v-model:value="config.Functions.AutoAcceptChampTrade" @update:value="triggerAutoSave" />
           </div>
         </n-collapse-item>
@@ -611,21 +629,21 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">自动选用/预选英雄</h3>
-                  <span class="card-desc">在你进入英雄选择时自动亮起/预选英雄</span>
+                  <h3 class="card-title">{{ $t('tools.autoHover.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.autoHover.desc') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">{{ config.Functions.EnableAutoHoverChampion ? '已启用' : '未启用' }}</span>
+                <span class="status-preview">{{ config.Functions.EnableAutoHoverChampion ? $t('tools.autoHover.statusEnabled') : $t('tools.autoHover.statusDisabled') }}</span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">启用自动亮起:</span>
+            <span class="setting-label">{{ $t('tools.autoHover.enableHover') }}</span>
             <n-switch v-model:value="config.Functions.EnableAutoHoverChampion" @update:value="triggerAutoSave" />
           </div>
           <div class="setting-row">
-            <span class="setting-label">在结束时确认选择 (防秒退):</span>
+            <span class="setting-label">{{ $t('tools.autoHover.confirmTimeout') }}</span>
             <n-switch v-model:value="config.Functions.AutoSelectConfirmOnTimeout" @update:value="triggerAutoSave" />
           </div>
           
@@ -666,25 +684,25 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">自动禁用英雄</h3>
-                  <span class="card-desc">在你的禁用环节开始时自动禁用英雄</span>
+                  <h3 class="card-title">{{ $t('tools.autoBan.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.autoBan.desc') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">{{ config.Functions.EnableAutoBanChampion ? '已启用' : '未启用' }}</span>
+                <span class="status-preview">{{ config.Functions.EnableAutoBanChampion ? $t('tools.autoBan.statusEnabled') : $t('tools.autoBan.statusDisabled') }}</span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">禁用环节自动禁用设定英雄:</span>
+            <span class="setting-label">{{ $t('tools.autoBan.enableBan') }}</span>
             <n-switch v-model:value="config.Functions.EnableAutoBanChampion" @update:value="triggerAutoSave" />
           </div>
           <div class="setting-row">
-            <span class="setting-label">避开队友已预选的英雄 (假禁用):</span>
+            <span class="setting-label">{{ $t('tools.autoBan.pretendBan') }}</span>
             <n-switch v-model:value="config.Functions.PretendBan" @update:value="triggerAutoSave" />
           </div>
           <div class="setting-row">
-            <span class="setting-label">自动禁用前等待延迟 (秒):</span>
+            <span class="setting-label">{{ $t('tools.autoBan.banDelay') }}</span>
             <n-input-number v-model:value="config.Functions.AutoBanDelay" :min="0" :max="15" :step="0.5" @update:value="triggerAutoSave" style="width:120px" size="small" />
           </div>
 
@@ -725,17 +743,17 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">自动设置召唤师技能</h3>
-                  <span class="card-desc">当你的英雄选择开始时自动设置召唤师技能</span>
+                  <h3 class="card-title">{{ $t('tools.autoSpells.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.autoSpells.desc') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">{{ config.Functions.EnableAutoSetSpells ? '已启用' : '未启用' }}</span>
+                <span class="status-preview">{{ config.Functions.EnableAutoSetSpells ? $t('tools.autoSpells.statusEnabled') : $t('tools.autoSpells.statusDisabled') }}</span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">锁定英雄后自动写入配置好的技能组:</span>
+            <span class="setting-label">{{ $t('tools.autoSpells.label') }}</span>
             <n-switch v-model:value="config.Functions.EnableAutoSetSpells" @update:value="triggerAutoSave" />
           </div>
 
@@ -773,8 +791,8 @@ async function handleToggleLockGameSettings() {
             </svg>
           </div>
           <div class="title-container">
-            <h3 class="card-title">大乱斗板凳席悬浮窗</h3>
-            <span class="card-desc">在大乱斗选人阶段显示半透明置顶悬浮窗，可无 CD 抢板凳席英雄</span>
+            <h3 class="card-title">{{ $t('tools.benchOverlay.title') }}</h3>
+            <span class="card-desc">{{ $t('tools.benchOverlay.desc') }}</span>
           </div>
         </div>
         <div class="card-right">
@@ -783,7 +801,7 @@ async function handleToggleLockGameSettings() {
       </div>
 
       <!-- 2. 游戏组 -->
-      <div class="group-header">游戏</div>
+      <div class="group-header">{{ $t('tools.groupGame') }}</div>
 
       <!-- 自动重连 -->
       <div class="card-item border-bottom">
@@ -795,8 +813,8 @@ async function handleToggleLockGameSettings() {
             </svg>
           </div>
           <div class="title-container">
-            <h3 class="card-title">自动重连</h3>
-            <span class="card-desc">当你掉线退出游戏时自动重新连接</span>
+            <h3 class="card-title">{{ $t('tools.autoReconnect.title') }}</h3>
+            <span class="card-desc">{{ $t('tools.autoReconnect.desc') }}</span>
           </div>
         </div>
         <div class="card-right">
@@ -818,29 +836,29 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">自动创建大厅</h3>
-                  <span class="card-desc">启动 LOL 客户端后自动创建默认模式的大厅</span>
+                  <h3 class="card-title">{{ $t('tools.autoCreateLobby.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.autoCreateLobby.desc') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
                 <span class="status-preview">
                   {{ config?.Functions.EnableAutoCreateLobby
-                    ? `已启用: ${GAME_MODES.find(m => m.id === config?.Functions.DefaultGameMode)?.name || '未知模式'}`
-                    : '未启用'
+                    ? $t('tools.autoCreateLobby.enabled', { mode: config?.Functions.DefaultGameMode ? $t('gameModes.' + config.Functions.DefaultGameMode) : $t('tools.autoCreateLobby.unknownMode') })
+                    : $t('tools.autoCreateLobby.disabled')
                   }}
                 </span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">客户端引导就绪后自动拉入指定大厅房间:</span>
+            <span class="setting-label">{{ $t('tools.autoCreateLobby.label') }}</span>
             <n-switch v-model:value="config.Functions.EnableAutoCreateLobby" @update:value="triggerAutoSave" />
           </div>
           <div class="setting-row">
-            <span class="setting-label">默认游戏模式:</span>
+            <span class="setting-label">{{ $t('tools.autoCreateLobby.defaultMode') }}</span>
             <n-select
               v-model:value="config.Functions.DefaultGameMode"
-              :options="GAME_MODES.map(m => ({ label: m.name, value: m.id }))"
+              :options="GAME_MODES.map(m => ({ label: $t('gameModes.' + m.id), value: m.id }))"
               :disabled="!config.Functions.EnableAutoCreateLobby"
               @update:value="triggerAutoSave"
               style="width: 140px;"
@@ -863,20 +881,20 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">观战</h3>
-                  <span class="card-desc">观战同大区玩家正在进行的实时游戏</span>
+                  <h3 class="card-title">{{ $t('tools.spectate.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.spectate.desc') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">点击展开</span>
+                <span class="status-preview">{{ $t('tools.spectate.expand') }}</span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">观战召唤师名称:</span>
+            <span class="setting-label">{{ $t('tools.spectate.nameLabel') }}</span>
             <n-input
               v-model:value="spectateSummonerName"
-              placeholder="输入要观战的召唤师名称..."
+              :placeholder="$t('tools.spectate.namePlaceholder')"
               clearable
               style="max-width: 300px;"
             >
@@ -887,13 +905,13 @@ async function handleToggleLockGameSettings() {
                   :disabled="!spectateSummonerName.trim()"
                   @click="handleSpectate"
                 >
-                  观战
+                  {{ $t('tools.spectate.btn') }}
                 </n-button>
               </template>
             </n-input>
           </div>
           <div class="setting-row">
-            <span class="setting-label">观战方式:</span>
+            <span class="setting-label">{{ $t('tools.spectate.methodLabel') }}</span>
             <n-select
               v-model:value="spectateMethod"
               :options="[
@@ -917,8 +935,8 @@ async function handleToggleLockGameSettings() {
             </svg>
           </div>
           <div class="title-container">
-            <h3 class="card-title">锁定游戏设置</h3>
-            <span class="card-desc">让你的游戏设置不会因为切换账号而改变</span>
+            <h3 class="card-title">{{ $t('tools.lockGameSettings.title') }}</h3>
+            <span class="card-desc">{{ $t('tools.lockGameSettings.desc') }}</span>
           </div>
         </div>
         <div class="card-right">
@@ -927,7 +945,7 @@ async function handleToggleLockGameSettings() {
       </div>
 
       <!-- 3. 客户端组 -->
-      <div class="group-header">客户端</div>
+      <div class="group-header">{{ $t('tools_extra.clientGroupTitle') }}</div>
 
       <div class="card-item border-bottom">
         <div class="card-left">
@@ -937,12 +955,12 @@ async function handleToggleLockGameSettings() {
             </svg>
           </div>
           <div class="title-container">
-            <h3 class="card-title">修复客户端窗口</h3>
-            <span class="card-desc">修复客户端错误的窗口大小（需要管理员权限）</span>
+            <h3 class="card-title">{{ $t('tools_extra.fixWindow') }}</h3>
+            <span class="card-desc">{{ $t('tools_extra.fixWindowDesc') }}</span>
           </div>
         </div>
         <div class="card-right">
-          <button class="action-btn" @click="handleFixWindow" :disabled="loading">修复</button>
+          <button class="action-btn" @click="handleFixWindow" :disabled="loading">{{ $t('tools_extra.fixBtn') }}</button>
         </div>
       </div>
 
@@ -954,12 +972,12 @@ async function handleToggleLockGameSettings() {
             </svg>
           </div>
           <div class="title-container">
-            <h3 class="card-title">重启客户端</h3>
-            <span class="card-desc">重启客户端而不需要重新排队</span>
+            <h3 class="card-title">{{ $t('tools_extra.restartClient') }}</h3>
+            <span class="card-desc">{{ $t('tools_extra.restartClientDesc') }}</span>
           </div>
         </div>
         <div class="card-right">
-          <n-button class="action-btn" @click="handleRestartClient" :loading="loading">重启</n-button>
+          <n-button class="action-btn" @click="handleRestartClient" :loading="loading">{{ $t('tools_extra.restartBtn') }}</n-button>
         </div>
       </div>
 
@@ -979,20 +997,20 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">个人签名</h3>
-                  <span class="card-desc">修改你个人卡片的签名</span>
+                  <h3 class="card-title">{{ $t('tools.signature.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.signature.desc') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">点击展开</span>
+                <span class="status-preview">{{ $t('tools.spectate.expand') }}</span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">输入新的个性化签名:</span>
+            <span class="setting-label">{{ $t('tools.signature.delayLabel') || '输入新的个性化签名:' }}</span>
             <n-input
               v-model:value="statusInput"
-              placeholder="输入新的个性化签名..."
+              :placeholder="$t('tools.signature.placeholder')"
               clearable
               style="max-width: 300px;"
               size="small"
@@ -1004,7 +1022,7 @@ async function handleToggleLockGameSettings() {
                   :disabled="loading || !statusInput.trim()"
                   @click="handleApplyStatus"
                 >
-                  应用
+                  {{ $t('tools.signature.updateBtn') }}
                 </n-button>
               </template>
             </n-input>
@@ -1026,17 +1044,17 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">个人主页背景</h3>
-                  <span class="card-desc">修改你个人主页背景皮肤图片</span>
+                  <h3 class="card-title">{{ $t('tools.background.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.background.desc') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">点击展开</span>
+                <span class="status-preview">{{ $t('tools.spectate.expand') }}</span>
               </div>
             </div>
           </template>
           <div class="setting-row no-border">
-            <span class="setting-label">选择英雄并更换皮肤背景:</span>
+            <span class="setting-label">{{ $t('tools.background.desc') }}</span>
           </div>
           <div class="setting-picker-row">
             <ChampionPicker v-model="bgChampion" :maxCount="1" />
@@ -1044,7 +1062,7 @@ async function handleToggleLockGameSettings() {
           
           <div v-if="skinLoading" class="skin-loading">
             <div class="loading-spinner"></div>
-            <span>加载皮肤中...</span>
+            <span>{{ $t('tools.loading') }}</span>
           </div>
           
           <!-- 已选择皮肤的预览信息，代替原来的平铺列表 -->
@@ -1054,9 +1072,9 @@ async function handleToggleLockGameSettings() {
                 <LcuImage :src="currentSelectedSkin?.loadScreenPath" class="preview-img" />
               </div>
               <div class="preview-info-box">
-                <span class="preview-title">已选背景皮肤</span>
+                <span class="preview-title">{{ $t('tools.background.title') }}</span>
                 <span class="preview-skin-name">{{ currentSelectedSkin?.name }}</span>
-                <n-button size="small" type="primary" @click="openSkinModal">更换背景皮肤</n-button>
+                <n-button size="small" type="primary" @click="openSkinModal">{{ $t('tools.background.selectSkinBtn') }}</n-button>
               </div>
             </div>
           </div>
@@ -1079,17 +1097,17 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">段位展示</h3>
-                  <span class="card-desc">修改你个人卡片显示的段位</span>
+                  <h3 class="card-title">{{ $t('tools.rankSpoof.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.rankSpoof.desc') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">点击展开</span>
+                <span class="status-preview">{{ $t('tools.spectate.expand') }}</span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">选择排位队列模式:</span>
+            <span class="setting-label">{{ $t('tools.rankSpoof.queueLabel') }}</span>
             <n-select
               v-model:value="spoofQueue"
               :options="Object.entries(SPOOF_QUEUE_LABELS).map(([k, v]) => ({ label: v, value: k }))"
@@ -1098,7 +1116,7 @@ async function handleToggleLockGameSettings() {
             />
           </div>
           <div class="setting-row">
-            <span class="setting-label">段位与级数等级:</span>
+            <span class="setting-label">{{ $t('tools.rankSpoof.tierLabel') }} {{ $t('tools.rankSpoof.divisionLabel') }}</span>
             <div class="rank-select-group">
               <n-select
                 v-model:value="spoofTier"
@@ -1113,7 +1131,7 @@ async function handleToggleLockGameSettings() {
                 style="width: 80px;"
                 size="small"
               />
-              <n-button size="small" type="primary" @click="handleApplyRankSpoof" :disabled="loading">应用</n-button>
+              <n-button size="small" type="primary" @click="handleApplyRankSpoof" :disabled="loading">{{ $t('tools_extra.applySpoofBtn') }}</n-button>
             </div>
           </div>
         </n-collapse-item>
@@ -1131,21 +1149,21 @@ async function handleToggleLockGameSettings() {
                   </svg>
                 </div>
                 <div class="title-container">
-                  <h3 class="card-title">在线状态</h3>
-                  <span class="card-desc">修改你的在线状态</span>
+                  <h3 class="card-title">{{ $t('tools.status.title') }}</h3>
+                  <span class="card-desc">{{ $t('tools.status.title') }}</span>
                 </div>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">点击展开</span>
+                <span class="status-preview">{{ $t('tools.spectate.expand') }}</span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">选择当前呈报的状态:</span>
+            <span class="setting-label">{{ $t('tools.status.title') }}</span>
             <div class="btn-group">
-              <n-button class="status-btn online" size="small" @click="handleApplyAvailability('chat')" :disabled="loading">在线</n-button>
-              <n-button class="status-btn away" size="small" @click="handleApplyAvailability('away')" :disabled="loading">离开</n-button>
-              <n-button class="status-btn offline" size="small" @click="handleApplyAvailability('offline')" :disabled="loading">隐身</n-button>
+              <n-button class="status-btn online" size="small" @click="handleApplyAvailability('chat')" :disabled="loading">{{ $t('tools.status.online') }}</n-button>
+              <n-button class="status-btn away" size="small" @click="handleApplyAvailability('away')" :disabled="loading">{{ $t('tools.status.away') }}</n-button>
+              <n-button class="status-btn offline" size="small" @click="handleApplyAvailability('offline')" :disabled="loading">{{ $t('tools.status.invisible') }}</n-button>
             </div>
           </div>
         </n-collapse-item>
@@ -1161,12 +1179,12 @@ async function handleToggleLockGameSettings() {
             </svg>
           </div>
           <div class="title-container">
-            <h3 class="card-title">卸下勋章</h3>
-            <span class="card-desc">卸下你个人卡片中的所有勋章</span>
+            <h3 class="card-title">{{ $t('tools.badges.title') }}</h3>
+            <span class="card-desc">{{ $t('tools.badges.title') }}</span>
           </div>
         </div>
         <div class="card-right">
-          <n-button class="action-btn text-danger" @click="handleClearBadges" :loading="loading">卸下</n-button>
+          <n-button class="action-btn text-danger" @click="handleClearBadges" :loading="loading">{{ $t('tools_extra.removeBtn') }}</n-button>
         </div>
       </div>
 
@@ -1180,12 +1198,12 @@ async function handleToggleLockGameSettings() {
             </svg>
           </div>
           <div class="title-container">
-            <h3 class="card-title">卸下头像框</h3>
-            <span class="card-desc">卸下你的召唤师头像框（需要召唤师等级大于等于 525）</span>
+            <h3 class="card-title">{{ $t('tools.border.title') }}</h3>
+            <span class="card-desc">{{ $t('tools.border.title') }}</span>
           </div>
         </div>
         <div class="card-right">
-          <n-button class="action-btn text-danger" @click="handleClearBorder" :loading="loading">卸下</n-button>
+          <n-button class="action-btn text-danger" @click="handleClearBorder" :loading="loading">{{ $t('tools_extra.removeBtn') }}</n-button>
         </div>
       </div>
 
@@ -1197,14 +1215,14 @@ async function handleToggleLockGameSettings() {
         <div class="skin-modal-card">
           <!-- 弹窗头部 -->
           <div class="skin-modal-header">
-            <h3>选择背景皮肤</h3>
+            <h3>{{ $t('tools.background.titleModal') }}</h3>
             <button class="modal-close-btn" @click="showSkinModal = false">✕</button>
           </div>
 
           <!-- 轮播主图区 -->
           <div class="skin-carousel-container">
             <!-- 左箭头 -->
-            <button class="carousel-nav-btn prev" @click="prevSkin" title="上一张 (←)">
+            <button class="carousel-nav-btn prev" @click="prevSkin" :title="$t('titlebar.back')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
 
@@ -1217,7 +1235,7 @@ async function handleToggleLockGameSettings() {
             </div>
 
             <!-- 右箭头 -->
-            <button class="carousel-nav-btn next" @click="nextSkin" title="下一张 (→)">
+            <button class="carousel-nav-btn next" @click="nextSkin" :title="$t('titlebar.back')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           </div>
@@ -1241,8 +1259,8 @@ async function handleToggleLockGameSettings() {
           <div class="skin-modal-footer">
             <span class="carousel-counter">{{ activeSkinIndex + 1 }} / {{ skinList.length }}</span>
             <div class="footer-actions">
-              <button class="cancel-action-btn" @click="showSkinModal = false">取消</button>
-              <button class="confirm-action-btn" @click="confirmSkinSelection">确 定</button>
+              <button class="cancel-action-btn" @click="showSkinModal = false">{{ $t('tools.cancel') }}</button>
+              <button class="confirm-action-btn" @click="confirmSkinSelection">{{ $t('tools.confirm') }}</button>
             </div>
           </div>
         </div>
@@ -1626,6 +1644,7 @@ async function handleToggleLockGameSettings() {
 .setting-picker-row {
   padding-top: 6px;
   padding-bottom: 10px;
+  width: 100%;
 }
 
 .input-with-button {

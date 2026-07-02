@@ -1,22 +1,24 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { useLcuStore } from "../store/lcuStore";
 
 const store = useLcuStore();
+const { t } = useI18n();
 
 // 占位数据 — 实际数据需接入 OP.GG / CDragon
-const teamComps = ref([
-  { name: "九五至尊", core: "瑟提 + 艾希 + 凯尔", traits: "8斗士 / 4射手", tier: "S" },
-  { name: "重秘狐狸", core: "阿狸 + 莫甘娜 + 丽桑卓", traits: "4重装 / 3秘术", tier: "S" },
-  { name: "决斗大师", core: "亚索 + 菲奥娜 + 永恩", traits: "6决斗 / 2浪人", tier: "A" },
-  { name: "神盾战士", core: "贾克斯 + 盲僧 + 瑟提", traits: "6神盾 / 3铁甲", tier: "A" },
-  { name: "魔导法师", core: "辛德拉 + 维克托 + 妮蔻", traits: "4魔导 / 2法师", tier: "B" },
+const teamComps = computed(() => [
+  { name: t("tftPage.comps.c1"), core: t("tftPage.cores.c1"), traits: t("tftPage.traits.c1"), tier: "S" },
+  { name: t("tftPage.comps.c2"), core: t("tftPage.cores.c2"), traits: t("tftPage.traits.c2"), tier: "S" },
+  { name: t("tftPage.comps.c3"), core: t("tftPage.cores.c3"), traits: t("tftPage.traits.c3"), tier: "A" },
+  { name: t("tftPage.comps.c4"), core: t("tftPage.cores.c4"), traits: t("tftPage.traits.c4"), tier: "A" },
+  { name: t("tftPage.comps.c5"), core: t("tftPage.cores.c5"), traits: t("tftPage.traits.c5"), tier: "B" },
 ]);
 
-const augments = ref([
-  { name: "组件百宝袋", desc: "获得 3 件随机基础装备", tier: "金" },
-  { name: "升级咯！", desc: "立即获得 4 经验值", tier: "银" },
-  { name: "利滚利", desc: "每回合多获得 1 金币利息", tier: "金" },
+const augments = computed(() => [
+  { name: t("tftPage.bag"), desc: t("tftPage.bagDesc"), tier: t("tftPage.gold") },
+  { name: t("tftPage.level"), desc: t("tftPage.levelDesc"), tier: t("tftPage.silver") },
+  { name: t("tftPage.interest"), desc: t("tftPage.interestDesc"), tier: t("tftPage.gold") },
 ]);
 
 const selectedComp = ref<number | null>(null);
@@ -24,17 +26,17 @@ const selectedComp = ref<number | null>(null);
 
 <template>
   <div class="tft">
-    <h2>🧩 云顶之弈助手</h2>
+    <h2>{{ $t('tftPage.title') }}</h2>
 
     <div v-if="!store.isConnected" class="tip">
-      请先启动英雄联盟客户端
+      {{ $t('gameInfo.launchLolPrompt') }}
     </div>
 
     <div v-else>
       <!-- 阵容推荐 -->
       <section class="section">
-        <h3>上分阵容推荐</h3>
-        <p class="section-desc">当前赛季强势阵容（数据待接入 OP.GG）</p>
+        <h3>{{ $t('tftPage.recommendTitle') }}</h3>
+        <p class="section-desc">{{ $t('tftPage.recommendDesc') }}</p>
 
         <div class="comp-grid">
           <div
@@ -45,26 +47,26 @@ const selectedComp = ref<number | null>(null);
           >
             <div class="comp-tier" :class="comp.tier.toLowerCase()">{{ comp.tier }}</div>
             <div class="comp-name">{{ comp.name }}</div>
-            <div class="comp-core">核心: {{ comp.core }}</div>
+            <div class="comp-core">{{ $t('tftPage.core') }}: {{ comp.core }}</div>
             <div class="comp-traits">{{ comp.traits }}</div>
           </div>
         </div>
 
         <!-- 选中阵容详情 -->
         <div v-if="selectedComp !== null" class="comp-detail">
-          <h4>{{ teamComps[selectedComp].name }} — 详细攻略</h4>
+          <h4>{{ teamComps[selectedComp].name }} — {{ $t('tftPage.detail') }}</h4>
           <div class="detail-placeholder">
             <div class="detail-section">
-              <span class="detail-label">前期过渡</span>
-              <span class="detail-value">（英雄推荐待接入）</span>
+              <span class="detail-label">{{ $t('tftPage.earlyGame') }}</span>
+              <span class="detail-value">{{ $t('tftPage.earlyGamePlaceholder') }}</span>
             </div>
             <div class="detail-section">
-              <span class="detail-label">核心装备</span>
-              <span class="detail-value">（装备推荐待接入）</span>
+              <span class="detail-label">{{ $t('tftPage.items') }}</span>
+              <span class="detail-value">{{ $t('tftPage.itemsPlaceholder') }}</span>
             </div>
             <div class="detail-section">
-              <span class="detail-label">站位图</span>
-              <span class="detail-value">（站位推荐待接入）</span>
+              <span class="detail-label">{{ $t('tftPage.position') }}</span>
+              <span class="detail-value">{{ $t('tftPage.positionPlaceholder') }}</span>
             </div>
           </div>
         </div>
@@ -72,12 +74,12 @@ const selectedComp = ref<number | null>(null);
 
       <!-- 海克斯推荐 -->
       <section class="section">
-        <h3>海克斯强化推荐</h3>
-        <p class="section-desc">当前对局最佳海克斯选择</p>
+        <h3>{{ $t('tftPage.augments') }}</h3>
+        <p class="section-desc">{{ $t('tftPage.augmentsDesc') }}</p>
 
         <div class="augment-list">
           <div v-for="(a, idx) in augments" :key="idx" class="augment-card">
-            <span :class="['augment-tier', a.tier === '金' ? 'gold' : 'silver']">{{ a.tier }}</span>
+            <span :class="['augment-tier', a.tier === $t('tftPage.gold') ? 'gold' : 'silver']">{{ a.tier }}</span>
             <div class="augment-info">
               <span class="augment-name">{{ a.name }}</span>
               <span class="augment-desc">{{ a.desc }}</span>

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from "vue";
+import { useI18n } from "vue-i18n";
 import LcuImage from "./LcuImage.vue";
+
+const { t } = useI18n();
 import {
   fetchChampions,
   fetchKeywords,
@@ -116,11 +119,11 @@ function clearAll() {
           <span class="chip-name">{{ champ.name }}</span>
           <span class="chip-remove" @click.stop="removeChampion(champ.id)">✕</span>
         </div>
-        <span v-if="selectedChampions.length === 0" class="chip-empty">未选择英雄</span>
+        <span v-if="selectedChampions.length === 0" class="chip-empty">{{ $t('championPicker.empty') }}</span>
       </div>
       <div class="trigger-actions">
-        <button v-if="selected.length > 0" class="clear-btn" @click="clearAll">清空</button>
-        <button class="select-btn" @click="showPicker = true">选择</button>
+        <button v-if="selected.length > 0" class="clear-btn" @click="clearAll">{{ $t('championPicker.clearBtn') }}</button>
+        <button class="select-btn" @click="showPicker = true">{{ $t('championPicker.selectBtn') }}</button>
       </div>
     </div>
 
@@ -130,7 +133,7 @@ function clearAll() {
         <div v-if="showPicker" class="modal-overlay" @click="showPicker = false">
           <div class="modal-content" @click.stop>
             <div class="modal-header">
-              <h3 class="modal-title">选择英雄</h3>
+              <h3 class="modal-title">{{ $t('championPicker.title') }}</h3>
               <button class="close-btn" @click="showPicker = false">✕</button>
             </div>
             
@@ -142,7 +145,7 @@ function clearAll() {
               <input
                 ref="searchInputRef"
                 v-model="searchQuery"
-                placeholder="输入名称、拼音缩写或别称 (例如: 瞎子, ys, hazn)..."
+                :placeholder="t('championPicker.placeholder')"
                 class="search-input"
                 type="text"
               />
@@ -150,7 +153,7 @@ function clearAll() {
 
             <div v-if="loading" class="picker-loading">
               <div class="loading-spinner"></div>
-              <span>加载中...</span>
+              <span>{{ $t('championPicker.loading') }}</span>
             </div>
             <div v-else class="champion-grid">
               <div
@@ -171,8 +174,8 @@ function clearAll() {
             </div>
 
             <div class="modal-footer">
-              <span class="selected-count">已选择 {{ selected.length }} 个英雄</span>
-              <button class="confirm-btn" @click="showPicker = false">确定</button>
+              <span class="selected-count">{{ $t('championPicker.selectedCount', { count: selected.length }) }}</span>
+              <button class="confirm-btn" @click="showPicker = false">{{ $t('championPicker.confirmBtn') }}</button>
             </div>
           </div>
         </div>

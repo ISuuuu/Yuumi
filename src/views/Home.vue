@@ -59,7 +59,7 @@ watch(() => store.isConnected, (connected) => {
   <div class="home-view">
     <!-- 连接成功状态 -->
     <div v-if="store.isConnected" class="connection-success">
-      <h1 class="status-title">客户端连接成功 🎉</h1>
+      <h1 class="status-title">{{ $t('home.connected') }}</h1>
 
       <div v-if="connectionDetails" class="details-box">
         <div class="detail-row">
@@ -76,7 +76,7 @@ watch(() => store.isConnected, (connected) => {
         </div>
       </div>
       <div v-else class="details-loading">
-        正在拉取 LCU 凭证细节...
+        {{ $t('home.fetchingDetails') }}
       </div>
     </div>
 
@@ -91,18 +91,18 @@ watch(() => store.isConnected, (connected) => {
     <!-- 未连接状态 -->
     <div v-else class="connection-offline">
       <img src="/logo.png" class="offline-logo" alt="Yuumi" />
-      <h1 class="status-title">客户端未连接</h1>
+      <h1 class="status-title">{{ $t('home.notConnected') }}</h1>
       <p class="offline-desc">
-        请先启动国服或外服的《英雄联盟》客户端。<br>
+        {{ $t('home.launchDesc') }}
       </p>
       <button class="launch-btn" @click="handleLaunchClient">
         <svg class="launch-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polygon points="5 3 19 12 5 21 5 3"/>
         </svg>
-        启动客户端
+        {{ $t('home.launchBtn') }}
       </button>
       <div v-if="lolPaths.length > 0" class="path-list">
-        <span class="path-label">客户端路径：</span>
+        <span class="path-label">{{ $t('home.lolPathLabel') }}</span>
         <div
           v-for="(p, i) in lolPaths"
           :key="i"
@@ -115,7 +115,7 @@ watch(() => store.isConnected, (connected) => {
       </div>
       <div class="loading-ring">
         <div class="ring-dot"></div>
-        <span>正在等待 LeagueClient 启动...</span>
+        <span>{{ $t('home.waitingForLol') }}</span>
       </div>
     </div>
   </div>

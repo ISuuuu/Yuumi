@@ -11,9 +11,12 @@ import { useDialog } from "naive-ui";
 import UpdateDialog, { type UpdateInfo } from "../components/UpdateDialog.vue";
 import { useToast } from "../composables/useToast";
 import ColorPickerWithAlpha from "../components/ColorPickerWithAlpha.vue";
+import { useI18n } from 'vue-i18n';
+import { setLocale } from '../i18n';
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 const dialog = useDialog();
+const { t } = useI18n();
 
 // 当前版本号
 const appVersion = ref("");
@@ -56,11 +59,11 @@ function autoSave() {
     try {
       await updateConfig(config.value!);
       if (!skipAutoSaveToast) {
-        showToast('设置已自动保存');
+        showToast(t('settings.autoSave'));
       }
       skipAutoSaveToast = false;
     } catch (e) {
-      showToast('保存失败', 'error');
+      showToast(t('settings.saveFailed'), 'error');
     }
   }, 500);
 }
@@ -330,20 +333,19 @@ function applyThemeMode(mode: string) {
   <div class="settings-view">
     <div v-if="!config" class="tip-container">
       <div class="loading-spinner"></div>
-      <p class="tip">加载配置数据中...</p>
+      <p class="tip">{{ $t('settings.loadingData') }}</p>
     </div>
 
     <div v-else class="settings-container">
-      <h1 class="page-title">设置</h1>
+      <h1 class="page-title">{{ $t('settings.title') }}</h1>
 
-      <!-- 1. 功能组 -->
-      <div class="group-header">功能</div>
+      <div class="group-header">{{ $t('settings.groupFeatures') }}</div>
 
       <!-- LCU API 并发数 -->
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">LCU API 并发数</h3>
-          <span class="card-desc">该值越大数据加载速度越快，但越可能引起客户端闪退</span>
+          <h3 class="card-title">{{ $t('settings.lcuConcurrencyTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.lcuConcurrencyDesc') }}</span>
         </div>
         <div class="card-right">
           <n-input-number
@@ -360,8 +362,8 @@ function applyThemeMode(mode: string) {
       <!-- 默认对局数量 -->
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">默认对局数量</h3>
-          <span class="card-desc">调整在个人生涯界面中显示的最大对局数量</span>
+          <h3 class="card-title">{{ $t('settings.defaultGamesTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.defaultGamesDesc') }}</span>
         </div>
         <div class="card-right">
           <n-input-number
@@ -378,8 +380,8 @@ function applyThemeMode(mode: string) {
 
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">对局信息过滤</h3>
-          <span class="card-desc">基于你当前游戏模式（地图/队列）筛选战绩，只显示相同模式的玩家历史数据</span>
+          <h3 class="card-title">{{ $t('settings.gameInfoFilterTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.gameInfoFilterDesc') }}</span>
         </div>
         <div class="card-right">
           <n-switch v-model:value="config.Functions.GameInfoFilter" @update:value="autoSave" />
@@ -388,8 +390,8 @@ function applyThemeMode(mode: string) {
 
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">保留对局信息界面内容</h3>
-          <span class="card-desc">保留上一局的对局信息内容直到下一次对局开始</span>
+          <h3 class="card-title">{{ $t('settings.reserveGameInfoTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.reserveGameInfoDesc') }}</span>
         </div>
         <div class="card-right">
           <n-switch v-model:value="config.Functions.EnableReserveGameinfo" @update:value="autoSave" />
@@ -398,8 +400,8 @@ function applyThemeMode(mode: string) {
 
       <div class="card-item">
         <div class="card-left">
-          <h3 class="card-title">对局详情中显示段位</h3>
-          <span class="card-desc">在搜索界面对局详情界面中显示段位，启动该选项将影响加载界面的速度</span>
+          <h3 class="card-title">{{ $t('settings.showTierInGameInfoTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.showTierInGameInfoDesc') }}</span>
         </div>
         <div class="card-right">
           <n-switch v-model:value="config.Functions.ShowTierInGameInfo" @update:value="autoSave" />
@@ -407,12 +409,12 @@ function applyThemeMode(mode: string) {
       </div>
 
       <!-- 2. OP.GG -->
-      <div class="group-header">OP.GG</div>
+      <div class="group-header">{{ $t('settings.opggGroup') }}</div>
 
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">自动显示 OP.GG 窗口</h3>
-          <span class="card-desc">在英雄选择开始时自动显示 OP.GG 窗口</span>
+          <h3 class="card-title">{{ $t('settings.autoShowOpggTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.autoShowOpggDesc') }}</span>
         </div>
         <div class="card-right">
           <n-switch v-model:value="config.Functions.AutoShowOpgg" @update:value="autoSave" />
@@ -421,8 +423,8 @@ function applyThemeMode(mode: string) {
 
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">置顶 OP.GG 窗口</h3>
-          <span class="card-desc">在英雄选择时将 OP.GG 窗口置顶</span>
+          <h3 class="card-title">{{ $t('settings.pinOpggTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.pinOpggDesc') }}</span>
         </div>
         <div class="card-right">
           <n-switch v-model:value="config.Functions.EnableOpggOnTop" @update:value="autoSave" />
@@ -434,11 +436,11 @@ function applyThemeMode(mode: string) {
           <template #header>
             <div class="collapse-header-wrapper">
               <div class="collapse-left-simple">
-                <span class="card-title">OP.GG HTTP 代理</span>
-                <span class="card-desc">连接 OP.GG 时启用 HTTP 代理</span>
+                <span class="card-title">{{ $t('settings.opggProxyTitle') }}</span>
+                <span class="card-desc">{{ $t('settings.opggProxyDesc') }}</span>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">{{ config.General.EnableOpggProxy ? '已启用' : '未启用' }}</span>
+                <span class="status-preview">{{ config.General.EnableOpggProxy ? $t('settings.enabled') : $t('settings.disabled') }}</span>
               </div>
             </div>
           </template>
@@ -450,39 +452,39 @@ function applyThemeMode(mode: string) {
       </n-collapse>
 
       <!-- 3. 通用 -->
-      <div class="group-header">通用</div>
+      <div class="group-header">{{ $t('settings.generalGroup') }}</div>
 
       <n-collapse arrow-placement="right" class="collapse-card">
         <n-collapse-item name="lolpath">
           <template #header>
             <div class="collapse-header-wrapper">
               <div class="collapse-left-simple">
-                <span class="card-title">客户端路径</span>
-                <span class="card-desc">选择或自动检测 LOL 客户端的安装路径</span>
+                <span class="card-title">{{ $t('settings.lolPathGroup') }}</span>
+                <span class="card-desc">{{ $t('settings.lolPathDesc') }}</span>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">{{ config?.General?.LolPath?.length ? `已设置 ${config.General.LolPath.length} 个路径` : '未设置' }}</span>
+                <span class="status-preview">{{ config?.General?.LolPath?.length ? $t('settings.pathSetCount', { count: config.General.LolPath.length }) : $t('settings.pathNotSet') }}</span>
               </div>
             </div>
           </template>
           <!-- 已保存的路径列表 -->
           <div v-for="(path, index) in (config?.General?.LolPath || [])" :key="index" class="path-item">
-            <n-input class="path-input" :value="path" @change="(val) => handleEditPathDirect(index, val)" placeholder="客户端安装路径" style="flex:1; margin-right:8px" />
-            <n-button size="tiny" circle @click="handleRemovePath(index)" title="删除">✕</n-button>
+            <n-input class="path-input" :value="path" @change="(val) => handleEditPathDirect(index, val)" :placeholder="t('settings.lolPathPlaceholder')" style="flex:1; margin-right:8px" />
+            <n-button size="tiny" circle @click="handleRemovePath(index)" :title="t('settings.pathRemove')">✕</n-button>
           </div>
-          <div v-if="!config?.General?.LolPath?.length" class="path-empty">暂无已保存的客户端路径</div>
+          <div v-if="!config?.General?.LolPath?.length" class="path-empty">{{ $t('settings.pathEmpty') }}</div>
           <!-- 操作按钮 -->
           <div class="path-actions">
-            <n-button size="small" @click="handleDetectPath">自动检测</n-button>
-            <n-button size="small" @click="handleBrowseFolder">添加目录</n-button>
+            <n-button size="small" @click="handleDetectPath">{{ $t('settings.detectBtn') }}</n-button>
+            <n-button size="small" @click="handleBrowseFolder">{{ $t('settings.browseBtn') }}</n-button>
           </div>
         </n-collapse-item>
       </n-collapse>
 
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">自动启动游戏</h3>
-          <span class="card-desc">启动 Yuumi 时自动启动 LOL 客户端</span>
+          <h3 class="card-title">{{ $t('settings.autoStartLolTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.autoStartLolDesc') }}</span>
         </div>
         <div class="card-right">
           <n-switch v-model:value="config.General.EnableStartLolWithApp" @update:value="autoSave" />
@@ -491,18 +493,18 @@ function applyThemeMode(mode: string) {
 
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">清除缓存</h3>
-          <span class="card-desc">删除所有游戏资源的缓存（建议在游戏资源有更新时使用）</span>
+          <h3 class="card-title">{{ $t('settings.clearCacheTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.clearCacheDesc') }}</span>
         </div>
         <div class="card-right">
-          <n-button size="small" @click="handleClearCache">删除</n-button>
+          <n-button size="small" @click="handleClearCache">{{ $t('settings.deleteBtn') }}</n-button>
         </div>
       </div>
 
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">最小化到任务栏托盘</h3>
-          <span class="card-desc">点击右上角关闭时将程序最小化到托盘</span>
+          <h3 class="card-title">{{ $t('settings.closeToTrayTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.closeToTrayDesc') }}</span>
         </div>
         <div class="card-right">
           <n-switch :value="!!config?.General?.EnableCloseToTray" @update:value="(val) => { if (config) { config.General.EnableCloseToTray = val; autoSave(); } }" />
@@ -511,8 +513,8 @@ function applyThemeMode(mode: string) {
 
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">静默启动</h3>
-          <span class="card-desc">启动 Yuumi 后最小化窗口到任务栏托盘</span>
+          <h3 class="card-title">{{ $t('settings.startMinimizedTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.startMinimizedDesc') }}</span>
         </div>
         <div class="card-right">
           <n-switch v-model:value="config.General.EnableGameStartMinimize" @update:value="autoSave" />
@@ -526,12 +528,12 @@ function applyThemeMode(mode: string) {
           <template #header>
             <div class="collapse-header-wrapper">
               <div class="collapse-left-simple">
-                <span class="card-title">云端服务</span>
-                <span class="card-desc">LCU 实时数据上传及 SignalR 实时查询服务</span>
+                <span class="card-title">{{ $t('settings.cloudServiceTitle') }}</span>
+                <span class="card-desc">{{ $t('settings.cloudServiceDesc') }}</span>
               </div>
               <div class="collapse-right-status">
                 <span class="status-preview">
-                  {{ config.General.UploadApiUrl ? '已配置上传' : '未配置' }}
+                  {{ config.General.UploadApiUrl ? $t('settings.uploadConfigured') : $t('settings.uploadNotConfigured') }}
                   <template v-if="config.Functions.LcuRealtimeEnabled">
                     / 
                     <span :class="['signalr-status-badge', signalrStatus]">
@@ -543,19 +545,19 @@ function applyThemeMode(mode: string) {
             </div>
           </template>
           <div class="setting-input-row">
-            <span class="setting-input-label">服务器 API 地址:</span>
+            <span class="setting-input-label">{{ $t('settings.apiServerAddrLabel') }}</span>
             <n-input v-model:value="config.General.UploadApiUrl" placeholder="http://example.com" clearable @change="if (config.Functions.LcuRealtimeEnabled && config.General.UploadApiUrl) { signalrStatus = 'connecting'; }; autoSave()" style="max-width:300px" />
           </div>
           <div class="setting-input-row">
-            <span class="setting-input-label">LCU 实时查询:</span>
+            <span class="setting-input-label">{{ $t('settings.realtimeLcuLabel') }}</span>
             <n-switch v-model:value="config.Functions.LcuRealtimeEnabled" @update:value="if (config.Functions.LcuRealtimeEnabled && config.General.UploadApiUrl) { signalrStatus = 'connecting'; } else { signalrStatus = 'disconnected'; }; autoSave()" />
           </div>
           <div v-if="signalrStatus === 'error' && signalrError" class="setting-error-tip">
-            连接异常: {{ signalrError }}
+            {{ $t('settings.connectionError') }}{{ signalrError }}
           </div>
           <div class="setting-input-row">
             <span class="setting-input-label">userid:</span>
-            <n-input v-model:value="config.General.SignalrUserId" placeholder="留空默认使用 lcu_user_001" clearable @change="autoSave" style="max-width:300px" />
+            <n-input v-model:value="config.General.SignalrUserId" :placeholder="t('settings.useridPlaceholder')" clearable @change="autoSave" style="max-width:300px" />
           </div>
         </n-collapse-item>
       </n-collapse>
@@ -563,8 +565,8 @@ function applyThemeMode(mode: string) {
       <!-- 隐藏云顶之弈 -->
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">隐藏云顶之弈</h3>
-          <span class="card-desc">在左侧菜单中隐藏 Teamfight Tactics 入口，关闭后立即生效</span>
+          <h3 class="card-title">{{ $t('settings.hideTftTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.hideTftDesc') }}</span>
         </div>
         <div class="card-right">
           <n-switch v-model:value="config.Functions.HideTft" @update:value="autoSave" />
@@ -572,13 +574,13 @@ function applyThemeMode(mode: string) {
       </div>
 
       <!-- 4. 日志 -->
-      <div class="group-header">日志</div>
+      <div class="group-header">{{ $t('settings.logGroup') }}</div>
 
       <!-- 日志等级 -->
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">日志等级</h3>
-          <span class="card-desc">日志写入文件记录的等级（Debug, Info, Error）</span>
+          <h3 class="card-title">{{ $t('settings.logLevelTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.logLevelDesc') }}</span>
         </div>
         <div class="card-right">
           <n-select
@@ -597,21 +599,21 @@ function applyThemeMode(mode: string) {
 
       <div class="card-item">
         <div class="card-left">
-          <h3 class="card-title">日志文件</h3>
-          <span class="card-desc">&lt;exe 目录&gt;/log/</span>
+          <h3 class="card-title">{{ $t('settings.logFileTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.logFileDesc') }}</span>
         </div>
         <div class="card-right">
-          <n-button size="small" @click="handleOpenLogFolder">打开文件夹</n-button>
+          <n-button size="small" @click="handleOpenLogFolder">{{ $t('settings.openFolderBtn') }}</n-button>
         </div>
       </div>
 
       <!-- 5. 个性化 -->
-      <div class="group-header">个性化</div>
+      <div class="group-header">{{ $t('settings.personalizationGroup') }}</div>
 
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">云母效果</h3>
-          <span class="card-desc">窗口和表面显示半透明（仅在 Win11 上可用）</span>
+          <h3 class="card-title">{{ $t('settings.micaTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.micaDesc') }}</span>
         </div>
         <div class="card-right">
           <n-switch v-model:value="config.Personalization.MicaEnabled" @update:value="autoSave(); invoke('set_mica_effect', { enabled: config.Personalization.MicaEnabled })" />
@@ -621,16 +623,16 @@ function applyThemeMode(mode: string) {
       <!-- 应用主题 -->
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">应用主题</h3>
-          <span class="card-desc">选择 Yuumi 的显示主题</span>
+          <h3 class="card-title">{{ $t('settings.themeModeTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.themeModeDesc') }}</span>
         </div>
         <div class="card-right">
           <n-select
             v-model:value="config.Personalization.ThemeMode"
             :options="[
-              { label: '浅色', value: 'Light' },
-              { label: '深色', value: 'Dark' },
-              { label: '跟随系统', value: 'Auto' }
+              { label: $t('settings.themeModeLight'), value: 'Light' },
+              { label: $t('settings.themeModeDark'), value: 'Dark' },
+              { label: $t('settings.themeModeAuto'), value: 'Auto' }
             ]"
             @update:value="(val) => { applyThemeMode(val); autoSave(); }"
             style="width: 140px;"
@@ -645,8 +647,8 @@ function applyThemeMode(mode: string) {
           <template #header>
             <div class="collapse-header-wrapper">
               <div class="collapse-left-simple">
-                <span class="card-title">主题色</span>
-                <span class="card-desc">选择 Yuumi 的全局视觉主题色</span>
+                <span class="card-title">{{ $t('settings.themeColorTitle') }}</span>
+                <span class="card-desc">{{ $t('settings.themeColorDesc') }}</span>
               </div>
               <div class="collapse-right-status">
                 <span class="status-preview">#{{ toColor6(config.Personalization.ThemeColor)?.replace('#', '') }}</span>
@@ -654,17 +656,18 @@ function applyThemeMode(mode: string) {
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">选择调色盘颜色:</span>
-            <n-color-picker
-              :value="toColor6(config.Personalization.ThemeColor)"
-              :show-alpha="false"
-              @update:value="onThemeColorSelect"
-              style="width: 100px; flex-shrink: 0;"
-              size="small"
-            />
+            <span class="setting-label">{{ $t('settings.themeColorPickerLabel') }}</span>
+            <div style="width: 100px; flex-shrink: 0;">
+              <n-color-picker
+                :value="toColor6(config.Personalization.ThemeColor)"
+                :show-alpha="false"
+                @update:value="onThemeColorSelect"
+                size="small"
+              />
+            </div>
           </div>
           <div class="reset-row">
-            <n-button size="small" @click="resetThemeColor">恢复默认</n-button>
+            <n-button size="small" @click="resetThemeColor">{{ $t('settings.resetColors') }}</n-button>
           </div>
         </n-collapse-item>
       </n-collapse>
@@ -675,16 +678,16 @@ function applyThemeMode(mode: string) {
           <template #header>
             <div class="collapse-header-wrapper">
               <div class="collapse-left-simple">
-                <span class="card-title">对局卡片颜色</span>
-                <span class="card-desc">自定义胜利、失败与重开对局卡片的背景色</span>
+                <span class="card-title">{{ $t('settings.cardColorTitle') }}</span>
+                <span class="card-desc">{{ $t('settings.cardColorDesc') }}</span>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">已设置自定义颜色</span>
+                <span class="status-preview">{{ $t('settings.cardColorStatusSet') }}</span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">胜利对局卡片:</span>
+            <span class="setting-label">{{ $t('settings.winCard') }}</span>
             <ColorPickerWithAlpha
               :value="config ? config.Personalization.WinCardColor : '#ffffffff'"
               @update:value="(val) => onCardColorChange(val, 'WinCardColor')"
@@ -694,7 +697,7 @@ function applyThemeMode(mode: string) {
             />
           </div>
           <div class="setting-row">
-            <span class="setting-label">失败对局卡片:</span>
+            <span class="setting-label">{{ $t('settings.loseCard') }}</span>
             <ColorPickerWithAlpha
               :value="config ? config.Personalization.LoseCardColor : '#ffffffff'"
               @update:value="(val) => onCardColorChange(val, 'LoseCardColor')"
@@ -704,7 +707,7 @@ function applyThemeMode(mode: string) {
             />
           </div>
           <div class="setting-row">
-            <span class="setting-label">重开对局卡片:</span>
+            <span class="setting-label">{{ $t('settings.remakeCard') }}</span>
             <ColorPickerWithAlpha
               :value="config ? config.Personalization.RemakeCardColor : '#ffffffff'"
               @update:value="(val) => onCardColorChange(val, 'RemakeCardColor')"
@@ -714,7 +717,7 @@ function applyThemeMode(mode: string) {
             />
           </div>
           <div class="reset-row">
-            <n-button size="small" @click="resetCardColors">恢复默认</n-button>
+            <n-button size="small" @click="resetCardColors">{{ $t('settings.resetColors') }}</n-button>
           </div>
         </n-collapse-item>
       </n-collapse>
@@ -725,57 +728,58 @@ function applyThemeMode(mode: string) {
           <template #header>
             <div class="collapse-header-wrapper">
               <div class="collapse-left-simple">
-                <span class="card-title">死亡数字体颜色</span>
-                <span class="card-desc">针对亮色与暗色模式分别自定义死亡文字的着色</span>
+                <span class="card-title">{{ $t('settings.deathColorTitle') }}</span>
+                <span class="card-desc">{{ $t('settings.deathColorDesc') }}</span>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">已设置自定义颜色</span>
+                <span class="status-preview">{{ $t('settings.cardColorStatusSet') }}</span>
               </div>
             </div>
           </template>
           <div class="setting-row">
-            <span class="setting-label">浅色主题死亡数字:</span>
-            <n-color-picker
-              :value="config ? toColor6(config.Personalization.LightDeathsNumberColor) : ''"
-              :show-alpha="false"
-              @update:value="(val) => onDeathColorSelect(val, 'LightDeathsNumberColor')"
-              style="width: 100px; flex-shrink: 0;"
-              size="small"
-            />
+            <span class="setting-label">{{ $t('settings.lightDeathLabel') }}</span>
+            <div style="width: 100px; flex-shrink: 0;">
+              <n-color-picker
+                :value="config ? toColor6(config.Personalization.LightDeathsNumberColor) : ''"
+                :show-alpha="false"
+                @update:value="(val) => onDeathColorSelect(val, 'LightDeathsNumberColor')"
+                size="small"
+              />
+            </div>
           </div>
           <div class="setting-row">
-            <span class="setting-label">深色主题死亡数字:</span>
-            <n-color-picker
-              :value="config ? toColor6(config.Personalization.DarkDeathsNumberColor) : ''"
-              :show-alpha="false"
-              @update:value="(val) => onDeathColorSelect(val, 'DarkDeathsNumberColor')"
-              style="width: 100px; flex-shrink: 0;"
-              size="small"
-            />
+            <span class="setting-label">{{ $t('settings.darkDeathLabel') }}</span>
+            <div style="width: 100px; flex-shrink: 0;">
+              <n-color-picker
+                :value="config ? toColor6(config.Personalization.DarkDeathsNumberColor) : ''"
+                :show-alpha="false"
+                @update:value="(val) => onDeathColorSelect(val, 'DarkDeathsNumberColor')"
+                size="small"
+              />
+            </div>
           </div>
           <div class="reset-row">
-            <n-button size="small" @click="resetDeathColors">恢复默认</n-button>
+            <n-button size="small" @click="resetDeathColors">{{ $t('settings.resetColors') }}</n-button>
           </div>
         </n-collapse-item>
       </n-collapse>
 
       <!-- 界面缩放 -->
-      <!-- 界面缩放 -->
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">界面缩放</h3>
-          <span class="card-desc">支持调整客户端视图的 DPI 缩放大小比例</span>
+          <h3 class="card-title">{{ $t('settings.dpiScaleTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.dpiScaleDesc') }}</span>
         </div>
         <div class="card-right">
           <n-select
             v-model:value="config.Personalization.DpiScale"
             :options="[
-              { label: '跟随系统', value: 'Auto' },
+              { label: $t('settings.dpiScaleAuto'), value: 'Auto' },
               { label: '100%', value: '100' },
               { label: '125%', value: '125' },
               { label: '150%', value: '150' }
             ]"
-            @update:value="() => { skipAutoSaveToast = true; autoSave(); showToast('缩放已修改，重启后生效'); }"
+            @update:value="() => { skipAutoSaveToast = true; autoSave(); showToast(t('settings.dpiScaleSaved')); }"
             style="width: 140px;"
             size="small"
           />
@@ -785,19 +789,19 @@ function applyThemeMode(mode: string) {
       <!-- 语言 -->
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">语言</h3>
-          <span class="card-desc">选择软件界面语言选项</span>
+          <h3 class="card-title">{{ $t('settings.langTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.langDesc') }}</span>
         </div>
         <div class="card-right">
           <n-select
             v-model:value="config.Personalization.Language"
             :options="[
-              { label: '跟随系统', value: 'Auto' },
+              { label: $t('settings.langAuto'), value: 'Auto' },
               { label: '简体中文', value: 'zh_CN' },
               { label: '繁體中文', value: 'zh_TW' },
               { label: 'English', value: 'en_US' }
             ]"
-            @update:value="() => { skipAutoSaveToast = true; autoSave(); showToast('语言已保存，重启后生效'); }"
+            @update:value="(val: any) => { skipAutoSaveToast = true; autoSave(); setLocale(val); showToast(t('settings.langSaved')); }"
             style="width: 140px;"
             size="small"
           />
@@ -805,15 +809,15 @@ function applyThemeMode(mode: string) {
       </div>
 
       <!-- 6. 软件更新 -->
-      <div class="group-header">软件更新</div>
+      <div class="group-header">{{ $t('settings.softwareUpdateGroup') }}</div>
 
       <div class="card-item border-bottom">
         <div class="card-left">
-          <h3 class="card-title">检查更新</h3>
-          <span class="card-desc">在 Yuumi 启动时自动检查更新</span>
+          <h3 class="card-title">{{ $t('settings.checkUpdateTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.checkUpdateDesc') }}</span>
         </div>
         <div class="card-right" style="flex-shrink:0; gap:10px">
-          <n-button size="small" :disabled="checkingUpdate" @click="manualCheckUpdate" :title="checkingUpdate ? '检查中...' : '检查更新'">
+          <n-button size="small" :disabled="checkingUpdate" @click="manualCheckUpdate" :title="checkingUpdate ? $t('settings.checkingUpdate') : $t('settings.checkUpdateBtn')">
             <template #icon>
               <svg v-if="!checkingUpdate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
                 <path d="M21 2v6h-6"/>
@@ -825,7 +829,7 @@ function applyThemeMode(mode: string) {
                 <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
               </svg>
             </template>
-            {{ checkingUpdate ? '检查中...' : '检查更新' }}
+            {{ checkingUpdate ? $t('settings.checkingUpdate') : $t('settings.checkUpdateBtn') }}
           </n-button>
           <n-switch v-model:value="config.General.EnableCheckUpdate" @update:value="autoSave" />
         </div>
@@ -843,11 +847,11 @@ function applyThemeMode(mode: string) {
           <template #header>
             <div class="collapse-header-wrapper">
               <div class="collapse-left-simple">
-                <span class="card-title">GitHub HTTP 代理</span>
-                <span class="card-desc">软件检查与拉取版本更新时走 HTTP 代理通道</span>
+                <span class="card-title">{{ $t('settings.githubProxyGroup') }}</span>
+                <span class="card-desc">{{ $t('settings.githubProxyDesc') }}</span>
               </div>
               <div class="collapse-right-status">
-                <span class="status-preview">{{ config.General.EnableGithubProxy ? '已启用' : '未启用' }}</span>
+                <span class="status-preview">{{ config.General.EnableGithubProxy ? $t('settings.enabled') : $t('settings.disabled') }}</span>
               </div>
             </div>
           </template>
@@ -859,12 +863,12 @@ function applyThemeMode(mode: string) {
       </n-collapse>
 
       <!-- 7. 关于 -->
-      <div class="group-header">关于</div>
+      <div class="group-header">{{ $t('settings.aboutGroup') }}</div>
 
       <div class="card-item">
         <div class="card-left">
-          <h3 class="card-title">关于</h3>
-          <span class="card-desc">当前版本 {{ appVersion ? `v${appVersion}` : '加载中...' }}</span>
+          <h3 class="card-title">{{ $t('settings.aboutTitle') }}</h3>
+          <span class="card-desc">{{ $t('settings.aboutVersion') }} {{ appVersion ? `v${appVersion}` : $t('settings.loading') }}</span>
         </div>
       </div>
     </div>
