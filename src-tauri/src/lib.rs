@@ -168,20 +168,10 @@ pub fn run() {
             }
 
             // ─── 系统托盘 ───
-            let tray_menu = MenuBuilder::new(app)
-                .item(&MenuItem::with_id(app, "home", "主页", true, None::<&str>)?)
-                .item(&MenuItem::with_id(app, "career", "生涯", true, None::<&str>)?)
-                .item(&MenuItem::with_id(app, "search", "战绩查询", true, None::<&str>)?)
-                .item(&MenuItem::with_id(app, "gameinfo", "对局信息", true, None::<&str>)?)
-                .item(&MenuItem::with_id(app, "tft", "TFT", true, None::<&str>)?)
-                .item(&MenuItem::with_id(app, "tools", "其他功能", true, None::<&str>)?)
-                .item(&PredefinedMenuItem::separator(app)?)
-                .item(&MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?)
-                .item(&PredefinedMenuItem::separator(app)?)
-                .item(&MenuItem::with_id(app, "exit", "退出", true, None::<&str>)?)
-                .build()?;
+            let hide_tft = app_config_arc.blocking_read().functions.hide_tft;
+            let tray_menu = build_tray_menu(app.handle(), hide_tft)?;
 
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id("main_tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&tray_menu)
                 .tooltip("Yuumi")
@@ -610,10 +600,23 @@ async fn update_config(
         || new_config.general.upload_api_url != old_api_url
         || new_user_id != old_user_id;
 
+    let hide_tft_changed = {
+        let lock = app_state.config.read().await;
+        lock.functions.hide_tft != new_config.functions.hide_tft
+    };
+
     {
         let mut cfg = app_state.config.write().await;
         *cfg = new_config.clone();
         cfg.save();
+    }
+
+    if hide_tft_changed {
+        if let Some(tray) = app_handle.tray_by_id("main_tray") {
+            if let Ok(new_menu) = build_tray_menu(&app_handle, new_config.functions.hide_tft) {
+                let _ = tray.set_menu(Some(new_menu));
+            }
+        }
     }
 
     if enable_changed || mode_changed {
@@ -696,6 +699,32 @@ async fn show_bench_overlay_window(
         }
     }
     Ok(())
+}
+
+/// 构建系统托盘菜单
+fn build_tray_menu<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    hide_tft: bool,
+) -> Result<tauri::menu::Menu<R>, tauri::Error> {
+    let mut builder = MenuBuilder::new(app)
+        .item(&MenuItem::with_id(app, "home", "主页", true, None::<&str>)?)
+        .item(&MenuItem::with_id(app, "career", "生涯", true, None::<&str>)?)
+        .item(&MenuItem::with_id(app, "search", "战绩查询", true, None::<&str>)?)
+        .item(&MenuItem::with_id(app, "gameinfo", "对局信息", true, None::<&str>)?);
+
+    if !hide_tft {
+        builder = builder.item(&MenuItem::with_id(app, "tft", "TFT", true, None::<&str>)?);
+    }
+
+    let menu = builder
+        .item(&MenuItem::with_id(app, "tools", "其他功能", true, None::<&str>)?)
+        .item(&PredefinedMenuItem::separator(app)?)
+        .item(&MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?)
+        .item(&PredefinedMenuItem::separator(app)?)
+        .item(&MenuItem::with_id(app, "exit", "退出", true, None::<&str>)?)
+        .build()?;
+        
+    Ok(menu)
 }
 
 
