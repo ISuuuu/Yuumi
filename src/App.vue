@@ -41,6 +41,8 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => {
     ? toHex6(appConfig.value.Personalization.ThemeColor)
     : "#a78bfa";
   
+  const isDark = isDarkTheme.value;
+  
   return {
     common: {
       primaryColor: customColor,
@@ -53,8 +55,12 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => {
       borderColor: "rgba(255, 255, 255, 0.2)",
     },
     Dialog: {
-      color: "rgba(255, 255, 255, 0.25)",
-      borderColor: "rgba(255, 255, 255, 0.2)",
+      color: isDark ? "rgba(28, 28, 30, 0.92)" : "rgba(255, 255, 255, 0.90)",
+      borderColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
+      iconColorWarning: customColor,
+      iconColorError: "#ec4899",
+      iconColorSuccess: "#10b981",
+      iconColorInfo: customColor,
     },
     Button: {
       textColorPrimary: "#ffffff",
@@ -174,7 +180,17 @@ onMounted(async () => {
     // 检查配置加载时是否有错误（如配置文件损坏已自动恢复）
     const configErr = await invoke<null | string>("get_config_load_error");
     if (configErr) {
-      alert("配置文件异常:\n" + configErr);
+      const dialog = (window as any).$dialog;
+      if (dialog) {
+        dialog.error({
+          title: "配置文件异常",
+          content: configErr,
+          positiveText: "确定",
+          positiveButtonProps: { type: 'primary' }
+        });
+      } else {
+        showToast("配置文件异常:\n" + configErr);
+      }
     }
     const cfg = appConfig.value;
     if (cfg?.General?.EnableStartLolWithApp) {

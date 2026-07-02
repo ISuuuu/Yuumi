@@ -501,7 +501,7 @@ function getItemUrl(itemId: number) {
 
 function copyGameId(gameId: number) {
   navigator.clipboard.writeText(String(gameId));
-  alert(`📋 游戏 ID: ${gameId} 已复制到剪贴板`);
+  showToast(`游戏 ID: ${gameId} 已复制到剪贴板`);
 }
 
 // 整理后的对局详情

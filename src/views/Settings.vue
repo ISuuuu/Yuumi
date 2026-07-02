@@ -7,11 +7,13 @@ import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import { updateThemeColor, updateDeathColor, updateCardColors } from "../utils/theme";
 
+import { useDialog } from "naive-ui";
 import UpdateDialog, { type UpdateInfo } from "../components/UpdateDialog.vue";
 import { useToast } from "../composables/useToast";
 import ColorPickerWithAlpha from "../components/ColorPickerWithAlpha.vue";
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
+const dialog = useDialog();
 
 // 当前版本号
 const appVersion = ref("");
@@ -196,14 +198,22 @@ async function handleEditPathDirect(index: number, val: string) {
 }
 
 // 清除缓存
-async function handleClearCache() {
-  if (!confirm("确定要清除所有游戏资源缓存吗？")) return;
-  try {
-    const result = await invoke<string>("clear_game_cache");
-    showToast(result);
-  } catch (e: any) {
-    showToast('清除缓存失败', 'error');
-  }
+function handleClearCache() {
+  dialog.warning({
+    title: "清除缓存",
+    content: "确定要清除所有游戏资源缓存吗？清除后需要重新加载游戏资源。",
+    positiveText: "确定",
+    negativeText: "取消",
+    positiveButtonProps: { type: 'primary' },
+    onPositiveClick: async () => {
+      try {
+        const result = await invoke<string>("clear_game_cache");
+        showToast(result);
+      } catch (e: any) {
+        showToast('清除缓存失败', 'error');
+      }
+    }
+  });
 }
 
 // 打开日志文件夹
