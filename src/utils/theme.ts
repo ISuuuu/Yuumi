@@ -70,3 +70,70 @@ export function applyDpiScale(dpiScale: string) {
     }
   }
 }
+
+/**
+ * 动态更新对局卡片的 CSS 变量
+ * @param winColor 胜利卡片颜色 (8位 hex #aarrggbb 或 6位 hex 或 rgba)
+ * @param loseColor 失败卡片颜色 (8位 hex #aarrggbb 或 6位 hex 或 rgba)
+ * @param remakeColor 重开卡片颜色 (8位 hex #aarrggbb 或 6位 hex 或 rgba)
+ */
+export function updateCardColors(winColor: string, loseColor: string, remakeColor: string) {
+  const root = document.documentElement;
+  
+  const DEFAULT_WIN = '#1510b981';
+  const DEFAULT_LOSE = '#12f43f5e';
+  const DEFAULT_REMAKE = '#1294a3b8';
+
+  const setCardVars = (prefix: string, color: string, defaultHex: string) => {
+    // 如果没有颜色配置，或颜色等于默认配置（不区分大小写），则清除 CSS 自定义属性覆盖，让其回退到样式表的亮暗色自动适应
+    if (!color || color.toLowerCase() === defaultHex.toLowerCase()) {
+      root.style.removeProperty(`--${prefix}-color`);
+      root.style.removeProperty(`--${prefix}-bg`);
+      root.style.removeProperty(`--${prefix}-border`);
+      root.style.removeProperty(`--${prefix}-glow`);
+      return;
+    }
+
+    let r = 0, g = 0, b = 0, alpha = 0.1;
+    if (color.startsWith('#')) {
+      if (color.length === 9) {
+        alpha = parseInt(color.slice(1, 3), 16) / 255;
+        r = parseInt(color.slice(3, 5), 16);
+        g = parseInt(color.slice(5, 7), 16);
+        b = parseInt(color.slice(7, 9), 16);
+      } else if (color.length === 7) {
+        r = parseInt(color.slice(1, 3), 16);
+        g = parseInt(color.slice(3, 5), 16);
+        b = parseInt(color.slice(5, 7), 16);
+        alpha = 0.1; // 默认大约 10% 的透明度
+      }
+    } else if (color.startsWith('rgba') || color.startsWith('rgb')) {
+      const match = color.match(/\d+(\.\d+)?/g);
+      if (match) {
+        r = parseInt(match[0], 10);
+        g = parseInt(match[1], 10);
+        b = parseInt(match[2], 10);
+        alpha = match[3] !== undefined ? parseFloat(match[3]) : 0.1;
+      }
+    }
+    
+    // 如果解析失败，清除覆盖
+    if (isNaN(r) || isNaN(g) || isNaN(b)) {
+      root.style.removeProperty(`--${prefix}-color`);
+      root.style.removeProperty(`--${prefix}-bg`);
+      root.style.removeProperty(`--${prefix}-border`);
+      root.style.removeProperty(`--${prefix}-glow`);
+      return;
+    }
+    
+    root.style.setProperty(`--${prefix}-color`, `rgba(${r}, ${g}, ${b}, 1)`);
+    root.style.setProperty(`--${prefix}-bg`, `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`);
+    root.style.setProperty(`--${prefix}-border`, `rgba(${r}, ${g}, ${b}, ${(alpha * 2.5).toFixed(2)})`);
+    root.style.setProperty(`--${prefix}-glow`, `rgba(${r}, ${g}, ${b}, ${(alpha * 0.75).toFixed(2)})`);
+  };
+
+  setCardVars('win', winColor, DEFAULT_WIN);
+  setCardVars('loss', loseColor, DEFAULT_LOSE);
+  setCardVars('remake', remakeColor, DEFAULT_REMAKE);
+}
+

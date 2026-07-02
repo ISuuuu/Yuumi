@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     ChampionPicker: typeof import('./components/ChampionPicker.vue')['default']
     ColorPicker: typeof import('./components/ColorPicker.vue')['default']
+    ColorPickerWithAlpha: typeof import('./components/ColorPickerWithAlpha.vue')['default']
     LcuImage: typeof import('./components/LcuImage.vue')['default']
     NaiveUIBridge: typeof import('./components/NaiveUIBridge.vue')['default']
     NButton: typeof import('naive-ui')['NButton']
@@ -26,6 +27,7 @@ declare module 'vue' {
     NInputNumber: typeof import('naive-ui')['NInputNumber']
     NMessageProvider: typeof import('naive-ui')['NMessageProvider']
     NSelect: typeof import('naive-ui')['NSelect']
+    NSlider: typeof import('naive-ui')['NSlider']
     NSpin: typeof import('naive-ui')['NSpin']
     NSwitch: typeof import('naive-ui')['NSwitch']
     OpggModal: typeof import('./components/OpggModal.vue')['default']

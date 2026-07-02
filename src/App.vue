@@ -3,7 +3,7 @@ import { ref, onMounted, watch, computed, provide } from "vue";
 import { useLcuStore, initLcuListeners } from "./store/lcuStore";
 import { storeToRefs } from "pinia";
 import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
-import { updateThemeColor, updateDeathColor, applyDpiScale, toHex6 } from "./utils/theme";
+import { updateThemeColor, updateDeathColor, applyDpiScale, toHex6, updateCardColors } from "./utils/theme";
 import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { invoke } from "@tauri-apps/api/core";
@@ -193,6 +193,11 @@ onMounted(async () => {
       if (cfg.Personalization.ThemeColor) {
         updateThemeColor(cfg.Personalization.ThemeColor);
       }
+      updateCardColors(
+        cfg.Personalization.WinCardColor,
+        cfg.Personalization.LoseCardColor,
+        cfg.Personalization.RemakeCardColor
+      );
       updateDeathColor(
         cfg.Personalization.LightDeathsNumberColor,
         cfg.Personalization.DarkDeathsNumberColor
@@ -343,11 +348,18 @@ async function loadLcuState() {
   // 5. 初始化加载主题色
   try {
     const cfg = appConfig.value || await fetchConfig();
-    if (cfg && cfg.Personalization && cfg.Personalization.ThemeColor) {
-      updateThemeColor(cfg.Personalization.ThemeColor);
-    }
-    if (cfg && cfg.Personalization && cfg.Personalization.ThemeMode) {
-      applyThemeMode(cfg.Personalization.ThemeMode);
+    if (cfg && cfg.Personalization) {
+      if (cfg.Personalization.ThemeColor) {
+        updateThemeColor(cfg.Personalization.ThemeColor);
+      }
+      updateCardColors(
+        cfg.Personalization.WinCardColor,
+        cfg.Personalization.LoseCardColor,
+        cfg.Personalization.RemakeCardColor
+      );
+      if (cfg.Personalization.ThemeMode) {
+        applyThemeMode(cfg.Personalization.ThemeMode);
+      }
     }
   } catch (e) {
     console.warn("[loadLcuState] 加载配置失败:", e);

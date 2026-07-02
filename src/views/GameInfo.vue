@@ -21,7 +21,7 @@ const currentSummonerPuuid = ref<string>("");
 
 // 预组队颜色方案（降低饱和度与透明度，非常柔和剔透，不刺眼）
 const PREMADE_COLORS = [
-  { border: 'rgba(249, 115, 22, 0.4)', bg: 'rgba(249, 115, 22, 0.10)', dot: '#f97316' },   // 柔橙
+  { border: 'rgba(255, 140, 0, 0.6)', bg: 'rgba(255, 140, 0, 0.15)', dot: '#ff9010' },   // 亮橙 / 橘色
   { border: 'rgba(236, 72, 153, 0.4)', bg: 'rgba(236, 72, 153, 0.10)', dot: '#ec4899' },   // 柔粉
   { border: 'rgba(59, 130, 246, 0.4)', bg: 'rgba(59, 130, 246, 0.10)', dot: '#3b82f6' },   // 柔蓝
   { border: 'rgba(16, 185, 129, 0.4)', bg: 'rgba(16, 185, 129, 0.10)', dot: '#10b981' },   // 柔绿
@@ -88,6 +88,7 @@ function getPremadeCardStyle(summonerId: number, side: 'my' | 'their'): Record<s
   const c = PREMADE_COLORS[idx % PREMADE_COLORS.length];
   return { 
     backgroundColor: c.bg,
+    borderColor: c.border,
   };
 }
 
