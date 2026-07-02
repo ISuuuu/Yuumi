@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { marked } from "marked";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 interface VersionEntry {
   tag: string;
@@ -40,7 +43,7 @@ async function fetchReleases() {
       versions.value = data.slice(0, 3).map((rel: any) => ({
         tag: rel.tag_name,
         date: formatDate(rel.published_at),
-        body: rel.body || "暂无发布描述"
+        body: rel.body || t("noticePage.noDesc")
       }));
       console.log("[Notice] 成功拉取 GitHub 最近 3 个版本日志");
     } else {
@@ -68,22 +71,22 @@ onMounted(() => {
         </svg>
       </div>
       <div class="header-text">
-        <h2>更新日志</h2>
-        <p class="header-sub">Yuumi 版本发布记录 (动态同步自 GitHub)</p>
+        <h2>{{ $t('noticePage.title') }}</h2>
+        <p class="header-sub">{{ $t('noticePage.sub') }}</p>
       </div>
     </div>
 
     <!-- 动态同步 Loading 骨架屏 -->
     <div v-if="loading && versions.length === 0" class="loading-container">
       <div class="loading-spinner" />
-      <p class="loading-text">正在同步最新版本日志...</p>
+      <p class="loading-text">{{ $t('noticePage.loadingText') }}</p>
     </div>
 
     <!-- 错误状态提示与重试 -->
     <div v-else-if="hasError && versions.length === 0" class="error-container">
       <div class="offline-logo">⚠️</div>
-      <p class="error-text">无法获取最新日志，请检查您的网络连接</p>
-      <button class="retry-btn" @click="fetchReleases">重新加载</button>
+      <p class="error-text">{{ $t('noticePage.errorText') }}</p>
+      <button class="retry-btn" @click="fetchReleases">{{ $t('noticePage.retryBtn') }}</button>
     </div>
 
     <div v-else class="timeline">

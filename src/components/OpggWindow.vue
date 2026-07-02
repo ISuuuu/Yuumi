@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { onMounted } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { setLocale } from "../i18n";
 import OpggModal from "./OpggModal.vue";
 import NaiveUIBridge from "./NaiveUIBridge.vue";
 
@@ -15,7 +17,17 @@ const isDark =
   savedTheme === "Dark" || (savedTheme !== "Light" && isSystemDark);
 document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
 
-onMounted(() => {
+onMounted(async () => {
+  // 同步语言配置
+  try {
+    const config: any = await invoke("get_config");
+    if (config?.Personalization?.Language) {
+      setLocale(config.Personalization.Language);
+    }
+  } catch (e) {
+    console.warn("[OpggWindow] 获取本地配置失败:", e);
+  }
+
   // 禁用右键菜单
   document.addEventListener("contextmenu", (e) => e.preventDefault());
 

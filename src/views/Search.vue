@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, watch, type Ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useLcuStore } from "../store/lcuStore";
 import { fetchMatchHistory, fetchMatchHistorySgp, lcuRequest, batchUploadMatches, fetchConfig, updateConfig } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
@@ -9,6 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useToast } from "../composables/useToast";
 
 const store = useLcuStore();
+const { t } = useI18n();
 const navigateTo = inject<(page: string) => void>("navigateTo")!;
 const searchName = ref("");
 
@@ -631,6 +633,8 @@ const gameDetails = computed(() => {
 
   return {
     gameId: g.gameId,
+    queueId: g.queueId,
+    mapId: g.mapId,
     duration: durationStr,
     date: dateStr,
     queueName: queueNames[g.queueId] || "自定义模式",
@@ -676,7 +680,7 @@ const gameDetails = computed(() => {
         <div class="search-input-wrapper">
           <n-input
             v-model:value="searchName"
-            placeholder="输入召唤师名称（如 你好#5201）"
+            :placeholder="t('search.searchPlaceholder')"
             :disabled="searching"
             clearable
             @keyup.enter="doSearch"
@@ -706,7 +710,7 @@ const gameDetails = computed(() => {
           <!-- 搜索历史下拉框 -->
           <div v-if="showHistory && filteredHistory.length > 0" class="history-dropdown">
             <div class="history-header">
-              <span class="history-title">🕐 最近搜索</span>
+              <span class="history-title">🕐 {{ $t('search.history') }}</span>
             </div>
             <div class="history-tags-container">
               <div
@@ -716,17 +720,17 @@ const gameDetails = computed(() => {
                 @mousedown.prevent="selectHistory(item)"
               >
                 <span class="history-text" :title="item">{{ item }}</span>
-                <span class="history-delete" @mousedown.prevent.stop="removeFromHistory(item)" title="删除">✕</span>
+                <span class="history-delete" @mousedown.prevent.stop="removeFromHistory(item)" :title="t('tools.cancel')">✕</span>
               </div>
             </div>
           </div>
         </div>
         
-        <n-button size="small" @click="navigateTo('career')">生涯</n-button>
+        <n-button size="small" @click="navigateTo('career')">{{ $t('nav.career') }}</n-button>
 
         <n-select
           v-model:value="selectedQueue"
-          :options="QUEUE_OPTIONS.map(q => ({ label: q.label, value: q.id }))"
+          :options="QUEUE_OPTIONS.map(q => ({ label: (q.id === null || q.id === -1) ? $t('career.all') : $t('gameModes.' + q.id), value: q.id }))"
           @update:value="selectQueue"
           style="width: 130px;"
           size="small"
@@ -760,7 +764,7 @@ const gameDetails = computed(() => {
                   <LcuImage :src="m.championIconUrl" alt="champ" />
                 </div>
                 <div class="mini-info">
-                  <span class="mini-mode">{{ m.name }}</span>
+                  <span class="mini-mode">{{ $te('gameModes.' + m.queueId) ? $t('gameModes.' + m.queueId) : m.name }}</span>
                   <span class="mini-time-kda">
                     {{ m.shortTime.split(' ')[0] }} &nbsp;&nbsp;
                     {{ m.kills }}/<span class="death-red">{{ m.deaths }}</span>/{{ m.assists }}
@@ -802,10 +806,10 @@ const gameDetails = computed(() => {
                   </div>
                   <div class="banner-left">
                     <h2 :class="['banner-result', gameDetails.win ? 'win' : 'lose']">
-                      {{ gameDetails.win ? '胜利' : '失败' }}
+                      {{ gameDetails.win ? $t('career.victory') : $t('career.defeat') }}
                     </h2>
                     <span class="banner-subtext">
-                      {{ gameDetails.mapName }} · {{ gameDetails.queueName }} · {{ gameDetails.duration }} · {{ gameDetails.date }} · 游戏 ID: {{ gameDetails.gameId }}
+                      {{ $t('maps.' + gameDetails.mapId) }} · {{ $te('gameModes.' + gameDetails.queueId) ? $t('gameModes.' + gameDetails.queueId) : gameDetails.queueName }} · {{ gameDetails.duration }} · {{ gameDetails.date }} · {{ $t('career.gameId') || 'Game ID' }}: {{ gameDetails.gameId }}
                     </span>
                   </div>
                 </div>
@@ -839,11 +843,11 @@ const gameDetails = computed(() => {
                     <div class="team-header-spacer"></div>
 
                     <div class="team-header-right">
-                      <span class="header-items">装备</span>
-                      <span class="header-kda">KDA</span>
-                      <span class="header-cs">补CS</span>
-                      <span class="header-gold">金币</span>
-                      <span class="header-damage">伤害</span>
+                      <span class="header-items">{{ $t('tools.background.titleModal') || '装备' }}</span>
+                      <span class="header-kda">{{ $t('career.kda') }}</span>
+                      <span class="header-cs">{{ $t('search.cs') }}</span>
+                      <span class="header-gold">{{ $t('search.gold') }}</span>
+                      <span class="header-damage">{{ $t('search.damage') }}</span>
                     </div>
                   </div>
 
@@ -936,7 +940,7 @@ const gameDetails = computed(() => {
             <div class="overlay-glass">
               <n-spin size="large">
                 <template #description>
-                  <span class="searching-text">正在为您读取最新对局数据...</span>
+                  <span class="searching-text">{{ $t('search.readingMatches') }}</span>
                 </template>
               </n-spin>
             </div>

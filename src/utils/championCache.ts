@@ -4,6 +4,8 @@
  * 独立于 Vue SFC 编译，不受组件销毁/重建影响。
  */
 
+import i18n from "../i18n";
+
 export interface ChampionEntry {
   id: number;
   name: string;
@@ -48,10 +50,10 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
     if (resp.success && resp.data) {
       rawData = resp.data;
       success = true;
-      console.log("Yuumi - 成功通过 champion-summary.json 获取英雄列表");
+      console.log("Yuumi - Successfully fetched champion list via champion-summary.json");
     }
   } catch (e) {
-    console.error("Yuumi - champion-summary.json 获取失败:", e);
+    console.error("Yuumi - Failed to fetch champion-summary.json:", e);
   }
 
   // 尝试 2: champions.json
@@ -61,10 +63,10 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
       if (resp.success && resp.data) {
         rawData = resp.data;
         success = true;
-        console.log("Yuumi - 成功通过 champions.json 获取英雄列表");
+        console.log("Yuumi - Successfully fetched champion list via champions.json");
       }
     } catch (e) {
-      console.error("Yuumi - champions.json 获取失败:", e);
+      console.error("Yuumi - Failed to fetch champions.json:", e);
     }
   }
 
@@ -77,20 +79,21 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
     }
 
     if (list.length > 0) {
+      const isEnglish = (i18n.global.locale as any).value === "en_US";
       cachedChampions = list
         .filter((c: any) => c && c.id > 0)
         .map((c: any) => ({
           id: c.id,
-          name: c.name || c.alias || `#${c.id}`,
+          name: (isEnglish && c.alias) ? c.alias : (c.name || c.alias || `#${c.id}`),
           iconPath: c.squarePortraitPath || `/lol-game-data/assets/v1/champion-icons/${c.id}.png`,
         }))
         .sort((a: ChampionEntry, b: ChampionEntry) => a.name.localeCompare(b.name, "zh"));
-      console.log(`Yuumi - 成功渲染了 ${cachedChampions.length} 个英雄`);
+      console.log(`Yuumi - Successfully rendered ${cachedChampions.length} champions`);
     } else {
-      console.error("Yuumi - 提取的英雄列表为空");
+      console.error("Yuumi - Extracted champion list is empty");
     }
   } else {
-    console.error("Yuumi - 所有英雄端点请求均失败");
+    console.error("Yuumi - All champion endpoints failed");
   }
 
   return cachedChampions || [];
@@ -123,11 +126,11 @@ async function doFetchKeywords(): Promise<Record<number, string>> {
         if (map[902]) map[902] += ",丁真,米利欧";
         if (map[897]) map[897] += ",黑龙,奎桑提";
         cachedKeywords = map;
-        console.log("Yuumi - 成功加载腾讯英雄别称/拼音检索库");
+        console.log("Yuumi - Successfully loaded Tencent champion alias/pinyin library");
       }
     }
   } catch (e) {
-    console.warn("Yuumi - 载入腾讯别称接口失败:", e);
+    console.warn("Yuumi - Failed to load Tencent champion alias endpoint:", e);
   }
   return map;
 }

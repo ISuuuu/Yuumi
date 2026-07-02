@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { lcuRequest, fetchConfig, cleanError } from "../api/lcu";
+
+const { locale } = useI18n();
 import LcuImage from "./LcuImage.vue";
 import opggIcon from "../assets/opgg.svg";
 import tierIcon1 from "../assets/tier/tier-1.svg";
@@ -306,8 +309,9 @@ async function loadChampionSummary() {
     const resp = await lcuRequest<any[]>("GET", "/lol-game-data/assets/v1/champion-summary.json");
     if (resp.success && resp.data) {
       const map = new Map<number, string>();
+      const isEnglish = locale.value === "en_US";
       for (const c of resp.data) {
-        map.set(c.id, c.name);
+        map.set(c.id, (isEnglish && c.alias) ? c.alias : c.name);
       }
       championsMap.value = map;
     }
@@ -499,42 +503,42 @@ async function setRunePage() {
       <div class="opgg-header-left">
         <img :src="opggIcon" class="opgg-icon" />
         <span class="opgg-logo">OP.GG</span>
-        <button :class="['tab-btn', { active: view === 'tier' }]" @click="view = 'tier'; fetchTierList()">梯队</button>
-        <button :class="['tab-btn', { active: view === 'build' }]" :disabled="!selectedChampId" @click="view = 'build'; selectedChampId && fetchBuild(selectedChampId)">出装</button>
+        <button :class="['tab-btn', { active: view === 'tier' }]" @click="view = 'tier'; fetchTierList()">{{ $t('opgg.tabs.tier') }}</button>
+        <button :class="['tab-btn', { active: view === 'build' }]" :disabled="!selectedChampId" @click="view = 'build'; selectedChampId && fetchBuild(selectedChampId)">{{ $t('opgg.tabs.build') }}</button>
       </div>
       <div class="opgg-header-right">
-        <span v-if="opggVersion" class="opgg-version">游戏版本: {{ opggVersion }}</span>
+        <span v-if="opggVersion" class="opgg-version">{{ $t('opgg.gameVersion') }}{{ opggVersion }}</span>
       </div>
     </div>
 
     <!-- 筛选栏 -->
     <div class="opgg-filters">
       <div class="filter-trigger" @click.stop="showRegionDropdown = !showRegionDropdown">
-        <span>{{ REGIONS.find(r => r.value === region)?.label || region }}</span>
+        <span>{{ $t('opgg.regions.' + region) }}</span>
         <svg :class="['filter-arrow', { expanded: showRegionDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         <div v-if="showRegionDropdown" class="filter-menu" @click.stop>
-          <div v-for="r in REGIONS" :key="r.value" :class="['filter-item', { active: region === r.value }]" @click="region = r.value; showRegionDropdown = false">{{ r.label }}</div>
+          <div v-for="r in REGIONS" :key="r.value" :class="['filter-item', { active: region === r.value }]" @click="region = r.value; showRegionDropdown = false">{{ $t('opgg.regions.' + r.value) }}</div>
         </div>
       </div>
       <div class="filter-trigger" @click.stop="showModeDropdown = !showModeDropdown">
-        <span>{{ MODES.find(m => m.value === mode)?.label || mode }}</span>
+        <span>{{ $t('opgg.modes.' + mode) }}</span>
         <svg :class="['filter-arrow', { expanded: showModeDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         <div v-if="showModeDropdown" class="filter-menu" @click.stop>
-          <div v-for="m in MODES" :key="m.value" :class="['filter-item', { active: mode === m.value }]" @click="mode = m.value; showModeDropdown = false">{{ m.label }}</div>
+          <div v-for="m in MODES" :key="m.value" :class="['filter-item', { active: mode === m.value }]" @click="mode = m.value; showModeDropdown = false">{{ $t('opgg.modes.' + m.value) }}</div>
         </div>
       </div>
       <div class="filter-trigger" @click.stop="showTierDropdown = !showTierDropdown">
-        <span>{{ TIERS.find(t => t.value === tier)?.label || tier }}</span>
+        <span>{{ $t('opgg.tiers.' + tier) }}</span>
         <svg :class="['filter-arrow', { expanded: showTierDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         <div v-if="showTierDropdown" class="filter-menu" @click.stop>
-          <div v-for="t in TIERS" :key="t.value" :class="['filter-item', { active: tier === t.value }]" @click="tier = t.value; showTierDropdown = false">{{ t.label }}</div>
+          <div v-for="t in TIERS" :key="t.value" :class="['filter-item', { active: tier === t.value }]" @click="tier = t.value; showTierDropdown = false">{{ $t('opgg.tiers.' + t.value) }}</div>
         </div>
       </div>
       <div v-if="mode === 'ranked'" class="filter-trigger" @click.stop="showPositionDropdown = !showPositionDropdown">
-        <span>{{ POSITIONS.find(p => p.value === position)?.label || position }}</span>
+        <span>{{ $t('opgg.positions.' + position) }}</span>
         <svg :class="['filter-arrow', { expanded: showPositionDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         <div v-if="showPositionDropdown" class="filter-menu" @click.stop>
-          <div v-for="p in POSITIONS" :key="p.value" :class="['filter-item', { active: position === p.value }]" @click="position = p.value; showPositionDropdown = false">{{ p.label }}</div>
+          <div v-for="p in POSITIONS" :key="p.value" :class="['filter-item', { active: position === p.value }]" @click="position = p.value; showPositionDropdown = false">{{ $t('opgg.positions.' + p.value) }}</div>
         </div>
       </div>
     </div>
@@ -548,14 +552,14 @@ async function setRunePage() {
       <!-- 表头 -->
       <div class="tier-header">
         <span class="tier-h-rank">#</span>
-        <span class="tier-h-champ">英雄</span>
+        <span class="tier-h-champ">{{ $t('championPicker.title').substring(2) || '英雄' }}</span>
         <span class="tier-h-spacer"></span>
         <span class="tier-h-tier">Tier</span>
-        <span class="tier-h-stat">胜率</span>
-        <span class="tier-h-stat">登场率</span>
-        <span class="tier-h-stat">禁用率</span>
+        <span class="tier-h-stat">{{ $t('career.winRate') }}</span>
+        <span class="tier-h-stat">{{ $t('opgg.pickRate') }}</span>
+        <span class="tier-h-stat">{{ $t('opgg.banRate') }}</span>
         <span class="tier-h-stat">KDA</span>
-        <span class="tier-h-counters">劣势对抗</span>
+        <span class="tier-h-counters">{{ $t('opgg.counters') }}</span>
       </div>
       <!-- 卡片列表 -->
       <div class="tier-cards">
@@ -598,17 +602,17 @@ async function setRunePage() {
         </div>
         <div class="build-title-stats">
           <div class="stat-col">
-            <span class="stat-label">胜率</span>
+            <span class="stat-label">{{ $t('career.winRate') }}</span>
             <span class="stat-value">{{ pct(selectedStats?.win_rate || selectedStats?.winRate) }}</span>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-col">
-            <span class="stat-label">登场率</span>
+            <span class="stat-label">{{ $t('opgg.pickRate') }}</span>
             <span class="stat-value">{{ pct(selectedStats?.pick_rate || selectedStats?.pickRate) }}</span>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-col">
-            <span class="stat-label">禁用率</span>
+            <span class="stat-label">{{ $t('opgg.banRate') }}</span>
             <span class="stat-value">{{ pct(selectedStats?.ban_rate || selectedStats?.banRate) }}</span>
           </div>
         </div>
@@ -628,7 +632,7 @@ async function setRunePage() {
             </div>
             <div class="spell-stats">
               <span class="spell-wr">{{ pct(s.win / s.play) }}</span>
-              <span class="spell-games">{{ s.play?.toLocaleString() }} 场</span>
+              <span class="spell-games">{{ $t('career.gamesCount', { count: s.play }) }}</span>
             </div>
             <span class="spell-pick">{{ pct(s.pick_rate) }}</span>
           </div>
@@ -699,13 +703,13 @@ async function setRunePage() {
                 <LcuImage :src="getRuneIcon(r.primary_page_id)" class="preset-page-icon" />
                 <div class="preset-info">
                   <div class="preset-wr">{{ pct(r.win / r.play) }}</div>
-                  <div class="preset-games">{{ r.play?.toLocaleString() }} 场</div>
+                  <div class="preset-games">{{ $t('career.gamesCount', { count: r.play }) }}</div>
                 </div>
                 <span class="preset-pick">{{ pct(r.pick_rate) }}</span>
               </div>
             </div>
             <button class="apply-rune-btn" @click="setRunePage">
-              设为当前符文页
+              {{ $t('opgg.applyRunePage') }}
             </button>
           </div>
         </div>
@@ -725,7 +729,7 @@ async function setRunePage() {
           </div>
           <div class="skill-stats">
             <span class="skill-wr">{{ pct(buildData.skills?.[0]?.win / buildData.skills?.[0]?.play) }}</span>
-            <span class="skill-games">{{ buildData.skills?.[0]?.play?.toLocaleString() }} 场</span>
+            <span class="skill-games">{{ $t('career.gamesCount', { count: buildData.skills?.[0]?.play }) }}</span>
           </div>
           <span class="skill-pick">{{ pct(buildData.skills?.[0]?.pick_rate) }}</span>
         </div>
@@ -739,7 +743,7 @@ async function setRunePage() {
             <div v-for="(item, i) in (buildData.starter_items || []).slice(0, 3)" :key="'s'+i" class="item-entry">
               <LcuImage v-for="id in item.ids" :key="id" :src="getItemIcon(id)" class="item-icon" />
               <span class="item-entry-wr">{{ pct(item.win / item.play) }}</span>
-              <span class="item-entry-games">{{ item.play?.toLocaleString() }}场</span>
+              <span class="item-entry-games">{{ $t('career.gamesCount', { count: item.play }) }}</span>
             </div>
           </div>
           <div class="item-v-divider"></div>
@@ -747,7 +751,7 @@ async function setRunePage() {
             <div v-for="(item, i) in (buildData.boots || []).slice(0, 3)" :key="'b'+i" class="item-entry">
               <LcuImage v-for="id in item.ids" :key="id" :src="getItemIcon(id)" class="item-icon" />
               <span class="item-entry-wr">{{ pct(item.win / item.play) }}</span>
-              <span class="item-entry-games">{{ item.play?.toLocaleString() }}场</span>
+              <span class="item-entry-games">{{ $t('career.gamesCount', { count: item.play }) }}</span>
             </div>
           </div>
         </div>
@@ -764,7 +768,7 @@ async function setRunePage() {
           </div>
           <div class="item-entry-stats">
             <span class="item-entry-wr">{{ pct(item.win / item.play) }}</span>
-            <span class="item-entry-games">{{ item.play?.toLocaleString() }}场</span>
+            <span class="item-entry-games">{{ $t('career.gamesCount', { count: item.play }) }}</span>
           </div>
           <span class="item-entry-pick">{{ pct(item.pick_rate) }}</span>
         </div>
@@ -783,13 +787,13 @@ async function setRunePage() {
         <div class="counter-columns">
           <!-- 克制（胜率 > 50%） -->
           <div class="counter-col">
-            <div class="counter-col-title">克制</div>
+            <div class="counter-col-title">{{ $t('opgg.strongAgainst') }}</div>
             <div v-for="ct in strongCounters" :key="ct.champion_id" class="counter-row">
               <div class="counter-champ">
                 <LcuImage :src="getChampIcon(ct.champion_id)" class="counter-icon" />
                 <span class="counter-name">{{ championsMap.get(ct.champion_id) || ct.name || ct.champion_id }}</span>
               </div>
-              <span class="counter-games">{{ ct.play?.toLocaleString() }}场</span>
+              <span class="counter-games">{{ $t('career.gamesCount', { count: ct.play }) }}</span>
               <span :class="['counter-wr-val', ct.rate >= 0.5 ? 'wr-good' : 'wr-bad']">
                 {{ pct(ct.rate) }}
               </span>
@@ -798,13 +802,13 @@ async function setRunePage() {
           <div class="counter-v-divider"></div>
           <!-- 被克（胜率 < 50%） -->
           <div class="counter-col">
-            <div class="counter-col-title">被克制</div>
+            <div class="counter-col-title">{{ $t('opgg.weakAgainst') }}</div>
             <div v-for="ct in weakCounters" :key="ct.champion_id" class="counter-row">
               <div class="counter-champ">
                 <LcuImage :src="getChampIcon(ct.champion_id)" class="counter-icon" />
                 <span class="counter-name">{{ championsMap.get(ct.champion_id) || ct.name || ct.champion_id }}</span>
               </div>
-              <span class="counter-games">{{ ct.play?.toLocaleString() }}场</span>
+              <span class="counter-games">{{ $t('career.gamesCount', { count: ct.play }) }}</span>
               <span :class="['counter-wr-val', ct.rate >= 0.5 ? 'wr-good' : 'wr-bad']">
                 {{ pct(ct.rate) }}
               </span>

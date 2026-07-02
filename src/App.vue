@@ -4,6 +4,8 @@ import { useLcuStore, initLcuListeners } from "./store/lcuStore";
 import { storeToRefs } from "pinia";
 import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
 import { updateThemeColor, updateDeathColor, applyDpiScale, toHex6, updateCardColors } from "./utils/theme";
+import { useI18n } from 'vue-i18n';
+import { setLocale } from './i18n';
 import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { invoke } from "@tauri-apps/api/core";
@@ -78,6 +80,7 @@ const isSidebarExpanded = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
 const platformId = ref("");
 const mapSideLabel = ref(""); // 蓝色方/红色方
+const { t } = useI18n();
 
 // 检测当前是否是悬浮窗窗口（bench-overlay）
 const isOverlayWindow = ref(window.location.search.includes("window=bench-overlay"));
@@ -100,20 +103,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
     console.warn("[Toast] Naive UI message not available yet:", e);
   }
 }
-
-const PHASE_LABELS: Record<string, string> = {
-  None: "空闲",
-  Lobby: "房间组队中",
-  Matchmaking: "匹配中",
-  ReadyCheck: "确认对局",
-  ChampSelect: "选择英雄",
-  GameStart: "游戏加载",
-  InProgress: "游戏中",
-  EndOfGame: "对局结束",
-  PreEndOfGame: "结算中",
-  WaitingForStats: "等待数据",
-  Reconnect: "重新连接",
-};
 
 // 用于 Career → Search 跳转的共享状态
 const navigateSearchPayload = ref<{ name: string; gameId: number | null } | null>(null);
@@ -142,18 +131,23 @@ function navigateTo(page: string) {
 }
 provide("navigateTo", navigateTo);
 
-const PLATFORM_MAP: Record<string, string> = {
-  HN1: "艾欧尼亚", HN2: "祖安", HN3: "诺克萨斯", HN4: "班德尔城", HN5: "皮尔特沃夫",
-  HN6: "战争学院", HN7: "巨神峰", HN8: "雷瑟守备", HN9: "裁决之地", HN10: "黑色玫瑰",
-  HN11: "暗影岛", HN12: "钢铁烈阳", HN13: "水晶之痕", HN14: "均衡教派", HN15: "影流",
-  HN16: "守望之海", HN17: "征服之海", HN18: "卡拉曼达", HN19: "皮城警备",
-  WT1: "比尔吉沃特", WT2: "德玛西亚", WT3: "弗雷尔卓德", WT4: "无畏先锋", WT5: "恕瑞玛", WT6: "扭曲丛林",
-  HN20: "巨龙之巢", BGP1: "男爵领域", BGP2: "教育网", BGP3: "巅峰战区",
-};
-
 const regionName = computed(() => {
-  return PLATFORM_MAP[platformId.value] || platformId.value || "艾欧尼亚";
+  if (!platformId.value) return t('regions.HN1');
+  const key = `regions.${platformId.value}`;
+  const translated = t(key);
+  return translated !== key ? translated : platformId.value;
 });
+
+// 监听配置中的语言设置，动态切换 locale
+watch(
+  () => appConfig.value?.Personalization?.Language,
+  (newLang) => {
+    if (newLang) {
+      setLocale(newLang);
+    }
+  },
+  { immediate: true }
+);
 
 onMounted(async () => {
   await initLcuListeners();
@@ -429,7 +423,7 @@ watch(gamePhase, (phase: string) => {
   console.log("[watch gamePhase] phase changed:", phase);
 
   // 更新窗口标题栏显示游戏状态
-  const label = PHASE_LABELS[phase];
+  const label = t('phase.' + phase);
   const title = label ? `Yuumi · ${label}` : "Yuumi";
   const setTitle = (t: string) => getCurrentWindow().setTitle(t).catch(() => {});
 
@@ -440,7 +434,7 @@ watch(gamePhase, (phase: string) => {
         const side = await invoke<string | null>("get_map_side");
         console.log("[watch gamePhase] get_map_side result:", side);
         if (side) {
-          const sideLabel = side === "blue" ? "蓝色方" : "红色方";
+          const sideLabel = side === "blue" ? t('titlebar.blueSide') : t('titlebar.redSide');
           mapSideLabel.value = sideLabel;
           setTitle(`Yuumi · ${label} - ${sideLabel}`);
           return;
@@ -459,7 +453,7 @@ watch(gamePhase, (phase: string) => {
         try {
           const side = await invoke<string | null>("get_map_side");
           if (side) {
-            const sideLabel = side === "blue" ? "蓝色方" : "红色方";
+            const sideLabel = side === "blue" ? t('titlebar.blueSide') : t('titlebar.redSide');
             mapSideLabel.value = sideLabel;
             setTitle(`Yuumi · ${label} - ${sideLabel}`);
             return;
@@ -536,13 +530,13 @@ function handleReconnect() {
       // 游戏中 → 调用 reconnect API
       lcuRequest("POST", "/lol-gameflow/v1/reconnect").then(r => {
         if (r.success) {
-          showToast("🔄 已触发游戏重连");
+          showToast("🔄 " + t('common.reconnectTriggered'));
         } else {
-          showToast("重连请求失败: " + (r.error || ""), "success");
+          showToast(t('common.reconnectFailed') + ": " + (r.error || ""), "success");
         }
       });
     } else {
-      showToast("LCU 监听服务已重置 (当前: " + (PHASE_LABELS[phase ?? ""] || phase) + ")");
+      showToast(t('common.lcuReset') + " (" + (t('phase.' + (phase ?? "")) || phase) + ")");
     }
   }).catch(() => {
     showToast("LCU 监听服务已重置");
@@ -589,7 +583,7 @@ async function handleClose() {
     <!-- 自定义标题栏 -->
     <div class="titlebar" data-tauri-drag-region>
       <div class="titlebar-left">
-        <div v-if="pageHistory.length > 0" class="titlebar-btn" @click="goBack" title="返回">
+        <div v-if="pageHistory.length > 0" class="titlebar-btn" @click="goBack" :title="$t('titlebar.back')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="15 18 9 12 15 6"/>
           </svg>
@@ -598,18 +592,18 @@ async function handleClose() {
         <span class="titlebar-title">
           Yummi
           <span v-if="store.isConnected && gamePhase !== 'None'" class="titlebar-phase">
-            · {{ PHASE_LABELS[gamePhase] || gamePhase }}<span v-if="mapSideLabel"> - {{ mapSideLabel }}</span>
+            · {{ $t('phase.' + gamePhase) }}<span v-if="mapSideLabel"> - {{ mapSideLabel }}</span>
           </span>
         </span>
       </div>
       <div class="titlebar-controls">
-        <div class="titlebar-btn" @click="getCurrentWindow().minimize()" title="最小化">
+        <div class="titlebar-btn" @click="getCurrentWindow().minimize()" :title="$t('titlebar.minimize')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </div>
-        <div class="titlebar-btn" @click="getCurrentWindow().toggleMaximize()" title="最大化">
+        <div class="titlebar-btn" @click="getCurrentWindow().toggleMaximize()" :title="$t('titlebar.maximize')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
         </div>
-        <div class="titlebar-btn close-btn" @click="handleClose" title="关闭">
+        <div class="titlebar-btn close-btn" @click="handleClose" :title="$t('titlebar.close')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </div>
       </div>
@@ -629,47 +623,47 @@ async function handleClose() {
 
       <!-- 中间功能导航 -->
       <nav class="sidebar-nav">
-        <div :class="['nav-item', { active: currentPage === 'home' }]" @click="navigate('home')" title="启动页">
+        <div :class="['nav-item', { active: currentPage === 'home' }]" @click="navigate('home')" :title="$t('nav.home')">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
               <polyline points="9 22 9 12 15 12 15 22"/>
             </svg>
           </span>
-          <span class="nav-label">启动页</span>
+          <span class="nav-label">{{ $t('nav.home') }}</span>
         </div>
 
-        <div :class="['nav-item', { active: currentPage === 'career' }]" @click="navigate('career')" title="生涯">
+        <div :class="['nav-item', { active: currentPage === 'career' }]" @click="navigate('career')" :title="$t('nav.career')">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
               <circle cx="12" cy="7" r="4"/>
             </svg>
           </span>
-          <span class="nav-label">生涯</span>
+          <span class="nav-label">{{ $t('nav.career') }}</span>
         </div>
 
-        <div :class="['nav-item', { active: currentPage === 'search' }]" @click="navigate('search')" title="战绩查询">
+        <div :class="['nav-item', { active: currentPage === 'search' }]" @click="navigate('search')" :title="$t('nav.search')">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"/>
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
           </span>
-          <span class="nav-label">战绩查询</span>
+          <span class="nav-label">{{ $t('nav.search') }}</span>
         </div>
 
-        <div :class="['nav-item', { active: currentPage === 'gameinfo' }]" @click="navigate('gameinfo')" title="对局信息">
+        <div :class="['nav-item', { active: currentPage === 'gameinfo' }]" @click="navigate('gameinfo')" :title="$t('nav.gameinfo')">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="2" y="6" width="20" height="12" rx="3"/>
               <path d="M6 12h4M8 10v4M15 11h.01M18 13h.01"/>
             </svg>
           </span>
-          <span class="nav-label">对局信息</span>
+          <span class="nav-label">{{ $t('nav.gameinfo') }}</span>
         </div>
 
-        <div v-if="!appConfig?.Functions?.HideTft" :class="['nav-item', { active: currentPage === 'tft' }]" @click="navigate('tft')" title="Teamfight Tactics">
+        <div v-if="!appConfig?.Functions?.HideTft" :class="['nav-item', { active: currentPage === 'tft' }]" @click="navigate('tft')" :title="$t('nav.tft')">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polygon points="12 2 2 7 12 12 22 7 12 2"/>
@@ -677,42 +671,42 @@ async function handleClose() {
               <polyline points="2 12 12 17 22 12"/>
             </svg>
           </span>
-          <span class="nav-label">Teamfight Tactics</span>
+          <span class="nav-label">{{ $t('nav.tft') }}</span>
         </div>
 
-        <div :class="['nav-item', { active: currentPage === 'tools' }]" @click="navigate('tools')" title="其他功能">
+        <div :class="['nav-item', { active: currentPage === 'tools' }]" @click="navigate('tools')" :title="$t('nav.tools')">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
             </svg>
           </span>
-          <span class="nav-label">其他功能</span>
+          <span class="nav-label">{{ $t('nav.tools') }}</span>
         </div>
       </nav>
 
       <!-- 底部附加操作 -->
       <div class="sidebar-bottom">
-        <div class="nav-item" @click="openOpggWindow" title="OP.GG">
+        <div class="nav-item" @click="openOpggWindow" :title="$t('nav.opgg')">
           <span class="nav-icon"><img :src="opggIcon" style="width:18px;height:18px;border-radius:3px" /></span>
-          <span class="nav-label">OP.GG</span>
+          <span class="nav-label">{{ $t('nav.opgg') }}</span>
         </div>
 
-        <div class="nav-item" @click="handleReconnect" title="修复无限加载">
+        <div class="nav-item" @click="handleReconnect" :title="$t('nav.reconnect')">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
           </span>
-          <span class="nav-label">修复无限加载</span>
+          <span class="nav-label">{{ $t('nav.reconnect') }}</span>
         </div>
 
-        <div :class="['nav-item', { active: currentPage === 'notice' }]" @click="navigate('notice')" title="更新日志">
+        <div :class="['nav-item', { active: currentPage === 'notice' }]" @click="navigate('notice')" :title="$t('nav.notice')">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>
             </svg>
           </span>
-          <span class="nav-label">更新日志</span>
+          <span class="nav-label">{{ $t('nav.notice') }}</span>
         </div>
 
         <!-- 召唤师简短信息 -->
@@ -726,14 +720,14 @@ async function handleClose() {
           </div>
         </div>
 
-        <div :class="['nav-item', { active: currentPage === 'settings' }]" @click="navigate('settings')" title="设置">
+        <div :class="['nav-item', { active: currentPage === 'settings' }]" @click="navigate('settings')" :title="$t('nav.settings')">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="3"/>
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
             </svg>
           </span>
-          <span class="nav-label">设置</span>
+          <span class="nav-label">{{ $t('nav.settings') }}</span>
         </div>
       </div>
     </aside>
@@ -755,17 +749,17 @@ async function handleClose() {
         <!-- 内建 OP.GG 占位页面 -->
         <div v-else-if="currentPage === 'opgg'" class="placeholder-view">
           <div class="view-header">
-            <h2>OP.GG 辅助模块</h2>
+            <h2>{{ $t('common.opgg') }}</h2>
           </div>
           <div class="view-card">
             <div class="avatar-circle op-icon">OP</div>
-            <h3>OP.GG 数据反代已成功建立</h3>
-            <p>Yuumi 已在后台为您开启 OP.GG 数据加速反代，保证国服和外服战绩的流畅拉取。</p>
+            <h3>{{ $t('common.opgg') }}</h3>
+            <p>{{ $t('common.opggProxyInfo') }}</p>
             <div class="status-box">
               <span class="dot online"></span>
-              <span>OP.GG 代理地址: 127.0.0.1:7897</span>
+              <span>{{ $t('common.opggProxyAddress') }}127.0.0.1:7897</span>
             </div>
-            <p class="hint">您可以在系统设置中开启"对局自动上传战绩"，该功能将静默安全地同步数据。</p>
+            <p class="hint">{{ $t('common.opggHint') }}</p>
           </div>
         </div>
 
