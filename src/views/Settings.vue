@@ -5,10 +5,11 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
-import { updateThemeColor, updateDeathColor } from "../utils/theme";
+import { updateThemeColor, updateDeathColor, updateCardColors } from "../utils/theme";
 
 import UpdateDialog, { type UpdateInfo } from "../components/UpdateDialog.vue";
 import { useToast } from "../composables/useToast";
+import ColorPickerWithAlpha from "../components/ColorPickerWithAlpha.vue";
 
 const config = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 
@@ -83,8 +84,15 @@ onMounted(async () => {
       console.error("加载系统配置失败:", e);
     }
   }
-  if (config.value && config.value.Personalization && config.value.Personalization.ThemeColor) {
-    updateThemeColor(config.value.Personalization.ThemeColor);
+  if (config.value && config.value.Personalization) {
+    if (config.value.Personalization.ThemeColor) {
+      updateThemeColor(config.value.Personalization.ThemeColor);
+    }
+    updateCardColors(
+      config.value.Personalization.WinCardColor,
+      config.value.Personalization.LoseCardColor,
+      config.value.Personalization.RemakeCardColor
+    );
   }
 
   // 获取初始 SignalR 状态
@@ -222,6 +230,18 @@ function toColor8(color: string): string {
   return color;
 }
 
+function onCardColorChange(val: string, field: 'WinCardColor' | 'LoseCardColor' | 'RemakeCardColor') {
+  if (!config.value?.Personalization) return;
+  config.value.Personalization[field] = val;
+  
+  // 实时更新全局 CSS 变量
+  updateCardColors(
+    config.value.Personalization.WinCardColor,
+    config.value.Personalization.LoseCardColor,
+    config.value.Personalization.RemakeCardColor
+  );
+}
+
 
 
 function onThemeColorSelect(color: string) {
@@ -267,6 +287,11 @@ function resetCardColors() {
   config.value.Personalization.WinCardColor = DEFAULT_COLORS.WinCardColor;
   config.value.Personalization.LoseCardColor = DEFAULT_COLORS.LoseCardColor;
   config.value.Personalization.RemakeCardColor = DEFAULT_COLORS.RemakeCardColor;
+  updateCardColors(
+    DEFAULT_COLORS.WinCardColor,
+    DEFAULT_COLORS.LoseCardColor,
+    DEFAULT_COLORS.RemakeCardColor
+  );
   autoSave();
 }
 
@@ -650,32 +675,32 @@ function applyThemeMode(mode: string) {
           </template>
           <div class="setting-row">
             <span class="setting-label">胜利对局卡片:</span>
-            <n-color-picker
-              :value="config ? toColor6(config.Personalization.WinCardColor) : ''"
-              :show-alpha="false"
-              @update:value="(val) => { if (config) { config.Personalization.WinCardColor = val; autoSave(); } }"
-              style="width: 100px; flex-shrink: 0;"
+            <ColorPickerWithAlpha
+              :value="config ? config.Personalization.WinCardColor : '#ffffffff'"
+              @update:value="(val) => onCardColorChange(val, 'WinCardColor')"
+              @save="autoSave"
               size="small"
+              style="width: 120px; flex-shrink: 0;"
             />
           </div>
           <div class="setting-row">
             <span class="setting-label">失败对局卡片:</span>
-            <n-color-picker
-              :value="config ? toColor6(config.Personalization.LoseCardColor) : ''"
-              :show-alpha="false"
-              @update:value="(val) => { if (config) { config.Personalization.LoseCardColor = val; autoSave(); } }"
-              style="width: 100px; flex-shrink: 0;"
+            <ColorPickerWithAlpha
+              :value="config ? config.Personalization.LoseCardColor : '#ffffffff'"
+              @update:value="(val) => onCardColorChange(val, 'LoseCardColor')"
+              @save="autoSave"
               size="small"
+              style="width: 120px; flex-shrink: 0;"
             />
           </div>
           <div class="setting-row">
             <span class="setting-label">重开对局卡片:</span>
-            <n-color-picker
-              :value="config ? toColor6(config.Personalization.RemakeCardColor) : ''"
-              :show-alpha="false"
-              @update:value="(val) => { if (config) { config.Personalization.RemakeCardColor = val; autoSave(); } }"
-              style="width: 100px; flex-shrink: 0;"
+            <ColorPickerWithAlpha
+              :value="config ? config.Personalization.RemakeCardColor : '#ffffffff'"
+              @update:value="(val) => onCardColorChange(val, 'RemakeCardColor')"
+              @save="autoSave"
               size="small"
+              style="width: 120px; flex-shrink: 0;"
             />
           </div>
           <div class="reset-row">
