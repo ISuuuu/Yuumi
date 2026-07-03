@@ -14,7 +14,7 @@ let cachedRankedQueues: any[] = [];
 let lastFetchedTime = 0;
 
 const store = useLcuStore();
-const { t } = useI18n();
+const { t, te } = useI18n();
 const summoner = ref<SummonerDisplay | null>(null);
 const matches = ref<MatchDisplay[]>([]);
 const recentMatches = ref<MatchDisplay[]>([]);
@@ -398,6 +398,23 @@ function translateMapName(name: string): string {
   if (name.includes("大厅") || name.includes("Lobby")) return t("maps.22");
   return name;
 }
+
+function getQueueName(m: MatchDisplay): string {
+  const key = `gameModes.${m.queueId}`;
+  if (te(key)) {
+    const translation = t(key);
+    // 翻译防冲突纠错：如果翻译包含“云顶之弈”或“云顶”，但后端实际名称不含“云顶”相关
+    // 则说明队列 ID 发生冲突，应该降级显示后端解析出的 name
+    if (
+      (translation.includes("云顶") || translation.includes("TFT")) &&
+      (!m.name.includes("云顶") && !m.name.includes("TFT"))
+    ) {
+      return m.name;
+    }
+    return translation;
+  }
+  return m.name;
+}
 </script>
 
 <template>
@@ -581,7 +598,7 @@ function translateMapName(name: string): string {
             <span :class="['result-text', m.win ? 'win-text' : 'lose-text']">
               {{ m.win ? $t('career.victory') : $t('career.defeat') }}
             </span>
-            <span class="queue-mode">{{ $te('gameModes.' + m.queueId) ? $t('gameModes.' + m.queueId) : m.name }}</span>
+            <span class="queue-mode">{{ getQueueName(m) }}</span>
           </div>
 
           <!-- 3. KDA 数字与文字 -->
