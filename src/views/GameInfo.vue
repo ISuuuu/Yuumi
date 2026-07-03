@@ -112,6 +112,7 @@ const premadeLegendIndices = computed(() => {
 
 // 当前游戏模式对应的队列 ID（用于过滤战绩）
 const currentQueueId = ref<number | null>(null);
+const isTftMode = ref(false);
 
 async function updateCurrentQueueId() {
   try {
@@ -119,11 +120,21 @@ async function updateCurrentQueueId() {
     if (resp.success && resp.data?.gameData?.queue?.id !== undefined) {
       currentQueueId.value = resp.data.gameData.queue.id;
       console.log("[GameInfo] Detected current game mode queueId:", currentQueueId.value);
+      
+      const qId = currentQueueId.value;
+      const gameMode = resp.data.gameData.queue.gameMode;
+      if (gameMode === "TFT" || (qId !== null && qId >= 1090 && qId <= 1200)) {
+        isTftMode.value = true;
+      } else {
+        isTftMode.value = false;
+      }
     } else {
       currentQueueId.value = null;
+      isTftMode.value = false;
     }
   } catch {
     currentQueueId.value = null;
+    isTftMode.value = false;
   }
 }
 
@@ -174,6 +185,7 @@ const isGameActive = computed(() =>
 
 /** 是否应该在界面中展示对局信息（如果开启了“保留对局信息界面内容”且有历史数据，则即使不在对局中也展示） */
 const shouldShowContent = computed(() => {
+  if (isTftMode.value) return false;
   if (isGameActive.value) return true;
   if (appConfig.value?.Functions?.EnableReserveGameinfo) {
     return Object.keys(playerData.value).length > 0;
@@ -391,6 +403,10 @@ async function loadFromGameflowSession() {
   loading.value = true;
   error.value = "";
   await updateCurrentQueueId();
+  if (isTftMode.value) {
+    loading.value = false;
+    return;
+  }
 
   // 保底获取当前玩家 summonerId（onMounted 可能还没拿到）
   if (!currentSummonerId.value) {
@@ -555,7 +571,11 @@ onMounted(async () => {
 
 // 监听阶段变化：ChampSelect → 加载己方；InProgress/GameStart → 加载双方
 watch(() => store.gamePhase, (phase: string) => {
+  if (phase === "None" || phase === "Lobby") {
+    isTftMode.value = false;
+  }
   if (phase === "ChampSelect") {
+    isTftMode.value = false;
     // 开启新一局选人时才清理上局快照数据以备载入新数据
     gameflowMyTeam.value = [];
     gameflowTheirTeam.value = [];
@@ -619,6 +639,11 @@ watch(activeTab, () => loadAllPlayers());
     <div v-if="!store.isConnected" class="tip-container">
       <div class="offline-logo">🎮</div>
       <p class="tip">{{ $t('gameInfo.launchLolPrompt') }}</p>
+    </div>
+
+    <div v-else-if="isTftMode" class="tip-container">
+      <div class="offline-logo">♟️</div>
+      <p class="tip">云顶之弈对局中，对局信息页面不显示数据</p>
     </div>
 
     <div v-else-if="!shouldShowContent" class="tip-container">

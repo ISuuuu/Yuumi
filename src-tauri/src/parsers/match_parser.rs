@@ -399,10 +399,17 @@ pub async fn get_match_history_sgp(
     const TENCENT_SERVERS: &[&str] = &[
         "hn1", "hn10", "bgp2", "tj100", "cq100", "gz100", "nj100", "tj101",
     ];
-    let server = lcu.server.as_deref().ok_or_else(|| "无法获取服务器信息".to_string())?;
+    let server = match &lcu.server {
+        Some(s) => s,
+        None => {
+            log::info!("无法获取服务器信息，跳过 SGP 战绩获取");
+            return Ok(Vec::new());
+        }
+    };
     let server_lower = server.to_lowercase();
     if !TENCENT_SERVERS.contains(&server_lower.as_str()) {
-        return Err("非腾讯国服，不支持 SGP 接口".to_string());
+        log::info!("非腾讯国服 ({})，跳过 SGP 战绩获取", server);
+        return Ok(Vec::new());
     }
     
     let auth = build_auth_header(&lcu.token);

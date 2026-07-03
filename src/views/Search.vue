@@ -10,7 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useToast } from "../composables/useToast";
 
 const store = useLcuStore();
-const { t } = useI18n();
+const { t, te } = useI18n();
 const navigateTo = inject<(page: string) => void>("navigateTo")!;
 const searchName = ref("");
 
@@ -378,10 +378,15 @@ async function loadMoreMatches() {
     // 3. LCU 全是重复 → 降级 SGP
     if (newGames.length === 0 && raw.length > 0) {
       console.log(`[Search] LCU 返回全重复，降级 SGP`);
-      raw = await fetchMatchHistorySgp(summoner.value.puuid, fetchBeg, fetchEnd);
-      console.log(`[Search] loadMoreMatches(SGP): beg=${fetchBeg}, end=${fetchEnd}, raw.length=${raw.length}`);
-      existingIds = new Set(allMatchesSearch.value.map(m => m.gameId));
-      newGames = raw.filter(m => !existingIds.has(m.gameId));
+      try {
+        raw = await fetchMatchHistorySgp(summoner.value.puuid, fetchBeg, fetchEnd);
+        console.log(`[Search] loadMoreMatches(SGP): beg=${fetchBeg}, end=${fetchEnd}, raw.length=${raw.length}`);
+        existingIds = new Set(allMatchesSearch.value.map(m => m.gameId));
+        newGames = raw.filter(m => !existingIds.has(m.gameId));
+      } catch (sgpError) {
+        console.warn("[Search] SGP 战绩降级拉取失败:", sgpError);
+        // SGP 失败时保持 newGames 为空，不中断原有战绩数据流
+      }
     }
     
     // 4. 追加新对局（上限 500 条，防内存泄漏）
@@ -664,6 +669,23 @@ const gameDetails = computed(() => {
     }
   };
 });
+
+function getQueueName(queueId: number, backendName: string): string {
+  const key = `gameModes.${queueId}`;
+  if (te(key)) {
+    const translation = t(key);
+    // 翻译防冲突纠错：如果翻译包含“云顶之弈”或“云顶”，但后端实际名称不含“云顶”相关
+    // 则说明队列 ID 发生冲突，应该降级显示后端解析出的 name
+    if (
+      (translation.includes("云顶") || translation.includes("TFT")) &&
+      (!backendName.includes("云顶") && !backendName.includes("TFT"))
+    ) {
+      return backendName;
+    }
+    return translation;
+  }
+  return backendName;
+}
 </script>
 
 <template>
@@ -764,7 +786,7 @@ const gameDetails = computed(() => {
                   <LcuImage :src="m.championIconUrl" alt="champ" />
                 </div>
                 <div class="mini-info">
-                  <span class="mini-mode">{{ $te('gameModes.' + m.queueId) ? $t('gameModes.' + m.queueId) : m.name }}</span>
+                  <span class="mini-mode">{{ getQueueName(m.queueId, m.name) }}</span>
                   <span class="mini-time-kda">
                     {{ m.shortTime.split(' ')[0] }} &nbsp;&nbsp;
                     {{ m.kills }}/<span class="death-red">{{ m.deaths }}</span>/{{ m.assists }}
@@ -809,7 +831,7 @@ const gameDetails = computed(() => {
                       {{ gameDetails.win ? $t('career.victory') : $t('career.defeat') }}
                     </h2>
                     <span class="banner-subtext">
-                      {{ $t('maps.' + gameDetails.mapId) }} · {{ $te('gameModes.' + gameDetails.queueId) ? $t('gameModes.' + gameDetails.queueId) : gameDetails.queueName }} · {{ gameDetails.duration }} · {{ gameDetails.date }} · {{ $t('career.gameId') || 'Game ID' }}: {{ gameDetails.gameId }}
+                      {{ $t('maps.' + gameDetails.mapId) }} · {{ getQueueName(gameDetails.queueId, gameDetails.queueName) }} · {{ gameDetails.duration }} · {{ gameDetails.date }} · {{ $t('career.gameId') || 'Game ID' }}: {{ gameDetails.gameId }}
                     </span>
                   </div>
                 </div>
