@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -26,10 +26,11 @@ const emit = defineEmits<{
 }>();
 
 const installing = ref(false);
+const isMinimized = ref(false);
 const progress = ref<DownloadProgress | null>(null);
 const errorMsg = ref("");
 
-// 进度百分比（用于进度条显示）
+// 进度百分比（用于进度条和环形进度条显示）
 const progressPercent = computed(() => {
   if (!progress.value) return 0;
   if (progress.value.percent != null) return Math.min(progress.value.percent, 100);
@@ -63,6 +64,7 @@ async function startInstall() {
   } catch (e: any) {
     errorMsg.value = String(e);
     installing.value = false;
+    isMinimized.value = false; // 更新出错时，强制弹回前台展示错误
     if (unlistenProgress) {
       unlistenProgress();
       unlistenProgress = null;
@@ -71,8 +73,16 @@ async function startInstall() {
 }
 
 function dismiss() {
-  if (installing.value) return; // 安装过程中不允许关闭
+  if (installing.value) return; // 安装过程中不允许直接关闭（但可以最小化）
   emit("dismiss");
+}
+
+function minimize() {
+  isMinimized.value = true;
+}
+
+function restore() {
+  isMinimized.value = false;
 }
 
 function openReleasePage() {
@@ -80,11 +90,18 @@ function openReleasePage() {
     console.error("Failed to open release page:", err);
   });
 }
+
+onUnmounted(() => {
+  if (unlistenProgress) {
+    unlistenProgress();
+  }
+});
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="update-overlay" @click.self="dismiss">
+    <!-- 正常的大弹窗状态 -->
+    <div v-if="!isMinimized" class="update-overlay" @click.self="dismiss">
       <div class="update-dialog">
         <!-- 头部 -->
         <div class="update-header">
@@ -106,9 +123,15 @@ function openReleasePage() {
               <span class="version-new">v{{ updateInfo.version }}</span>
             </p>
           </div>
+          <!-- 右上角按钮：若未下载则显示“稍后提醒”关闭按钮；若正在下载则显示“最小化到后台” -->
           <button v-if="!installing" class="update-close" @click="dismiss" title="稍后提醒">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+          <button v-else class="update-close" @click="minimize" title="后台下载">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
           </button>
         </div>
@@ -135,6 +158,11 @@ function openReleasePage() {
             <div v-else class="progress-bar-indeterminate" />
           </div>
           <p class="progress-hint">下载完成后将自动安装并重启应用</p>
+
+          <!-- 新增：后台下载按钮 -->
+          <div class="progress-actions">
+            <button class="btn-minimize-text" @click="minimize">后台运行</button>
+          </div>
         </div>
 
         <!-- 错误提示 -->
@@ -151,6 +179,31 @@ function openReleasePage() {
           <button class="btn-dismiss" @click="dismiss">稍后提醒</button>
           <button class="btn-install" @click="startInstall">{{ errorMsg ? '重试' : '立即更新' }}</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 新增：最小化状态下的悬浮状态气泡 -->
+    <div v-else class="update-mini-badge" @click="restore" title="点击展开更新进度">
+      <div class="mini-progress-ring">
+        <svg class="ring-svg" viewBox="0 0 36 36">
+          <path
+            class="ring-bg"
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+          />
+          <path
+            class="ring-fill"
+            :stroke-dasharray="`${progressPercent >= 0 ? progressPercent : 25}, 100`"
+            :class="{ 'ring-animate': progressPercent < 0 }"
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+          />
+        </svg>
+        <div class="mini-percent">
+          {{ progressPercent >= 0 ? Math.round(progressPercent) + '%' : '...' }}
+        </div>
+      </div>
+      <div class="mini-info">
+        <div class="mini-title">正在后台更新</div>
+        <div class="mini-version">新版本 v{{ updateInfo.version }}</div>
       </div>
     </div>
   </Teleport>
@@ -434,5 +487,134 @@ function openReleasePage() {
 
 .btn-install:active {
   transform: translateY(0);
+}
+
+/* ── 后台下载按钮 ── */
+.progress-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+.btn-minimize-text {
+  background: transparent;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
+  color: var(--text-secondary, #999);
+  padding: 6px 18px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-minimize-text:hover {
+  background: var(--bg-hover, rgba(255,255,255,0.06));
+  color: var(--text-primary, #e8eaf0);
+  border-color: var(--theme-color, #009faa);
+}
+
+.btn-minimize-text:active {
+  transform: scale(0.97);
+}
+
+/* ── 迷你悬浮气泡 ── */
+.update-mini-badge {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-card, #1e2030);
+  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
+  border-radius: 30px;
+  padding: 6px 16px 6px 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  user-select: none;
+  animation: badge-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.update-mini-badge:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  border-color: var(--theme-color, #009faa);
+}
+
+.update-mini-badge:active {
+  transform: translateY(-1px) scale(0.97);
+}
+
+@keyframes badge-in {
+  from { opacity: 0; transform: translateY(24px) scale(0.85); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.mini-progress-ring {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ring-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.ring-bg {
+  fill: none;
+  stroke: var(--bg-secondary, rgba(255,255,255,0.06));
+  stroke-width: 3.5;
+}
+
+.ring-fill {
+  fill: none;
+  stroke: var(--theme-color, #009faa);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.3s ease;
+}
+
+.ring-animate {
+  animation: ring-dash 2s ease-in-out infinite;
+}
+
+@keyframes ring-dash {
+  0% { stroke-dasharray: 1, 100; }
+  50% { stroke-dasharray: 50, 100; }
+  100% { stroke-dasharray: 1, 100; }
+}
+
+.mini-percent {
+  position: absolute;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-primary, #e8eaf0);
+  font-family: monospace;
+}
+
+.mini-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.mini-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary, #e8eaf0);
+}
+
+.mini-version {
+  font-size: 10px;
+  color: var(--theme-color, #009faa);
+  font-weight: 500;
+  margin-top: 1px;
 }
 </style>
