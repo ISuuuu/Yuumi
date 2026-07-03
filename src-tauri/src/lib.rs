@@ -421,21 +421,24 @@ async fn get_map_side(
     Ok(None)
 }
 
-/// 自动检测 LOL 客户端安装路径（从运行中的 LeagueClientUx.exe 推断）
-/// 向上遍历目录，找到包含 LeagueClient.exe 或 Client.exe 的那一层作为客户端根目录
+/// 自动检测 LOL 客户端安装路径（从运行中的 LeagueClientUx.exe 推断，或从 Windows 注册表兜底）
 #[tauri::command]
 fn detect_lol_path() -> Result<Option<String>, String> {
     use sysinfo::System;
     let mut sys = System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
+    // 1. 优先从运行中的客户端进程推断
     for (_pid, process) in sys.processes() {
         let name = process.name().to_string_lossy().to_lowercase();
         if name == "leagueclientux.exe" {
             if let Some(exe_path) = process.exe() {
                 let mut dir = exe_path.parent();
                 while let Some(d) = dir {
-                    if d.join("LeagueClient.exe").exists() || d.join("Client.exe").exists() {
+                    if d.join("LeagueClient.exe").exists()
+                        || d.join("Client.exe").exists()
+                        || d.join("client.exe").exists()
+                    {
                         return Ok(Some(d.to_string_lossy().to_string()));
                     }
                     dir = d.parent();
@@ -449,6 +452,43 @@ fn detect_lol_path() -> Result<Option<String>, String> {
             }
         }
     }
+
+    // 2. 进程未运行，则按照 Python 逻辑，尝试从 Windows 注册表获取国服 LOL 路径
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = std::process::Command::new("reg")
+            .args(&["query", r"HKCU\SOFTWARE\Tencent\LOL", "/v", "InstallPath"])
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if line.contains("InstallPath") {
+                        if let Some(pos) = line.find("REG_SZ") {
+                            let raw_path = line[pos + 6..].trim();
+                            if !raw_path.is_empty() {
+                                // 统一成正斜杠格式，规范盘符大小写
+                                let mut path = raw_path.replace("\\", "/");
+                                if path.len() >= 2 && path.as_bytes()[1] == b':' {
+                                    let drive = path.chars().next().unwrap().to_uppercase().to_string();
+                                    path = format!("{}{}", drive, &path[1..]);
+                                }
+
+                                // 如果是国服，注册表读出来的安装目录下有 TCLS 目录
+                                let tcls_dir = std::path::Path::new(&path).join("TCLS");
+                                if tcls_dir.exists() {
+                                    return Ok(Some(tcls_dir.to_string_lossy().replace("\\", "/")));
+                                }
+
+                                return Ok(Some(path));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(None)
 }
 
@@ -504,33 +544,133 @@ async fn launch_lol_client(
         }
     }
 
-    // 指定了路径则直接用
-    if let Some(p) = path {
-        for exe_name in &["LeagueClient.exe", "Client.exe"] {
-            let exe = std::path::Path::new(&p).join(exe_name);
+    // 智能探测客户端执行文件的辅助函数
+    let find_executable = |base_path: &str| -> Option<std::path::PathBuf> {
+        let p = std::path::Path::new(base_path);
+        let check_list = &[
+            ("", "LeagueClient.exe"),
+            ("", "Client.exe"),
+            ("", "client.exe"),
+            ("TCLS", "client.exe"),
+            ("TCLS", "Client.exe"),
+            ("LeagueClient", "LeagueClient.exe"),
+            ("../TCLS", "client.exe"),
+            ("../TCLS", "Client.exe"),
+            ("../LeagueClient", "LeagueClient.exe"),
+        ];
+
+        for (sub_dir, exe_name) in check_list {
+            let exe = if sub_dir.is_empty() {
+                p.join(exe_name)
+            } else {
+                p.join(sub_dir).join(exe_name)
+            };
             if exe.exists() {
-                log::info!("启动 LOL 客户端: {:?}", exe);
-                std::process::Command::new(&exe)
-                    .spawn()
-                    .map_err(|e| format!("启动失败: {}", e))?;
-                return Ok(());
+                return Some(exe);
             }
         }
-        return Err(format!("在 {} 中未找到启动程序", p));
+        None
+    };
+
+    // 启动可执行文件并处理 UAC 提升的辅助函数
+    let spawn_executable = |exe: &std::path::Path, args: &[&str]| -> Result<(), String> {
+        let mut cmd = std::process::Command::new(exe);
+        cmd.args(args);
+        // 关键：设置启动工作目录为 exe 所在的父目录，防止 DLL 加载或配置读取报拒绝访问错误 (os error 5)
+        if let Some(parent) = exe.parent() {
+            cmd.current_dir(parent);
+        }
+        match cmd.spawn() {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let os_err = e.raw_os_error();
+                // 拦截 740 (需要提升) 与 5 (拒绝访问) 并尝试以 UAC 管理员提权运行
+                if os_err == Some(740) || os_err == Some(5) {
+                    log::info!("启动 LOL 客户端遇到权限限制 ({:?})，尝试提升权限启动...", os_err);
+                    #[cfg(target_os = "windows")]
+                    {
+                        use std::os::windows::process::CommandExt;
+                        let working_dir = exe.parent()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        
+                        // 格式化参数传给 PowerShell
+                        let args_str = args.iter()
+                            .map(|arg| format!("'{}'", arg))
+                            .collect::<Vec<String>>()
+                            .join(", ");
+
+                        let command_str = if args_str.is_empty() {
+                            format!("Start-Process -FilePath '{}' -WorkingDirectory '{}' -Verb RunAs", exe.to_string_lossy(), working_dir)
+                        } else {
+                            format!("Start-Process -FilePath '{}' -ArgumentList {} -WorkingDirectory '{}' -Verb RunAs", exe.to_string_lossy(), args_str, working_dir)
+                        };
+
+                        let status = std::process::Command::new("powershell")
+                            .creation_flags(0x08000000) // 隐藏 powershell 窗口
+                            .args(&["-Command", &command_str])
+                            .spawn();
+                        if status.is_ok() {
+                            return Ok(());
+                        }
+                    }
+                }
+                Err(format!("启动失败: {}", e))
+            }
+        }
+    };
+
+    // 智能转换：若是 Riot 纳管的外服，改由 RiotClientServices.exe 启动
+    let check_and_launch = |exe: std::path::PathBuf| -> Result<(), String> {
+        let mut riot_service = None;
+        if exe.file_name().map(|n| n.to_string_lossy().to_lowercase()) == Some("leagueclient.exe".to_string()) {
+            if let Some(parent) = exe.parent() {
+                let same_level = parent.join("RiotClientServices.exe");
+                if same_level.exists() {
+                    riot_service = Some(same_level);
+                } else if let Some(grandparent) = parent.parent() {
+                    let parent_level = grandparent.join("RiotClientServices.exe");
+                    if parent_level.exists() {
+                        riot_service = Some(parent_level);
+                    }
+                }
+            }
+        }
+
+        if let Some(service) = riot_service {
+            log::info!("检测到外服 Riot 纳管客户端，改由 RiotClientServices.exe 启动");
+            let is_pbe = exe.to_string_lossy().to_lowercase().contains("pbe");
+            let patchline = if is_pbe { "pbe" } else { "live" };
+            let args = &[
+                "--launch-product=league_of_legends",
+                &format!("--launch-patchline={}", patchline),
+            ];
+            log::info!("启动 Riot 服务: {:?} {:?}", service, args);
+            spawn_executable(&service, args)?;
+        } else {
+            log::info!("常规方式启动客户端: {:?}", exe);
+            spawn_executable(&exe, &[])?;
+        }
+        Ok(())
+    };
+
+    // 指定了路径则直接用
+    if let Some(p) = path {
+        if let Some(exe) = find_executable(&p) {
+            log::info!("启动 LOL 客户端: {:?}", exe);
+            check_and_launch(exe)?;
+            return Ok(());
+        }
+        return Err(format!("在 {} 中未找到启动程序 (TCLS/client.exe 或 LeagueClient.exe)", p));
     }
 
     // 否则遍历配置路径
     let cfg = app_state.config.read().await;
     for p in &cfg.general.lol_path {
-        for exe_name in &["LeagueClient.exe", "Client.exe"] {
-            let exe = std::path::Path::new(p).join(exe_name);
-            if exe.exists() {
-                log::info!("启动 LOL 客户端: {:?}", exe);
-                std::process::Command::new(&exe)
-                    .spawn()
-                    .map_err(|e| format!("启动失败: {}", e))?;
-                return Ok(());
-            }
+        if let Some(exe) = find_executable(p) {
+            log::info!("启动 LOL 客户端: {:?}", exe);
+            check_and_launch(exe)?;
+            return Ok(());
         }
     }
     Err("未找到 LeagueClient.exe / Client.exe，请先在设置中配置客户端路径".to_string())
