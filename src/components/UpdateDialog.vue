@@ -2,7 +2,7 @@
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 export interface UpdateInfo {
   version: string;
@@ -76,7 +76,7 @@ function dismiss() {
 }
 
 function openReleasePage() {
-  open("https://github.com/ISuuuu/Yuumi/releases/latest").catch((err) => {
+  openUrl("https://github.com/ISuuuu/Yuumi/releases/latest").catch((err: any) => {
     console.error("Failed to open release page:", err);
   });
 }
