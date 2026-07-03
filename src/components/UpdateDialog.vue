@@ -2,6 +2,7 @@
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-opener";
 
 export interface UpdateInfo {
   version: string;
@@ -73,6 +74,12 @@ function dismiss() {
   if (installing.value) return; // 安装过程中不允许关闭
   emit("dismiss");
 }
+
+function openReleasePage() {
+  open("https://github.com/ISuuuu/Yuumi/releases/latest").catch((err) => {
+    console.error("Failed to open release page:", err);
+  });
+}
 </script>
 
 <template>
@@ -140,8 +147,9 @@ function dismiss() {
 
         <!-- 按钮区 -->
         <div v-if="!installing" class="update-actions">
+          <button v-if="errorMsg" class="btn-manual" @click="openReleasePage">浏览器下载</button>
           <button class="btn-dismiss" @click="dismiss">稍后提醒</button>
-          <button class="btn-install" @click="startInstall">立即更新</button>
+          <button class="btn-install" @click="startInstall">{{ errorMsg ? '重试' : '立即更新' }}</button>
         </div>
       </div>
     </div>
@@ -373,6 +381,22 @@ function dismiss() {
   gap: 10px;
   justify-content: flex-end;
   margin-top: 4px;
+}
+
+.btn-manual {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--theme-color, #009faa);
+  background: transparent;
+  color: var(--theme-color, #009faa);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-manual:hover {
+  background: color-mix(in srgb, var(--theme-color, #009faa) 10%, transparent);
 }
 
 .btn-dismiss {

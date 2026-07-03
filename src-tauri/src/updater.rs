@@ -97,19 +97,22 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     // 克隆 app handle 用于在 closure 中发送 event
     let app_for_progress = app.clone();
 
+    let downloaded_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let downloaded_bytes_clone = downloaded_bytes.clone();
+
     update
         .download_and_install(
-            move |downloaded, total| {
-                let downloaded_u64 = downloaded as u64;
+            move |chunk_length, total| {
+                let current = downloaded_bytes_clone.fetch_add(chunk_length as u64, std::sync::atomic::Ordering::Relaxed) + chunk_length as u64;
                 let percent = total.map(|t| {
                     if t > 0 {
-                        downloaded_u64 as f64 / t as f64 * 100.0
+                        current as f64 / t as f64 * 100.0
                     } else {
                         0.0
                     }
                 });
                 let progress = DownloadProgress {
-                    downloaded: downloaded_u64,
+                    downloaded: current,
                     total,
                     percent,
                 };
