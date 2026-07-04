@@ -48,6 +48,7 @@ impl ServerCertVerifier for NoVerifier {
 const RECORD_SEPARATOR: char = '\x1e';
 
 /// 允许远程查询的 LCU Endpoint 白名单前缀
+/// 原则：只放行远程 Hub 必需的数据接口，避免暴露聊天/组队/排位等敏感端点
 const ALLOWED_PREFIXES: &[&str] = &[
     "/lol-summoner/",
     "/lol-match-history/",
@@ -57,9 +58,6 @@ const ALLOWED_PREFIXES: &[&str] = &[
     "/lol-game-queues/",
     "/lol-perks/",
     "/lol-game-data/",
-    "/lol-lobby/",
-    "/lol-chat/",
-    "/lol-matchmaking/",
 ];
 
 pub enum SignalrCommand {

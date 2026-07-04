@@ -108,25 +108,25 @@ pub async fn call_lcu_api(
     Err(last_err)
 }
 
+/// LCU 资源路径白名单前缀
+const ASSET_PATH_PREFIX: &str = "/lol-game-data/assets/";
+
 /// 获取 LCU 静态资源（图片等），返回 data URL。
 /// 前端可用于 <img :src="dataUrl">，绕过自签名证书问题。
+/// 路径限制：必须以 `/lol-game-data/assets/` 开头。
 #[tauri::command]
 pub async fn get_lcu_asset(
     path: String,
     app_state: State<'_, AppState>,
 ) -> Result<String, String> {
+    if !path.starts_with(ASSET_PATH_PREFIX) {
+        return Err(format!("不允许的资源路径，必须以 {} 开头", ASSET_PATH_PREFIX));
+    }
+
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
 
-    let mut clean_path = path.clone();
-    if let Some(pos) = clean_path.find("/lol-game-data/assets/") {
-        let prefix_len = pos + "/lol-game-data/assets/".len();
-        if prefix_len < clean_path.len() {
-            let (prefix, suffix) = clean_path.split_at(prefix_len);
-            clean_path = format!("{}{}", prefix, suffix.to_lowercase());
-        }
-    }
-
+    let clean_path = format!("{}{}", ASSET_PATH_PREFIX, path[ASSET_PATH_PREFIX.len()..].to_lowercase());
     let url = format!("https://127.0.0.1:{}{}", lcu.port, clean_path);
     let auth = build_auth_header(&lcu.token);
 
