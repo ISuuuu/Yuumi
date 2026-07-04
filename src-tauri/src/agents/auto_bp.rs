@@ -108,7 +108,7 @@ pub struct OpggBuildEvent {
 // ─── 启动 BP Agent ───
 
 pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSession>) {
-    tauri::async_runtime::spawn(async move {
+    crate::spawn_log_panic(async move {
         let mut selection = ChampionSelection::default();
 
         while let Some(session) = session_rx.recv().await {
@@ -321,7 +321,7 @@ async fn do_auto_complete(
 
     // 在后台任务中等待并锁定，不阻塞主循环（否则秒退后新选人事件无法处理）
     let app_handle = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
+    crate::spawn_log_panic(async move {
         tokio::time::sleep(std::time::Duration::from_secs(sleep_secs)).await;
 
         // 验证该任务是否已被取消或被后续任务覆盖

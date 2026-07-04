@@ -36,7 +36,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' https://127.0.0.1:* https://*; font-src 'self' https: data:; object-src 'none'"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' https://127.0.0.1:* https://api.github.com https://game.gtimg.cn; font-src 'self' https: data:; object-src 'none'"
     }
   },
   "bundle": {

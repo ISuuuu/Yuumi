@@ -26,7 +26,7 @@ pub fn start(
     mut rx: mpsc::Receiver<GameflowEvent>,
     upload_trigger: crate::upload::UploadTrigger,
 ) {
-    tauri::async_runtime::spawn(async move {
+    crate::spawn_log_panic(async move {
         let mut lobby_created = false;
         let mut last_phase = get_current_phase(&app_handle).await.unwrap_or_default();
         let mut upload_trigger = upload_trigger;
