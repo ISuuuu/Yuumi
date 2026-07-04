@@ -52,17 +52,6 @@ struct LcuSummonerById {
     pub summoner_level: Option<u32>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct _LcuRankedEntry {
-    pub tier: Option<String>,
-    pub rank: Option<String>,
-    pub league_points: Option<i32>,
-    pub wins: Option<i32>,
-    pub losses: Option<i32>,
-    pub queue_type: Option<String>,
-}
-
 // ─── 十人并发查询 ───
 
 /// 并发查询所有玩家的战绩、段位、KDA，并判定上局关系
@@ -253,7 +242,6 @@ async fn check_fate(
 
     // 找到当前玩家和目标玩家所在的队伍
     let mut current_team_id: Option<i32> = None;
-    let _target_team_id: Option<i32> = None;
 
     // 通过 participantIdentities 匹配 summonerId → participantId → teamId
     for ident in identities {
