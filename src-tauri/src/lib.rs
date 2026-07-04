@@ -701,6 +701,22 @@ fn get_config_load_error() -> Option<String> {
     config::AppConfig::take_load_error()
 }
 
+/// 校验关键配置字段，防止恶意篡改
+fn validate_config(cfg: &config::AppConfig) -> Result<(), String> {
+    let url = &cfg.general.upload_api_url;
+    if !url.is_empty() && !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("upload_api_url 必须以 http:// 或 https:// 开头".to_string());
+    }
+    let srv = &cfg.general.signalr_server_url;
+    if !srv.is_empty() && !srv.starts_with("http://") && !srv.starts_with("https://") {
+        return Err("signalr_server_url 必须以 http:// 或 https:// 开头".to_string());
+    }
+    if !cfg.personalization.theme_color.starts_with('#') {
+        return Err("theme_color 必须是以 # 开头的颜色值".to_string());
+    }
+    Ok(())
+}
+
 /// 更新配置（接收完整 AppConfig JSON，写入内存并持久化）
 #[tauri::command]
 async fn update_config(
@@ -708,6 +724,8 @@ async fn update_config(
     app_state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    validate_config(&new_config)?;
+
     let (old_enable, old_mode, old_realtime, old_api_url, old_user_id) = {
         let lock = app_state.config.read().await;
         (
