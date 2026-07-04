@@ -8,7 +8,14 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::{build_auth_header, AppState};
 
-static OPGG_CACHE: OnceLock<Mutex<HashMap<String, serde_json::Value>>> = OnceLock::new();
+static OPGG_CACHE: OnceLock<Mutex<HashMap<String, OpggCacheEntry>>> = OnceLock::new();
+const OPGG_CACHE_MAX_ENTRIES: usize = 100;
+const OPGG_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(600); // 10 分钟
+
+struct OpggCacheEntry {
+    data: serde_json::Value,
+    inserted_at: std::time::Instant,
+}
 
 fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
@@ -31,7 +38,7 @@ fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
     builder.build().unwrap_or_else(|_| reqwest::Client::new())
 }
 
-fn get_opgg_cache() -> &'static Mutex<HashMap<String, serde_json::Value>> {
+fn get_opgg_cache() -> &'static Mutex<HashMap<String, OpggCacheEntry>> {
     OPGG_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -309,11 +316,13 @@ pub async fn fetch_opgg_data(
         region, mode, tier, champion_id, position
     );
 
-    // 尝试从内存缓存中读取
+    // 尝试从内存缓存中读取（检查 TTL）
     if let Ok(cache) = get_opgg_cache().lock() {
-        if let Some(cached_val) = cache.get(&cache_key) {
-            log::info!("OP.GG 缓存命中: {}", cache_key);
-            return Ok(cached_val.clone());
+        if let Some(entry) = cache.get(&cache_key) {
+            if entry.inserted_at.elapsed() < OPGG_CACHE_TTL {
+                log::info!("OP.GG 缓存命中: {}", cache_key);
+                return Ok(entry.data.clone());
+            }
         }
     }
 
@@ -344,10 +353,15 @@ pub async fn fetch_opgg_data(
 
     let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
 
-    // 写入内存缓存
+    // 写入内存缓存（超限时淘汰最旧条目）
     if let Ok(mut cache) = get_opgg_cache().lock() {
+        if cache.len() >= OPGG_CACHE_MAX_ENTRIES {
+            if let Some(oldest_key) = cache.iter().min_by_key(|(_, e)| e.inserted_at).map(|(k, _)| k.clone()) {
+                cache.remove(&oldest_key);
+            }
+        }
         log::info!("OP.GG 缓存写入: {}", cache_key);
-        cache.insert(cache_key, data.clone());
+        cache.insert(cache_key, OpggCacheEntry { data: data.clone(), inserted_at: std::time::Instant::now() });
     }
 
     Ok(data)

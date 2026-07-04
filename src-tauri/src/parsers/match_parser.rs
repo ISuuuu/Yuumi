@@ -244,18 +244,18 @@ fn get_queue_info(queue_id: i32) -> QueueInfo {
 
 /// 毫秒时间戳 → "2024-01-15 20:30"
 fn timestamp_to_str(ms: u64) -> String {
-    let secs = ms / 1000;
-    // 简单实现：基于 Unix 时间戳计算
-    // 使用 chrono 会更好，但为减少依赖，手动计算
-    let (year, month, day, hour, min) = unix_secs_to_ymdhm(secs);
-    format!("{:04}-{:02}-{:02} {:02}:{:02}", year, month, day, hour, min)
+    let secs = (ms / 1000) as i64;
+    chrono::DateTime::from_timestamp(secs, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "1970-01-01 00:00".to_string())
 }
 
 /// 毫秒时间戳 → "01-15 20:30"
 fn timestamp_to_short_str(ms: u64) -> String {
-    let secs = ms / 1000;
-    let (_, month, day, hour, min) = unix_secs_to_ymdhm(secs);
-    format!("{:02}-{:02} {:02}:{:02}", month, day, hour, min)
+    let secs = (ms / 1000) as i64;
+    chrono::DateTime::from_timestamp(secs, 0)
+        .map(|dt| dt.format("%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "01-01 00:00".to_string())
 }
 
 /// 秒数 → "25:30"
@@ -263,50 +263,6 @@ fn secs_to_str(total_secs: u64) -> String {
     let mins = total_secs / 60;
     let secs = total_secs % 60;
     format!("{:02}:{:02}", mins, secs)
-}
-
-/// Unix 秒时间戳 → (年, 月, 日, 时, 分) — UTC
-/// 注：简化实现，生产环境建议使用 chrono
-pub fn unix_secs_to_ymdhm(secs: u64) -> (u32, u32, u32, u32, u32) {
-    const SECS_PER_DAY: u64 = 86400;
-    let days = secs / SECS_PER_DAY;
-    let remaining = secs % SECS_PER_DAY;
-    let hour = (remaining / 3600) as u32;
-    let min = ((remaining % 3600) / 60) as u32;
-
-    // 从 1970-01-01 开始推算日期
-    let mut y = 1970u32;
-    let mut d = days;
-    loop {
-        let days_in_year = if is_leap_year(y) { 366 } else { 365 };
-        if d < days_in_year {
-            break;
-        }
-        d -= days_in_year;
-        y += 1;
-    }
-
-    let leap = is_leap_year(y);
-    let days_in_month: [u64; 12] = if leap {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-
-    let mut m = 1u32;
-    for &dim in &days_in_month {
-        if d < dim {
-            break;
-        }
-        d -= dim;
-        m += 1;
-    }
-
-    (y, m, (d + 1) as u32, hour, min)
-}
-
-fn is_leap_year(year: u32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
 // ─── Tauri 命令 ───

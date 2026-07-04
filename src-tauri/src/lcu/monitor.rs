@@ -8,6 +8,13 @@ use tokio::time::{sleep, Duration};
 use crate::LcuClient;
 use super::game_data::GameDataAssets;
 
+/// 日志脱敏：将命令行中的 token 值替换为 ***
+fn sanitize_cmdline(cmd: &str) -> String {
+    regex_lite::Regex::new(r"--remoting-auth-token=\S+")
+        .map(|re| re.replace_all(cmd, "--remoting-auth-token=***").to_string())
+        .unwrap_or_else(|_| cmd.to_string())
+}
+
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Readiness probe: how many times to retry, and interval between retries.
 const PROBE_MAX_RETRIES: u32 = 5;
@@ -230,7 +237,7 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> 
                 }
             }
 
-            log::info!("找到 LCU 进程，命令行整句为: {}", cmd_str);
+            log::info!("找到 LCU 进程，命令行整句为: {}", sanitize_cmdline(&cmd_str));
 
             if cmd_str.is_empty() {
                 log::warn!("LCU 进程命令行为空");
@@ -262,7 +269,7 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> 
                 server = Some(sub[..end].to_string());
             }
 
-            log::info!("从命令行解析结果: port={:?}, token={:?}, server={:?}", port, token, server);
+            log::info!("从命令行解析结果: port={:?}, token=***, server={:?}", port, server);
 
             // 只有成功提取到了合规的凭据才返回，避免因遇到无权/僵尸同名进程导致提前退出
             if let (Some(p), Some(t)) = (port, token) {

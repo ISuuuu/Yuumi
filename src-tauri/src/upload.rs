@@ -337,8 +337,9 @@ async fn upload_single_game(app_handle: &AppHandle, game_id: u64, upload_url: &s
         )
     };
 
-    // 获取当前召唤师名称
-    let current_name = get_current_summoner_name(&lcu_client, &auth, &base).await;
+    // 获取当前召唤师名称和 puuid
+    let current_summoner_info = get_current_summoner_info(&lcu_client, &auth, &base).await;
+    let current_puuid = current_summoner_info.as_ref().map(|(_, puuid)| puuid.as_str());
 
     // 获取对局详情
     let detail_url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
@@ -364,7 +365,7 @@ async fn upload_single_game(app_handle: &AppHandle, game_id: u64, upload_url: &s
         let gd = state.game_data.read().await;
         gd.champions.clone()
     };
-    let payload = build_upload_payload(&game_detail, current_name.as_deref(), &champion_names);
+    let payload = build_upload_payload(&game_detail, current_puuid, &champion_names);
 
     log::info!(
         "对局数据构建完成: matchId={}, 内层{}人, 外层{}人",
@@ -427,16 +428,16 @@ async fn upload_single_game(app_handle: &AppHandle, game_id: u64, upload_url: &s
     Err(format!("对局 {} 上传失败: {}", game_id, last_err))
 }
 
-async fn get_current_summoner_name(
+async fn get_current_summoner_info(
     http: &reqwest::Client,
     auth: &str,
     base: &str,
-) -> Option<String> {
+) -> Option<(String, String)> {
     let url = format!("{}/lol-summoner/v1/current-summoner", base);
     let resp = match http.get(&url).header("Authorization", auth).send().await {
         Ok(r) => r,
         Err(e) => {
-            log::warn!("获取召唤师名称失败: {}", e);
+            log::warn!("获取召唤师信息失败: {}", e);
             return None;
         }
     };
@@ -447,7 +448,9 @@ async fn get_current_summoner_name(
             return None;
         }
     };
-    data.get("gameName")?.as_str().map(|s| s.to_string())
+    let puuid = data.get("puuid")?.as_str()?.to_string();
+    let name = data.get("gameName")?.as_str()?.to_string();
+    Some((name, puuid))
 }
 
 fn extract_gameflow_game_id(data: &Value) -> Option<u64> {
@@ -797,7 +800,7 @@ struct PlayerInfo {
 
 fn build_upload_payload(
     game_detail: &GameDetail,
-    current_summoner_name: Option<&str>,
+    current_summoner_puuid: Option<&str>,
     champion_names: &std::collections::HashMap<i32, String>,
 ) -> UploadPayload {
     let game_creation_iso = game_detail
@@ -934,19 +937,11 @@ fn build_upload_payload(
     let mut inner_participants = Vec::new();
     let mut outer_participants = Vec::new();
 
-    if let Some(target_name) = current_summoner_name {
-        let target_lower = target_name.to_lowercase().replace(' ', "");
+    if let Some(target_puuid) = current_summoner_puuid {
         let mut found = false;
 
         for p in all_participants.drain(..) {
-            let p_name = p
-                .summoner_name
-                .split('#')
-                .next()
-                .unwrap_or("")
-                .to_lowercase()
-                .replace(' ', "");
-            if !found && (p_name == target_lower || p_name.contains(&target_lower)) {
+            if !found && p.puuid == target_puuid {
                 inner_participants.push(p);
                 found = true;
             } else {
@@ -1057,7 +1052,8 @@ async fn batch_upload_by_ids(
         }
     };
 
-    let current_name = get_current_summoner_name(&lcu_client, &auth, &base).await;
+    let current_summoner_info = get_current_summoner_info(&lcu_client, &auth, &base).await;
+    let current_puuid = current_summoner_info.as_ref().map(|(_, puuid)| puuid.as_str());
 
     // 获取英雄名称映射
     let champion_names = {
@@ -1079,7 +1075,7 @@ async fn batch_upload_by_ids(
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<GameDetail>().await {
                     Ok(detail) => {
-                        payloads.push(build_upload_payload(&detail, current_name.as_deref(), &champion_names));
+                        payloads.push(build_upload_payload(&detail, current_puuid, &champion_names));
                     }
                     Err(e) => {
                         log::warn!("批量上传: 解析对局 {} 详情失败: {}", game_id, e);
