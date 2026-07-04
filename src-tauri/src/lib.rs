@@ -18,6 +18,7 @@ use tauri::Emitter;
 use tauri::Manager;
 use std::sync::Mutex;
 use tokio::sync::{mpsc, watch, RwLock, Semaphore};
+use crate::updater::PendingUpdate;
 
 /// 包装 tauri::async_runtime::spawn，捕获并记录后台任务异常终止。
 /// 不会丢失 JoinHandle 的错误信息，避免任务静默崩溃。
@@ -64,6 +65,10 @@ pub struct AppState {
     pub bp_reset_flag: AtomicBool,
     /// BP 锁定后台任务版本号（用于标记和防止残留协程竞态）
     pub bp_task_id: AtomicU64,
+    /// 后台下载进行中标志，防止重复启动多个下载
+    pub is_downloading: AtomicBool,
+    /// 后台已下载完成的待安装更新
+    pub pending_update: Mutex<Option<PendingUpdate>>,
 }
 
 impl AppState {
@@ -123,6 +128,8 @@ pub fn run() {
                 api_semaphore: Arc::new(Semaphore::new(api_concurrency)),
                 bp_reset_flag: AtomicBool::new(false),
                 bp_task_id: AtomicU64::new(0),
+                is_downloading: AtomicBool::new(false),
+                pending_update: Mutex::new(None),
             };
             app.manage(state);
 
@@ -246,7 +253,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // ─── 启动时静默检查更新 ───
+            // ─── 启动时静默检查并后台下载更新 ───
             {
                 let cfg_snapshot = app_config_arc.blocking_read();
                 let enable_check = cfg_snapshot.general.enable_check_update;
@@ -256,19 +263,8 @@ pub fn run() {
                     crate::spawn_log_panic(async move {
                         // 延迟 3 秒，等待主窗口完全加载后再检查
                         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        match updater::check_update(app_handle.clone()).await {
-                            Ok(Some(info)) => {
-                                log::info!("发现新版本: {} (当前: {})", info.version, info.current_version);
-                                // 通知前端弹出更新对话框
-                                let _ = app_handle.emit("updater://update-available", info);
-                            }
-                            Ok(None) => {
-                                log::info!("已是最新版本");
-                            }
-                            Err(e) => {
-                                log::warn!("启动时检查更新失败: {e}");
-                            }
-                        }
+                        // start_background_download 内部自动完成：检查→后台下载→存储→事件通知
+                        updater::start_background_download(app_handle).await;
                     });
                 }
             }
@@ -312,6 +308,7 @@ pub fn run() {
             signalr::get_signalr_status,
             updater::check_update,
             updater::install_update,
+            updater::install_pending_update,
             show_bench_overlay_window,
         ])
         .run(tauri::generate_context!())

@@ -8,8 +8,8 @@ import type { AppConfig } from "../api/lcu";
 import { updateThemeColor, updateDeathColor, updateCardColors } from "../utils/theme";
 
 import { useDialog } from "naive-ui";
-import UpdateDialog, { type UpdateInfo } from "../components/UpdateDialog.vue";
 import { useToast } from "../composables/useToast";
+import type { UpdateInfo } from "../components/UpdateDialog.vue";
 import ColorPickerWithAlpha from "../components/ColorPickerWithAlpha.vue";
 import { useI18n } from 'vue-i18n';
 import { setLocale } from '../i18n';
@@ -23,7 +23,6 @@ const appVersion = ref("");
 
 // 手动检查更新状态
 const checkingUpdate = ref(false);
-const updateInfo = ref<UpdateInfo | null>(null);
 
 async function manualCheckUpdate() {
   if (checkingUpdate.value) return;
@@ -31,7 +30,8 @@ async function manualCheckUpdate() {
   try {
     const result = await invoke<UpdateInfo | null>("check_update");
     if (result) {
-      updateInfo.value = result;
+      // check_update 已自动触发后台下载，App.vue 的 UpdateDialog 会接管气泡和进度
+      showToast(`已开始下载 v${result.version}`, "success");
     } else {
       showToast("已是最新版本！", "success");
     }
@@ -834,13 +834,6 @@ function applyThemeMode(mode: string) {
           <n-switch v-model:value="config.General.EnableCheckUpdate" @update:value="autoSave" />
         </div>
       </div>
-
-      <!-- 手动检查更新对话框 -->
-      <UpdateDialog
-        v-if="updateInfo"
-        :update-info="updateInfo"
-        @dismiss="updateInfo = null"
-      />
 
       <n-collapse arrow-placement="right" class="collapse-card">
         <n-collapse-item name="githubproxy">

@@ -573,13 +573,6 @@ async function handleClose() {
   <!-- 否则渲染常规的主程序界面 -->
   <div v-else class="app-layout">
 
-    <!-- 自动更新弹窗 -->
-    <UpdateDialog
-      v-if="updateInfo"
-      :update-info="updateInfo"
-      @dismiss="updateInfo = null"
-    />
-
     <!-- 自定义标题栏 -->
     <div class="titlebar" data-tauri-drag-region>
       <div class="titlebar-left">
@@ -769,6 +762,13 @@ async function handleClose() {
     </main>
     </div>
   </div>
+
+    <!-- 自动更新弹窗（在 app-layout 外部，避免 overflow:hidden 限制） -->
+    <UpdateDialog
+      :update-info="updateInfo"
+      @dismiss="updateInfo = null"
+    />
+
       </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
