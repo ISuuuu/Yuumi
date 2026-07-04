@@ -72,7 +72,7 @@ impl ServerCertVerifier for NoVerifier {
 /// 每次调用会取消前一个仍在运行的连接循环，避免旧 port/token 的僵尸重试。
 pub fn connect(app_handle: AppHandle, port: u16, token: String) {
     // 取消上一次 WS 循环
-    let cancel_rx = {
+    let mut cancel_rx = {
         let state = app_handle.state::<crate::AppState>();
         let mut old_tx = state.ws_cancel_tx.lock().unwrap();
         // 发送取消信号给旧循环
@@ -84,8 +84,7 @@ pub fn connect(app_handle: AppHandle, port: u16, token: String) {
         rx
     };
 
-    tauri::async_runtime::spawn(async move {
-        let mut cancel_rx = cancel_rx;
+    crate::spawn_log_panic(async move {
         loop {
             // 在尝试连接前检查是否已被取消
             if *cancel_rx.borrow() {
@@ -104,7 +103,7 @@ pub fn connect(app_handle: AppHandle, port: u16, token: String) {
 
                             // 初始主动获取一次当前游戏阶段以触发自动化状态对齐
                             let app_clone = app_handle.clone();
-                            tauri::async_runtime::spawn(async move {
+                            crate::spawn_log_panic(async move {
                                 let state = app_clone.state::<crate::AppState>();
                                 let lcu_lock = state.lcu_client.read().await;
                                 if let Some(lcu) = lcu_lock.as_ref() {
@@ -336,7 +335,7 @@ fn process_event(text: &str, app_handle: &AppHandle) {
     {
         let event_data_clone = event_data.clone();
         let uri = uri.to_string();
-        tauri::async_runtime::spawn(async move {
+        crate::spawn_log_panic(async move {
             let data = event_data_clone.get("data").unwrap_or(&serde_json::Value::Null).clone();
             if uri == "/lol-gameflow/v1/gameflow-phase" {
                 if let Some(phase) = data.as_str() {

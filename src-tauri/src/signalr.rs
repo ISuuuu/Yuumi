@@ -131,8 +131,7 @@ fn clean_server_url(url: &str) -> String {
 /// 启动 SignalR Hub 连接。
 /// 连接到远程服务器 of `/lcuHub`，支持远程 LCU 查询和状态上报。
 pub fn start(app_handle: AppHandle, server_url: String, user_id: String) {
-    tauri::async_runtime::spawn(async move {
-        stop().await;
+    crate::spawn_log_panic(async move {
 
         let server_url = clean_server_url(&server_url);
 
@@ -311,7 +310,7 @@ async fn handle_connection(
 
     // 握手成功后，查询当前玩家信息并推送 summoner_info
     let app_handle_clone = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
+    crate::spawn_log_panic(async move {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         log::info!("[SignalR] 正在向 LCU 获取当前登录玩家信息用于首次云端对齐...");
         if let Ok(summoner) = query_current_summoner(&app_handle_clone).await {
@@ -326,7 +325,7 @@ async fn handle_connection(
     let (heartbeat_cancel_tx, mut heartbeat_cancel_rx) = tokio::sync::oneshot::channel::<()>();
     let heartbeat_cmd_tx = SIGNALR_TX.lock().await.clone();
     if let Some(h_tx) = heartbeat_cmd_tx {
-        tauri::async_runtime::spawn(async move {
+        crate::spawn_log_panic(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
             interval.tick().await; // skip first immediate tick
             loop {

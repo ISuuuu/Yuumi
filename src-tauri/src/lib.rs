@@ -19,6 +19,20 @@ use tauri::Manager;
 use std::sync::Mutex;
 use tokio::sync::{mpsc, watch, RwLock, Semaphore};
 
+/// 包装 tauri::async_runtime::spawn，捕获并记录后台任务异常终止。
+/// 不会丢失 JoinHandle 的错误信息，避免任务静默崩溃。
+pub(crate) fn spawn_log_panic<F>(future: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let handle = tauri::async_runtime::spawn(future);
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = handle.await {
+            log::error!("后台任务异常终止: {:?}", e);
+        }
+    });
+}
+
 /// LCU 连接凭证及预配置的 HTTP Client
 pub struct LcuClient {
     pub pid: u32,
@@ -172,7 +186,10 @@ pub fn run() {
             let tray_menu = build_tray_menu(app.handle(), hide_tft)?;
 
             let _tray = TrayIconBuilder::with_id("main_tray")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(app.default_window_icon().cloned().unwrap_or_else(|| {
+                    log::warn!("default_window_icon 为 None，使用 1x1 透明像素占位");
+                    tauri::image::Image::new(&[0, 0, 0, 0], 1, 1)
+                }))
                 .menu(&tray_menu)
                 .tooltip("Yuumi")
                 .on_menu_event(move |app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
@@ -236,7 +253,7 @@ pub fn run() {
                 drop(cfg_snapshot);
                 if enable_check {
                     let app_handle = app.handle().clone();
-                    tauri::async_runtime::spawn(async move {
+                    crate::spawn_log_panic(async move {
                         // 延迟 3 秒，等待主窗口完全加载后再检查
                         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                         match updater::check_update(app_handle.clone()).await {

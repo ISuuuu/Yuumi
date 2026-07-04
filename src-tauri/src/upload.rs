@@ -23,7 +23,7 @@ impl UploadQueue {
 
         // 启动后台 Worker（使用 Tauri 异步运行时，避免 setup 阶段无 Tokio runtime）
         let enqueued_clone = enqueued.clone();
-        tauri::async_runtime::spawn(upload_worker(app_handle, rx, enqueued_clone));
+        crate::spawn_log_panic(upload_worker(app_handle, rx, enqueued_clone));
 
         Self { tx, enqueued }
     }

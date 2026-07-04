@@ -22,7 +22,7 @@ pub fn start(
     lcu_state: Arc<RwLock<Option<LcuClient>>>,
     game_data: Arc<RwLock<GameDataAssets>>,
 ) {
-    tauri::async_runtime::spawn(async move {
+    crate::spawn_log_panic(async move {
         let mut was_connected = false;
 
         loop {
@@ -115,7 +115,7 @@ pub fn start(
                                     let gd = game_data.clone();
                                     let app_handle_for_gd = app_handle.clone();
                                     let token_for_gd = token.clone();
-                                    tauri::async_runtime::spawn(async move {
+                                    crate::spawn_log_panic(async move {
                                         match reqwest::Client::builder()
                                             .danger_accept_invalid_certs(true)
                                             .no_proxy()
@@ -162,7 +162,7 @@ pub fn start(
                         }
                         was_connected = false;
                         let gd = game_data.clone();
-                        tauri::async_runtime::spawn(async move {
+                        crate::spawn_log_panic(async move {
                             *gd.write().await = GameDataAssets::default();
                         });
                         let _ = app_handle.emit("lcu-client-ended", ());
