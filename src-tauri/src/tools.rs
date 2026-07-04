@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::fs;
 use serde::Deserialize;
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
@@ -10,8 +12,7 @@ static OPGG_CACHE: OnceLock<Mutex<HashMap<String, serde_json::Value>>> = OnceLoc
 
 fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .danger_accept_invalid_certs(true);
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
     if enable_proxy && !proxy_addr.is_empty() {
         let proxy_url = if proxy_addr.contains("://") {
@@ -456,78 +457,98 @@ pub async fn fix_lcu_window(
         }
     };
 
-    // 将 PowerShell 脚本写入临时文件，通过参数传入 zoom，避免字符串拼接注入风险
-    let ps_script_body = r#"param([double]$zoom)
-Add-Type @"
-    using System;
-    using System.Runtime.InteropServices;
-    public class WinAPI {
-        [DllImport("user32.dll")]
-        public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-        [DllImport("user32.dll")]
-        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-        [DllImport("user32.dll")]
-        public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    // 通过 Win32 API 直接操作窗口，替代旧的 PowerShell 脚本方案
+    #[cfg(target_os = "windows")]
+    {
+        return fix_lcu_window_win32(zoom);
     }
-"@
-$procs = Get-Process -Name "LeagueClientUx" -ErrorAction SilentlyContinue
-if ($procs) {
-    $hWnd = $procs[0].MainWindowHandle
-    if ($hWnd -ne [IntPtr]::Zero) {
-        [WinAPI]::ShowWindow($hWnd, 9)
-        [WinAPI]::SetWindowPos($hWnd, [IntPtr]::Zero, 0, 0, 0, 0, 0x0043)
-        Write-Output "窗口已修复 (zoom=$zoom)"
-    } else {
-        Write-Output "未找到窗口句柄"
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = zoom;
+        Err("仅 Windows 平台支持窗口修复".to_string())
     }
-} else {
-    Write-Output "未找到 LeagueClientUx 进程"
 }
-"#;
 
-    let temp_ps_path = std::env::temp_dir().join("yuumi_fix_window.ps1");
-    let zoom_str = zoom.to_string();
+#[cfg(target_os = "windows")]
+fn fix_lcu_window_win32(zoom: f64) -> Result<String, String> {
+    use std::ffi::c_void;
+    use std::ptr;
 
-    let result = tokio::task::spawn_blocking(move || {
-        // 写入临时脚本文件
-        if let Err(e) = std::fs::write(&temp_ps_path, ps_script_body) {
-            return Err(format!("写入 PowerShell 脚本失败: {}", e));
+    extern "system" {
+        fn FindWindowW(lpClassName: *const u16, lpWindowName: *const u16) -> *mut c_void;
+        fn ShowWindow(hWnd: *mut c_void, nCmdShow: i32) -> i32;
+        fn SetWindowPos(
+            hWnd: *mut c_void,
+            hWndInsertAfter: *mut c_void,
+            X: i32, Y: i32, cx: i32, cy: i32, uFlags: u32,
+        ) -> i32;
+        fn GetWindowThreadProcessId(hWnd: *mut c_void, lpdwProcessId: *mut u32) -> u32;
+        fn EnumWindows(
+            lpEnumFunc: Option<unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32>,
+            lParam: *mut c_void,
+        ) -> i32;
+    }
+
+    const SW_RESTORE: i32 = 9;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_SHOWWINDOW: u32 = 0x0040;
+
+    unsafe {
+        let mut hwnd = {
+            let class_name: Vec<u16> = "RiotWindow\0".encode_utf16().collect();
+            FindWindowW(class_name.as_ptr(), ptr::null())
+        };
+
+        if hwnd.is_null() {
+            struct EnumData {
+                target_pid: u32,
+                hwnd: *mut c_void,
+            }
+
+            unsafe extern "system" fn enum_callback(hwnd: *mut c_void, lparam: *mut c_void) -> i32 {
+                let data = &mut *(lparam as *mut EnumData);
+                let mut pid: u32 = 0;
+                GetWindowThreadProcessId(hwnd, &mut pid);
+                if pid == data.target_pid {
+                    data.hwnd = hwnd;
+                    0
+                } else {
+                    1
+                }
+            }
+
+            let target_pid = {
+                let sys = sysinfo::System::new_all();
+                sys.processes().iter().find_map(|(pid, process)| {
+                    let name = process.name().to_string_lossy().to_lowercase();
+                    if name == "leagueclientux.exe" || name == "leagueclientux" {
+                        Some(pid.as_u32())
+                    } else {
+                        None
+                    }
+                })
+            };
+
+            if let Some(pid) = target_pid {
+                let mut data = EnumData { target_pid: pid, hwnd: ptr::null_mut() };
+                EnumWindows(Some(enum_callback), (&mut data as *mut EnumData).cast());
+                hwnd = data.hwnd;
+            }
         }
 
-        let output = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                &temp_ps_path.to_string_lossy(),
-                "-zoom",
-                &zoom_str,
-            ])
-            .output()
-            .map_err(|e| format!("执行 PowerShell 失败: {}", e));
+        if hwnd.is_null() {
+            return Err("未找到 LCU 窗口".to_string());
+        }
 
-        // 清理临时文件
-        let _ = std::fs::remove_file(&temp_ps_path);
+        ShowWindow(hwnd, SW_RESTORE);
+        SetWindowPos(hwnd, ptr::null_mut(), 0, 0, 0, 0,
+            SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_SHOWWINDOW);
 
-        output.and_then(|out| {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            if stdout.is_empty() {
-                let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                Err(stderr)
-            } else {
-                Ok(stdout.trim().to_string())
-            }
-        })
-    })
-    .await
-    .map_err(|e| format!("任务执行失败: {}", e))?;
-
-    result
+        Ok(format!("窗口已修复 (zoom={})", zoom))
+    }
 }
-
-use std::path::{Path, PathBuf};
-use std::fs;
 
 fn get_persisted_settings_path(lol_paths: &[String]) -> Option<PathBuf> {
     if lol_paths.is_empty() {
@@ -694,7 +715,6 @@ pub async fn spectate_directly(
     };
 
     let sgp_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
         .no_proxy()
         .user_agent("RiotClient/78.0.1.1352 (Windows;10;co;red)")
         .http1_only()

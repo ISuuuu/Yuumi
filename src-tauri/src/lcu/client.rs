@@ -10,6 +10,24 @@ use crate::{build_auth_header, AppState};
 const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 
+/// 允许前端调用的 LCU API 路径前缀白名单
+const ALLOWED_API_PREFIXES: &[&str] = &[
+    "/lol-gameflow/",
+    "/lol-champ-select/",
+    "/lol-matchmaking/",
+    "/lol-summoner/",
+    "/lol-chat/",
+    "/lol-game-data/",
+    "/lol-lobby/",
+    "/lol-perks/",
+    "/lol-ranked/",
+    "/lol-match-history/",
+    "/lol-spectator/",
+    "/riotclient/",
+    "/entitlements/",
+    "/system/",
+];
+
 /// 统一的 LCU API 调用命令。
 /// 前端通过 invoke("call_lcu_api", { method, path, body }) 调用。
 #[tauri::command]
@@ -19,6 +37,12 @@ pub async fn call_lcu_api(
     body: Option<Value>,
     app_state: State<'_, AppState>,
 ) -> Result<Value, String> {
+    // 路径前缀白名单校验
+    let path_allowed = ALLOWED_API_PREFIXES.iter().any(|p| path.starts_with(p));
+    if !path_allowed {
+        return Err(format!("不允许的 API 路径: {}", path));
+    }
+
     // 获取并发许可
     let _permit = app_state.api_semaphore.acquire().await.map_err(|e| e.to_string())?;
 

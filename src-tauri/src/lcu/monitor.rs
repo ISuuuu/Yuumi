@@ -13,103 +13,6 @@ const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const PROBE_MAX_RETRIES: u32 = 5;
 const PROBE_INTERVAL: Duration = Duration::from_secs(2);
 
-#[cfg(target_os = "windows")]
-mod win_privilege {
-    use std::ptr;
-
-    #[repr(C)]
-    struct LUID {
-        low_part: u32,
-        high_part: i32,
-    }
-
-    #[repr(C)]
-    struct LUID_AND_ATTRIBUTES {
-        luid: LUID,
-        attributes: u32,
-    }
-
-    #[repr(C)]
-    struct TOKEN_PRIVILEGES {
-        privilege_count: u32,
-        privileges: [LUID_AND_ATTRIBUTES; 1],
-    }
-
-    const TOKEN_ADJUST_PRIVILEGES: u32 = 0x0020;
-    const TOKEN_QUERY: u32 = 0x0008;
-    const SE_PRIVILEGE_ENABLED: u32 = 0x00000002;
-
-    #[link(name = "advapi32")]
-    extern "system" {
-        fn OpenProcessToken(
-            process_handle: *mut std::ffi::c_void,
-            desired_access: u32,
-            token_handle: *mut *mut std::ffi::c_void,
-        ) -> i32;
-
-        fn LookupPrivilegeValueW(
-            system_name: *const u16,
-            name: *const u16,
-            luid: *mut LUID,
-        ) -> i32;
-
-        fn AdjustTokenPrivileges(
-            token_handle: *mut std::ffi::c_void,
-            disable_all_privileges: i32,
-            new_state: *const TOKEN_PRIVILEGES,
-            buffer_length: u32,
-            previous_state: *mut TOKEN_PRIVILEGES,
-            return_length: *mut u32,
-        ) -> i32;
-    }
-
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn GetCurrentProcess() -> *mut std::ffi::c_void;
-        fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
-    }
-
-    pub unsafe fn enable_debug_privilege() -> bool {
-        let mut token_handle: *mut std::ffi::c_void = ptr::null_mut();
-        if OpenProcessToken(
-            GetCurrentProcess(),
-            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
-            &mut token_handle,
-        ) == 0
-        {
-            return false;
-        }
-
-        let priv_name: Vec<u16> = "SeDebugPrivilege\0".encode_utf16().collect();
-        let mut luid = LUID { low_part: 0, high_part: 0 };
-
-        if LookupPrivilegeValueW(ptr::null(), priv_name.as_ptr(), &mut luid) == 0 {
-            CloseHandle(token_handle);
-            return false;
-        }
-
-        let tp = TOKEN_PRIVILEGES {
-            privilege_count: 1,
-            privileges: [LUID_AND_ATTRIBUTES {
-                luid,
-                attributes: SE_PRIVILEGE_ENABLED,
-            }],
-        };
-
-        let result = AdjustTokenPrivileges(
-            token_handle,
-            0,
-            &tp,
-            std::mem::size_of::<TOKEN_PRIVILEGES>() as u32,
-            ptr::null_mut(),
-            ptr::null_mut(),
-        );
-
-        CloseHandle(token_handle);
-        result != 0
-    }
-}
-
 /// 启动 LCU 进程轮询监测器。
 /// 两种检测方式并用，确保可靠连接：
 /// 1. 读取 lockfile（更快、更可靠）
@@ -119,12 +22,6 @@ pub fn start(
     lcu_state: Arc<RwLock<Option<LcuClient>>>,
     game_data: Arc<RwLock<GameDataAssets>>,
 ) {
-    #[cfg(target_os = "windows")]
-    unsafe {
-        let success = win_privilege::enable_debug_privilege();
-        log::info!("启用 SeDebugPrivilege 特权: {}", success);
-    }
-
     tauri::async_runtime::spawn(async move {
         let mut was_connected = false;
 
