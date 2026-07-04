@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -18,62 +18,115 @@ interface DownloadProgress {
 }
 
 const { updateInfo } = defineProps<{
-  updateInfo: UpdateInfo;
+  updateInfo: UpdateInfo | null | undefined;
 }>();
 
 const emit = defineEmits<{
   (e: "dismiss"): void;
 }>();
 
+// ─── 状态 ───
 const installing = ref(false);
-const isMinimized = ref(false);
+const isMinimized = ref(true); // 默认从迷你气泡开始，不遮挡主界面
+const downloadReady = ref(false);
 const progress = ref<DownloadProgress | null>(null);
 const errorMsg = ref("");
 
-// 进度百分比（用于进度条和环形进度条显示）
+// 记录历史最大 total，防止服务器中途改变 Content-Length 导致百分比倒退
+let stableTotal: number | null = null;
+
+// 进度百分比
 const progressPercent = computed(() => {
   if (!progress.value) return 0;
-  if (progress.value.percent != null) return Math.min(progress.value.percent, 100);
-  // 没有 total 时，模拟不确定进度条
+  // 优先用 Rust 端计算的百分比（但用 stableTotal 做上限保护）
+  const p = progress.value;
+  if (p.percent != null && stableTotal != null && p.total != null && p.total < stableTotal) {
+    // total 变小了：用 stableTotal 重新计算，防止百分比倒退
+    return Math.min((p.downloaded / stableTotal) * 100, 100);
+  }
+  if (p.percent != null) return Math.min(p.percent, 100);
   return -1;
 });
 
-// 格式化已下载大小
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-// 监听下载进度事件
+// ─── 事件监听 ───
 let unlistenProgress: (() => void) | null = null;
+let unlistenDownloadReady: (() => void) | null = null;
+let unlistenDownloadError: (() => void) | null = null;
 
-async function startInstall() {
+onMounted(async () => {
+  // 监听 Rust 后台下载进度（start_background_download 已在 Rust 端自动启动）
+  unlistenProgress = await listen<DownloadProgress>("updater://progress", (event) => {
+    const p = event.payload;
+    // 更新稳定 total（只增不减）
+    if (p.total != null) {
+      if (stableTotal == null || p.total > stableTotal) {
+        stableTotal = p.total;
+      }
+      // 如果 Rust 给的 total 比 stableTotal 小，补全一个基于 stableTotal 的 percent
+      if (p.total < stableTotal) {
+        p.percent = (p.downloaded / stableTotal) * 100;
+        p.total = stableTotal;
+      }
+    }
+    progress.value = p;
+  });
+  // 监听下载完成事件
+  unlistenDownloadReady = await listen<UpdateInfo>("updater://download-ready", () => {
+    downloadReady.value = true;
+    console.log("后台更新下载完成，等待用户确认安装");
+  });
+  // 监听下载失败事件
+  unlistenDownloadError = await listen<string>("updater://download-error", (event) => {
+    errorMsg.value = String(event.payload);
+    isMinimized.value = false; // 出错时弹出显示错误
+  });
+});
+
+onUnmounted(() => {
+  if (unlistenProgress) unlistenProgress();
+  if (unlistenDownloadReady) unlistenDownloadReady();
+  if (unlistenDownloadError) unlistenDownloadError();
+});
+
+// ─── 操作 ───
+
+/** 安装已下载的待更新版本（download-ready 后调用） */
+async function installPending() {
+  installing.value = true;
+  errorMsg.value = "";
+  try {
+    await invoke("install_pending_update");
+    // install_pending_update 会重启应用，不会走到这里
+  } catch (e: any) {
+    errorMsg.value = String(e);
+    installing.value = false;
+    isMinimized.value = false;
+  }
+}
+
+/** 手动使用旧版 install_update（Settings 页面手动检查场景） */
+async function installNow() {
   installing.value = true;
   errorMsg.value = "";
   progress.value = { downloaded: 0, total: undefined, percent: 0 };
 
-  // 注册进度事件监听
-  unlistenProgress = await listen<DownloadProgress>("updater://progress", (event) => {
-    progress.value = event.payload;
-  });
-
   try {
     await invoke("install_update");
-    // install_update 会重启应用，不会走到这里
   } catch (e: any) {
     errorMsg.value = String(e);
     installing.value = false;
-    isMinimized.value = false; // 更新出错时，强制弹回前台展示错误
-    if (unlistenProgress) {
-      unlistenProgress();
-      unlistenProgress = null;
-    }
+    isMinimized.value = false;
   }
 }
 
 function dismiss() {
-  if (installing.value) return; // 安装过程中不允许直接关闭（但可以最小化）
+  if (installing.value) return;
   emit("dismiss");
 }
 
@@ -90,18 +143,34 @@ function openReleasePage() {
     console.error("Failed to open release page:", err);
   });
 }
-
-onUnmounted(() => {
-  if (unlistenProgress) {
-    unlistenProgress();
-  }
-});
 </script>
 
 <template>
-  <Teleport to="body">
-    <!-- 正常的大弹窗状态 -->
-    <div v-if="!isMinimized" class="update-overlay" @click.self="dismiss">
+  <!-- 迷你气泡：直接渲染，不经过 Teleport，永远属于 App.vue 的 DOM 树 -->
+  <div v-if="updateInfo && isMinimized" class="update-mini-badge" @click="restore" :title="downloadReady ? '点击重启安装' : '点击展开更新进度'">
+    <div class="mini-progress-ring">
+      <svg class="ring-svg" viewBox="0 0 36 36">
+        <path class="ring-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+        <path
+          class="ring-fill"
+          :stroke-dasharray="`${downloadReady ? 100 : (progressPercent >= 0 ? progressPercent : 25)}, 100`"
+          :class="{ 'ring-animate': progressPercent < 0 && !downloadReady }"
+          d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+        />
+      </svg>
+      <div class="mini-percent">
+        {{ downloadReady ? '✓' : (progressPercent >= 0 ? Math.round(progressPercent) + '%' : '...') }}
+      </div>
+    </div>
+    <div class="mini-info">
+      <div class="mini-title">{{ downloadReady ? '更新就绪' : '正在后台更新' }}</div>
+      <div class="mini-version">{{ downloadReady ? '点击重启安装' : `新版本 v${updateInfo.version}` }}</div>
+    </div>
+  </div>
+
+  <!-- 全屏弹窗：用 Teleport 放到 body 最上层 -->
+  <Teleport to="body" v-if="updateInfo && !isMinimized">
+    <div class="update-overlay" @click.self="minimize">
       <div class="update-dialog">
         <!-- 头部 -->
         <div class="update-header">
@@ -113,39 +182,55 @@ onUnmounted(() => {
             </svg>
           </div>
           <div class="update-title-group">
-            <h2 class="update-title">发现新版本</h2>
-            <p class="update-subtitle">
-              <span class="version-current">v{{ updateInfo.currentVersion }}</span>
-              <svg class="version-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <line x1="5" y1="12" x2="19" y2="12"/>
-                <polyline points="12 5 19 12 12 19"/>
-              </svg>
-              <span class="version-new">v{{ updateInfo.version }}</span>
-            </p>
+            <!-- 下载完成 → 准备安装 -->
+            <template v-if="downloadReady">
+              <h2 class="update-title">更新已就绪</h2>
+              <p class="update-subtitle">
+                <span class="version-current">v{{ updateInfo.currentVersion }}</span>
+                <svg class="version-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                  <polyline points="12 5 19 12 12 19"/>
+                </svg>
+                <span class="version-new">v{{ updateInfo.version }}</span>
+              </p>
+            </template>
+            <!-- 下载中 / 手动更新 -->
+            <template v-else>
+              <h2 class="update-title">发现新版本</h2>
+              <p class="update-subtitle">
+                <span class="version-current">v{{ updateInfo.currentVersion }}</span>
+                <svg class="version-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                  <polyline points="12 5 19 12 12 19"/>
+                </svg>
+                <span class="version-new">v{{ updateInfo.version }}</span>
+              </p>
+            </template>
           </div>
-          <!-- 右上角按钮：若未下载则显示“稍后提醒”关闭按钮；若正在下载则显示“最小化到后台” -->
-          <button v-if="!installing" class="update-close" @click="dismiss" title="稍后提醒">
+          <!-- 右上角关闭/最小化按钮 -->
+          <button v-if="!installing" class="update-close" @click="downloadReady ? dismiss() : minimize()" :title="downloadReady ? '稍后' : '后台下载'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              <line v-if="downloadReady" x1="18" y1="6" x2="6" y2="18"/><line v-if="downloadReady" x1="6" y1="6" x2="18" y2="18"/>
+              <line v-else x1="5" y1="12" x2="19" y2="12"/>
             </svg>
           </button>
-          <button v-else class="update-close" @click="minimize" title="后台下载">
+          <button v-else class="update-close" @click="minimize" title="后台运行">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
           </button>
         </div>
 
-        <!-- 更新说明 -->
-        <div v-if="updateInfo.notes && !installing" class="update-notes">
+        <!-- 更新说明（仅手动更新/下载完成时显示） -->
+        <div v-if="updateInfo.notes && (downloadReady || !progress)" class="update-notes">
           <div class="notes-label">更新说明</div>
           <pre class="notes-content">{{ updateInfo.notes }}</pre>
         </div>
 
-        <!-- 下载进度 -->
-        <div v-if="installing" class="update-progress-section">
+        <!-- 下载进度（自动后台下载时显示） -->
+        <div v-if="!downloadReady && progress" class="update-progress-section">
           <div class="progress-label">
-            <span>{{ progress?.percent != null ? '下载中...' : '准备中...' }}</span>
+            <span>后台下载中...</span>
             <span v-if="progress?.downloaded">{{ formatBytes(progress.downloaded) }}{{ progress.total ? ` / ${formatBytes(progress.total)}` : '' }}</span>
           </div>
           <div class="progress-bar-track">
@@ -154,15 +239,9 @@ onUnmounted(() => {
               class="progress-bar-fill"
               :style="{ width: `${progressPercent}%` }"
             />
-            <!-- 不确定进度动画 -->
             <div v-else class="progress-bar-indeterminate" />
           </div>
-          <p class="progress-hint">下载完成后将自动安装并重启应用</p>
-
-          <!-- 新增：后台下载按钮 -->
-          <div class="progress-actions">
-            <button class="btn-minimize-text" @click="minimize">后台运行</button>
-          </div>
+          <p class="progress-hint">下载完成后将提示安装</p>
         </div>
 
         <!-- 错误提示 -->
@@ -175,35 +254,22 @@ onUnmounted(() => {
 
         <!-- 按钮区 -->
         <div v-if="!installing" class="update-actions">
-          <button v-if="errorMsg" class="btn-manual" @click="openReleasePage">浏览器下载</button>
-          <button class="btn-dismiss" @click="dismiss">稍后提醒</button>
-          <button class="btn-install" @click="startInstall">{{ errorMsg ? '重试' : '立即更新' }}</button>
+          <!-- 下载完成 → 立即重启 -->
+          <template v-if="downloadReady">
+            <button class="btn-dismiss" @click="dismiss">稍后</button>
+            <button class="btn-install" @click="installPending">立即重启</button>
+          </template>
+          <!-- 手动更新（Settings 页面场景，无后台下载） -->
+          <template v-else-if="!progress">
+            <button v-if="errorMsg" class="btn-manual" @click="openReleasePage">浏览器下载</button>
+            <button class="btn-dismiss" @click="dismiss">稍后提醒</button>
+            <button class="btn-install" @click="installNow">{{ errorMsg ? '重试' : '立即更新' }}</button>
+          </template>
+          <!-- 下载中 -->
+          <template v-else>
+            <button class="btn-dismiss" @click="minimize">后台运行</button>
+          </template>
         </div>
-      </div>
-    </div>
-
-    <!-- 新增：最小化状态下的悬浮状态气泡 -->
-    <div v-else class="update-mini-badge" @click="restore" title="点击展开更新进度">
-      <div class="mini-progress-ring">
-        <svg class="ring-svg" viewBox="0 0 36 36">
-          <path
-            class="ring-bg"
-            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-          />
-          <path
-            class="ring-fill"
-            :stroke-dasharray="`${progressPercent >= 0 ? progressPercent : 25}, 100`"
-            :class="{ 'ring-animate': progressPercent < 0 }"
-            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-          />
-        </svg>
-        <div class="mini-percent">
-          {{ progressPercent >= 0 ? Math.round(progressPercent) + '%' : '...' }}
-        </div>
-      </div>
-      <div class="mini-info">
-        <div class="mini-title">正在后台更新</div>
-        <div class="mini-version">新版本 v{{ updateInfo.version }}</div>
       </div>
     </div>
   </Teleport>
