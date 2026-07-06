@@ -57,12 +57,15 @@ pnpm tauri build    # 生产构建
 ```
 Yuumi/
 ├── src/                  # Vue 前端
-│   ├── views/            # 页面组件（Home/Career/Search/GameInfo/TFT/Tools/Settings）
+│   ├── views/            # 页面组件（Home/Career/Search/GameInfo/TFT/Tools/Settings/Notice/BenchOverlay）
 │   ├── components/       # 通用组件（LcuImage/OpggModal/OpggWindow/ChampionPicker/SpellPicker/NaiveUIBridge）
 │   ├── composables/      # 组合式 hooks（useLcuAsset/useToast）
 │   ├── api/              # LCU API 封装 + Tauri IPC 调用
 │   ├── store/            # Pinia 全局状态
-│   └── utils/            # 工具函数（主题色等）
+│   ├── utils/            # 工具函数（主题色等）
+│   ├── i18n.ts           # 多语言配置
+│   ├── main.ts           # 主窗口入口
+│   └── opgg.ts           # OP.GG 独立窗口入口
 ├── src-tauri/            # Rust 后端
 │   ├── src/
 │   │   ├── lib.rs        # 入口：AppState、命令注册、系统托盘
