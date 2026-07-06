@@ -54,10 +54,25 @@ pub fn start(
                         &mut upload_trigger,
                     )
                     .await;
+
+                    // 进入 ReadyCheck 阶段时触发自动接受匹配后台任务
+                    if phase == "ReadyCheck" && cfg.enable_auto_accept_matching && !ready_check_accepted {
+                        ready_check_accepted = true;
+                        spawn_auto_accept(app_handle.clone(), cfg.auto_accept_matching_delay);
+                    }
                 }
                 GameflowEvent::ReadyCheck(data) => {
-                    if last_phase == "ReadyCheck" {
-                        handle_ready_check(&app_handle, &data, &cfg, &mut ready_check_accepted).await;
+                    if last_phase == "ReadyCheck" && cfg.enable_auto_accept_matching && !ready_check_accepted {
+                        let already_responded = data.player_response.as_ref()
+                            .map(|r| r == "Accepted" || r == "Declined")
+                            .unwrap_or(false);
+                        if already_responded {
+                            log::debug!("收到 ReadyCheck 事件，但玩家已响应，标记为已处理");
+                            ready_check_accepted = true;
+                        } else {
+                            ready_check_accepted = true;
+                            spawn_auto_accept(app_handle.clone(), cfg.auto_accept_matching_delay);
+                        }
                     }
                 }
                 GameflowEvent::ResetLobbyState => {
@@ -207,55 +222,58 @@ async fn try_create_default_lobby(
     *lobby_created = true;
 }
 
-/// 匹配准备检查处理
-async fn handle_ready_check(
-    app_handle: &AppHandle,
-    _data: &ReadyCheckData,
-    cfg: &FunctionsConfig,
-    ready_check_accepted: &mut bool,
-) {
-    if !cfg.enable_auto_accept_matching {
-        return;
-    }
+/// 异步执行延迟接受匹配任务，不阻塞主事件循环。
+fn spawn_auto_accept(app_handle: AppHandle, delay_secs: u32) {
+    tokio::spawn(async move {
+        if delay_secs > 0 {
+            log::info!("将在 {} 秒后自动接受匹配...", delay_secs);
+            tokio::time::sleep(std::time::Duration::from_secs(delay_secs as u64)).await;
+        } else {
+            log::info!("立即自动接受匹配");
+        }
 
-    // 如果已经接受过，跳过
-    if *ready_check_accepted {
-        log::debug!("已接受匹配，跳过重复请求");
-        return;
-    }
-
-    let delay = cfg.auto_accept_matching_delay;
-    if delay > 0 {
-        tokio::time::sleep(std::time::Duration::from_millis(delay as u64)).await;
-    }
-
-    // 先获取当前 ready check 状态（参考 Python 实现）
-    match get_ready_check_status(app_handle).await {
-        Some(status) => {
-            // 检查玩家响应状态
-            if let Some(ref response) = status.player_response {
-                if response == "Accepted" || response == "Declined" {
-                    log::debug!("玩家已响应匹配: {}", response);
-                    *ready_check_accepted = true;
+        // 延迟后，先检查当前游戏阶段是否仍然是 ReadyCheck
+        match get_current_phase(&app_handle).await {
+            Some(current_phase) => {
+                if current_phase != "ReadyCheck" {
+                    log::info!(
+                        "延迟后当前游戏阶段为 {}，不再是 ReadyCheck，取消自动接受",
+                        current_phase
+                    );
                     return;
                 }
             }
-            // 检查是否有错误
-            if let Some(ref error_code) = status.error_code {
-                log::warn!("Ready check 错误: {}", error_code);
+            None => {
+                log::warn!("延迟后无法获取当前游戏阶段，取消自动接受");
                 return;
             }
         }
-        None => {
-            log::debug!("无法获取 ready check 状态，跳过");
-            return;
-        }
-    }
 
-    log::info!("自动接受匹配");
-    if lcu_post(app_handle, "/lol-matchmaking/v1/ready-check/accept").await {
-        *ready_check_accepted = true;
-    }
+        // 再次获取当前 ready check 状态以确认是否已被响应
+        match get_ready_check_status(&app_handle).await {
+            Some(status) => {
+                // 检查玩家响应状态
+                if let Some(ref response) = status.player_response {
+                    if response == "Accepted" || response == "Declined" {
+                        log::debug!("延迟后玩家已响应匹配: {}，跳过自动接受", response);
+                        return;
+                    }
+                }
+                // 检查是否有错误
+                if let Some(ref error_code) = status.error_code {
+                    log::warn!("延迟后 Ready check 发生错误: {}，取消自动接受", error_code);
+                    return;
+                }
+            }
+            None => {
+                log::debug!("延迟后无法获取 ready check 状态，取消自动接受");
+                return;
+            }
+        }
+
+        log::info!("自动接受匹配");
+        lcu_post(&app_handle, "/lol-matchmaking/v1/ready-check/accept").await;
+    });
 }
 
 /// 获取当前 ready check 状态
