@@ -181,10 +181,10 @@ impl Default for FunctionsConfig {
     fn default() -> Self {
         Self {
             career_games_number: 20,
-            api_concurrency_number: 1,
+            api_concurrency_number: 5,
             game_info_filter: false,
             show_tier_in_game_info: false,
-            auto_show_opgg: true,
+            auto_show_opgg: false,
             enable_opgg_on_top: false,
             enable_auto_accept_matching: false,
             enable_auto_reconnect: false,
@@ -217,7 +217,7 @@ impl Default for FunctionsConfig {
             auto_set_summoner_spell_mid: Vec::new(),
             auto_set_summoner_spell_bot: Vec::new(),
             auto_set_summoner_spell_sup: Vec::new(),
-            enable_reserve_gameinfo: false,
+            enable_reserve_gameinfo: true,
             lcu_realtime_enabled: false,
             enable_auto_hover_champion: false,
             auto_select_confirm_on_timeout: true,
