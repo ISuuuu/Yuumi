@@ -3,6 +3,70 @@
 Tauri v2 + Vue 3 + TypeScript 桌面应用。
 原版 Python (Seraphine) 项目的 Rust 重构。
 
+## 编码指导原则 (Coding Guidelines)
+
+**权衡：** 这些原则倾向于谨慎而非速度。对于微不足道的任务，请自行判断。
+
+### 编码前思考 (Think Before Coding)
+
+- 明确陈述你的假设。如果不确定，请进行询问。
+- 如果存在多种解释，请展示它们 —— 不要默默选择其中一种。
+- 如果有更简单的方法，请指出。在必要时进行反驳/建议。
+- 如果有不清楚的地方，请停下来，指出令人困惑的点，并进行询问。
+
+### 简洁第一 (Simplicity First)
+
+- 不要添加超出需求的功能。
+- 不要为单次使用的代码进行抽象。
+- 不要添加未要求的“灵活性”或“可配置性”。
+- 不要为不可能发生的情景编写错误处理。
+- 如果你写了 200 行代码，而 50 行就能搞定，请重写。
+
+### 外科手术式修改 (Surgical Changes)
+
+- 不要“改进”相邻的代码、注释或格式。
+- 不要重构没有损坏/正常工作的代码。
+- 匹配现有的代码风格，即使你有不同的习惯。
+- 如果注意到无关的死代码，请提及 —— 不要直接删除它。
+- 移除因**你的**修改而不再使用的 imports、变量或函数。
+- 除非被要求，否则不要移除预先存在的死代码。
+
+### 目标驱动执行 (Goal-Driven Execution)
+
+将任务转化为可验证的目标：
+- “添加校验” → “为无效输入编写测试，然后使其通过”
+- “修复 Bug” → “编写复现该 Bug 的测试，然后使其通过”
+- “重构 X” → “确保重构前后测试均能通过”
+
+## Tauri v2 & Vue 3 编码规范 (Tauri & Vue Guidelines)
+
+### Rust 后端 (Tauri v2 / Rust)
+
+- **类型安全边界**：所有与前端交互的 Struct/Enum 必须实现 `serde::Serialize` 和 `serde::Deserialize`。
+- **错误传播与序列化**：
+  - `#[tauri::command]` 如果可能失败，必须返回 `Result<T, String>`。
+  - 严禁随意使用 `unwrap()` 或 `panic!`，应使用 `map_err(|e| e.to_string())` 或 `thiserror` 将 Error 转化为前端友好的 String，并使用系统 `logging.rs` 的 logger 记录完整堆栈。
+- **共享状态管理**：只能通过 `tauri::State<'_, AppState>` 访问全局状态，不得使用不安全的全局静态变量。
+- **异步与非阻塞**：
+  - 严禁在 Command 的主线程中执行耗时的 CPU 计算或 I/O 操作。
+  - 使用 `tokio::spawn` 投递后台任务，并在执行完毕后通过 `tauri::Emitter::emit` (Tauri v2 API) 异步通知前端。
+
+### Vue 3 前端 (Vue 3 / TypeScript)
+
+- **类型约束**：
+  - 必须对所有 `invoke` 的入参及返回结果定义明确的 TypeScript Interface，绝对禁止使用 `any`。
+  - Rust 返回的 Result 应该在前端有合理的错误捕获（`try-catch` 或 `.catch()`），并通过 `useToast` 或 `message` 呈现给用户。
+- **事件监听生命周期管理**：
+  - 使用 `@tauri-apps/api/event` 的 `listen` 订阅 Rust 事件时，必须在组件销毁时（`onUnmounted`）调用返回的 `unlisten()` 函数，以防闭包内存泄漏。
+- **LCU API 隔离原则**：
+  - 前端绝不应直接建立与 LCU 端口的 HTTP/WebSocket 连接。
+  - 所有 LCU 接口的调用，必须经由 Rust 端的 `call_lcu_api` 转发，以规避 Token 泄漏并统一错误捕获。
+- **组件及路由状态保留**：
+  - 页面路由切换基于 Vue 的 `currentPage` 控制。
+  - Search 页和 GameInfo 页由于数据量较大且需要保留搜索/对比状态，必须使用 `v-show` 保持组件挂载，避免重新渲染销毁状态。
+- **主题与样式**：
+  - 遵循 "纯白水晶极光" 风格，背景使用毛玻璃模糊（`backdrop-filter: blur`），配色统一采用动态 CSS 变量，不可随意硬编码色值。
+
 ## 技术栈
 
 - **前端**: Vue 3 + TypeScript + Vite + Pinia + Naive UI
