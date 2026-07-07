@@ -168,6 +168,17 @@ pub fn start(
                             *lock = None;
                         }
                         was_connected = false;
+
+                        // 取消 WS 连接循环，避免在 LOL 退出后后台持续尝试连接旧端口并打印日志
+                        {
+                            use tauri::Manager;
+                            let state = app_handle.state::<crate::AppState>();
+                            let mut old_tx = state.ws_cancel_tx.lock().unwrap();
+                            if let Some(tx) = old_tx.take() {
+                                let _ = tx.send(true);
+                            }
+                        }
+
                         let gd = game_data.clone();
                         crate::spawn_log_panic(async move {
                             *gd.write().await = GameDataAssets::default();
@@ -237,7 +248,7 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> 
                 }
             }
 
-            log::info!("找到 LCU 进程，命令行整句为: {}", sanitize_cmdline(&cmd_str));
+            log::debug!("找到 LCU 进程，命令行整句为: {}", sanitize_cmdline(&cmd_str));
 
             if cmd_str.is_empty() {
                 log::warn!("LCU 进程命令行为空");
@@ -269,7 +280,7 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> 
                 server = Some(sub[..end].to_string());
             }
 
-            log::info!("从命令行解析结果: port={:?}, token=***, server={:?}", port, server);
+            log::debug!("从命令行解析结果: port={:?}, token=***, server={:?}", port, server);
 
             // 只有成功提取到了合规的凭据才返回，避免因遇到无权/僵尸同名进程导致提前退出
             if let (Some(p), Some(t)) = (port, token) {
@@ -300,7 +311,7 @@ fn find_via_wmic() -> Option<(u32, u16, String, Option<String>)> {
         // 提取 --rso_platform_id=
         let server = regex_find_value(&stdout, r#"--rso_platform_id=([^"\s]+)"#);
 
-        log::info!("从 WMIC 解析结果: port={}, token=***, server={:?}", port, server);
+        log::debug!("从 WMIC 解析结果: port={}, token=***, server={:?}", port, server);
 
         // WMIC 不返回 PID，从进程列表中查找
         let sys = System::new_all();
