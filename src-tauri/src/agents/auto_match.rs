@@ -30,7 +30,7 @@ pub fn start(
         let mut lobby_created = false;
         let mut last_phase = get_current_phase(&app_handle).await.unwrap_or_default();
         let mut upload_trigger = upload_trigger;
-        let mut ready_check_accepted = false;  // 跟踪是否已接受匹配
+        let mut ready_check_accepted = false; // 跟踪是否已接受匹配
 
         while let Some(event) = rx.recv().await {
             let cfg = {
@@ -56,14 +56,22 @@ pub fn start(
                     .await;
 
                     // 进入 ReadyCheck 阶段时触发自动接受匹配后台任务
-                    if phase == "ReadyCheck" && cfg.enable_auto_accept_matching && !ready_check_accepted {
+                    if phase == "ReadyCheck"
+                        && cfg.enable_auto_accept_matching
+                        && !ready_check_accepted
+                    {
                         ready_check_accepted = true;
                         spawn_auto_accept(app_handle.clone(), cfg.auto_accept_matching_delay);
                     }
                 }
                 GameflowEvent::ReadyCheck(data) => {
-                    if last_phase == "ReadyCheck" && cfg.enable_auto_accept_matching && !ready_check_accepted {
-                        let already_responded = data.player_response.as_ref()
+                    if last_phase == "ReadyCheck"
+                        && cfg.enable_auto_accept_matching
+                        && !ready_check_accepted
+                    {
+                        let already_responded = data
+                            .player_response
+                            .as_ref()
                             .map(|r| r == "Accepted" || r == "Declined")
                             .unwrap_or(false);
                         if already_responded {
@@ -108,7 +116,9 @@ async fn handle_phase_change(
     // （不经过通道，无阻塞、无丢失）
     {
         let state = app_handle.state::<crate::AppState>();
-        state.bp_reset_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        state
+            .bp_reset_flag
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     // 空闲状态 → 自动创建预设大厅

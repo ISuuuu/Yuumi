@@ -3,8 +3,12 @@ import { ref, watch, computed, onMounted, inject, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useLcuStore } from "../store/lcuStore";
 import {
-  getGameflowPhase, getChampSelectSession, fetchMatchHistory,
-  fetchCurrentSummoner, lcuRequest, fetchConfig,
+  getGameflowPhase,
+  getChampSelectSession,
+  fetchMatchHistory,
+  fetchCurrentSummoner,
+  lcuRequest,
+  fetchConfig,
 } from "../api/lcu";
 import type { MatchDisplay, AppConfig } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
@@ -16,18 +20,39 @@ const error = ref("");
 const activeTab = ref<"my" | "their">("my");
 
 // 应用配置（用于获取对局卡片颜色）
-const appConfig = inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
+const appConfig =
+  inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 
 const currentSummonerId = ref<number>(0);
 const currentSummonerPuuid = ref<string>("");
 
 // 预组队颜色方案（降低饱和度与透明度，非常柔和剔透，不刺眼）
 const PREMADE_COLORS = [
-  { border: 'rgba(255, 140, 0, 0.6)', bg: 'rgba(255, 140, 0, 0.15)', dot: '#ff9010' },   // 亮橙 / 橘色
-  { border: 'rgba(236, 72, 153, 0.4)', bg: 'rgba(236, 72, 153, 0.10)', dot: '#ec4899' },   // 柔粉
-  { border: 'rgba(59, 130, 246, 0.4)', bg: 'rgba(59, 130, 246, 0.10)', dot: '#3b82f6' },   // 柔蓝
-  { border: 'rgba(16, 185, 129, 0.4)', bg: 'rgba(16, 185, 129, 0.10)', dot: '#10b981' },   // 柔绿
-  { border: 'rgba(168, 85, 247, 0.4)', bg: 'rgba(168, 85, 247, 0.10)', dot: '#a855f7' },   // 柔紫
+  {
+    border: "rgba(255, 140, 0, 0.6)",
+    bg: "rgba(255, 140, 0, 0.15)",
+    dot: "#ff9010",
+  }, // 亮橙 / 橘色
+  {
+    border: "rgba(236, 72, 153, 0.4)",
+    bg: "rgba(236, 72, 153, 0.10)",
+    dot: "#ec4899",
+  }, // 柔粉
+  {
+    border: "rgba(59, 130, 246, 0.4)",
+    bg: "rgba(59, 130, 246, 0.10)",
+    dot: "#3b82f6",
+  }, // 柔蓝
+  {
+    border: "rgba(16, 185, 129, 0.4)",
+    bg: "rgba(16, 185, 129, 0.10)",
+    dot: "#10b981",
+  }, // 柔绿
+  {
+    border: "rgba(168, 85, 247, 0.4)",
+    bg: "rgba(168, 85, 247, 0.10)",
+    dot: "#a855f7",
+  }, // 柔紫
 ];
 
 // summonerId → colorIndex（-1 = 单排，0+ = 组队颜色索引）
@@ -69,26 +94,34 @@ async function fetchPremadeColors() {
     const { teamOne, teamTwo } = resp.data.gameData;
     if (!teamOne || !teamTwo || teamOne.length === 0) return;
 
-    const isTeamOne = teamOne.some((p: any) => p.summonerId === currentSummonerId.value);
+    const isTeamOne = teamOne.some(
+      (p: any) => p.summonerId === currentSummonerId.value,
+    );
     const ally = isTeamOne ? teamOne : teamTwo;
     const enemy = isTeamOne ? teamTwo : teamOne;
     premadeColorsMy.value = computePremadeColors(ally);
     premadeColorsTheir.value = computePremadeColors(enemy);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 /** 获取玩家组队颜色索引 */
-function getPremadeIdx(summonerId: number, side: 'my' | 'their'): number {
-  const colors = side === 'my' ? premadeColorsMy.value : premadeColorsTheir.value;
+function getPremadeIdx(summonerId: number, side: "my" | "their"): number {
+  const colors =
+    side === "my" ? premadeColorsMy.value : premadeColorsTheir.value;
   return colors[summonerId] ?? -1;
 }
 
 /** 左侧玩家卡片组队样式 */
-function getPremadeCardStyle(summonerId: number, side: 'my' | 'their'): Record<string, string> {
+function getPremadeCardStyle(
+  summonerId: number,
+  side: "my" | "their",
+): Record<string, string> {
   const idx = getPremadeIdx(summonerId, side);
   if (idx < 0) return {};
   const c = PREMADE_COLORS[idx % PREMADE_COLORS.length];
-  return { 
+  return {
     backgroundColor: c.bg,
     borderColor: c.border,
   };
@@ -96,13 +129,15 @@ function getPremadeCardStyle(summonerId: number, side: 'my' | 'their'): Record<s
 
 /** 是否有组队信息 */
 const hasPremadeInfo = computed(() => {
-  const colors = activeTab.value === 'my' ? premadeColorsMy.value : premadeColorsTheir.value;
+  const colors =
+    activeTab.value === "my" ? premadeColorsMy.value : premadeColorsTheir.value;
   return Object.keys(colors).length > 0;
 });
 
 /** 当前 Tab 的组队颜色索引列表（去重、排序） */
 const premadeLegendIndices = computed(() => {
-  const colors = activeTab.value === 'my' ? premadeColorsMy.value : premadeColorsTheir.value;
+  const colors =
+    activeTab.value === "my" ? premadeColorsMy.value : premadeColorsTheir.value;
   const indices = new Set<number>();
   for (const v of Object.values(colors)) {
     if (v >= 0) indices.add(v);
@@ -119,8 +154,11 @@ async function updateCurrentQueueId() {
     const resp = await lcuRequest<any>("GET", "/lol-gameflow/v1/session");
     if (resp.success && resp.data?.gameData?.queue?.id !== undefined) {
       currentQueueId.value = resp.data.gameData.queue.id;
-      console.log("[GameInfo] Detected current game mode queueId:", currentQueueId.value);
-      
+      console.log(
+        "[GameInfo] Detected current game mode queueId:",
+        currentQueueId.value,
+      );
+
       const qId = currentQueueId.value;
       const gameMode = resp.data.gameData.queue.gameMode;
       if (gameMode === "TFT" || (qId !== null && qId >= 1090 && qId <= 1200)) {
@@ -148,14 +186,22 @@ interface PlayerData {
   winRate?: number;
   winCount?: number;
   lossesCount?: number;
-  fateFlag?: 'ally' | 'enemy' | null; // 上一局宿命：队友/对手/无
+  fateFlag?: "ally" | "enemy" | null; // 上一局宿命：队友/对手/无
 }
 const playerData = ref<Record<number, PlayerData>>({});
 
 const TIER_MAP = computed<Record<string, string>>(() => ({
-  NONE: "", IRON: t("tools.spoofTier.IRON"), BRONZE: t("tools.spoofTier.BRONZE"), SILVER: t("tools.spoofTier.SILVER"), GOLD: t("tools.spoofTier.GOLD"),
-  PLATINUM: t("tools.spoofTier.PLATINUM"), EMERALD: t("tools.spoofTier.EMERALD"), DIAMOND: t("tools.spoofTier.DIAMOND"),
-  MASTER: t("tools.spoofTier.MASTER"), GRANDMASTER: t("tools.spoofTier.GRANDMASTER"), CHALLENGER: t("tools.spoofTier.CHALLENGER"),
+  NONE: "",
+  IRON: t("tools.spoofTier.IRON"),
+  BRONZE: t("tools.spoofTier.BRONZE"),
+  SILVER: t("tools.spoofTier.SILVER"),
+  GOLD: t("tools.spoofTier.GOLD"),
+  PLATINUM: t("tools.spoofTier.PLATINUM"),
+  EMERALD: t("tools.spoofTier.EMERALD"),
+  DIAMOND: t("tools.spoofTier.DIAMOND"),
+  MASTER: t("tools.spoofTier.MASTER"),
+  GRANDMASTER: t("tools.spoofTier.GRANDMASTER"),
+  CHALLENGER: t("tools.spoofTier.CHALLENGER"),
 }));
 
 const myTeam = computed(() => {
@@ -172,15 +218,20 @@ const theirTeam = computed(() => {
   }
   return gameflowTheirTeam.value;
 });
-const currentTeam = computed(() => activeTab.value === "my" ? myTeam.value : theirTeam.value);
+const currentTeam = computed(() =>
+  activeTab.value === "my" ? myTeam.value : theirTeam.value,
+);
 
 // InProgress/GameStart 阶段的队伍数据（从 gameflow session 获取）
 const gameflowMyTeam = ref<any[]>([]);
 const gameflowTheirTeam = ref<any[]>([]);
 
 /** 当前是否处于可展示战绩的阶段 */
-const isGameActive = computed(() =>
-  store.gamePhase === "ChampSelect" || store.gamePhase === "GameStart" || store.gamePhase === "InProgress",
+const isGameActive = computed(
+  () =>
+    store.gamePhase === "ChampSelect" ||
+    store.gamePhase === "GameStart" ||
+    store.gamePhase === "InProgress",
 );
 
 /** 是否应该在界面中展示对局信息（如果开启了“保留对局信息界面内容”且有历史数据，则即使不在对局中也展示） */
@@ -198,21 +249,29 @@ watch(isGameActive, (active) => {
   if (!active) {
     try {
       const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
-      const savedTheirTeam = localStorage.getItem("yuumi_last_gameflow_their_team");
-      const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
+      const savedTheirTeam = localStorage.getItem(
+        "yuumi_last_gameflow_their_team",
+      );
+      const savedPlayerData = localStorage.getItem(
+        "yuumi_last_game_player_data",
+      );
       if (savedMyTeam) {
         const parsed = JSON.parse(savedMyTeam);
-        if (Array.isArray(parsed) && parsed.length > 0) gameflowMyTeam.value = parsed;
+        if (Array.isArray(parsed) && parsed.length > 0)
+          gameflowMyTeam.value = parsed;
       }
       if (savedTheirTeam) {
         const parsed = JSON.parse(savedTheirTeam);
-        if (Array.isArray(parsed) && parsed.length > 0) gameflowTheirTeam.value = parsed;
+        if (Array.isArray(parsed) && parsed.length > 0)
+          gameflowTheirTeam.value = parsed;
       }
       if (savedPlayerData) {
         const parsed = JSON.parse(savedPlayerData);
         if (parsed && Object.keys(parsed).length > 0) playerData.value = parsed;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   } else {
     // 游戏再次活跃时，先清空以加载新状态
     gameflowMyTeam.value = [];
@@ -225,30 +284,44 @@ async function refreshState() {
   try {
     const phaseResp = await getGameflowPhase();
     if (phaseResp.success && phaseResp.data) store.setGamePhase(phaseResp.data);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   try {
     const sessionResp = await getChampSelectSession();
-    if (sessionResp.success && sessionResp.data) store.setChampSelectSession(sessionResp.data);
-  } catch { /* ignore */ }
+    if (sessionResp.success && sessionResp.data)
+      store.setChampSelectSession(sessionResp.data);
+  } catch {
+    /* ignore */
+  }
   loading.value = false;
 }
 
 /** 缓存 key 与 Career.vue 共享，避免各自独立缓存导致数据不互通 */
 const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_matches_cache_${puuid}`;
-function mergeMatchesWithCache(puuid: string, fresh: MatchDisplay[]): MatchDisplay[] {
+function mergeMatchesWithCache(
+  puuid: string,
+  fresh: MatchDisplay[],
+): MatchDisplay[] {
   let cached: MatchDisplay[] = [];
   try {
     const raw = localStorage.getItem(MATCHES_CACHE_KEY(puuid));
     if (raw) cached = JSON.parse(raw);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   const merged = [...fresh, ...cached]
-    .filter((m, idx, arr) => arr.findIndex(x => x.gameId === m.gameId) === idx)
+    .filter(
+      (m, idx, arr) => arr.findIndex((x) => x.gameId === m.gameId) === idx,
+    )
     .sort((a, b) => b.timeStamp - a.timeStamp);
 
   try {
     localStorage.setItem(MATCHES_CACHE_KEY(puuid), JSON.stringify(merged));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   return merged;
 }
@@ -260,14 +333,32 @@ async function loadPlayerData(cellId: number, summonerId: number) {
   const existing = playerData.value[cellId];
   const existingIsCurrentPlayer =
     summonerId === currentSummonerId.value ||
-    (!!existing?.info?.puuid && existing.info.puuid === currentSummonerPuuid.value);
-  if (existing?.info && (!existingIsCurrentPlayer || existing.matches.length >= 10)) return;
-  playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: true };
+    (!!existing?.info?.puuid &&
+      existing.info.puuid === currentSummonerPuuid.value);
+  if (
+    existing?.info &&
+    (!existingIsCurrentPlayer || existing.matches.length >= 10)
+  )
+    return;
+  playerData.value[cellId] = {
+    info: null,
+    matches: [],
+    ranked: { solo: null, flex: null },
+    loading: true,
+  };
 
   try {
-    const resp = await lcuRequest<any>("GET", `/lol-summoner/v1/summoners/${summonerId}`);
+    const resp = await lcuRequest<any>(
+      "GET",
+      `/lol-summoner/v1/summoners/${summonerId}`,
+    );
     if (!resp.success || !resp.data) {
-      playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: false };
+      playerData.value[cellId] = {
+        info: null,
+        matches: [],
+        ranked: { solo: null, flex: null },
+        loading: false,
+      };
       return;
     }
     const info = resp.data;
@@ -276,8 +367,12 @@ async function loadPlayerData(cellId: number, summonerId: number) {
     const maxMatches = filterEnabled ? 50 : 10;
 
     const [rawMatches, rankedResp] = await Promise.all([
-      info.puuid ? fetchMatchHistory(info.puuid, 0, maxMatches) : Promise.resolve([]),
-      info.puuid ? lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${info.puuid}`) : Promise.resolve({ success: false } as any),
+      info.puuid
+        ? fetchMatchHistory(info.puuid, 0, maxMatches)
+        : Promise.resolve([]),
+      info.puuid
+        ? lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${info.puuid}`)
+        : Promise.resolve({ success: false } as any),
     ]);
 
     const isCurrentPlayer =
@@ -291,14 +386,23 @@ async function loadPlayerData(cellId: number, summonerId: number) {
     }
 
     if (filterEnabled && currentQueueId.value !== null) {
-      matches = matches.filter((m: MatchDisplay) => m.queueId === currentQueueId.value);
+      matches = matches.filter(
+        (m: MatchDisplay) => m.queueId === currentQueueId.value,
+      );
     }
     matches = matches.slice(0, 10);
 
-    let solo = null, flex = null;
+    let solo = null,
+      flex = null;
     if (rankedResp.success && rankedResp.data?.queues) {
-      solo = rankedResp.data.queues.find((q: any) => q.queueType === "RANKED_SOLO_5x5") || null;
-      flex = rankedResp.data.queues.find((q: any) => q.queueType === "RANKED_FLEX_SR") || null;
+      solo =
+        rankedResp.data.queues.find(
+          (q: any) => q.queueType === "RANKED_SOLO_5x5",
+        ) || null;
+      flex =
+        rankedResp.data.queues.find(
+          (q: any) => q.queueType === "RANKED_FLEX_SR",
+        ) || null;
     }
 
     let avgKda = 0;
@@ -328,42 +432,50 @@ async function loadPlayerData(cellId: number, summonerId: number) {
       });
 
       const validMatches = matches.length - remakeCount;
-      winRate = validMatches > 0 ? Math.round((winCount / validMatches) * 100) : 0;
+      winRate =
+        validMatches > 0 ? Math.round((winCount / validMatches) * 100) : 0;
       const deathsForCalc = totalDeaths === 0 ? 1 : totalDeaths;
       avgKda = (totalKills + totalAssists) / deathsForCalc;
     }
 
     // 宿命检测：取该玩家最近一局，查自己是否在其中（上局队友/对手），排除自己本身
-    let fateFlag: 'ally' | 'enemy' | null = null;
+    let fateFlag: "ally" | "enemy" | null = null;
     if (currentSummonerId.value && matches.length > 0 && !isCurrentPlayer) {
       try {
         const lastGameId = matches[0].gameId;
-        const gameResp = await lcuRequest<any>("GET", `/lol-match-history/v1/games/${lastGameId}`);
+        const gameResp = await lcuRequest<any>(
+          "GET",
+          `/lol-match-history/v1/games/${lastGameId}`,
+        );
         if (gameResp.success && gameResp.data?.participants) {
           const participants: any[] = gameResp.data.participants;
           // 找到该玩家自己在哪个 teamId
           const targetParticipant = participants.find(
-            (pt: any) => pt.participantId === gameResp.data.participantIdentities?.find(
-              (id: any) => id.player?.summonerId === summonerId
-            )?.participantId
+            (pt: any) =>
+              pt.participantId ===
+              gameResp.data.participantIdentities?.find(
+                (id: any) => id.player?.summonerId === summonerId,
+              )?.participantId,
           );
           const targetTeamId = targetParticipant?.teamId;
 
           // 找到当前用户（自己）在哪个 teamId
           const selfIdentity = gameResp.data.participantIdentities?.find(
-            (id: any) => id.player?.summonerId === currentSummonerId.value
+            (id: any) => id.player?.summonerId === currentSummonerId.value,
           );
           if (selfIdentity) {
             const selfParticipant = participants.find(
-              (pt: any) => pt.participantId === selfIdentity.participantId
+              (pt: any) => pt.participantId === selfIdentity.participantId,
             );
             const selfTeamId = selfParticipant?.teamId;
             if (targetTeamId !== undefined && selfTeamId !== undefined) {
-              fateFlag = selfTeamId === targetTeamId ? 'ally' : 'enemy';
+              fateFlag = selfTeamId === targetTeamId ? "ally" : "enemy";
             }
           }
         }
-      } catch { /* 查询失败忽略，不影响主流程 */ }
+      } catch {
+        /* 查询失败忽略，不影响主流程 */
+      }
     }
 
     playerData.value[cellId] = {
@@ -378,12 +490,28 @@ async function loadPlayerData(cellId: number, summonerId: number) {
       fateFlag,
     };
     try {
-      localStorage.setItem("yuumi_last_game_player_data", JSON.stringify(playerData.value));
-      localStorage.setItem("yuumi_last_gameflow_my_team", JSON.stringify(myTeam.value));
-      localStorage.setItem("yuumi_last_gameflow_their_team", JSON.stringify(theirTeam.value));
-    } catch { /* ignore */ }
+      localStorage.setItem(
+        "yuumi_last_game_player_data",
+        JSON.stringify(playerData.value),
+      );
+      localStorage.setItem(
+        "yuumi_last_gameflow_my_team",
+        JSON.stringify(myTeam.value),
+      );
+      localStorage.setItem(
+        "yuumi_last_gameflow_their_team",
+        JSON.stringify(theirTeam.value),
+      );
+    } catch {
+      /* ignore */
+    }
   } catch {
-    playerData.value[cellId] = { info: null, matches: [], ranked: { solo: null, flex: null }, loading: false };
+    playerData.value[cellId] = {
+      info: null,
+      matches: [],
+      ranked: { solo: null, flex: null },
+      loading: false,
+    };
   }
 }
 
@@ -392,7 +520,9 @@ async function loadAllPlayers() {
   const team = currentTeam.value;
   if (!team || team.length === 0) return;
   await updateCurrentQueueId();
-  await Promise.all(team.map((p: any) => loadPlayerData(p.cellId, p.summonerId)));
+  await Promise.all(
+    team.map((p: any) => loadPlayerData(p.cellId, p.summonerId)),
+  );
 }
 
 /**
@@ -414,7 +544,9 @@ async function loadFromGameflowSession() {
       const s = await fetchCurrentSummoner();
       if (s?.summonerId) currentSummonerId.value = s.summonerId;
       if (s?.puuid) currentSummonerPuuid.value = s.puuid;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   try {
@@ -434,7 +566,9 @@ async function loadFromGameflowSession() {
 
     // 用当前玩家 summonerId 判断哪队是己方
     console.log("[GameInfo] currentSummonerId:", currentSummonerId.value);
-    const isTeamOne = teamOne.some((p: any) => p.summonerId === currentSummonerId.value);
+    const isTeamOne = teamOne.some(
+      (p: any) => p.summonerId === currentSummonerId.value,
+    );
     const allyTeam = isTeamOne ? teamOne : teamTwo;
     const enemyTeam = isTeamOne ? teamTwo : teamOne;
 
@@ -442,7 +576,11 @@ async function loadFromGameflowSession() {
     // 此时内存中的 gameflowMyTeam 仍保留着选人阶段的旧席位快照，避免依赖已置空的 store.champSelectSession
     if (gameflowMyTeam.value && gameflowMyTeam.value.length > 0) {
       for (const p of gameflowMyTeam.value) {
-        if (p.summonerId && p.cellId !== undefined && playerData.value[p.cellId]) {
+        if (
+          p.summonerId &&
+          p.cellId !== undefined &&
+          playerData.value[p.cellId]
+        ) {
           playerData.value[p.summonerId] = playerData.value[p.cellId];
         }
       }
@@ -466,9 +604,17 @@ async function loadFromGameflowSession() {
     premadeColorsTheir.value = computePremadeColors(enemyTeam);
 
     try {
-      localStorage.setItem("yuumi_last_gameflow_my_team", JSON.stringify(gameflowMyTeam.value));
-      localStorage.setItem("yuumi_last_gameflow_their_team", JSON.stringify(gameflowTheirTeam.value));
-    } catch { /* ignore */ }
+      localStorage.setItem(
+        "yuumi_last_gameflow_my_team",
+        JSON.stringify(gameflowMyTeam.value),
+      );
+      localStorage.setItem(
+        "yuumi_last_gameflow_their_team",
+        JSON.stringify(gameflowTheirTeam.value),
+      );
+    } catch {
+      /* ignore */
+    }
 
     // 并行加载双方全部玩家（己方若已迁移则 loadPlayerData 内部会跳过）
     await Promise.all([
@@ -491,26 +637,26 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   if (!appConfig.value?.Personalization) return {};
 
   const colors = appConfig.value.Personalization;
-  let color = '';
+  let color = "";
 
   if (m.remake) {
-    color = colors.RemakeCardColor || '';
+    color = colors.RemakeCardColor || "";
   } else if (m.win) {
-    color = colors.WinCardColor || '';
+    color = colors.WinCardColor || "";
   } else {
-    color = colors.LoseCardColor || '';
+    color = colors.LoseCardColor || "";
   }
 
   if (color) {
     // 处理不同的颜色格式
-    if (color.startsWith('#') && color.length === 9) {
+    if (color.startsWith("#") && color.length === 9) {
       // #AARRGGBB 格式：转换为 rgba()
       const alpha = parseInt(color.slice(1, 3), 16) / 255;
       const r = parseInt(color.slice(3, 5), 16);
       const g = parseInt(color.slice(5, 7), 16);
       const b = parseInt(color.slice(7, 9), 16);
       return { background: `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})` };
-    } else if (color.startsWith('#') && color.length === 7) {
+    } else if (color.startsWith("#") && color.length === 7) {
       // #RRGGBB 格式：添加半透明背景
       return { background: `${color}1a` }; // 1a = 约 10% 透明度
     }
@@ -532,15 +678,19 @@ onMounted(async () => {
   // 从 localStorage 加载上一局数据以支持持久化显示
   try {
     const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
-    const savedTheirTeam = localStorage.getItem("yuumi_last_gameflow_their_team");
+    const savedTheirTeam = localStorage.getItem(
+      "yuumi_last_gameflow_their_team",
+    );
     const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
     if (savedMyTeam) {
       const parsed = JSON.parse(savedMyTeam);
-      if (Array.isArray(parsed) && parsed.length > 0) gameflowMyTeam.value = parsed;
+      if (Array.isArray(parsed) && parsed.length > 0)
+        gameflowMyTeam.value = parsed;
     }
     if (savedTheirTeam) {
       const parsed = JSON.parse(savedTheirTeam);
-      if (Array.isArray(parsed) && parsed.length > 0) gameflowTheirTeam.value = parsed;
+      if (Array.isArray(parsed) && parsed.length > 0)
+        gameflowTheirTeam.value = parsed;
     }
     if (savedPlayerData) {
       const parsed = JSON.parse(savedPlayerData);
@@ -548,72 +698,98 @@ onMounted(async () => {
     }
 
     // 从已加载的队伍数据恢复组队颜色
-    if (gameflowMyTeam.value.length > 0) premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
-    if (gameflowTheirTeam.value.length > 0) premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
-  } catch { /* ignore */ }
+    if (gameflowMyTeam.value.length > 0)
+      premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
+    if (gameflowTheirTeam.value.length > 0)
+      premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
+  } catch {
+    /* ignore */
+  }
 
   // 获取当前玩家 summonerId，用于 InProgress 阶段分离队伍
   try {
     const s = await fetchCurrentSummoner();
     if (s?.summonerId) currentSummonerId.value = s.summonerId;
     if (s?.puuid) currentSummonerPuuid.value = s.puuid;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // 获取应用配置（用于对局卡片颜色）
   if (!appConfig.value) {
     try {
       appConfig.value = await fetchConfig();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   refreshState();
 });
 
 // 监听阶段变化：ChampSelect → 加载己方；InProgress/GameStart → 加载双方
-watch(() => store.gamePhase, (phase: string) => {
-  if (phase === "None" || phase === "Lobby") {
-    isTftMode.value = false;
-  }
-  if (phase === "ChampSelect") {
-    isTftMode.value = false;
-    // 开启新一局选人时才清理上局快照数据以备载入新数据
-    gameflowMyTeam.value = [];
-    gameflowTheirTeam.value = [];
-    playerData.value = {};
-    premadeColorsMy.value = {};
-    premadeColorsTheir.value = {};
-    try {
-      localStorage.removeItem("yuumi_last_gameflow_my_team");
-      localStorage.removeItem("yuumi_last_gameflow_their_team");
-      localStorage.removeItem("yuumi_last_game_player_data");
-    } catch { /* ignore */ }
-    refreshState();
-  }
-  if (phase === "InProgress" || phase === "GameStart") loadFromGameflowSession();
-});
+watch(
+  () => store.gamePhase,
+  (phase: string) => {
+    if (phase === "None" || phase === "Lobby") {
+      isTftMode.value = false;
+    }
+    if (phase === "ChampSelect") {
+      isTftMode.value = false;
+      // 开启新一局选人时才清理上局快照数据以备载入新数据
+      gameflowMyTeam.value = [];
+      gameflowTheirTeam.value = [];
+      playerData.value = {};
+      premadeColorsMy.value = {};
+      premadeColorsTheir.value = {};
+      try {
+        localStorage.removeItem("yuumi_last_gameflow_my_team");
+        localStorage.removeItem("yuumi_last_gameflow_their_team");
+        localStorage.removeItem("yuumi_last_game_player_data");
+      } catch {
+        /* ignore */
+      }
+      refreshState();
+    }
+    if (phase === "InProgress" || phase === "GameStart")
+      loadFromGameflowSession();
+  },
+);
 
 // ChampSelect session 更新时加载己方玩家
-watch(() => store.champSelectSession, (session: any) => {
-  if (session && store.gamePhase === "ChampSelect") {
-    loading.value = false;
-    error.value = "";
-    // 实现在 ChampSelect 选人更新时就同步填充 gameflowMyTeam 列表快照，防范进入游戏加载页时数据由于 Session 销毁发生短暂的清空闪烁
-    gameflowMyTeam.value = session.myTeam || [];
-    loadAllPlayers();
-    // 获取组队颜色（gameflow session 在选人阶段也有 teamParticipantId）
-    fetchPremadeColors();
+watch(
+  () => store.champSelectSession,
+  (session: any) => {
+    if (session && store.gamePhase === "ChampSelect") {
+      loading.value = false;
+      error.value = "";
+      // 实现在 ChampSelect 选人更新时就同步填充 gameflowMyTeam 列表快照，防范进入游戏加载页时数据由于 Session 销毁发生短暂的清空闪烁
+      gameflowMyTeam.value = session.myTeam || [];
+      loadAllPlayers();
+      // 获取组队颜色（gameflow session 在选人阶段也有 teamParticipantId）
+      fetchPremadeColors();
 
-    // 存储当前选人快照数据至 localStorage，以防秒退后头像等数据丢失
-    try {
-      if (session.myTeam && session.myTeam.length > 0) {
-        localStorage.setItem("yuumi_last_gameflow_my_team", JSON.stringify(session.myTeam));
+      // 存储当前选人快照数据至 localStorage，以防秒退后头像等数据丢失
+      try {
+        if (session.myTeam && session.myTeam.length > 0) {
+          localStorage.setItem(
+            "yuumi_last_gameflow_my_team",
+            JSON.stringify(session.myTeam),
+          );
+        }
+        if (session.theirTeam && session.theirTeam.length > 0) {
+          localStorage.setItem(
+            "yuumi_last_gameflow_their_team",
+            JSON.stringify(session.theirTeam),
+          );
+        }
+      } catch {
+        /* ignore */
       }
-      if (session.theirTeam && session.theirTeam.length > 0) {
-        localStorage.setItem("yuumi_last_gameflow_their_team", JSON.stringify(session.theirTeam));
-      }
-    } catch { /* ignore */ }
-  }
-}, { deep: true });
+    }
+  },
+  { deep: true },
+);
 
 function getKdaClass(kda: number | undefined): string {
   if (kda === undefined) return "kda-gray";
@@ -635,10 +811,9 @@ watch(activeTab, () => loadAllPlayers());
 
 <template>
   <div class="game-info">
-
     <div v-if="!store.isConnected" class="tip-container">
       <div class="offline-logo">🎮</div>
-      <p class="tip">{{ $t('gameInfo.launchLolPrompt') }}</p>
+      <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
     </div>
 
     <div v-else-if="isTftMode" class="tip-container">
@@ -648,18 +823,24 @@ watch(activeTab, () => loadAllPlayers());
 
     <div v-else-if="!shouldShowContent" class="tip-container">
       <div class="offline-logo">⏳</div>
-      <p class="tip">{{ $t('gameInfo.awaitingLoad') }}</p>
+      <p class="tip">{{ $t("gameInfo.awaitingLoad") }}</p>
     </div>
 
     <div v-else class="game-layout">
       <!-- 左侧：队伍切换 + 玩家列表 -->
       <div class="left-panel">
         <div class="team-tabs">
-          <button :class="['tab-btn', { active: activeTab === 'my' }]" @click="activeTab = 'my'">
-            {{ $t('gameInfo.myTeam', { count: myTeam.length }) }}
+          <button
+            :class="['tab-btn', { active: activeTab === 'my' }]"
+            @click="activeTab = 'my'"
+          >
+            {{ $t("gameInfo.myTeam", { count: myTeam.length }) }}
           </button>
-          <button :class="['tab-btn', { active: activeTab === 'their' }]" @click="activeTab = 'their'">
-            {{ $t('gameInfo.theirTeam', { count: theirTeam.length }) }}
+          <button
+            :class="['tab-btn', { active: activeTab === 'their' }]"
+            @click="activeTab = 'their'"
+          >
+            {{ $t("gameInfo.theirTeam", { count: theirTeam.length }) }}
           </button>
         </div>
 
@@ -668,7 +849,9 @@ watch(activeTab, () => loadAllPlayers());
             v-for="(p, i) in currentTeam"
             :key="p.cellId ?? i"
             class="player-card"
-            :class="{ 'premade-card': getPremadeIdx(p.summonerId, activeTab) >= 0 }"
+            :class="{
+              'premade-card': getPremadeIdx(p.summonerId, activeTab) >= 0,
+            }"
             :style="getPremadeCardStyle(p.summonerId, activeTab)"
           >
             <div class="pc-avatar-area">
@@ -676,77 +859,167 @@ watch(activeTab, () => loadAllPlayers());
                 <!-- 等级进度环形条 -->
                 <svg class="gauge-ring-svg-mini" viewBox="0 0 100 100">
                   <circle class="gauge-track-mini" cx="50" cy="50" r="45" />
-                  <circle class="gauge-progress-mini" cx="50" cy="50" r="45"
-                          :style="{ '--progress': playerData[p.cellId]?.info?.percentCompleteForNextLevel || 0 }" />
+                  <circle
+                    class="gauge-progress-mini"
+                    cx="50"
+                    cy="50"
+                    r="45"
+                    :style="{
+                      '--progress':
+                        playerData[p.cellId]?.info
+                          ?.percentCompleteForNextLevel || 0,
+                    }"
+                  />
                 </svg>
                 <div class="avatar-container-mini">
                   <!-- 选人阶段：选了英雄或预选了英雄才显示英雄头像 -->
                   <template v-if="p.championId || p.championPickIntent">
-                    <LcuImage :src="getChampionIcon(p.championId || p.championPickIntent)" class="profile-avatar-mini" alt="champ" />
+                    <LcuImage
+                      :src="
+                        getChampionIcon(p.championId || p.championPickIntent)
+                      "
+                      class="profile-avatar-mini"
+                      alt="champ"
+                    />
                   </template>
                   <template v-else>
-                    <div class="profile-avatar-mini profile-avatar-empty-mini">?</div>
+                    <div class="profile-avatar-mini profile-avatar-empty-mini">
+                      ?
+                    </div>
                   </template>
                 </div>
                 <!-- 等级数字 -->
-                <div v-if="playerData[p.cellId]?.info?.summonerLevel" class="level-badge-mini">
+                <div
+                  v-if="playerData[p.cellId]?.info?.summonerLevel"
+                  class="level-badge-mini"
+                >
                   {{ playerData[p.cellId].info.summonerLevel }}
                 </div>
               </div>
             </div>
-            
+
             <div class="pc-info centered">
               <div class="pc-row pc-name-row-centered">
                 <span
                   v-if="getPremadeIdx(p.summonerId, activeTab) >= 0"
                   class="premade-dot"
-                  :style="{ background: PREMADE_COLORS[getPremadeIdx(p.summonerId, activeTab) % PREMADE_COLORS.length].dot }"
-                  :title="t('gameInfo.premadeIdx', { idx: getPremadeIdx(p.summonerId, activeTab) + 1 })"
+                  :style="{
+                    background:
+                      PREMADE_COLORS[
+                        getPremadeIdx(p.summonerId, activeTab) %
+                          PREMADE_COLORS.length
+                      ].dot,
+                  }"
+                  :title="
+                    t('gameInfo.premadeIdx', {
+                      idx: getPremadeIdx(p.summonerId, activeTab) + 1,
+                    })
+                  "
                 ></span>
-                <span class="name-text">{{ playerData[p.cellId]?.info?.gameName || playerData[p.cellId]?.info?.displayName || p.displayName || '未知' }}</span>
+                <span class="name-text">{{
+                  playerData[p.cellId]?.info?.gameName ||
+                  playerData[p.cellId]?.info?.displayName ||
+                  p.displayName ||
+                  "未知"
+                }}</span>
                 <span
                   v-if="playerData[p.cellId]?.fateFlag"
                   :class="['fate-badge', playerData[p.cellId].fateFlag]"
-                  :title="playerData[p.cellId].fateFlag === 'ally' ? $t('gameInfo.fateAllyTitle') : $t('gameInfo.fateEnemyTitle')"
-                >{{ playerData[p.cellId].fateFlag === 'ally' ? $t('gameInfo.fateAllyText') : $t('gameInfo.fateEnemyText') }}</span>
+                  :title="
+                    playerData[p.cellId].fateFlag === 'ally'
+                      ? $t('gameInfo.fateAllyTitle')
+                      : $t('gameInfo.fateEnemyTitle')
+                  "
+                  >{{
+                    playerData[p.cellId].fateFlag === "ally"
+                      ? $t("gameInfo.fateAllyText")
+                      : $t("gameInfo.fateEnemyText")
+                  }}</span
+                >
               </div>
-              
-              <div class="pc-row pc-winrate-row" v-if="playerData[p.cellId]?.winRate !== undefined">
-                <span :class="['pc-winrate-badge-clean', getWinRateClass(playerData[p.cellId].winRate)]">
-                  {{ playerData[p.cellId].winRate }}{{ $t('gameInfo.winRateSuffix') }}
+
+              <div
+                class="pc-row pc-winrate-row"
+                v-if="playerData[p.cellId]?.winRate !== undefined"
+              >
+                <span
+                  :class="[
+                    'pc-winrate-badge-clean',
+                    getWinRateClass(playerData[p.cellId].winRate),
+                  ]"
+                >
+                  {{ playerData[p.cellId].winRate
+                  }}{{ $t("gameInfo.winRateSuffix") }}
                 </span>
               </div>
-              
-              <div class="pc-row pc-kda-row" v-if="playerData[p.cellId]?.avgKda !== undefined">
-                <span :class="['pc-kda-text', getKdaClass(playerData[p.cellId].avgKda)]">
-                  KDA: {{ playerData[p.cellId]?.avgKda?.toFixed(2) ?? '0.00' }}
-                </span>
-              </div>
-              
-              <div class="pc-row pc-rank-row">
-                <span class="rank-badge-clean" :title="formatRank(playerData[p.cellId]?.ranked?.solo) || $t('gameInfo.soloRankTitle')">
-                  {{ $t('gameInfo.soloRank') }}: {{ (playerData[p.cellId]?.ranked?.solo?.tier ? TIER_MAP[playerData[p.cellId].ranked.solo.tier] : $t('gameInfo.noRank')) }}
+
+              <div
+                class="pc-row pc-kda-row"
+                v-if="playerData[p.cellId]?.avgKda !== undefined"
+              >
+                <span
+                  :class="[
+                    'pc-kda-text',
+                    getKdaClass(playerData[p.cellId].avgKda),
+                  ]"
+                >
+                  KDA: {{ playerData[p.cellId]?.avgKda?.toFixed(2) ?? "0.00" }}
                 </span>
               </div>
 
               <div class="pc-row pc-rank-row">
-                <span class="rank-badge-clean" :title="formatRank(playerData[p.cellId]?.ranked?.flex) || $t('gameInfo.flexRankTitle')">
-                  {{ $t('gameInfo.flexRank') }}: {{ (playerData[p.cellId]?.ranked?.flex?.tier ? TIER_MAP[playerData[p.cellId].ranked.flex.tier] : $t('gameInfo.noRank')) }}
+                <span
+                  class="rank-badge-clean"
+                  :title="
+                    formatRank(playerData[p.cellId]?.ranked?.solo) ||
+                    $t('gameInfo.soloRankTitle')
+                  "
+                >
+                  {{ $t("gameInfo.soloRank") }}:
+                  {{
+                    playerData[p.cellId]?.ranked?.solo?.tier
+                      ? TIER_MAP[playerData[p.cellId].ranked.solo.tier]
+                      : $t("gameInfo.noRank")
+                  }}
+                </span>
+              </div>
+
+              <div class="pc-row pc-rank-row">
+                <span
+                  class="rank-badge-clean"
+                  :title="
+                    formatRank(playerData[p.cellId]?.ranked?.flex) ||
+                    $t('gameInfo.flexRankTitle')
+                  "
+                >
+                  {{ $t("gameInfo.flexRank") }}:
+                  {{
+                    playerData[p.cellId]?.ranked?.flex?.tier
+                      ? TIER_MAP[playerData[p.cellId].ranked.flex.tier]
+                      : $t("gameInfo.noRank")
+                  }}
                 </span>
               </div>
             </div>
           </div>
-          <div v-if="currentTeam.length === 0" class="tip">{{ $t('gameInfo.noTeamData') }}</div>
+          <div v-if="currentTeam.length === 0" class="tip">
+            {{ $t("gameInfo.noTeamData") }}
+          </div>
         </div>
         <!-- 组队图例 -->
         <div v-if="hasPremadeInfo" class="premade-legend">
-          <span class="legend-label">{{ $t('gameInfo.premadeLegend') }}</span>
+          <span class="legend-label">{{ $t("gameInfo.premadeLegend") }}</span>
           <span
             v-for="idx in premadeLegendIndices"
             :key="idx"
             class="legend-item"
           >
-            <span class="legend-dot" :style="{ background: PREMADE_COLORS[idx % PREMADE_COLORS.length].dot }"></span>
+            <span
+              class="legend-dot"
+              :style="{
+                background: PREMADE_COLORS[idx % PREMADE_COLORS.length].dot,
+              }"
+            ></span>
             {{ idx + 1 }}
           </span>
         </div>
@@ -763,10 +1036,21 @@ watch(activeTab, () => loadAllPlayers());
             <div class="col-header">
               <div class="col-header-top">
                 <div class="col-header-info">
-                  <span class="col-name">{{ playerData[p.cellId]?.info?.gameName || p.displayName || `玩家${i+1}` }}</span>
-                  <span v-if="playerData[p.cellId]?.winRate !== undefined" class="col-summary">
-                    <span class="summary-wins">{{ playerData[p.cellId].winCount }}胜</span>
-                    <span class="summary-losses">{{ playerData[p.cellId].lossesCount }}负</span>
+                  <span class="col-name">{{
+                    playerData[p.cellId]?.info?.gameName ||
+                    p.displayName ||
+                    `玩家${i + 1}`
+                  }}</span>
+                  <span
+                    v-if="playerData[p.cellId]?.winRate !== undefined"
+                    class="col-summary"
+                  >
+                    <span class="summary-wins"
+                      >{{ playerData[p.cellId].winCount }}胜</span
+                    >
+                    <span class="summary-losses"
+                      >{{ playerData[p.cellId].lossesCount }}负</span
+                    >
                   </span>
                 </div>
               </div>
@@ -782,24 +1066,38 @@ watch(activeTab, () => loadAllPlayers());
                 <div
                   v-for="m in playerData[p.cellId].matches"
                   :key="m.gameId"
-                  :class="['col-match', m.remake ? 'remake' : (m.win ? 'win' : 'lose')]"
+                  :class="[
+                    'col-match',
+                    m.remake ? 'remake' : m.win ? 'win' : 'lose',
+                  ]"
                   :style="getMatchCardStyle(m)"
                 >
                   <div class="cm-champ">
-                    <LcuImage :src="m.championIconUrl" class="cm-champ-img" alt="champ" />
+                    <LcuImage
+                      :src="m.championIconUrl"
+                      class="cm-champ-img"
+                      alt="champ"
+                    />
                     <span class="cm-level">{{ m.champLevel }}</span>
                   </div>
                   <div class="cm-detail">
                     <div class="cm-top-row">
-                      <span class="cm-mode">{{ $te('gameModes.' + m.queueId) ? $t('gameModes.' + m.queueId) : m.name }}</span>
+                      <span class="cm-mode">{{
+                        $te("gameModes." + m.queueId)
+                          ? $t("gameModes." + m.queueId)
+                          : m.name
+                      }}</span>
                     </div>
                     <div class="cm-bottom">
                       <span class="cm-kda">
-                        <span class="k">{{ m.kills }}</span>/
-                        <span class="d">{{ m.deaths }}</span>/
+                        <span class="k">{{ m.kills }}</span
+                        >/ <span class="d">{{ m.deaths }}</span
+                        >/
                         <span class="a">{{ m.assists }}</span>
                       </span>
-                      <span class="cm-date">{{ m.shortTime.split(' ')[0] }}</span>
+                      <span class="cm-date">{{
+                        m.shortTime.split(" ")[0]
+                      }}</span>
                     </div>
                   </div>
                 </div>
@@ -839,12 +1137,23 @@ watch(activeTab, () => loadAllPlayers());
 }
 
 .tip-container {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 6rem 2rem; color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 6rem 2rem;
+  color: var(--text-muted);
   flex: 1;
 }
-.offline-logo { font-size: 3rem; margin-bottom: 1rem; }
-.tip { font-size: 0.95rem; color: var(--text-dimmed); margin: 0; }
+.offline-logo {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+.tip {
+  font-size: 0.95rem;
+  color: var(--text-dimmed);
+  margin: 0;
+}
 
 /* 左右分栏 */
 .game-layout {
@@ -953,7 +1262,9 @@ watch(activeTab, () => loadAllPlayers());
   background: var(--card-bg-hover);
   transform: translateY(-2px) scale(1.01);
   border-color: var(--primary-color-alpha-40);
-  box-shadow: var(--shadow-md), 0 4px 16px var(--primary-color-alpha-15);
+  box-shadow:
+    var(--shadow-md),
+    0 4px 16px var(--primary-color-alpha-15);
 }
 
 /* 组队标记圆点 */
@@ -1098,10 +1409,18 @@ watch(activeTab, () => loadAllPlayers());
   font-size: 0.72rem;
   font-weight: 700;
 }
-.pc-kda-text.kda-orange { color: var(--accent-color); }
-.pc-kda-text.kda-blue { color: var(--tier-blue); }
-.pc-kda-text.kda-green { color: var(--win-color); }
-.pc-kda-text.kda-gray { color: var(--text-dimmed); }
+.pc-kda-text.kda-orange {
+  color: var(--accent-color);
+}
+.pc-kda-text.kda-blue {
+  color: var(--tier-blue);
+}
+.pc-kda-text.kda-green {
+  color: var(--win-color);
+}
+.pc-kda-text.kda-gray {
+  color: var(--text-dimmed);
+}
 
 .rank-badge-clean {
   font-size: 0.7rem;
@@ -1196,7 +1515,11 @@ watch(activeTab, () => loadAllPlayers());
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .col-empty {
   display: flex;

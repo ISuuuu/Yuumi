@@ -112,17 +112,24 @@ pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSe
         let mut selection = ChampionSelection::default();
 
         while let Some(session) = session_rx.recv().await {
-            log::debug!("[bp-agent] session received: cell_id={}, actions_groups={}, my_team_count={}",
+            log::debug!(
+                "[bp-agent] session received: cell_id={}, actions_groups={}, my_team_count={}",
                 session.local_player_cell_id,
                 session.actions.len(),
-                session.my_team.len());
+                session.my_team.len()
+            );
 
             // 检查 AtomicBool 重置标志（gameflow 阶段变化时设置，零阻塞、零丢失）
             {
                 let state = app_handle.state::<crate::AppState>();
-                if state.bp_reset_flag.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                if state
+                    .bp_reset_flag
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
                     log::info!("BP状态重置（gameflow阶段变化）");
-                    state.bp_task_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    state
+                        .bp_task_id
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     selection = ChampionSelection::default();
                 }
             }
@@ -131,7 +138,9 @@ pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSe
             if session.local_player_cell_id == -1 {
                 log::info!("收到重置选人代理状态的信号");
                 let state = app_handle.state::<crate::AppState>();
-                state.bp_task_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                state
+                    .bp_task_id
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 selection = ChampionSelection::default();
                 continue;
             }
@@ -202,10 +211,7 @@ async fn do_auto_trade(
         if trade.state == "RECEIVED" {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             log::info!("自动接受英雄交换: tradeId={}", trade.id);
-            let url = format!(
-                "/lol-champ-select/v1/session/trades/{}/accept",
-                trade.id
-            );
+            let url = format!("/lol-champ-select/v1/session/trades/{}/accept", trade.id);
             lcu_post(app_handle, &url).await;
             return;
         }
@@ -220,7 +226,10 @@ async fn do_auto_show(
     cfg: &FunctionsConfig,
     _selection: &mut ChampionSelection,
 ) {
-    log::debug!("[autoShow] called, enable_auto_hover_champion={}", cfg.enable_auto_hover_champion);
+    log::debug!(
+        "[autoShow] called, enable_auto_hover_champion={}",
+        cfg.enable_auto_hover_champion
+    );
     if !cfg.enable_auto_hover_champion {
         return;
     }
@@ -229,7 +238,11 @@ async fn do_auto_show(
 
     // 从会话数据直接判断是否已经亮过/选过英雄（无状态，避免残留）
     if let Some(player) = session.my_team.iter().find(|p| p.cell_id == cell_id) {
-        log::debug!("[autoShow] player: champion_id={}, champion_pick_intent={}", player.champion_id, player.champion_pick_intent);
+        log::debug!(
+            "[autoShow] player: champion_id={}, champion_pick_intent={}",
+            player.champion_id,
+            player.champion_pick_intent
+        );
         if player.champion_id != 0 || player.champion_pick_intent != 0 {
             log::debug!("[autoShow] skip: already has champion/shown");
             return;
@@ -266,7 +279,11 @@ async fn do_auto_show(
         .find(|a| a.actor_cell_id == cell_id && a.action_type == "pick");
 
     if let Some(action) = pick_action {
-        log::debug!("[autoShow] PATCH action {} with champion_id={}", action.id, champion_id);
+        log::debug!(
+            "[autoShow] PATCH action {} with champion_id={}",
+            action.id,
+            champion_id
+        );
         let ok = lcu_patch_action(app_handle, action.id, champion_id, false).await;
         log::debug!("[autoShow] PATCH result: {}", ok);
     } else {
@@ -289,12 +306,9 @@ async fn do_auto_complete(
     let cell_id = session.local_player_cell_id;
 
     // 找到 pick action 并检查状态 — 确认是进行中的 pick 即可
-    let has_in_progress_pick = session
-        .actions
-        .iter()
-        .rev()
-        .flatten()
-        .any(|a| a.actor_cell_id == cell_id && a.action_type == "pick" && a.is_in_progress && !a.completed);
+    let has_in_progress_pick = session.actions.iter().rev().flatten().any(|a| {
+        a.actor_cell_id == cell_id && a.action_type == "pick" && a.is_in_progress && !a.completed
+    });
 
     if !has_in_progress_pick {
         return;
@@ -306,7 +320,7 @@ async fn do_auto_complete(
         .as_ref()
         .and_then(|t| t.adjusted_time_left_in_phase)
         .unwrap_or(10000);
-    let sleep_secs = (sleep_ms / 1000).saturating_sub(4).max(0);
+    let sleep_secs = (sleep_ms / 1000).saturating_sub(4);
 
     // 标记防止重复进入
     selection.is_champion_picked_completed = true;
@@ -314,10 +328,17 @@ async fn do_auto_complete(
     // 递增全局任务版本，产生本次独占任务 ID
     let current_id = {
         let state = app_handle.state::<crate::AppState>();
-        state.bp_task_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+        state
+            .bp_task_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
     };
 
-    log::info!("自动锁定: 等待 {} 秒后锁定 (任务版本: {})", sleep_secs, current_id);
+    log::info!(
+        "自动锁定: 等待 {} 秒后锁定 (任务版本: {})",
+        sleep_secs,
+        current_id
+    );
 
     // 在后台任务中等待并锁定，不阻塞主循环（否则秒退后新选人事件无法处理）
     let app_handle = app_handle.clone();
@@ -476,9 +497,11 @@ async fn do_auto_ban(
     let cell_id = session.local_player_cell_id;
 
     // 从会话数据判断：找到本地玩家的 ban action，如果已结束则跳过
-    let ban_action = session.actions.iter().flatten().find(|a| {
-        a.actor_cell_id == cell_id && a.action_type == "ban" && a.is_in_progress
-    });
+    let ban_action = session
+        .actions
+        .iter()
+        .flatten()
+        .find(|a| a.actor_cell_id == cell_id && a.action_type == "ban" && a.is_in_progress);
 
     let action = match ban_action {
         Some(a) => a,
@@ -629,7 +652,12 @@ async fn do_auto_spell(
     log::info!("自动设置召唤师技能: {} / {}", spells[0], spells[1]);
 
     let body = serde_json::json!({ "spell1Id": spells[0], "spell2Id": spells[1] });
-    lcu_patch_session(app_handle, "/lol-champ-select/v1/session/my-selection", &body).await;
+    lcu_patch_session(
+        app_handle,
+        "/lol-champ-select/v1/session/my-selection",
+        &body,
+    )
+    .await;
 }
 
 // ─── LCU API 调用 ───
@@ -641,10 +669,7 @@ async fn lcu_patch_action(
     champion_id: i32,
     completed: bool,
 ) -> bool {
-    let url = format!(
-        "/lol-champ-select/v1/session/actions/{}",
-        action_id
-    );
+    let url = format!("/lol-champ-select/v1/session/actions/{}", action_id);
     let body = serde_json::json!({
         "championId": champion_id,
         "completed": completed,
@@ -727,10 +752,7 @@ async fn lcu_get_session(app_handle: &AppHandle) -> Option<ChampSelectSession> {
     let lock = app_state.lcu_client.read().await;
     let lcu = lock.as_ref()?;
 
-    let url = format!(
-        "https://127.0.0.1:{}/lol-champ-select/v1/session",
-        lcu.port
-    );
+    let url = format!("https://127.0.0.1:{}/lol-champ-select/v1/session", lcu.port);
     let auth = crate::build_auth_header(&lcu.token);
 
     let resp = lcu

@@ -66,7 +66,6 @@ fn default_theme_color() -> String {
     "#009faa".into()
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PersonalizationConfig {
@@ -233,24 +232,17 @@ impl Default for FunctionsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[derive(Default)]
 pub struct OtherConfig {
     pub last_notice_sha: String,
     pub search_history: String,
-}
-
-impl Default for OtherConfig {
-    fn default() -> Self {
-        Self {
-            last_notice_sha: String::new(),
-            search_history: String::new(),
-        }
-    }
 }
 
 // ─── 顶层配置 ───
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[derive(Default)]
 pub struct AppConfig {
     #[serde(default)]
     pub general: GeneralConfig,
@@ -260,17 +252,6 @@ pub struct AppConfig {
     pub functions: FunctionsConfig,
     #[serde(default)]
     pub other: OtherConfig,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            general: GeneralConfig::default(),
-            personalization: PersonalizationConfig::default(),
-            functions: FunctionsConfig::default(),
-            other: OtherConfig::default(),
-        }
-    }
 }
 
 impl AppConfig {

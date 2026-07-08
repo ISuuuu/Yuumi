@@ -44,7 +44,11 @@ pub async fn call_lcu_api(
     }
 
     // 获取并发许可
-    let _permit = app_state.api_semaphore.acquire().await.map_err(|e| e.to_string())?;
+    let _permit = app_state
+        .api_semaphore
+        .acquire()
+        .await
+        .map_err(|e| e.to_string())?;
 
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
@@ -87,7 +91,10 @@ pub async fn call_lcu_api(
                     // HTTP 状态码错误不重试，直接返回
                     log::warn!(
                         "LCU API 请求失败: {} {}, 状态码: {}, 响应: {}",
-                        method, path, status.as_u16(), text
+                        method,
+                        path,
+                        status.as_u16(),
+                        text
                     );
                     return Err(format!("LCU 返回错误 [{}]: {}", status.as_u16(), text));
                 }
@@ -96,7 +103,10 @@ pub async fn call_lcu_api(
                 last_err = e.to_string();
                 log::debug!(
                     "LCU API 请求失败 ({}/{}): {} - {}",
-                    attempt, MAX_RETRIES, path, last_err
+                    attempt,
+                    MAX_RETRIES,
+                    path,
+                    last_err
                 );
                 if attempt < MAX_RETRIES {
                     sleep(RETRY_DELAY).await;
@@ -115,18 +125,22 @@ const ASSET_PATH_PREFIX: &str = "/lol-game-data/assets/";
 /// 前端可用于 <img :src="dataUrl">，绕过自签名证书问题。
 /// 路径限制：必须以 `/lol-game-data/assets/` 开头。
 #[tauri::command]
-pub async fn get_lcu_asset(
-    path: String,
-    app_state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Result<String, String> {
     if !path.starts_with(ASSET_PATH_PREFIX) {
-        return Err(format!("不允许的资源路径，必须以 {} 开头", ASSET_PATH_PREFIX));
+        return Err(format!(
+            "不允许的资源路径，必须以 {} 开头",
+            ASSET_PATH_PREFIX
+        ));
     }
 
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
 
-    let clean_path = format!("{}{}", ASSET_PATH_PREFIX, path[ASSET_PATH_PREFIX.len()..].to_lowercase());
+    let clean_path = format!(
+        "{}{}",
+        ASSET_PATH_PREFIX,
+        path[ASSET_PATH_PREFIX.len()..].to_lowercase()
+    );
     let url = format!("https://127.0.0.1:{}{}", lcu.port, clean_path);
     let auth = build_auth_header(&lcu.token);
 
@@ -153,6 +167,11 @@ pub async fn get_lcu_asset(
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     let data_url = format!("data:{};base64,{}", content_type, b64);
-    log::debug!("LCU 资源加载成功: {} ({} bytes, {} chars data-url)", path, bytes.len(), data_url.len());
+    log::debug!(
+        "LCU 资源加载成功: {} ({} bytes, {} chars data-url)",
+        path,
+        bytes.len(),
+        data_url.len()
+    );
     Ok(data_url)
 }

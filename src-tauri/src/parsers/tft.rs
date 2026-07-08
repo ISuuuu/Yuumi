@@ -94,9 +94,7 @@ fn parse_tft_data(content: &TftJsonRoot) -> TftDataMapping {
 
 /// 从 LCU 获取 TFT 数据资源
 #[tauri::command]
-pub async fn get_tft_data(
-    app_state: State<'_, AppState>,
-) -> Result<TftDataMapping, String> {
+pub async fn get_tft_data(app_state: State<'_, AppState>) -> Result<TftDataMapping, String> {
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
 
@@ -125,8 +123,7 @@ pub async fn get_tft_data(
     }
 
     // 备用：从 Community Dragon CDN 获取
-    let cdn_url =
-        "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json";
+    let cdn_url = "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json";
 
     let http = reqwest::Client::new();
     let resp = http

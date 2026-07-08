@@ -90,10 +90,8 @@ async fn upload_worker(
                 log::info!("对局 {} 上传完成: {}", game_id, status);
                 if status == "new" {
                     // 上传成功，向前端推送通知
-                    let _ = app_handle.emit(
-                        "upload-success",
-                        serde_json::json!({ "gameId": game_id }),
-                    );
+                    let _ =
+                        app_handle.emit("upload-success", serde_json::json!({ "gameId": game_id }));
                 }
             }
             Ok(Err(e)) => {
@@ -176,10 +174,7 @@ impl UploadTrigger {
             return;
         }
 
-        log::info!(
-            "检测到游戏结束转换: {} → {}，准备上传...",
-            prev, phase
-        );
+        log::info!("检测到游戏结束转换: {} → {}，准备上传...", prev, phase);
 
         // 如果该对局已完成上传，跳过重复处理
         {
@@ -324,8 +319,11 @@ fn external_http_client() -> reqwest::Client {
 
 /// 上传单局对局数据。
 /// 构建 Smart Split Payload → POST 到外部 API。
-async fn upload_single_game(app_handle: &AppHandle, game_id: u64, upload_url: &str) -> Result<String, String> {
-
+async fn upload_single_game(
+    app_handle: &AppHandle,
+    game_id: u64,
+    upload_url: &str,
+) -> Result<String, String> {
     let (lcu_client, auth, base) = {
         let state = app_handle.state::<crate::AppState>();
         let lock = state.lcu_client.read().await;
@@ -339,7 +337,9 @@ async fn upload_single_game(app_handle: &AppHandle, game_id: u64, upload_url: &s
 
     // 获取当前召唤师名称和 puuid
     let current_summoner_info = get_current_summoner_info(&lcu_client, &auth, &base).await;
-    let current_puuid = current_summoner_info.as_ref().map(|(_, puuid)| puuid.as_str());
+    let current_puuid = current_summoner_info
+        .as_ref()
+        .map(|(_, puuid)| puuid.as_str());
 
     // 获取对局详情
     let detail_url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
@@ -388,7 +388,11 @@ async fn upload_single_game(app_handle: &AppHandle, game_id: u64, upload_url: &s
             Ok(resp) => {
                 if resp.status().is_success() {
                     if let Ok(json) = resp.json::<serde_json::Value>().await {
-                        if json.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        if json
+                            .get("success")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false)
+                        {
                             let data = json.get("data");
                             let is_new = data
                                 .and_then(|d| d.get("isNewMatch"))
@@ -420,7 +424,12 @@ async fn upload_single_game(app_handle: &AppHandle, game_id: u64, upload_url: &s
         }
 
         if retry < 5 {
-            log::warn!("对局 {} 上传失败 ({}), 重试 {}/5", game_id, last_err, retry + 1);
+            log::warn!(
+                "对局 {} 上传失败 ({}), 重试 {}/5",
+                game_id,
+                last_err,
+                retry + 1
+            );
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     }
@@ -522,12 +531,10 @@ async fn fetch_latest_game_id(app_handle: &AppHandle, puuid: &str) -> Result<u64
         .and_then(|g| g.as_array());
 
     match games_arr.and_then(|arr| arr.first()) {
-        Some(first) => {
-            first
-                .get("gameId")
-                .and_then(|id| id.as_u64())
-                .ok_or_else(|| "最近对局条目缺少 gameId 字段".to_string())
-        }
+        Some(first) => first
+            .get("gameId")
+            .and_then(|id| id.as_u64())
+            .ok_or_else(|| "最近对局条目缺少 gameId 字段".to_string()),
         None => Err("最近对局列表为空".to_string()),
     }
 }
@@ -699,84 +706,147 @@ struct RawParticipant {
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct ParticipantStats {
-    #[serde(default)] win: bool,
-    #[serde(default)] kills: i32,
-    #[serde(default)] deaths: i32,
-    #[serde(default)] assists: i32,
+    #[serde(default)]
+    win: bool,
+    #[serde(default)]
+    kills: i32,
+    #[serde(default)]
+    deaths: i32,
+    #[serde(default)]
+    assists: i32,
     // 伤害（对英雄）
-    #[serde(default)] total_damage_dealt_to_champions: i32,
-    #[serde(default)] physical_damage_dealt_to_champions: i32,
-    #[serde(default)] magic_damage_dealt_to_champions: i32,
-    #[serde(default)] true_damage_dealt_to_champions: i32,
+    #[serde(default)]
+    total_damage_dealt_to_champions: i32,
+    #[serde(default)]
+    physical_damage_dealt_to_champions: i32,
+    #[serde(default)]
+    magic_damage_dealt_to_champions: i32,
+    #[serde(default)]
+    true_damage_dealt_to_champions: i32,
     // 伤害（所有目标）
-    #[serde(default)] total_damage_dealt: i32,
-    #[serde(default)] physical_damage_dealt: i32,
-    #[serde(default)] magic_damage_dealt: i32,
-    #[serde(default)] true_damage_dealt: i32,
+    #[serde(default)]
+    total_damage_dealt: i32,
+    #[serde(default)]
+    physical_damage_dealt: i32,
+    #[serde(default)]
+    magic_damage_dealt: i32,
+    #[serde(default)]
+    true_damage_dealt: i32,
     // 承受伤害
-    #[serde(default)] total_damage_taken: i32,
-    #[serde(default)] physical_damage_taken: i32,
-    #[serde(default)] magical_damage_taken: i32,
+    #[serde(default)]
+    total_damage_taken: i32,
+    #[serde(default)]
+    physical_damage_taken: i32,
+    #[serde(default)]
+    magical_damage_taken: i32,
     // 治疗
-    #[serde(default)] total_heal: i32,
+    #[serde(default)]
+    total_heal: i32,
     // 经济与补刀
-    #[serde(default)] gold_earned: i32,
-    #[serde(default)] gold_spent: i32,
-    #[serde(default)] total_minions_killed: i32,
-    #[serde(default)] neutral_minions_killed: i32,
+    #[serde(default)]
+    gold_earned: i32,
+    #[serde(default)]
+    gold_spent: i32,
+    #[serde(default)]
+    total_minions_killed: i32,
+    #[serde(default)]
+    neutral_minions_killed: i32,
     // 装备
-    #[serde(default)] item0: i32,
-    #[serde(default)] item1: i32,
-    #[serde(default)] item2: i32,
-    #[serde(default)] item3: i32,
-    #[serde(default)] item4: i32,
-    #[serde(default)] item5: i32,
-    #[serde(default)] item6: i32,
-    #[serde(default)] role_bound_item: i32,
+    #[serde(default)]
+    item0: i32,
+    #[serde(default)]
+    item1: i32,
+    #[serde(default)]
+    item2: i32,
+    #[serde(default)]
+    item3: i32,
+    #[serde(default)]
+    item4: i32,
+    #[serde(default)]
+    item5: i32,
+    #[serde(default)]
+    item6: i32,
+    #[serde(default)]
+    role_bound_item: i32,
     // 视野
-    #[serde(default)] vision_score: i32,
-    #[serde(default)] wards_placed: i32,
-    #[serde(default)] wards_killed: i32,
-    #[serde(default)] vision_wards_bought_in_game: i32,
+    #[serde(default)]
+    vision_score: i32,
+    #[serde(default)]
+    wards_placed: i32,
+    #[serde(default)]
+    wards_killed: i32,
+    #[serde(default)]
+    vision_wards_bought_in_game: i32,
     // 英雄等级
-    #[serde(default)] champ_level: i32,
+    #[serde(default)]
+    champ_level: i32,
     // 多杀
-    #[serde(default)] double_kills: i32,
-    #[serde(default)] triple_kills: i32,
-    #[serde(default)] quadra_kills: i32,
-    #[serde(default)] penta_kills: i32,
-    #[serde(default)] largest_multi_kill: i32,
+    #[serde(default)]
+    double_kills: i32,
+    #[serde(default)]
+    triple_kills: i32,
+    #[serde(default)]
+    quadra_kills: i32,
+    #[serde(default)]
+    penta_kills: i32,
+    #[serde(default)]
+    largest_multi_kill: i32,
     // 连杀
-    #[serde(default)] largest_killing_spree: i32,
-    #[serde(default)] killing_sprees: i32,
+    #[serde(default)]
+    largest_killing_spree: i32,
+    #[serde(default)]
+    killing_sprees: i32,
     // 全场最多标识
-    #[serde(default)] most_kills: bool,
-    #[serde(default)] most_assists: bool,
-    #[serde(default)] most_damage_dealt: bool,
-    #[serde(default)] most_damage_taken: bool,
-    #[serde(default)] most_gold_earned: bool,
-    #[serde(default)] most_turret_kills: bool,
-    #[serde(default)] most_healing_done: bool,
+    #[serde(default)]
+    most_kills: bool,
+    #[serde(default)]
+    most_assists: bool,
+    #[serde(default)]
+    most_damage_dealt: bool,
+    #[serde(default)]
+    most_damage_taken: bool,
+    #[serde(default)]
+    most_gold_earned: bool,
+    #[serde(default)]
+    most_turret_kills: bool,
+    #[serde(default)]
+    most_healing_done: bool,
     // 目标
-    #[serde(default)] turret_kills: i32,
-    #[serde(default)] inhibitor_kills: i32,
-    #[serde(default)] first_blood_kill: bool,
-    #[serde(default)] first_blood_assist: bool,
-    #[serde(default)] first_tower_kill: bool,
-    #[serde(default)] first_tower_assist: bool,
+    #[serde(default)]
+    turret_kills: i32,
+    #[serde(default)]
+    inhibitor_kills: i32,
+    #[serde(default)]
+    first_blood_kill: bool,
+    #[serde(default)]
+    first_blood_assist: bool,
+    #[serde(default)]
+    first_tower_kill: bool,
+    #[serde(default)]
+    first_tower_assist: bool,
     // 伤害（对塔/目标）
-    #[serde(default)] damage_dealt_to_turrets: i32,
-    #[serde(default)] damage_dealt_to_objectives: i32,
+    #[serde(default)]
+    damage_dealt_to_turrets: i32,
+    #[serde(default)]
+    damage_dealt_to_objectives: i32,
     // 符文
-    #[serde(default)] perk_primary_style: i32,
-    #[serde(default)] perk_sub_style: i32,
+    #[serde(default)]
+    perk_primary_style: i32,
+    #[serde(default)]
+    perk_sub_style: i32,
     // 海克斯强化（用于 extract_hextech_ids）
-    #[serde(default)] augments: Vec<i32>,
-    #[serde(default)] player_augment1: i32,
-    #[serde(default)] player_augment2: i32,
-    #[serde(default)] player_augment3: i32,
-    #[serde(default)] player_augment4: i32,
-    #[serde(default)] player_augment5: i32,
+    #[serde(default)]
+    augments: Vec<i32>,
+    #[serde(default)]
+    player_augment1: i32,
+    #[serde(default)]
+    player_augment2: i32,
+    #[serde(default)]
+    player_augment3: i32,
+    #[serde(default)]
+    player_augment4: i32,
+    #[serde(default)]
+    player_augment5: i32,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -807,8 +877,11 @@ fn build_upload_payload(
         .game_creation
         .and_then(|ms| {
             let secs = (ms / 1000) as i64;
-            chrono::DateTime::from_timestamp(secs, 0)
-                .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%dT%H:%M:%S").to_string())
+            chrono::DateTime::from_timestamp(secs, 0).map(|dt| {
+                dt.with_timezone(&chrono::Local)
+                    .format("%Y-%m-%dT%H:%M:%S")
+                    .to_string()
+            })
         })
         .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string());
 
@@ -1053,7 +1126,9 @@ async fn batch_upload_by_ids(
     };
 
     let current_summoner_info = get_current_summoner_info(&lcu_client, &auth, &base).await;
-    let current_puuid = current_summoner_info.as_ref().map(|(_, puuid)| puuid.as_str());
+    let current_puuid = current_summoner_info
+        .as_ref()
+        .map(|(_, puuid)| puuid.as_str());
 
     // 获取英雄名称映射
     let champion_names = {
@@ -1072,18 +1147,24 @@ async fn batch_upload_by_ids(
             .send()
             .await
         {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<GameDetail>().await {
-                    Ok(detail) => {
-                        payloads.push(build_upload_payload(&detail, current_puuid, &champion_names));
-                    }
-                    Err(e) => {
-                        log::warn!("批量上传: 解析对局 {} 详情失败: {}", game_id, e);
-                    }
+            Ok(resp) if resp.status().is_success() => match resp.json::<GameDetail>().await {
+                Ok(detail) => {
+                    payloads.push(build_upload_payload(
+                        &detail,
+                        current_puuid,
+                        &champion_names,
+                    ));
                 }
-            }
+                Err(e) => {
+                    log::warn!("批量上传: 解析对局 {} 详情失败: {}", game_id, e);
+                }
+            },
             Ok(resp) => {
-                log::warn!("批量上传: 获取对局 {} 详情失败: HTTP {}", game_id, resp.status());
+                log::warn!(
+                    "批量上传: 获取对局 {} 详情失败: HTTP {}",
+                    game_id,
+                    resp.status()
+                );
             }
             Err(e) => {
                 log::warn!("批量上传: 获取对局 {} 详情请求失败: {}", game_id, e);
@@ -1111,11 +1192,7 @@ async fn batch_upload_by_ids(
     let ext_client = external_http_client();
 
     for (i, chunk) in payloads.chunks(10).enumerate() {
-        log::info!(
-            "批量上传第 {} 批，本批 {} 场对局",
-            i + 1,
-            chunk.len()
-        );
+        log::info!("批量上传第 {} 批，本批 {} 场对局", i + 1, chunk.len());
 
         match ext_client
             .post(batch_url)
@@ -1128,19 +1205,29 @@ async fn batch_upload_by_ids(
                 let status = resp.status();
                 match resp.json::<serde_json::Value>().await {
                     Ok(json) => {
-                        if json.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        if json
+                            .get("success")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false)
+                        {
                             let data = json.get("data");
                             let success = data
                                 .and_then(|d| d.get("successCount").or(d.get("newMatches")))
                                 .and_then(|v| v.as_u64())
-                                .unwrap_or(chunk.len() as u64) as u32;
+                                .unwrap_or(chunk.len() as u64)
+                                as u32;
                             let failed = data
                                 .and_then(|d| d.get("failedCount"))
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0) as u32;
                             total_success += success;
                             total_failed += failed;
-                            log::info!("批量上传第 {} 批完成: 成功={}, 失败={}", i + 1, success, failed);
+                            log::info!(
+                                "批量上传第 {} 批完成: 成功={}, 失败={}",
+                                i + 1,
+                                success,
+                                failed
+                            );
                         } else {
                             let msg = json
                                 .get("message")
@@ -1161,7 +1248,11 @@ async fn batch_upload_by_ids(
             Ok(resp) => {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                let preview = if body.len() > 200 { &body[..200] } else { &body };
+                let preview = if body.len() > 200 {
+                    &body[..200]
+                } else {
+                    &body
+                };
                 total_failed += chunk.len() as u32;
                 error_msg = Some(format!("HTTP {}: {}", status, preview));
                 log::warn!("批量上传第 {} 批 HTTP 错误 {}: {}", i + 1, status, preview);
@@ -1231,7 +1322,11 @@ pub async fn batch_upload_matches(
         });
     }
     let batch_url = build_batch_upload_url(&raw_url);
-    log::info!("[batch_upload] 开始批量上传 {} 场对局, url={}", game_ids.len(), batch_url);
+    log::info!(
+        "[batch_upload] 开始批量上传 {} 场对局, url={}",
+        game_ids.len(),
+        batch_url
+    );
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(120),
@@ -1244,7 +1339,11 @@ pub async fn batch_upload_matches(
         error: Some("批量上传超时 (120s)".to_string()),
     });
 
-    log::info!("[batch_upload] 完成: 成功={}, 失败={}", result.success_count, result.failed_count);
+    log::info!(
+        "[batch_upload] 完成: 成功={}, 失败={}",
+        result.success_count,
+        result.failed_count
+    );
     Ok(result)
 }
 
@@ -1267,6 +1366,9 @@ mod tests {
     #[test]
     fn ignores_missing_or_zero_gameflow_game_id() {
         assert_eq!(extract_gameflow_game_id(&json!({})), None);
-        assert_eq!(extract_gameflow_game_id(&json!({ "gameData": { "gameId": 0 } })), None);
+        assert_eq!(
+            extract_gameflow_game_id(&json!({ "gameData": { "gameId": 0 } })),
+            None
+        );
     }
 }

@@ -7,10 +7,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::{
-    connect_async_tls_with_config,
-    tungstenite::client::ClientRequestBuilder,
-    tungstenite::protocol::Message,
-    Connector,
+    connect_async_tls_with_config, tungstenite::client::ClientRequestBuilder,
+    tungstenite::protocol::Message, Connector,
 };
 
 #[derive(Debug)]
@@ -28,12 +26,18 @@ impl ServerCertVerifier for NoVerifier {
         Ok(ServerCertVerified::assertion())
     }
     fn verify_tls12_signature(
-        &self, _message: &[u8], _cert: &CertificateDer<'_>, _dss: &DigitallySignedStruct,
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, TlsError> {
         Ok(HandshakeSignatureValid::assertion())
     }
     fn verify_tls13_signature(
-        &self, _message: &[u8], _cert: &CertificateDer<'_>, _dss: &DigitallySignedStruct,
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, TlsError> {
         Ok(HandshakeSignatureValid::assertion())
     }
@@ -132,7 +136,6 @@ fn clean_server_url(url: &str) -> String {
 /// 连接到远程服务器 of `/lcuHub`，支持远程 LCU 查询和状态上报。
 pub fn start(app_handle: AppHandle, server_url: String, user_id: String) {
     crate::spawn_log_panic(async move {
-
         let server_url = clean_server_url(&server_url);
 
         let (cancel_tx, mut cancel_rx) = watch::channel(false);
@@ -206,9 +209,7 @@ async fn try_connect(
     server_url: &str,
     user_id: &str,
 ) -> Result<
-    tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
     // 1. 进行 SignalR 协商 (Negotiate)
@@ -249,35 +250,38 @@ async fn try_connect(
     let url: http::Uri = ws_url.parse()?;
     let request = ClientRequestBuilder::new(url);
 
-    let (ws_stream, _) =
-        connect_async_tls_with_config(request, None, false, tls_connector).await?;
+    let (ws_stream, _) = connect_async_tls_with_config(request, None, false, tls_connector).await?;
 
     Ok(ws_stream)
 }
 
 async fn negotiate(server_url: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let is_local = server_url.contains("127.0.0.1") || server_url.contains("localhost");
-    
+
     let http_client = reqwest::Client::builder()
         .danger_accept_invalid_certs(is_local)
         .build()?;
-        
+
     let negotiate_url = format!("{}/lcuHub/negotiate?negotiateVersion=1", server_url);
-    log::info!("[SignalR] 正在发送协商 (Negotiate) 请求到: {}", negotiate_url);
-    
+    log::info!(
+        "[SignalR] 正在发送协商 (Negotiate) 请求到: {}",
+        negotiate_url
+    );
+
     let resp = http_client.post(&negotiate_url).send().await?;
     if !resp.status().is_success() {
         return Err(format!("协商请求失败: HTTP {}", resp.status()).into());
     }
-    
+
     let val: serde_json::Value = resp.json().await?;
     log::debug!("[SignalR] 协商返回数据: {:?}", val);
-    
-    let token = val.get("connectionToken")
+
+    let token = val
+        .get("connectionToken")
         .or_else(|| val.get("connectionId"))
         .and_then(|v| v.as_str())
         .ok_or("协商响应中缺少 connectionToken 或 connectionId")?;
-        
+
     Ok(token.to_string())
 }
 
@@ -528,7 +532,11 @@ async fn handle_receive_command(
 
     let query_id = arguments.get(1).and_then(|v| v.as_str()).unwrap_or("");
 
-    log::info!("[SignalR] <<< 收到后端远程命令: endpoint={}, queryId={}", endpoint, query_id);
+    log::info!(
+        "[SignalR] <<< 收到后端远程命令: endpoint={}, queryId={}",
+        endpoint,
+        query_id
+    );
 
     if !is_endpoint_allowed(endpoint) {
         log::warn!("[SignalR] ReceiveCommand 拒绝执行未授权路径: {}", endpoint);
@@ -657,7 +665,9 @@ async fn query_current_summoner(app_handle: &AppHandle) -> Result<serde_json::Va
         .map_err(|e| e.to_string())?;
 
     if resp.status().is_success() {
-        resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())
+        resp.json::<serde_json::Value>()
+            .await
+            .map_err(|e| e.to_string())
     } else {
         Err(format!("HTTP {}", resp.status()))
     }
@@ -681,7 +691,11 @@ pub async fn update_summoner_info(summoner: serde_json::Value) {
         "level": summoner.get("summonerLevel").or_else(|| summoner.get("level")).unwrap_or(&serde_json::Value::Null),
         "profileIconId": summoner.get("profileIconId").unwrap_or(&serde_json::Value::Null),
     });
-    log::info!("[SignalR] 推送召唤师对齐信息: PUUID={}, 名字={}", summoner.get("puuid").and_then(|v| v.as_str()).unwrap_or(""), name);
+    log::info!(
+        "[SignalR] 推送召唤师对齐信息: PUUID={}, 名字={}",
+        summoner.get("puuid").and_then(|v| v.as_str()).unwrap_or(""),
+        name
+    );
     let _ = send_event("summoner_info", info).await;
 }
 

@@ -96,7 +96,5 @@ pub async fn get_current_summoner(
 
     let summoner: LcuSummoner = resp.json().await.map_err(|e| e.to_string())?;
 
-    summoner
-        .to_display()
-        .ok_or("召唤师数据不完整".to_string())
+    summoner.to_display().ok_or("召唤师数据不完整".to_string())
 }

@@ -1,8 +1,22 @@
 <script setup lang="ts">
-import { ref, watch, computed, inject, onMounted, onUnmounted, type Ref } from "vue";
+import {
+  ref,
+  watch,
+  computed,
+  inject,
+  onMounted,
+  onUnmounted,
+  type Ref,
+} from "vue";
 import { useI18n } from "vue-i18n";
 import { useLcuStore } from "../store/lcuStore";
-import { fetchCurrentSummoner, fetchMatchHistory, fetchMatchHistorySgp, lcuRequest, fetchConfig } from "../api/lcu";
+import {
+  fetchCurrentSummoner,
+  fetchMatchHistory,
+  fetchMatchHistorySgp,
+  lcuRequest,
+  fetchConfig,
+} from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 
@@ -27,18 +41,20 @@ const careerGamesNumber = ref(20); // 默认值，启动时从配置读取
 // 游戏模式筛选
 const selectedQueue = ref<number | null>(null);
 const QUEUE_OPTIONS = [
-  { id: null, label: '全部' },
-  { id: 2400, label: '海克斯大乱斗' },
-  { id: 450, label: '极地大乱斗' },
-  { id: 430, label: '匹配模式' },
-  { id: 420, label: '单双排位' },
-  { id: 440, label: '灵活排位' },
+  { id: null, label: "全部" },
+  { id: 2400, label: "海克斯大乱斗" },
+  { id: 450, label: "极地大乱斗" },
+  { id: 430, label: "匹配模式" },
+  { id: 420, label: "单双排位" },
+  { id: 440, label: "灵活排位" },
 ];
 const showQueueDropdown = ref(false);
 
 const filteredMatches = computed(() => {
   if (selectedQueue.value === null) return matches.value;
-  return matches.value.filter((m: MatchDisplay) => m.queueId === selectedQueue.value);
+  return matches.value.filter(
+    (m: MatchDisplay) => m.queueId === selectedQueue.value,
+  );
 });
 
 function selectQueue(id: number | null) {
@@ -47,7 +63,9 @@ function selectQueue(id: number | null) {
 }
 
 // 从 App.vue 注入 Career → Search 跳转状态
-const navigateSearchPayload = inject<Ref<{ name: string; gameId: number | null } | null>>("navigateSearchPayload")!;
+const navigateSearchPayload = inject<
+  Ref<{ name: string; gameId: number | null } | null>
+>("navigateSearchPayload")!;
 
 const TIER_MAP: Record<string, string> = {
   NONE: "无段位",
@@ -66,7 +84,7 @@ const TIER_MAP: Record<string, string> = {
 async function loadSummoner(forceRefresh = false) {
   // 如果距离上次成功加载小于 20 秒，且已有缓存数据，且不是强刷，则直接使用缓存，不发起 API 请求
   const now = Date.now();
-  if (!forceRefresh && cachedSummoner && (now - lastFetchedTime < 20000)) {
+  if (!forceRefresh && cachedSummoner && now - lastFetchedTime < 20000) {
     summoner.value = cachedSummoner;
     rankedQueues.value = cachedRankedQueues;
     matches.value = cachedMatches;
@@ -102,7 +120,10 @@ async function loadSummoner(forceRefresh = false) {
 
 async function loadRankedStats(puuid: string) {
   try {
-    const resp = await lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${puuid}`);
+    const resp = await lcuRequest<any>(
+      "GET",
+      `/lol-ranked/v1/ranked-stats/${puuid}`,
+    );
     if (resp.success && resp.data && resp.data.queues) {
       rankedQueues.value = resp.data.queues;
       // 同步写回顶级缓存
@@ -120,14 +141,17 @@ async function fetchMatchHistoryWithFallback(
   puuid: string,
   begIndex: number,
   endIndex: number,
-  isGameEndSync = false
+  isGameEndSync = false,
 ): Promise<MatchDisplay[]> {
   let raw = await fetchMatchHistory(puuid, begIndex, endIndex);
-  const prevLatestId = recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
+  const prevLatestId =
+    recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
   const latestId = raw[0]?.gameId ?? null;
 
   // 只有当 LCU 拉出来为空，或者在游戏刚结束的自动刷新流中且最新 ID 仍为旧的最新 ID（证明 LCU 数据滞后）时，才降级到 SGP 加速拉取
-  const shouldFallback = raw.length === 0 || (isGameEndSync && prevLatestId && latestId === prevLatestId);
+  const shouldFallback =
+    raw.length === 0 ||
+    (isGameEndSync && prevLatestId && latestId === prevLatestId);
 
   if (shouldFallback) {
     try {
@@ -147,7 +171,12 @@ async function loadMatches(puuid: string, isGameEndSync = false) {
   try {
     loading.value = true;
     const targetCount = careerGamesNumber.value;
-    matches.value = await fetchMatchHistoryWithFallback(puuid, 0, targetCount - 1, isGameEndSync);
+    matches.value = await fetchMatchHistoryWithFallback(
+      puuid,
+      0,
+      targetCount - 1,
+      isGameEndSync,
+    );
     // 同步更新顶级缓存
     cachedMatches = matches.value;
   } catch (e) {
@@ -160,7 +189,12 @@ async function loadMatches(puuid: string, isGameEndSync = false) {
 async function loadRecentMatches(puuid: string, isGameEndSync = false) {
   try {
     const targetCount = careerGamesNumber.value;
-    const fresh = await fetchMatchHistoryWithFallback(puuid, 0, targetCount, isGameEndSync);
+    const fresh = await fetchMatchHistoryWithFallback(
+      puuid,
+      0,
+      targetCount,
+      isGameEndSync,
+    );
     updateRecentMatchesCache(puuid, fresh);
   } catch (e) {
     console.error("获取近期战绩统计失败:", e);
@@ -172,10 +206,14 @@ function updateRecentMatchesCache(puuid: string, fresh: MatchDisplay[]) {
   try {
     const raw = localStorage.getItem(MATCHES_CACHE_KEY(puuid));
     if (raw) cached = JSON.parse(raw);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   const merged = [...fresh, ...cached]
-    .filter((m, idx, arr) => arr.findIndex(x => x.gameId === m.gameId) === idx)
+    .filter(
+      (m, idx, arr) => arr.findIndex((x) => x.gameId === m.gameId) === idx,
+    )
     .sort((a, b) => b.timeStamp - a.timeStamp)
     .slice(0, careerGamesNumber.value);
 
@@ -185,7 +223,9 @@ function updateRecentMatchesCache(puuid: string, fresh: MatchDisplay[]) {
 
   try {
     localStorage.setItem(MATCHES_CACHE_KEY(puuid), JSON.stringify(merged));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 function getKdaClass(kda: string): string {
@@ -209,7 +249,12 @@ function formatHighestRank(queue: any) {
 }
 
 function formatPrevSeasonRank(queue: any) {
-  if (!queue || !queue.previousSeasonEndTier || queue.previousSeasonEndTier === "NONE") return "--";
+  if (
+    !queue ||
+    !queue.previousSeasonEndTier ||
+    queue.previousSeasonEndTier === "NONE"
+  )
+    return "--";
   return TIER_MAP[queue.previousSeasonEndTier] || queue.previousSeasonEndTier;
 }
 
@@ -220,7 +265,9 @@ async function copyRiotId() {
   try {
     await navigator.clipboard.writeText(fullId);
     copied.value = true;
-    setTimeout(() => { copied.value = false; }, 1500);
+    setTimeout(() => {
+      copied.value = false;
+    }, 1500);
   } catch {
     // fallback
     const ta = document.createElement("textarea");
@@ -230,7 +277,9 @@ async function copyRiotId() {
     document.execCommand("copy");
     document.body.removeChild(ta);
     copied.value = true;
-    setTimeout(() => { copied.value = false; }, 1500);
+    setTimeout(() => {
+      copied.value = false;
+    }, 1500);
   }
 }
 
@@ -280,69 +329,96 @@ function onDocClick() {
 }
 
 // 自动加载逻辑
-watch(() => store.isConnected, (connected) => {
-  if (connected) {
-    loadSummoner();
-  } else {
-    summoner.value = null;
-    matches.value = [];
-    recentMatches.value = [];
-    rankedQueues.value = [];
-    // 断开连接时，同步清空内存缓存，避免恢复连接时加载旧人的数据
-    cachedSummoner = null;
-    cachedMatches = [];
-    cachedRecentMatches = [];
-    cachedRankedQueues = [];
-    lastFetchedTime = 0;
-  }
-}, { immediate: true });
+watch(
+  () => store.isConnected,
+  (connected) => {
+    if (connected) {
+      loadSummoner();
+    } else {
+      summoner.value = null;
+      matches.value = [];
+      recentMatches.value = [];
+      rankedQueues.value = [];
+      // 断开连接时，同步清空内存缓存，避免恢复连接时加载旧人的数据
+      cachedSummoner = null;
+      cachedMatches = [];
+      cachedRecentMatches = [];
+      cachedRankedQueues = [];
+      lastFetchedTime = 0;
+    }
+  },
+  { immediate: true },
+);
 
 // 对局结束后自动刷新战绩
 // 参考: 进入结算/大厅状态后等 2 秒，让 LCU 把对局数据落盘；
 // 然后重试 5 次 × 3 秒，因为 lol-match-history 同步新对局通常有几秒到十几秒延迟
-watch(() => store.gamePhase, async (phase: string, oldPhase: string | undefined) => {
-  if (!summoner.value?.puuid) return;
-  const gamePhases = ["InProgress", "GameStart", "ChampSelect", "ReadyCheck", "PreEndOfGame"];
-  const endPhases = ["EndOfGame", "Lobby", "None"];
-  if (gamePhases.includes(oldPhase ?? "") && endPhases.includes(phase ?? "")) {
-    const puuid = summoner.value.puuid;
-    const prevLatestId = recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
-    console.log(`[Career] 对局结束 (${oldPhase} → ${phase})，等待 LCU 同步并重试刷新`);
+watch(
+  () => store.gamePhase,
+  async (phase: string, oldPhase: string | undefined) => {
+    if (!summoner.value?.puuid) return;
+    const gamePhases = [
+      "InProgress",
+      "GameStart",
+      "ChampSelect",
+      "ReadyCheck",
+      "PreEndOfGame",
+    ];
+    const endPhases = ["EndOfGame", "Lobby", "None"];
+    if (
+      gamePhases.includes(oldPhase ?? "") &&
+      endPhases.includes(phase ?? "")
+    ) {
+      const puuid = summoner.value.puuid;
+      const prevLatestId =
+        recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
+      console.log(
+        `[Career] 对局结束 (${oldPhase} → ${phase})，等待 LCU 同步并重试刷新`,
+      );
 
-    // 第一次延迟：让结算界面走完
-    await new Promise(r => setTimeout(r, 2000));
+      // 第一次延迟：让结算界面走完
+      await new Promise((r) => setTimeout(r, 2000));
 
-    // 最多重试 5 次，每次间隔 3 秒；只要发现新对局 ID 就提前停止
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (attempt > 0) {
-        await new Promise(r => setTimeout(r, 3000));
-      }
-      try {
-        await loadMatches(puuid, true);
-        // 异步更新近期统计缓存
-        loadRecentMatches(puuid, true);
-        const latestId = matches.value[0]?.gameId ?? null;
-        if (latestId && latestId !== prevLatestId) {
-          console.log(`[Career] 第 ${attempt + 1} 次重试时已发现新对局 ${latestId}`);
-          return;
+      // 最多重试 5 次，每次间隔 3 秒；只要发现新对局 ID 就提前停止
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 3000));
         }
-        console.log(`[Career] 第 ${attempt + 1} 次刷新：尚未发现新对局，继续等待`);
-      } catch (e) {
-        console.warn(`[Career] 第 ${attempt + 1} 次刷新失败:`, e);
+        try {
+          await loadMatches(puuid, true);
+          // 异步更新近期统计缓存
+          loadRecentMatches(puuid, true);
+          const latestId = matches.value[0]?.gameId ?? null;
+          if (latestId && latestId !== prevLatestId) {
+            console.log(
+              `[Career] 第 ${attempt + 1} 次重试时已发现新对局 ${latestId}`,
+            );
+            return;
+          }
+          console.log(
+            `[Career] 第 ${attempt + 1} 次刷新：尚未发现新对局，继续等待`,
+          );
+        } catch (e) {
+          console.warn(`[Career] 第 ${attempt + 1} 次刷新失败:`, e);
+        }
       }
+      // 兜底刷新召唤师信息（段位变化等）
+      await loadRankedStats(puuid);
     }
-    // 兜底刷新召唤师信息（段位变化等）
-    await loadRankedStats(puuid);
-  }
-});
+  },
+);
 
 // 提取排位队列
 const soloQueue = computed(() => {
-  return rankedQueues.value.find(q => q.queueType === "RANKED_SOLO_5x5") || null;
+  return (
+    rankedQueues.value.find((q) => q.queueType === "RANKED_SOLO_5x5") || null
+  );
 });
 
 const flexQueue = computed(() => {
-  return rankedQueues.value.find(q => q.queueType === "RANKED_FLEX_SR") || null;
+  return (
+    rankedQueues.value.find((q) => q.queueType === "RANKED_FLEX_SR") || null
+  );
 });
 
 // 计算近期对局统计
@@ -353,16 +429,22 @@ const statsSummary = computed(() => {
   let kills = 0;
   let deaths = 0;
   let assists = 0;
-  const champMap: Record<number, { id: number; icon: string; count: number }> = {};
+  const champMap: Record<number, { id: number; icon: string; count: number }> =
+    {};
 
   for (const m of recentMatches.value) {
-    if (m.win) wins++; else losses++;
+    if (m.win) wins++;
+    else losses++;
     kills += m.kills;
     deaths += m.deaths;
     assists += m.assists;
 
     if (!champMap[m.championId]) {
-      champMap[m.championId] = { id: m.championId, icon: m.championIconUrl, count: 0 };
+      champMap[m.championId] = {
+        id: m.championId,
+        icon: m.championIconUrl,
+        count: 0,
+      };
     }
     champMap[m.championId].count++;
   }
@@ -371,7 +453,8 @@ const statsSummary = computed(() => {
     .sort((a, b) => b.count - a.count)
     .slice(0, 6);
 
-  const kdaRatio = deaths === 0 ? "Perfect" : ((kills + assists) / deaths).toFixed(1);
+  const kdaRatio =
+    deaths === 0 ? "Perfect" : ((kills + assists) / deaths).toFixed(1);
 
   return {
     wins,
@@ -380,13 +463,13 @@ const statsSummary = computed(() => {
     deaths,
     assists,
     kda: kdaRatio,
-    topChamps
+    topChamps,
   };
 });
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
-  const pad = (n: number) => n.toString().padStart(2, '0');
+  const pad = (n: number) => n.toString().padStart(2, "0");
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
@@ -407,7 +490,8 @@ function getQueueName(m: MatchDisplay): string {
     // 则说明队列 ID 发生冲突，应该降级显示后端解析出的 name
     if (
       (translation.includes("云顶") || translation.includes("TFT")) &&
-      (!m.name.includes("云顶") && !m.name.includes("TFT"))
+      !m.name.includes("云顶") &&
+      !m.name.includes("TFT")
     ) {
       return m.name;
     }
@@ -421,7 +505,7 @@ function getQueueName(m: MatchDisplay): string {
   <div class="career">
     <div v-if="!store.isConnected" class="tip-container">
       <div class="offline-logo">🎮</div>
-      <p class="tip">{{ $t('gameInfo.launchLolPrompt') }}</p>
+      <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
     </div>
 
     <div v-else class="career-content">
@@ -434,34 +518,67 @@ function getQueueName(m: MatchDisplay): string {
             <!-- 等级进度环形条（缺口在底部） -->
             <svg class="gauge-ring-svg" viewBox="0 0 100 100">
               <circle class="gauge-track" cx="50" cy="50" r="45" />
-              <circle class="gauge-progress" cx="50" cy="50" r="45"
-                      :style="{ '--progress': summoner.percentCompleteForNextLevel }" />
+              <circle
+                class="gauge-progress"
+                cx="50"
+                cy="50"
+                r="45"
+                :style="{ '--progress': summoner.percentCompleteForNextLevel }"
+              />
             </svg>
             <div class="avatar-container">
-              <LcuImage :src="summoner.profileIconUrl" class="profile-avatar" alt="avatar" />
+              <LcuImage
+                :src="summoner.profileIconUrl"
+                class="profile-avatar"
+                alt="avatar"
+              />
             </div>
             <!-- 等级数字（底部缺口处） -->
             <div class="level-badge">{{ summoner.summonerLevel }}</div>
           </div>
 
           <div class="summoner-info">
-            <h1 class="display-name">{{ summoner.gameName || summoner.displayName }}</h1>
+            <h1 class="display-name">
+              {{ summoner.gameName || summoner.displayName }}
+            </h1>
             <div class="copy-wrapper">
-              <button class="copy-riot-id-btn" @click="copyRiotId" :title="`复制: ${summoner.gameName || summoner.displayName}#${summoner.tagLine}`">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              <button
+                class="copy-riot-id-btn"
+                @click="copyRiotId"
+                :title="`复制: ${summoner.gameName || summoner.displayName}#${summoner.tagLine}`"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  class="copy-icon"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path
+                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                  />
                 </svg>
               </button>
-              <span v-if="copied" class="copied-text">✓ {{ $t('career.copied') }}</span>
+              <span v-if="copied" class="copied-text"
+                >✓ {{ $t("career.copied") }}</span
+              >
             </div>
             <span class="tagline"># {{ summoner.tagLine }}</span>
           </div>
         </div>
 
         <div class="header-actions">
-          <button class="action-btn" @click="loadSummoner(true)" :disabled="loading">{{ $t('career.refresh') }}</button>
-          <button class="action-btn" @click="goToHistory" :disabled="loading">{{ $t('career.historyBtn') }}</button>
+          <button
+            class="action-btn"
+            @click="loadSummoner(true)"
+            :disabled="loading"
+          >
+            {{ $t("career.refresh") }}
+          </button>
+          <button class="action-btn" @click="goToHistory" :disabled="loading">
+            {{ $t("career.historyBtn") }}
+          </button>
         </div>
       </div>
 
@@ -470,51 +587,63 @@ function getQueueName(m: MatchDisplay): string {
         <table class="rank-table">
           <thead>
             <tr>
-              <th>{{ $t('career.type') }}</th>
-              <th>{{ $t('career.totalGames') }}</th>
-              <th>{{ $t('career.winRate') }}</th>
-              <th>{{ $t('career.winsLabel') }}</th>
-              <th>{{ $t('career.lossesLabel') }}</th>
-              <th>{{ $t('career.tier') }}</th>
-              <th>{{ $t('career.lp') }}</th>
-              <th>{{ $t('career.highest') }}</th>
-              <th>{{ $t('career.prevSeason') }}</th>
+              <th>{{ $t("career.type") }}</th>
+              <th>{{ $t("career.totalGames") }}</th>
+              <th>{{ $t("career.winRate") }}</th>
+              <th>{{ $t("career.winsLabel") }}</th>
+              <th>{{ $t("career.lossesLabel") }}</th>
+              <th>{{ $t("career.tier") }}</th>
+              <th>{{ $t("career.lp") }}</th>
+              <th>{{ $t("career.highest") }}</th>
+              <th>{{ $t("career.prevSeason") }}</th>
             </tr>
           </thead>
           <tbody>
             <!-- 单双排 -->
             <tr>
-              <td class="type-name">{{ $t('gameModes.420') }}</td>
+              <td class="type-name">{{ $t("gameModes.420") }}</td>
               <td>{{ soloQueue ? soloQueue.wins + soloQueue.losses : 0 }}</td>
               <td>
-                {{ soloQueue && soloQueue.wins + soloQueue.losses > 0 
-                  ? ((soloQueue.wins / (soloQueue.wins + soloQueue.losses)) * 100).toFixed(0) + '%' 
-                  : '--' 
+                {{
+                  soloQueue && soloQueue.wins + soloQueue.losses > 0
+                    ? (
+                        (soloQueue.wins / (soloQueue.wins + soloQueue.losses)) *
+                        100
+                      ).toFixed(0) + "%"
+                    : "--"
                 }}
               </td>
               <td>{{ soloQueue ? soloQueue.wins : 0 }}</td>
               <td>{{ soloQueue ? soloQueue.losses : 0 }}</td>
-              <td class="rank-name">{{ soloQueue ? formatRank(soloQueue) : '--' }}</td>
+              <td class="rank-name">
+                {{ soloQueue ? formatRank(soloQueue) : "--" }}
+              </td>
               <td>{{ soloQueue ? soloQueue.leaguePoints : 0 }}</td>
-              <td>{{ soloQueue ? formatHighestRank(soloQueue) : '--' }}</td>
-              <td>{{ soloQueue ? formatPrevSeasonRank(soloQueue) : '--' }}</td>
+              <td>{{ soloQueue ? formatHighestRank(soloQueue) : "--" }}</td>
+              <td>{{ soloQueue ? formatPrevSeasonRank(soloQueue) : "--" }}</td>
             </tr>
             <!-- 灵活排位 -->
             <tr>
-              <td class="type-name">{{ $t('gameModes.440') }}</td>
+              <td class="type-name">{{ $t("gameModes.440") }}</td>
               <td>{{ flexQueue ? flexQueue.wins + flexQueue.losses : 0 }}</td>
               <td>
-                {{ flexQueue && flexQueue.wins + flexQueue.losses > 0 
-                  ? ((flexQueue.wins / (flexQueue.wins + flexQueue.losses)) * 100).toFixed(0) + '%' 
-                  : '--' 
+                {{
+                  flexQueue && flexQueue.wins + flexQueue.losses > 0
+                    ? (
+                        (flexQueue.wins / (flexQueue.wins + flexQueue.losses)) *
+                        100
+                      ).toFixed(0) + "%"
+                    : "--"
                 }}
               </td>
               <td>{{ flexQueue ? flexQueue.wins : 0 }}</td>
               <td>{{ flexQueue ? flexQueue.losses : 0 }}</td>
-              <td class="rank-name">{{ flexQueue ? formatRank(flexQueue) : '--' }}</td>
+              <td class="rank-name">
+                {{ flexQueue ? formatRank(flexQueue) : "--" }}
+              </td>
               <td>{{ flexQueue ? flexQueue.leaguePoints : 0 }}</td>
-              <td>{{ flexQueue ? formatHighestRank(flexQueue) : '--' }}</td>
-              <td>{{ flexQueue ? formatPrevSeasonRank(flexQueue) : '--' }}</td>
+              <td>{{ flexQueue ? formatHighestRank(flexQueue) : "--" }}</td>
+              <td>{{ flexQueue ? formatPrevSeasonRank(flexQueue) : "--" }}</td>
             </tr>
           </tbody>
         </table>
@@ -523,37 +652,72 @@ function getQueueName(m: MatchDisplay): string {
       <!-- 近期数据看板 & 常用英雄 -->
       <div v-if="statsSummary" class="recent-summary-bar">
         <div class="summary-text">
-          <span class="summary-title">{{ $t('career.recentGamesTitle', { count: recentMatches.length }) }}</span>
-          <span class="win-color">{{ $t('career.win') }}: {{ statsSummary.wins }}</span>
-          <span class="lose-color">{{ $t('career.lose') }}: {{ statsSummary.losses }}</span>
+          <span class="summary-title">{{
+            $t("career.recentGamesTitle", { count: recentMatches.length })
+          }}</span>
+          <span class="win-color"
+            >{{ $t("career.win") }}: {{ statsSummary.wins }}</span
+          >
+          <span class="lose-color"
+            >{{ $t("career.lose") }}: {{ statsSummary.losses }}</span
+          >
           <span class="kda-label">KDA:</span>
           <span class="kda-values">
-            {{ statsSummary.kills }} / <span class="death-red">{{ statsSummary.deaths }}</span> / {{ statsSummary.assists }}
+            {{ statsSummary.kills }} /
+            <span class="death-red">{{ statsSummary.deaths }}</span> /
+            {{ statsSummary.assists }}
           </span>
           <span class="kda-ratio">({{ statsSummary.kda }})</span>
         </div>
 
         <div class="recent-champs">
-          <div v-for="c in statsSummary.topChamps" :key="c.id" class="recent-champ-icon" :title="t('career.gamesCount', { count: c.count })">
+          <div
+            v-for="c in statsSummary.topChamps"
+            :key="c.id"
+            class="recent-champ-icon"
+            :title="t('career.gamesCount', { count: c.count })"
+          >
             <LcuImage :src="c.icon" alt="champ" />
           </div>
         </div>
 
         <div class="summary-actions">
-          <button class="summary-action-btn">{{ $t('career.recentTeammates') }}</button>
-          <div class="dropdown-trigger" @click.stop="showQueueDropdown = !showQueueDropdown">
-            <span>{{ selectedQueue === null ? $t('career.all') : $t('gameModes.' + selectedQueue) }}</span>
-            <svg :class="['arrow-icon', { expanded: showQueueDropdown }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="6 9 12 15 18 9"/>
+          <button class="summary-action-btn">
+            {{ $t("career.recentTeammates") }}
+          </button>
+          <div
+            class="dropdown-trigger"
+            @click.stop="showQueueDropdown = !showQueueDropdown"
+          >
+            <span>{{
+              selectedQueue === null
+                ? $t("career.all")
+                : $t("gameModes." + selectedQueue)
+            }}</span>
+            <svg
+              :class="['arrow-icon', { expanded: showQueueDropdown }]"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polyline points="6 9 12 15 18 9" />
             </svg>
-            <div v-if="showQueueDropdown" class="queue-dropdown-menu" @click.stop>
+            <div
+              v-if="showQueueDropdown"
+              class="queue-dropdown-menu"
+              @click.stop
+            >
               <div
                 v-for="q in QUEUE_OPTIONS"
                 :key="q.id ?? -1"
-                :class="['queue-dropdown-item', { active: selectedQueue === q.id }]"
+                :class="[
+                  'queue-dropdown-item',
+                  { active: selectedQueue === q.id },
+                ]"
                 @click="selectQueue(q.id)"
               >
-                {{ q.id === null ? $t('career.all') : $t('gameModes.' + q.id) }}
+                {{ q.id === null ? $t("career.all") : $t("gameModes." + q.id) }}
               </div>
             </div>
           </div>
@@ -562,97 +726,149 @@ function getQueueName(m: MatchDisplay): string {
 
       <!-- 局部滚动包裹区域：保留头像、排位与近期对局看板，仅滚动对局战绩列表 -->
       <div class="career-scroll-area">
-
-      <!-- 战绩对局历史列表 -->
-      <div v-if="filteredMatches.length > 0" class="match-history-list">
-        <div
-          v-for="m in filteredMatches"
-          :key="m.gameId"
-          :class="['match-card', m.win ? 'win' : 'lose']"
-          @click="goToMatchDetail(m.gameId)"
-          style="cursor: pointer;"
-        >
-          <!-- 1. 英雄头像、等级、技能、符文 -->
-          <div class="champ-panel">
-            <div class="champ-avatar-box">
-              <LcuImage :src="m.championIconUrl" class="champ-avatar" alt="champ" />
-              <div class="level-overlay">{{ m.champLevel }}</div>
-            </div>
-            <div class="spells-runes">
-              <div class="spells-col">
-                <div class="spell-slot">
-                  <LcuImage :src="getSpellIcon(m, 1)" class="mini-icon" alt="s1" />
+        <!-- 战绩对局历史列表 -->
+        <div v-if="filteredMatches.length > 0" class="match-history-list">
+          <div
+            v-for="m in filteredMatches"
+            :key="m.gameId"
+            :class="['match-card', m.win ? 'win' : 'lose']"
+            @click="goToMatchDetail(m.gameId)"
+            style="cursor: pointer"
+          >
+            <!-- 1. 英雄头像、等级、技能、符文 -->
+            <div class="champ-panel">
+              <div class="champ-avatar-box">
+                <LcuImage
+                  :src="m.championIconUrl"
+                  class="champ-avatar"
+                  alt="champ"
+                />
+                <div class="level-overlay">{{ m.champLevel }}</div>
+              </div>
+              <div class="spells-runes">
+                <div class="spells-col">
+                  <div class="spell-slot">
+                    <LcuImage
+                      :src="getSpellIcon(m, 1)"
+                      class="mini-icon"
+                      alt="s1"
+                    />
+                  </div>
+                  <div class="spell-slot">
+                    <LcuImage
+                      :src="getSpellIcon(m, 2)"
+                      class="mini-icon"
+                      alt="s2"
+                    />
+                  </div>
                 </div>
-                <div class="spell-slot">
-                  <LcuImage :src="getSpellIcon(m, 2)" class="mini-icon" alt="s2" />
+                <div v-if="m.queueId !== 2400" class="rune-slot">
+                  <LcuImage
+                    :src="m.runeIconUrl"
+                    class="mini-icon circular"
+                    alt="rune"
+                  />
                 </div>
               </div>
-              <div v-if="m.queueId !== 2400" class="rune-slot">
-                <LcuImage :src="m.runeIconUrl" class="mini-icon circular" alt="rune" />
+            </div>
+
+            <!-- 2. 胜负状态与游戏模式 -->
+            <div class="result-panel">
+              <span :class="['result-text', m.win ? 'win-text' : 'lose-text']">
+                {{ m.win ? $t("career.victory") : $t("career.defeat") }}
+              </span>
+              <span class="queue-mode">{{ getQueueName(m) }}</span>
+            </div>
+
+            <!-- 3. KDA 数字与文字 -->
+            <div class="kda-panel">
+              <div class="kda-numbers">
+                <span class="bold">{{ m.kills }}</span> /
+                <span class="bold death-red">{{ m.deaths }}</span> /
+                <span class="bold">{{ m.assists }}</span>
+              </div>
+              <div class="kda-desc">
+                <span class="kda-ratio" :class="getKdaClass(m.kda)"
+                  >{{ m.kda }} KDA</span
+                >
               </div>
             </div>
-          </div>
 
-          <!-- 2. 胜负状态与游戏模式 -->
-          <div class="result-panel">
-            <span :class="['result-text', m.win ? 'win-text' : 'lose-text']">
-              {{ m.win ? $t('career.victory') : $t('career.defeat') }}
-            </span>
-            <span class="queue-mode">{{ getQueueName(m) }}</span>
-          </div>
-
-          <!-- 3. KDA 数字与文字 -->
-          <div class="kda-panel">
-            <div class="kda-numbers">
-              <span class="bold">{{ m.kills }}</span> / 
-              <span class="bold death-red">{{ m.deaths }}</span> / 
-              <span class="bold">{{ m.assists }}</span>
+            <!-- 4. 补刀补兵数 -->
+            <div class="cs-panel">
+              <span class="cs-count">{{ m.cs }}</span>
+              <svg
+                class="cs-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
             </div>
-            <div class="kda-desc">
-              <span class="kda-ratio" :class="getKdaClass(m.kda)">{{ m.kda }} KDA</span>
-            </div>
-          </div>
 
-          <!-- 4. 补刀补兵数 -->
-          <div class="cs-panel">
-            <span class="cs-count">{{ m.cs }}</span>
-            <svg class="cs-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-
-          <!-- 5. 装备栏 (前 6 件常规装备 + 第 7 件饰品) -->
-          <div class="items-panel">
-            <div class="items-grid">
-              <div v-for="idx in 6" :key="idx" class="item-slot">
-                <LcuImage v-if="m.itemIconUrls[idx-1]" :src="m.itemIconUrls[idx-1]" class="item-img" alt="item" />
+            <!-- 5. 装备栏 (前 6 件常规装备 + 第 7 件饰品) -->
+            <div class="items-panel">
+              <div class="items-grid">
+                <div v-for="idx in 6" :key="idx" class="item-slot">
+                  <LcuImage
+                    v-if="m.itemIconUrls[idx - 1]"
+                    :src="m.itemIconUrls[idx - 1]"
+                    class="item-img"
+                    alt="item"
+                  />
+                </div>
+              </div>
+              <!-- 饰品独立显示 -->
+              <div class="ward-slot">
+                <LcuImage
+                  v-if="m.itemIconUrls[6]"
+                  :src="m.itemIconUrls[6]"
+                  class="item-img"
+                  alt="ward"
+                />
               </div>
             </div>
-            <!-- 饰品独立显示 -->
-            <div class="ward-slot">
-              <LcuImage v-if="m.itemIconUrls[6]" :src="m.itemIconUrls[6]" class="item-img" alt="ward" />
+
+            <!-- 6. 获得金币 -->
+            <div class="gold-panel">
+              <span class="gold-count">{{ m.gold.toLocaleString() }}</span>
+              <svg class="gold-icon" viewBox="0 0 24 24" fill="currentColor">
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  fill="none"
+                />
+                <path
+                  d="M12 6v12M15 9H11.5a1.5 1.5 0 0 0 0 3h1a1.5 1.5 0 0 1 0 3H9"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  fill="none"
+                />
+              </svg>
             </div>
-          </div>
 
-          <!-- 6. 获得金币 -->
-          <div class="gold-panel">
-            <span class="gold-count">{{ m.gold.toLocaleString() }}</span>
-            <svg class="gold-icon" viewBox="0 0 24 24" fill="currentColor">
-              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
-              <path d="M12 6v12M15 9H11.5a1.5 1.5 0 0 0 0 3h1a1.5 1.5 0 0 1 0 3H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
-            </svg>
-          </div>
-
-          <!-- 7. 地图模式与时长/日期 -->
-          <div class="time-panel">
-            <span class="game-map">{{ translateMapName(m.map) }}</span>
-            <span class="match-time">{{ m.duration }} · {{ formatTime(m.timeStamp) }}</span>
+            <!-- 7. 地图模式与时长/日期 -->
+            <div class="time-panel">
+              <span class="game-map">{{ translateMapName(m.map) }}</span>
+              <span class="match-time"
+                >{{ m.duration }} · {{ formatTime(m.timeStamp) }}</span
+              >
+            </div>
           </div>
         </div>
-      </div>
-      <div v-else-if="!loading" class="tip-container">
-        <p class="tip">{{ $t('career.empty') }}</p>
-      </div>
+        <div v-else-if="!loading" class="tip-container">
+          <p class="tip">{{ $t("career.empty") }}</p>
+        </div>
       </div>
     </div>
   </div>
@@ -938,7 +1154,8 @@ function getQueueName(m: MatchDisplay): string {
   text-align: left;
 }
 
-.rank-table th, .rank-table td {
+.rank-table th,
+.rank-table td {
   padding: 12px 16px;
   font-size: 0.82rem;
   border-bottom: 1px solid var(--border-color);
@@ -1233,7 +1450,8 @@ function getQueueName(m: MatchDisplay): string {
   gap: 2px;
 }
 
-.spell-slot, .rune-slot {
+.spell-slot,
+.rune-slot {
   width: 22px;
   height: 22px;
   border-radius: 3px;
@@ -1305,10 +1523,18 @@ function getQueueName(m: MatchDisplay): string {
   font-weight: 700;
 }
 
-.kda-perfect { color: #d97706; }
-.kda-great { color: #db2777; }
-.kda-good { color: #2563eb; }
-.kda-normal { color: var(--text-dimmed); }
+.kda-perfect {
+  color: #d97706;
+}
+.kda-great {
+  color: #db2777;
+}
+.kda-good {
+  color: #2563eb;
+}
+.kda-normal {
+  color: var(--text-dimmed);
+}
 
 /* 4. 补刀面板 */
 .cs-panel {
@@ -1343,7 +1569,8 @@ function getQueueName(m: MatchDisplay): string {
   gap: 2px;
 }
 
-.item-slot, .ward-slot {
+.item-slot,
+.ward-slot {
   width: 28px;
   height: 28px;
   background-color: rgba(0, 0, 0, 0.04);
@@ -1405,7 +1632,13 @@ function getQueueName(m: MatchDisplay): string {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

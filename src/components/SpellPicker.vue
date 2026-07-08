@@ -20,42 +20,47 @@ interface SpellEntry {
 const spells = ref<SpellEntry[]>([]);
 const loading = ref(true);
 const showPicker = ref(false);
-const activeSlot = ref<'D' | 'F' | null>(null);
+const activeSlot = ref<"D" | "F" | null>(null);
 
 const selectedIds = computed(() => props.modelValue || []);
 
 // 获取 D 键选中的技能
 const dSpell = computed(() => {
   const id = selectedIds.value[0];
-  return spells.value.find(s => s.id === id);
+  return spells.value.find((s) => s.id === id);
 });
 
 // 获取 F 键选中的技能
 const fSpell = computed(() => {
   const id = selectedIds.value[1];
-  return spells.value.find(s => s.id === id);
+  return spells.value.find((s) => s.id === id);
 });
 
 async function loadSpells() {
   if (spells.value.length > 0) return;
   loading.value = true;
   try {
-    const resp = await lcuRequest<any[]>("GET", "/lol-game-data/assets/v1/summoner-spells.json");
+    const resp = await lcuRequest<any[]>(
+      "GET",
+      "/lol-game-data/assets/v1/summoner-spells.json",
+    );
     if (resp.success && resp.data) {
       const seenNames = new Set<string>();
       const unique: SpellEntry[] = [];
       // 按照 ID 升序排列，这样名字重复时会优先保留 ID 较小的常规技能（比如普通闪现 ID 为 4）
-      const sortedData = [...resp.data].sort((a, b) => (a.id || 0) - (b.id || 0));
+      const sortedData = [...resp.data].sort(
+        (a, b) => (a.id || 0) - (b.id || 0),
+      );
       for (const s of sortedData) {
         const name = (s.name || "").trim();
         if (
-          s.id > 0 && 
-          name && 
-          !name.toLowerCase().includes("placeholder") && 
-          !name.includes("占位") && 
-          !name.includes("魄罗") && 
-          !name.includes("闪人") && 
-          !name.includes("原始惩戒") && 
+          s.id > 0 &&
+          name &&
+          !name.toLowerCase().includes("placeholder") &&
+          !name.includes("占位") &&
+          !name.includes("魄罗") &&
+          !name.includes("闪人") &&
+          !name.includes("原始惩戒") &&
           !seenNames.has(name)
         ) {
           seenNames.add(name);
@@ -85,26 +90,26 @@ watch(showPicker, (newVal) => {
   }
 });
 
-function openPicker(slot: 'D' | 'F') {
+function openPicker(slot: "D" | "F") {
   activeSlot.value = slot;
   showPicker.value = true;
 }
 
 function selectSpell(id: number) {
   const list = [...selectedIds.value];
-  
+
   // 确保数组包含两个位置
   while (list.length < 2) {
     list.push(0);
   }
 
-  if (activeSlot.value === 'D') {
+  if (activeSlot.value === "D") {
     list[0] = id;
     // 如果 F 键也是这个技能，清空 F 键以防重复
     if (list[1] === id) {
       list[1] = 0;
     }
-  } else if (activeSlot.value === 'F') {
+  } else if (activeSlot.value === "F") {
     list[1] = id;
     // 如果 D 键也是这个技能，清空 D 键以防重复
     if (list[0] === id) {
@@ -113,22 +118,28 @@ function selectSpell(id: number) {
   }
 
   // 过滤掉未设置 (0) 的技能，传回后端
-  emit("update:modelValue", list.filter(x => x > 0));
+  emit(
+    "update:modelValue",
+    list.filter((x) => x > 0),
+  );
   showPicker.value = false;
   activeSlot.value = null;
 }
 
-function removeSpell(slot: 'D' | 'F') {
+function removeSpell(slot: "D" | "F") {
   const list = [...selectedIds.value];
   while (list.length < 2) {
     list.push(0);
   }
-  if (slot === 'D') {
+  if (slot === "D") {
     list[0] = 0;
   } else {
     list[1] = 0;
   }
-  emit("update:modelValue", list.filter(x => x > 0));
+  emit(
+    "update:modelValue",
+    list.filter((x) => x > 0),
+  );
 }
 </script>
 
@@ -138,29 +149,33 @@ function removeSpell(slot: 'D' | 'F') {
     <div class="slots-container">
       <!-- D 键技能 -->
       <div class="spell-slot-card" @click="openPicker('D')">
-        <span class="slot-badge">{{ $t('spellPicker.keyD') }}</span>
+        <span class="slot-badge">{{ $t("spellPicker.keyD") }}</span>
         <div v-if="dSpell" class="slot-content">
           <LcuImage :src="dSpell.iconPath" class="slot-icon" alt="spell" />
-          <span class="slot-name">{{ $te('spells.' + dSpell.id) ? $t('spells.' + dSpell.id) : dSpell.name }}</span>
+          <span class="slot-name">{{
+            $te("spells." + dSpell.id) ? $t("spells." + dSpell.id) : dSpell.name
+          }}</span>
           <span class="slot-remove" @click.stop="removeSpell('D')">✕</span>
         </div>
         <div v-else class="slot-placeholder">
           <span class="plus-icon">+</span>
-          <span>{{ $t('spellPicker.selectSpell') }}</span>
+          <span>{{ $t("spellPicker.selectSpell") }}</span>
         </div>
       </div>
 
       <!-- F 键技能 -->
       <div class="spell-slot-card" @click="openPicker('F')">
-        <span class="slot-badge">{{ $t('spellPicker.keyF') }}</span>
+        <span class="slot-badge">{{ $t("spellPicker.keyF") }}</span>
         <div v-if="fSpell" class="slot-content">
           <LcuImage :src="fSpell.iconPath" class="slot-icon" alt="spell" />
-          <span class="slot-name">{{ $te('spells.' + fSpell.id) ? $t('spells.' + fSpell.id) : fSpell.name }}</span>
+          <span class="slot-name">{{
+            $te("spells." + fSpell.id) ? $t("spells." + fSpell.id) : fSpell.name
+          }}</span>
           <span class="slot-remove" @click.stop="removeSpell('F')">✕</span>
         </div>
         <div v-else class="slot-placeholder">
           <span class="plus-icon">+</span>
-          <span>{{ $t('spellPicker.selectSpell') }}</span>
+          <span>{{ $t("spellPicker.selectSpell") }}</span>
         </div>
       </div>
     </div>
@@ -168,23 +183,46 @@ function removeSpell(slot: 'D' | 'F') {
     <!-- 技能选择面板 -->
     <div v-show="showPicker" class="picker-panel">
       <div class="panel-header">
-        <span class="panel-title">{{ $t('spellPicker.panelTitle', { slot: activeSlot }) }}</span>
-        <button class="panel-close" @click="showPicker = false; activeSlot = null">✕</button>
+        <span class="panel-title">{{
+          $t("spellPicker.panelTitle", { slot: activeSlot })
+        }}</span>
+        <button
+          class="panel-close"
+          @click="
+            showPicker = false;
+            activeSlot = null;
+          "
+        >
+          ✕
+        </button>
       </div>
-      <div v-if="loading" class="picker-loading">{{ $t('spellPicker.loading') }}</div>
+      <div v-if="loading" class="picker-loading">
+        {{ $t("spellPicker.loading") }}
+      </div>
       <div v-else class="spell-grid">
         <div
           v-for="spell in spells"
           :key="spell.id"
-          :class="['spell-cell', { 
-            selected: (activeSlot === 'D' && dSpell?.id === spell.id) || (activeSlot === 'F' && fSpell?.id === spell.id),
-            disabled: (activeSlot === 'D' && fSpell?.id === spell.id) || (activeSlot === 'F' && dSpell?.id === spell.id)
-          }]"
-          :title="$te('spells.' + spell.id) ? $t('spells.' + spell.id) : spell.name"
+          :class="[
+            'spell-cell',
+            {
+              selected:
+                (activeSlot === 'D' && dSpell?.id === spell.id) ||
+                (activeSlot === 'F' && fSpell?.id === spell.id),
+              disabled:
+                (activeSlot === 'D' && fSpell?.id === spell.id) ||
+                (activeSlot === 'F' && dSpell?.id === spell.id),
+            },
+          ]"
+          :title="
+            $te('spells.' + spell.id) ? $t('spells.' + spell.id) : spell.name
+          "
           @click="selectSpell(spell.id)"
         >
           <LcuImage :src="spell.iconPath" class="spell-icon" alt="spell" />
-          <span class="spell-name">{{ $te('spells.' + spell.id) ? $t('spells.' + spell.id) : spell.name }}</span>
+          <span class="spell-name">{{
+            $te("spells." + spell.id) ? $t("spells." + spell.id) : spell.name
+          }}</span>
         </div>
       </div>
     </div>
@@ -251,7 +289,7 @@ function removeSpell(slot: 'D' | 'F') {
   height: 36px;
   border-radius: 6px;
   overflow: hidden;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   flex-shrink: 0;
 }
 
@@ -307,8 +345,14 @@ function removeSpell(slot: 'D' | 'F') {
 }
 
 @keyframes slide-down {
-  from { opacity: 0; transform: translateY(-5px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .panel-header {
@@ -332,7 +376,9 @@ function removeSpell(slot: 'D' | 'F') {
   color: var(--text-dimmed);
   cursor: pointer;
 }
-.panel-close:hover { color: var(--loss-color); }
+.panel-close:hover {
+  color: var(--loss-color);
+}
 
 .picker-loading {
   text-align: center;
@@ -361,7 +407,9 @@ function removeSpell(slot: 'D' | 'F') {
   transition: all 0.15s;
   border: 2px solid transparent;
 }
-.spell-cell:hover { background: var(--settings-card-bg-hover); }
+.spell-cell:hover {
+  background: var(--settings-card-bg-hover);
+}
 .spell-cell.selected {
   border-color: var(--primary-color);
   background: var(--primary-color-alpha-15);

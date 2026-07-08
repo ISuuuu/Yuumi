@@ -8,12 +8,21 @@ const inflight = new Map<string, Promise<string>>();
 /**
  * 包装带重试机制的 LCU 资源获取方法，处理客户端初始启动时的暂时不可达问题
  */
-function fetchLcuAssetWithRetry(path: string, retries = 3, delay = 1000): Promise<string> {
+function fetchLcuAssetWithRetry(
+  path: string,
+  retries = 3,
+  delay = 1000,
+): Promise<string> {
   return fetchLcuAsset(path).catch((err) => {
     if (retries > 0) {
-      console.warn(`[LcuImage] 资源加载失败，将在 ${delay}ms 后重试 (剩余 ${retries} 次):`, path, err);
-      return new Promise<void>((resolve) => setTimeout(resolve, delay))
-        .then(() => fetchLcuAssetWithRetry(path, retries - 1, delay * 1.5));
+      console.warn(
+        `[LcuImage] 资源加载失败，将在 ${delay}ms 后重试 (剩余 ${retries} 次):`,
+        path,
+        err,
+      );
+      return new Promise<void>((resolve) => setTimeout(resolve, delay)).then(
+        () => fetchLcuAssetWithRetry(path, retries - 1, delay * 1.5),
+      );
     }
     throw err;
   });
@@ -48,24 +57,27 @@ export function useLcuAsset(pathRef: Ref<string | undefined>) {
         inflight.set(path, fetchLcuAssetWithRetry(path));
       }
 
-      inflight.get(path)!.then(
-        (dataUrl) => {
-          cache.set(path, dataUrl);
-          // 仅当 pathRef 未变化时才写入（防止竞态）
-          if (pathRef.value === path) {
-            src.value = dataUrl;
-          }
-        },
-        (err) => {
-          console.warn("[LcuImage] 资源最终加载失败:", path, err);
-          if (pathRef.value === path) {
-            src.value = "";
-          }
-        },
-      ).finally(() => {
-        inflight.delete(path);
-        loading.value = false;
-      });
+      inflight
+        .get(path)!
+        .then(
+          (dataUrl) => {
+            cache.set(path, dataUrl);
+            // 仅当 pathRef 未变化时才写入（防止竞态）
+            if (pathRef.value === path) {
+              src.value = dataUrl;
+            }
+          },
+          (err) => {
+            console.warn("[LcuImage] 资源最终加载失败:", path, err);
+            if (pathRef.value === path) {
+              src.value = "";
+            }
+          },
+        )
+        .finally(() => {
+          inflight.delete(path);
+          loading.value = false;
+        });
     },
     { immediate: true },
   );

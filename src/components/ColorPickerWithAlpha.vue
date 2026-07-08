@@ -8,15 +8,26 @@
       v-bind="filteredAttrs"
     >
       <template #action>
-        <div style="display: flex; flex-direction: column; width: 100%; gap: 8px;">
-          <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
-            <span style="font-size: 12px; color: var(--text-dimmed); white-space: nowrap;">透明度</span>
+        <div
+          style="display: flex; flex-direction: column; width: 100%; gap: 8px"
+        >
+          <div
+            style="display: flex; align-items: center; gap: 8px; width: 100%"
+          >
+            <span
+              style="
+                font-size: 12px;
+                color: var(--text-dimmed);
+                white-space: nowrap;
+              "
+              >透明度</span
+            >
             <n-slider
               :value="alphaPercent"
               @update:value="onAlphaSliderUpdate"
               :min="0"
               :max="100"
-              style="flex: 1; min-width: 60px;"
+              style="flex: 1; min-width: 60px"
             />
             <n-input-number
               :value="alphaPercent"
@@ -24,7 +35,7 @@
               :min="0"
               :max="100"
               size="small"
-              style="width: 70px; flex-shrink: 0;"
+              style="width: 70px; flex-shrink: 0"
               :show-button="false"
             >
               <template #suffix>%</template>
@@ -37,10 +48,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useAttrs } from 'vue';
+import { computed, useAttrs } from "vue";
 
 defineOptions({
-  inheritAttrs: false
+  inheritAttrs: false,
 });
 
 const props = defineProps<{
@@ -48,8 +59,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:value', val: string): void;
-  (e: 'save'): void; // 当面板关闭时触发持久化保存
+  (e: "update:value", val: string): void;
+  (e: "save"): void; // 当面板关闭时触发持久化保存
 }>();
 
 const attrs = useAttrs();
@@ -62,7 +73,7 @@ const filteredAttrs = computed(() => {
 const alphaPercent = computed(() => {
   const color = props.value;
   if (!color) return 100;
-  if (color.startsWith('#') && color.length === 9) {
+  if (color.startsWith("#") && color.length === 9) {
     const alphaHex = color.slice(1, 3);
     return Math.round((parseInt(alphaHex, 16) / 255) * 100);
   }
@@ -72,38 +83,40 @@ const alphaPercent = computed(() => {
 // 提取纯色 #RRGGBB 给颜色选择器
 const pureColor = computed(() => {
   const color = props.value;
-  if (!color) return '#000000';
-  if (color.startsWith('#') && color.length === 9) {
-    return '#' + color.slice(3); // #RRGGBB
+  if (!color) return "#000000";
+  if (color.startsWith("#") && color.length === 9) {
+    return "#" + color.slice(3); // #RRGGBB
   }
   return color;
 });
 
 // 将纯色和透明度百分比合成 #AARRGGBB
 function buildColor(pureHex: string, percent: number) {
-  const cleanHex6 = pureHex.startsWith('#') ? pureHex.slice(1) : pureHex;
+  const cleanHex6 = pureHex.startsWith("#") ? pureHex.slice(1) : pureHex;
   const alpha = Math.min(100, Math.max(0, percent)) / 100;
-  const alphaHex = Math.round(alpha * 255).toString(16).padStart(2, '0');
+  const alphaHex = Math.round(alpha * 255)
+    .toString(16)
+    .padStart(2, "0");
   return `#${alphaHex}${cleanHex6}`;
 }
 
 function onColorUpdate(newPureHex: string) {
-  emit('update:value', buildColor(newPureHex, alphaPercent.value));
+  emit("update:value", buildColor(newPureHex, alphaPercent.value));
 }
 
 function onAlphaSliderUpdate(val: number) {
-  emit('update:value', buildColor(pureColor.value, val));
+  emit("update:value", buildColor(pureColor.value, val));
 }
 
 function onAlphaInputUpdate(val: number | null) {
   if (val === null) return;
-  emit('update:value', buildColor(pureColor.value, val));
+  emit("update:value", buildColor(pureColor.value, val));
 }
 
 // 当面板关闭时通知外部进行写入保存，避免拖动时的高频 I/O 卡死
 function onShowUpdate(show: boolean) {
   if (!show) {
-    emit('save');
+    emit("save");
   }
 }
 </script>

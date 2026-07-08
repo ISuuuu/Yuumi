@@ -52,7 +52,9 @@ const filteredChampions = computed(() => {
 
 const selectedChampions = computed(() => {
   const map = new Map(champions.value.map((c) => [c.id, c]));
-  return selected.value.map((id) => map.get(id)).filter(Boolean) as ChampionEntry[];
+  return selected.value
+    .map((id) => map.get(id))
+    .filter(Boolean) as ChampionEntry[];
 });
 
 onMounted(async () => {
@@ -70,7 +72,9 @@ watch(showPicker, (newVal) => {
   if (newVal) {
     searchQuery.value = "";
     // 确保数据已加载（缓存命中时立即返回）
-    fetchChampions().then(list => { champions.value = list; });
+    fetchChampions().then((list) => {
+      champions.value = list;
+    });
     nextTick(() => {
       searchInputRef.value?.focus();
     });
@@ -96,7 +100,10 @@ function toggleChampion(id: number) {
 }
 
 function removeChampion(id: number) {
-  emit("update:modelValue", selected.value.filter((x) => x !== id));
+  emit(
+    "update:modelValue",
+    selected.value.filter((x) => x !== id),
+  );
 }
 
 function clearAll() {
@@ -117,30 +124,48 @@ function clearAll() {
         >
           <LcuImage :src="champ.iconPath" class="chip-icon" alt="champ" />
           <span class="chip-name">{{ champ.name }}</span>
-          <span class="chip-remove" @click.stop="removeChampion(champ.id)">✕</span>
+          <span class="chip-remove" @click.stop="removeChampion(champ.id)"
+            >✕</span
+          >
         </div>
-        <span v-if="selectedChampions.length === 0" class="chip-empty">{{ $t('championPicker.empty') }}</span>
+        <span v-if="selectedChampions.length === 0" class="chip-empty">{{
+          $t("championPicker.empty")
+        }}</span>
       </div>
       <div class="trigger-actions">
-        <button v-if="selected.length > 0" class="clear-btn" @click="clearAll">{{ $t('championPicker.clearBtn') }}</button>
-        <button class="select-btn" @click="showPicker = true">{{ $t('championPicker.selectBtn') }}</button>
+        <button v-if="selected.length > 0" class="clear-btn" @click="clearAll">
+          {{ $t("championPicker.clearBtn") }}
+        </button>
+        <button class="select-btn" @click="showPicker = true">
+          {{ $t("championPicker.selectBtn") }}
+        </button>
       </div>
     </div>
 
     <!-- 弹出选择框 (Teleport) -->
     <Teleport to="body">
       <Transition name="fade">
-        <div v-if="showPicker" class="modal-overlay" @click="showPicker = false">
+        <div
+          v-if="showPicker"
+          class="modal-overlay"
+          @click="showPicker = false"
+        >
           <div class="modal-content" @click.stop>
             <div class="modal-header">
-              <h3 class="modal-title">{{ $t('championPicker.title') }}</h3>
+              <h3 class="modal-title">{{ $t("championPicker.title") }}</h3>
               <button class="close-btn" @click="showPicker = false">✕</button>
             </div>
-            
+
             <div class="search-box">
-              <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="11" cy="11" r="8"/>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              <svg
+                class="search-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
               <input
                 ref="searchInputRef"
@@ -153,29 +178,45 @@ function clearAll() {
 
             <div v-if="loading" class="picker-loading">
               <div class="loading-spinner"></div>
-              <span>{{ $t('championPicker.loading') }}</span>
+              <span>{{ $t("championPicker.loading") }}</span>
             </div>
             <div v-else class="champion-grid">
               <div
                 v-for="champ in filteredChampions"
                 :key="champ.id"
-                :class="['champ-cell', { selected: selected.includes(champ.id) }]"
+                :class="[
+                  'champ-cell',
+                  { selected: selected.includes(champ.id) },
+                ]"
                 :title="champ.name"
                 @click="toggleChampion(champ.id)"
               >
-                <LcuImage :src="champ.iconPath" class="champ-icon" alt="champ" />
+                <LcuImage
+                  :src="champ.iconPath"
+                  class="champ-icon"
+                  alt="champ"
+                />
                 <span class="champ-name">{{ champ.name }}</span>
                 <div v-if="selected.includes(champ.id)" class="selected-badge">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                    <polyline points="20 6 9 17 4 12"/>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="3"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
                   </svg>
                 </div>
               </div>
             </div>
 
             <div class="modal-footer">
-              <span class="selected-count">{{ $t('championPicker.selectedCount', { count: selected.length }) }}</span>
-              <button class="confirm-btn" @click="showPicker = false">{{ $t('championPicker.confirmBtn') }}</button>
+              <span class="selected-count">{{
+                $t("championPicker.selectedCount", { count: selected.length })
+              }}</span>
+              <button class="confirm-btn" @click="showPicker = false">
+                {{ $t("championPicker.confirmBtn") }}
+              </button>
             </div>
           </div>
         </div>
@@ -241,7 +282,9 @@ function clearAll() {
   margin-left: 2px;
   padding: 0 2px;
 }
-.chip-remove:hover { color: var(--loss-color); }
+.chip-remove:hover {
+  color: var(--loss-color);
+}
 
 .chip-empty {
   font-size: 0.82rem;
@@ -309,7 +352,9 @@ function clearAll() {
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.05);
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.15),
+    0 10px 10px -5px rgba(0, 0, 0, 0.05);
   border: 1px solid var(--border-color);
   overflow: hidden;
   position: relative;
@@ -408,7 +453,9 @@ function clearAll() {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 英雄网格 */
@@ -497,7 +544,7 @@ function clearAll() {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
   border: 1px solid white;
 }
 .selected-badge svg {
