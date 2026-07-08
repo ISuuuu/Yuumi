@@ -3,9 +3,15 @@ import { ref, onMounted, watch, computed, provide } from "vue";
 import { useLcuStore, initLcuListeners } from "./store/lcuStore";
 import { storeToRefs } from "pinia";
 import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
-import { updateThemeColor, updateDeathColor, applyDpiScale, toHex6, updateCardColors } from "./utils/theme";
-import { useI18n } from 'vue-i18n';
-import { setLocale } from './i18n';
+import {
+  updateThemeColor,
+  updateDeathColor,
+  applyDpiScale,
+  toHex6,
+  updateCardColors,
+} from "./utils/theme";
+import { useI18n } from "vue-i18n";
+import { setLocale } from "./i18n";
 import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { invoke } from "@tauri-apps/api/core";
@@ -28,11 +34,11 @@ import opggIcon from "./assets/opgg.svg";
 
 function applyThemeMode(mode: string) {
   const root = document.documentElement;
-  if (mode === 'Auto') {
-    root.removeAttribute('data-theme');
+  if (mode === "Auto") {
+    root.removeAttribute("data-theme");
     localStorage.setItem("yuumi_theme", "Auto");
-  } else if (mode === 'Light' || mode === 'Dark') {
-    root.setAttribute('data-theme', mode.toLowerCase());
+  } else if (mode === "Light" || mode === "Dark") {
+    root.setAttribute("data-theme", mode.toLowerCase());
     localStorage.setItem("yuumi_theme", mode);
   }
 }
@@ -42,9 +48,9 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => {
   const customColor = appConfig.value?.Personalization?.ThemeColor
     ? toHex6(appConfig.value.Personalization.ThemeColor)
     : "#a78bfa";
-  
+
   const isDark = isDarkTheme.value;
-  
+
   return {
     common: {
       primaryColor: customColor,
@@ -83,17 +89,19 @@ const mapSideLabel = ref(""); // 蓝色方/红色方
 const { t } = useI18n();
 
 // 检测当前是否是悬浮窗窗口（bench-overlay）
-const isOverlayWindow = ref(window.location.search.includes("window=bench-overlay"));
+const isOverlayWindow = ref(
+  window.location.search.includes("window=bench-overlay"),
+);
 
 // 自动更新弹窗
 const updateInfo = ref<UpdateInfo | null>(null);
 
 // Toast 通知（通过 Naive UI Message API）
-function showToast(message: string, type: 'success' | 'error' = 'success') {
+function showToast(message: string, type: "success" | "error" = "success") {
   try {
     const msg = (window as any).$message;
     if (msg) {
-      if (type === 'error') {
+      if (type === "error") {
         msg.error(message);
       } else {
         msg.success(message);
@@ -105,11 +113,16 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
 }
 
 // 用于 Career → Search 跳转的共享状态
-const navigateSearchPayload = ref<{ name: string; gameId: number | null } | null>(null);
+const navigateSearchPayload = ref<{
+  name: string;
+  gameId: number | null;
+} | null>(null);
 
 provide("navigateSearchPayload", navigateSearchPayload);
 
-const isSystemDark = ref(window.matchMedia("(prefers-color-scheme: dark)").matches);
+const isSystemDark = ref(
+  window.matchMedia("(prefers-color-scheme: dark)").matches,
+);
 onMounted(() => {
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   const handler = (e: MediaQueryListEvent) => {
@@ -132,7 +145,7 @@ function navigateTo(page: string) {
 provide("navigateTo", navigateTo);
 
 const regionName = computed(() => {
-  if (!platformId.value) return t('regions.HN1');
+  if (!platformId.value) return t("regions.HN1");
   const key = `regions.${platformId.value}`;
   const translated = t(key);
   return translated !== key ? translated : platformId.value;
@@ -146,7 +159,7 @@ watch(
       setLocale(newLang);
     }
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 onMounted(async () => {
@@ -180,7 +193,7 @@ onMounted(async () => {
           title: "配置文件异常",
           content: configErr,
           positiveText: "确定",
-          positiveButtonProps: { type: 'primary' }
+          positiveButtonProps: { type: "primary" },
         });
       } else {
         showToast("配置文件异常:\n" + configErr);
@@ -188,7 +201,9 @@ onMounted(async () => {
     }
     const cfg = appConfig.value;
     if (cfg?.General?.EnableStartLolWithApp) {
-      invoke("launch_lol_client").catch((e: any) => console.warn("自动启动 LOL 失败:", e));
+      invoke("launch_lol_client").catch((e: any) =>
+        console.warn("自动启动 LOL 失败:", e),
+      );
     }
     // 如果没有开启“游戏开始最小化”（静默启动），则在组件挂载并完成配置获取后显示窗口
     if (!cfg?.General?.EnableGameStartMinimize) {
@@ -196,7 +211,9 @@ onMounted(async () => {
     }
     // 无论是否静默启动，都在配置加载完后尝试应用一次云母效果，防止窗口创建时隐藏导致 DWM 特效应用失败
     if (cfg?.Personalization?.MicaEnabled) {
-      invoke("set_mica_effect", { enabled: true }).catch((e: any) => console.warn("应用云母效果失败:", e));
+      invoke("set_mica_effect", { enabled: true }).catch((e: any) =>
+        console.warn("应用云母效果失败:", e),
+      );
     }
     // 应用主题色、死亡数字颜色 & 界面缩放
     if (cfg?.Personalization) {
@@ -206,11 +223,11 @@ onMounted(async () => {
       updateCardColors(
         cfg.Personalization.WinCardColor,
         cfg.Personalization.LoseCardColor,
-        cfg.Personalization.RemakeCardColor
+        cfg.Personalization.RemakeCardColor,
       );
       updateDeathColor(
         cfg.Personalization.LightDeathsNumberColor,
-        cfg.Personalization.DarkDeathsNumberColor
+        cfg.Personalization.DarkDeathsNumberColor,
       );
       applyDpiScale(cfg.Personalization.DpiScale);
       applyThemeMode(cfg.Personalization.ThemeMode);
@@ -253,7 +270,7 @@ async function openOpggWindow() {
   // 从配置中读取是否置顶窗口
   let alwaysOnTop = false;
   try {
-    const cfg = appConfig.value || await fetchConfig();
+    const cfg = appConfig.value || (await fetchConfig());
     alwaysOnTop = cfg.Functions?.EnableOpggOnTop ?? false;
   } catch (e) {
     console.warn("加载置顶配置失败，使用默认值:", e);
@@ -261,7 +278,9 @@ async function openOpggWindow() {
 
   // 根据当前主题决定原生标题栏颜色
   const savedTheme = localStorage.getItem("yuumi_theme");
-  const isSystemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const isSystemDark = window.matchMedia(
+    "(prefers-color-scheme: dark)",
+  ).matches;
   const nativeTheme: "dark" | "light" =
     savedTheme === "Dark" || (savedTheme !== "Light" && isSystemDark)
       ? "dark"
@@ -311,7 +330,7 @@ async function loadLcuState() {
   if (!store.isConnected) return;
 
   // 等待 1 秒，让 LCU API 完全就绪
-  await new Promise(r => setTimeout(r, 1000));
+  await new Promise((r) => setTimeout(r, 1000));
 
   // 每一步独立 try-catch，互不影响
 
@@ -325,7 +344,10 @@ async function loadLcuState() {
 
   // 2. 获取大区平台
   try {
-    const resp = await lcuRequest<any>("GET", "/lol-platform-config/v1/namespaces/LoginPlatformLocalization/platformId");
+    const resp = await lcuRequest<any>(
+      "GET",
+      "/lol-platform-config/v1/namespaces/LoginPlatformLocalization/platformId",
+    );
     if (resp.success && resp.data) {
       platformId.value = resp.data;
     }
@@ -335,7 +357,10 @@ async function loadLcuState() {
 
   // 3. 同步拉取当前 LCU 对局状态（游戏中重启时关键，必须执行）
   try {
-    const phaseResp = await lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase");
+    const phaseResp = await lcuRequest<string>(
+      "GET",
+      "/lol-gameflow/v1/gameflow-phase",
+    );
     if (phaseResp.success && phaseResp.data) {
       store.setGamePhase(phaseResp.data);
     }
@@ -346,7 +371,10 @@ async function loadLcuState() {
   // 4. 同步拉取对局 Session
   if (store.gamePhase === "ChampSelect") {
     try {
-      const sessionResp = await lcuRequest<any>("GET", "/lol-champ-select/v1/session");
+      const sessionResp = await lcuRequest<any>(
+        "GET",
+        "/lol-champ-select/v1/session",
+      );
       if (sessionResp.success && sessionResp.data) {
         store.setChampSelectSession(sessionResp.data);
       }
@@ -357,7 +385,7 @@ async function loadLcuState() {
 
   // 5. 初始化加载主题色
   try {
-    const cfg = appConfig.value || await fetchConfig();
+    const cfg = appConfig.value || (await fetchConfig());
     if (cfg && cfg.Personalization) {
       if (cfg.Personalization.ThemeColor) {
         updateThemeColor(cfg.Personalization.ThemeColor);
@@ -365,7 +393,7 @@ async function loadLcuState() {
       updateCardColors(
         cfg.Personalization.WinCardColor,
         cfg.Personalization.LoseCardColor,
-        cfg.Personalization.RemakeCardColor
+        cfg.Personalization.RemakeCardColor,
       );
       if (cfg.Personalization.ThemeMode) {
         applyThemeMode(cfg.Personalization.ThemeMode);
@@ -375,22 +403,31 @@ async function loadLcuState() {
     console.warn("[loadLcuState] 加载配置失败:", e);
   }
 
-  console.log("[loadLcuState] 完成, gamePhase=", store.gamePhase, "summoner=", summoner.value?.displayName);
+  console.log(
+    "[loadLcuState] 完成, gamePhase=",
+    store.gamePhase,
+    "summoner=",
+    summoner.value?.displayName,
+  );
 }
 
-watch(() => store.isConnected, (connected) => {
-  if (connected) {
-    loadLcuState();
-    // 客户端连接成功后自动跳转到生涯页面
-    currentPage.value = "career";
-  } else {
-    summoner.value = null;
-    platformId.value = "";
-    mapSideLabel.value = ""; // 断开连接时清空队伍阵营信息
-    // 断开连接时回到首页
-    currentPage.value = "home";
-  }
-}, { immediate: true });
+watch(
+  () => store.isConnected,
+  (connected) => {
+    if (connected) {
+      loadLcuState();
+      // 客户端连接成功后自动跳转到生涯页面
+      currentPage.value = "career";
+    } else {
+      summoner.value = null;
+      platformId.value = "";
+      mapSideLabel.value = ""; // 断开连接时清空队伍阵营信息
+      // 断开连接时回到首页
+      currentPage.value = "home";
+    }
+  },
+  { immediate: true },
+);
 
 // 监听 Career → Search 跳转
 watch(navigateSearchPayload, (payload) => {
@@ -400,14 +437,22 @@ watch(navigateSearchPayload, (payload) => {
 });
 
 async function showBenchOverlay(show: boolean = true) {
-  console.log("[bench-debug] showBenchOverlay 被调用: show =", show, "EnableBenchOverlay 配置值 =", appConfig.value?.Functions?.EnableBenchOverlay);
+  console.log(
+    "[bench-debug] showBenchOverlay 被调用: show =",
+    show,
+    "EnableBenchOverlay 配置值 =",
+    appConfig.value?.Functions?.EnableBenchOverlay,
+  );
   // 检查配置开关
   if (show && appConfig.value?.Functions?.EnableBenchOverlay === false) {
     console.log("[bench-debug] 悬浮窗已被配置开关禁用，不执行开启");
     return;
   }
   try {
-    console.log("[bench-debug] 正在通过 invoke 向 Rust 发送窗口控制命令: show =", show);
+    console.log(
+      "[bench-debug] 正在通过 invoke 向 Rust 发送窗口控制命令: show =",
+      show,
+    );
     await invoke("show_bench_overlay_window", { show });
   } catch (err) {
     console.error("[bench] 控制悬浮窗失败:", err);
@@ -423,9 +468,12 @@ watch(gamePhase, (phase: string) => {
   console.log("[watch gamePhase] phase changed:", phase);
 
   // 更新窗口标题栏显示游戏状态
-  const label = t('phase.' + phase);
+  const label = t("phase." + phase);
   const title = label ? `Yuumi · ${label}` : "Yuumi";
-  const setTitle = (t: string) => getCurrentWindow().setTitle(t).catch(() => {});
+  const setTitle = (t: string) =>
+    getCurrentWindow()
+      .setTitle(t)
+      .catch(() => {});
 
   if (phase === "ChampSelect") {
     // 异步获取队伍信息（蓝色方/红色方）追加到标题
@@ -434,7 +482,8 @@ watch(gamePhase, (phase: string) => {
         const side = await invoke<string | null>("get_map_side");
         console.log("[watch gamePhase] get_map_side result:", side);
         if (side) {
-          const sideLabel = side === "blue" ? t('titlebar.blueSide') : t('titlebar.redSide');
+          const sideLabel =
+            side === "blue" ? t("titlebar.blueSide") : t("titlebar.redSide");
           mapSideLabel.value = sideLabel;
           setTitle(`Yuumi · ${label} - ${sideLabel}`);
           return;
@@ -453,12 +502,15 @@ watch(gamePhase, (phase: string) => {
         try {
           const side = await invoke<string | null>("get_map_side");
           if (side) {
-            const sideLabel = side === "blue" ? t('titlebar.blueSide') : t('titlebar.redSide');
+            const sideLabel =
+              side === "blue" ? t("titlebar.blueSide") : t("titlebar.redSide");
             mapSideLabel.value = sideLabel;
             setTitle(`Yuumi · ${label} - ${sideLabel}`);
             return;
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
         setTitle(`Yuumi · ${label}`);
       })();
     }
@@ -469,14 +521,18 @@ watch(gamePhase, (phase: string) => {
   }
 
   // 进入选人/游戏加载/游戏中时自动跳转到对局信息页
-  if (phase === "ChampSelect" || phase === "GameStart" || phase === "InProgress") {
+  if (
+    phase === "ChampSelect" ||
+    phase === "GameStart" ||
+    phase === "InProgress"
+  ) {
     console.log("[watch gamePhase] navigating to gameinfo");
     currentPage.value = "gameinfo";
 
     if (phase === "ChampSelect") {
       const runAutoShow = async () => {
         try {
-          const cfg = appConfig.value || await fetchConfig();
+          const cfg = appConfig.value || (await fetchConfig());
           if (cfg?.Functions?.AutoShowOpgg) {
             openOpggWindow();
           }
@@ -490,15 +546,24 @@ watch(gamePhase, (phase: string) => {
 
   // ─── 大乱斗板凳席悬浮窗生命周期控制 ───
   if (phase === "ChampSelect") {
-    console.log("[bench-debug] 进入选人阶段，等待 1.5 秒后检测大乱斗板凳席状态...");
+    console.log(
+      "[bench-debug] 进入选人阶段，等待 1.5 秒后检测大乱斗板凳席状态...",
+    );
     setTimeout(async () => {
       const session = store.champSelectSession;
-      console.log("[bench-debug] 1.5秒检测结果: session 存在 =", !!session, "benchEnabled =", session?.benchEnabled);
+      console.log(
+        "[bench-debug] 1.5秒检测结果: session 存在 =",
+        !!session,
+        "benchEnabled =",
+        session?.benchEnabled,
+      );
       if (session && session.benchEnabled) {
         console.log("[bench-debug] 满足创建悬浮窗条件，准备开启...");
         await showBenchOverlay();
       } else {
-        console.log("[bench-debug] 不满足创建悬浮窗条件: session 为空或 benchEnabled 为 false");
+        console.log(
+          "[bench-debug] 不满足创建悬浮窗条件: session 为空或 benchEnabled 为 false",
+        );
       }
     }, 1500);
   } else {
@@ -508,39 +573,62 @@ watch(gamePhase, (phase: string) => {
 });
 
 // 动态监听选人会话变化，双重保证在大乱斗模式（板凳席开启）时自动拉起悬浮窗
-watch(() => store.champSelectSession, async (session) => {
-  if (isOverlayWindow.value) return;
-  console.log("[bench-debug] watch(session) 触发：session 存在 =", !!session, "benchEnabled =", session?.benchEnabled);
-  if (store.gamePhase === "ChampSelect" && session && session.benchEnabled) {
-    console.log("[bench-debug] watch(session) 条件满足，准备开启悬浮窗...");
-    await showBenchOverlay();
-  }
-}, { deep: true });
+watch(
+  () => store.champSelectSession,
+  async (session) => {
+    if (isOverlayWindow.value) return;
+    console.log(
+      "[bench-debug] watch(session) 触发：session 存在 =",
+      !!session,
+      "benchEnabled =",
+      session?.benchEnabled,
+    );
+    if (store.gamePhase === "ChampSelect" && session && session.benchEnabled) {
+      console.log("[bench-debug] watch(session) 条件满足，准备开启悬浮窗...");
+      await showBenchOverlay();
+    }
+  },
+  { deep: true },
+);
 
 function handleReconnect() {
   initLcuListeners();
   // 先查询当前游戏阶段，按情况处理
-  lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase").then(resp => {
-    if (!resp.success) {
-      showToast("LCU 未连接，请先启动英雄联盟客户端", "success");
-      return;
-    }
-    const phase = resp.data;
-    if (phase === "InProgress" || phase === "GameStart" || phase === "Reconnect") {
-      // 游戏中 → 调用 reconnect API
-      lcuRequest("POST", "/lol-gameflow/v1/reconnect").then(r => {
-        if (r.success) {
-          showToast("🔄 " + t('common.reconnectTriggered'));
-        } else {
-          showToast(t('common.reconnectFailed') + ": " + (r.error || ""), "success");
-        }
-      });
-    } else {
-      showToast(t('common.lcuReset') + " (" + (t('phase.' + (phase ?? "")) || phase) + ")");
-    }
-  }).catch(() => {
-    showToast("LCU 监听服务已重置");
-  });
+  lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase")
+    .then((resp) => {
+      if (!resp.success) {
+        showToast("LCU 未连接，请先启动英雄联盟客户端", "success");
+        return;
+      }
+      const phase = resp.data;
+      if (
+        phase === "InProgress" ||
+        phase === "GameStart" ||
+        phase === "Reconnect"
+      ) {
+        // 游戏中 → 调用 reconnect API
+        lcuRequest("POST", "/lol-gameflow/v1/reconnect").then((r) => {
+          if (r.success) {
+            showToast("🔄 " + t("common.reconnectTriggered"));
+          } else {
+            showToast(
+              t("common.reconnectFailed") + ": " + (r.error || ""),
+              "success",
+            );
+          }
+        });
+      } else {
+        showToast(
+          t("common.lcuReset") +
+            " (" +
+            (t("phase." + (phase ?? "")) || phase) +
+            ")",
+        );
+      }
+    })
+    .catch(() => {
+      showToast("LCU 监听服务已重置");
+    });
 }
 
 async function handleClose() {
@@ -560,215 +648,416 @@ async function handleClose() {
 </script>
 
 <template>
-  <n-config-provider :theme-overrides="themeOverrides" :theme="isDarkTheme ? darkTheme : null">
+  <n-config-provider
+    :theme-overrides="themeOverrides"
+    :theme="isDarkTheme ? darkTheme : null"
+  >
     <n-message-provider>
       <n-dialog-provider>
         <NaiveUIBridge />
 
-  <!-- 如果是悬浮窗窗口，仅渲染悬浮窗组件 -->
-  <div v-if="isOverlayWindow" class="overlay-container">
-    <BenchOverlay />
-  </div>
-
-  <!-- 否则渲染常规的主程序界面 -->
-  <div v-else class="app-layout">
-
-    <!-- 自定义标题栏 -->
-    <div class="titlebar" data-tauri-drag-region>
-      <div class="titlebar-left">
-        <div v-if="pageHistory.length > 0" class="titlebar-btn" @click="goBack" :title="$t('titlebar.back')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 18 9 12 15 6"/>
-          </svg>
-        </div>
-        <img src="/logo.png" class="titlebar-logo" alt="logo" />
-        <span class="titlebar-title">
-          Yummi
-          <span v-if="store.isConnected && gamePhase !== 'None'" class="titlebar-phase">
-            · {{ $t('phase.' + gamePhase) }}<span v-if="mapSideLabel"> - {{ mapSideLabel }}</span>
-          </span>
-        </span>
-      </div>
-      <div class="titlebar-controls">
-        <div class="titlebar-btn" @click="getCurrentWindow().minimize()" :title="$t('titlebar.minimize')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </div>
-        <div class="titlebar-btn" @click="getCurrentWindow().toggleMaximize()" :title="$t('titlebar.maximize')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
-        </div>
-        <div class="titlebar-btn close-btn" @click="handleClose" :title="$t('titlebar.close')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </div>
-      </div>
-    </div>
-
-    <!-- 主体区域：侧边栏 + 内容 -->
-    <div class="main-row">
-    <aside :class="['sidebar', isSidebarExpanded ? 'expanded' : 'collapsed']">
-      <!-- 顶部折叠按钮 -->
-      <div class="sidebar-header">
-        <div class="hamburger-btn" @click="toggleSidebar">
-          <svg class="hamburger-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 12h18M3 6h18M3 18h18" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-      </div>
-
-      <!-- 中间功能导航 -->
-      <nav class="sidebar-nav">
-        <div :class="['nav-item', { active: currentPage === 'home' }]" @click="navigate('home')" :title="$t('nav.home')">
-          <span class="nav-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-              <polyline points="9 22 9 12 15 12 15 22"/>
-            </svg>
-          </span>
-          <span class="nav-label">{{ $t('nav.home') }}</span>
+        <!-- 如果是悬浮窗窗口，仅渲染悬浮窗组件 -->
+        <div v-if="isOverlayWindow" class="overlay-container">
+          <BenchOverlay />
         </div>
 
-        <div :class="['nav-item', { active: currentPage === 'career' }]" @click="navigate('career')" :title="$t('nav.career')">
-          <span class="nav-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
-            </svg>
-          </span>
-          <span class="nav-label">{{ $t('nav.career') }}</span>
-        </div>
-
-        <div :class="['nav-item', { active: currentPage === 'search' }]" @click="navigate('search')" :title="$t('nav.search')">
-          <span class="nav-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="11" cy="11" r="8"/>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            </svg>
-          </span>
-          <span class="nav-label">{{ $t('nav.search') }}</span>
-        </div>
-
-        <div :class="['nav-item', { active: currentPage === 'gameinfo' }]" @click="navigate('gameinfo')" :title="$t('nav.gameinfo')">
-          <span class="nav-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="2" y="6" width="20" height="12" rx="3"/>
-              <path d="M6 12h4M8 10v4M15 11h.01M18 13h.01"/>
-            </svg>
-          </span>
-          <span class="nav-label">{{ $t('nav.gameinfo') }}</span>
-        </div>
-
-        <div v-if="!appConfig?.Functions?.HideTft" :class="['nav-item', { active: currentPage === 'tft' }]" @click="navigate('tft')" :title="$t('nav.tft')">
-          <span class="nav-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polygon points="12 2 2 7 12 12 22 7 12 2"/>
-              <polyline points="2 17 12 22 22 17"/>
-              <polyline points="2 12 12 17 22 12"/>
-            </svg>
-          </span>
-          <span class="nav-label">{{ $t('nav.tft') }}</span>
-        </div>
-
-        <div :class="['nav-item', { active: currentPage === 'tools' }]" @click="navigate('tools')" :title="$t('nav.tools')">
-          <span class="nav-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-            </svg>
-          </span>
-          <span class="nav-label">{{ $t('nav.tools') }}</span>
-        </div>
-      </nav>
-
-      <!-- 底部附加操作 -->
-      <div class="sidebar-bottom">
-        <div class="nav-item" @click="openOpggWindow" :title="$t('nav.opgg')">
-          <span class="nav-icon"><img :src="opggIcon" style="width:18px;height:18px;border-radius:3px" /></span>
-          <span class="nav-label">{{ $t('nav.opgg') }}</span>
-        </div>
-
-        <div class="nav-item" @click="handleReconnect" :title="$t('nav.reconnect')">
-          <span class="nav-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-            </svg>
-          </span>
-          <span class="nav-label">{{ $t('nav.reconnect') }}</span>
-        </div>
-
-        <div :class="['nav-item', { active: currentPage === 'notice' }]" @click="navigate('notice')" :title="$t('nav.notice')">
-          <span class="nav-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>
-            </svg>
-          </span>
-          <span class="nav-label">{{ $t('nav.notice') }}</span>
-        </div>
-
-        <!-- 召唤师简短信息 -->
-        <div v-if="summoner" class="user-card" @click="navigate('career')" :title="`${summoner.displayName} (${regionName})`">
-          <div class="user-avatar">
-            <LcuImage :src="summoner.profileIconUrl" alt="avatar" />
-          </div>
-          <div class="user-info">
-            <span class="user-name">{{ summoner.displayName }}</span>
-            <span class="user-region">{{ regionName }}</span>
-          </div>
-        </div>
-
-        <div :class="['nav-item', { active: currentPage === 'settings' }]" @click="navigate('settings')" :title="$t('nav.settings')">
-          <span class="nav-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-          </span>
-          <span class="nav-label">{{ $t('nav.settings') }}</span>
-        </div>
-      </div>
-    </aside>
-
-    <!-- 右侧内容区域 -->
-    <main class="content-wrapper">
-      <!-- GameInfo 用 v-show 保持状态，切页面不清空数据 -->
-      <div v-show="currentPage === 'gameinfo'" style="flex:1;display:flex;flex-direction:column;overflow-y:auto;min-height:0;">
-        <GameInfo />
-      </div>
-      <template v-if="currentPage !== 'gameinfo'">
-        <Search v-if="currentPage === 'search'" />
-        <Home v-else-if="currentPage === 'home'" @navigate="navigate" />
-        <Career v-else-if="currentPage === 'career'" />
-        <TFT v-else-if="currentPage === 'tft' && !appConfig?.Functions?.HideTft" />
-        <Settings v-else-if="currentPage === 'settings'" />
-        <Tools v-else-if="currentPage === 'tools'" />
-
-        <!-- 内建 OP.GG 占位页面 -->
-        <div v-else-if="currentPage === 'opgg'" class="placeholder-view">
-          <div class="view-header">
-            <h2>{{ $t('common.opgg') }}</h2>
-          </div>
-          <div class="view-card">
-            <div class="avatar-circle op-icon">OP</div>
-            <h3>{{ $t('common.opgg') }}</h3>
-            <p>{{ $t('common.opggProxyInfo') }}</p>
-            <div class="status-box">
-              <span class="dot online"></span>
-              <span>{{ $t('common.opggProxyAddress') }}127.0.0.1:7897</span>
+        <!-- 否则渲染常规的主程序界面 -->
+        <div v-else class="app-layout">
+          <!-- 自定义标题栏 -->
+          <div class="titlebar" data-tauri-drag-region>
+            <div class="titlebar-left">
+              <div
+                v-if="pageHistory.length > 0"
+                class="titlebar-btn"
+                @click="goBack"
+                :title="$t('titlebar.back')"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </div>
+              <img src="/logo.png" class="titlebar-logo" alt="logo" />
+              <span class="titlebar-title">
+                Yummi
+                <span
+                  v-if="store.isConnected && gamePhase !== 'None'"
+                  class="titlebar-phase"
+                >
+                  · {{ $t("phase." + gamePhase)
+                  }}<span v-if="mapSideLabel"> - {{ mapSideLabel }}</span>
+                </span>
+              </span>
             </div>
-            <p class="hint">{{ $t('common.opggHint') }}</p>
+            <div class="titlebar-controls">
+              <div
+                class="titlebar-btn"
+                @click="getCurrentWindow().minimize()"
+                :title="$t('titlebar.minimize')"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </div>
+              <div
+                class="titlebar-btn"
+                @click="getCurrentWindow().toggleMaximize()"
+                :title="$t('titlebar.maximize')"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <rect x="5" y="5" width="14" height="14" rx="2" />
+                </svg>
+              </div>
+              <div
+                class="titlebar-btn close-btn"
+                @click="handleClose"
+                :title="$t('titlebar.close')"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- 主体区域：侧边栏 + 内容 -->
+          <div class="main-row">
+            <aside
+              :class="['sidebar', isSidebarExpanded ? 'expanded' : 'collapsed']"
+            >
+              <!-- 顶部折叠按钮 -->
+              <div class="sidebar-header">
+                <div class="hamburger-btn" @click="toggleSidebar">
+                  <svg
+                    class="hamburger-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M3 12h18M3 6h18M3 18h18"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </div>
+              </div>
+
+              <!-- 中间功能导航 -->
+              <nav class="sidebar-nav">
+                <div
+                  :class="['nav-item', { active: currentPage === 'home' }]"
+                  @click="navigate('home')"
+                  :title="$t('nav.home')"
+                >
+                  <span class="nav-icon">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path
+                        d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+                      />
+                      <polyline points="9 22 9 12 15 12 15 22" />
+                    </svg>
+                  </span>
+                  <span class="nav-label">{{ $t("nav.home") }}</span>
+                </div>
+
+                <div
+                  :class="['nav-item', { active: currentPage === 'career' }]"
+                  @click="navigate('career')"
+                  :title="$t('nav.career')"
+                >
+                  <span class="nav-icon">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                      <circle cx="12" cy="7" r="4" />
+                    </svg>
+                  </span>
+                  <span class="nav-label">{{ $t("nav.career") }}</span>
+                </div>
+
+                <div
+                  :class="['nav-item', { active: currentPage === 'search' }]"
+                  @click="navigate('search')"
+                  :title="$t('nav.search')"
+                >
+                  <span class="nav-icon">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                  </span>
+                  <span class="nav-label">{{ $t("nav.search") }}</span>
+                </div>
+
+                <div
+                  :class="['nav-item', { active: currentPage === 'gameinfo' }]"
+                  @click="navigate('gameinfo')"
+                  :title="$t('nav.gameinfo')"
+                >
+                  <span class="nav-icon">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <rect x="2" y="6" width="20" height="12" rx="3" />
+                      <path d="M6 12h4M8 10v4M15 11h.01M18 13h.01" />
+                    </svg>
+                  </span>
+                  <span class="nav-label">{{ $t("nav.gameinfo") }}</span>
+                </div>
+
+                <div
+                  v-if="!appConfig?.Functions?.HideTft"
+                  :class="['nav-item', { active: currentPage === 'tft' }]"
+                  @click="navigate('tft')"
+                  :title="$t('nav.tft')"
+                >
+                  <span class="nav-icon">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                      <polyline points="2 17 12 22 22 17" />
+                      <polyline points="2 12 12 17 22 12" />
+                    </svg>
+                  </span>
+                  <span class="nav-label">{{ $t("nav.tft") }}</span>
+                </div>
+
+                <div
+                  :class="['nav-item', { active: currentPage === 'tools' }]"
+                  @click="navigate('tools')"
+                  :title="$t('nav.tools')"
+                >
+                  <span class="nav-icon">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path
+                        d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+                      />
+                    </svg>
+                  </span>
+                  <span class="nav-label">{{ $t("nav.tools") }}</span>
+                </div>
+              </nav>
+
+              <!-- 底部附加操作 -->
+              <div class="sidebar-bottom">
+                <div
+                  class="nav-item"
+                  @click="openOpggWindow"
+                  :title="$t('nav.opgg')"
+                >
+                  <span class="nav-icon"
+                    ><img
+                      :src="opggIcon"
+                      style="width: 18px; height: 18px; border-radius: 3px"
+                  /></span>
+                  <span class="nav-label">{{ $t("nav.opgg") }}</span>
+                </div>
+
+                <div
+                  class="nav-item"
+                  @click="handleReconnect"
+                  :title="$t('nav.reconnect')"
+                >
+                  <span class="nav-icon">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path
+                        d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+                      />
+                    </svg>
+                  </span>
+                  <span class="nav-label">{{ $t("nav.reconnect") }}</span>
+                </div>
+
+                <div
+                  :class="['nav-item', { active: currentPage === 'notice' }]"
+                  @click="navigate('notice')"
+                  :title="$t('nav.notice')"
+                >
+                  <span class="nav-icon">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path
+                        d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"
+                      />
+                    </svg>
+                  </span>
+                  <span class="nav-label">{{ $t("nav.notice") }}</span>
+                </div>
+
+                <!-- 召唤师简短信息 -->
+                <div
+                  v-if="summoner"
+                  class="user-card"
+                  @click="navigate('career')"
+                  :title="`${summoner.displayName} (${regionName})`"
+                >
+                  <div class="user-avatar">
+                    <LcuImage :src="summoner.profileIconUrl" alt="avatar" />
+                  </div>
+                  <div class="user-info">
+                    <span class="user-name">{{ summoner.displayName }}</span>
+                    <span class="user-region">{{ regionName }}</span>
+                  </div>
+                </div>
+
+                <div
+                  :class="['nav-item', { active: currentPage === 'settings' }]"
+                  @click="navigate('settings')"
+                  :title="$t('nav.settings')"
+                >
+                  <span class="nav-icon">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <circle cx="12" cy="12" r="3" />
+                      <path
+                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+                      />
+                    </svg>
+                  </span>
+                  <span class="nav-label">{{ $t("nav.settings") }}</span>
+                </div>
+              </div>
+            </aside>
+
+            <!-- 右侧内容区域 -->
+            <main class="content-wrapper">
+              <!-- GameInfo 用 v-show 保持状态，切页面不清空数据 -->
+              <div
+                v-show="currentPage === 'gameinfo'"
+                style="
+                  flex: 1;
+                  display: flex;
+                  flex-direction: column;
+                  overflow-y: auto;
+                  min-height: 0;
+                "
+              >
+                <GameInfo />
+              </div>
+              <template v-if="currentPage !== 'gameinfo'">
+                <Search v-if="currentPage === 'search'" />
+                <Home v-else-if="currentPage === 'home'" @navigate="navigate" />
+                <Career v-else-if="currentPage === 'career'" />
+                <TFT
+                  v-else-if="
+                    currentPage === 'tft' && !appConfig?.Functions?.HideTft
+                  "
+                />
+                <Settings v-else-if="currentPage === 'settings'" />
+                <Tools v-else-if="currentPage === 'tools'" />
+
+                <!-- 内建 OP.GG 占位页面 -->
+                <div
+                  v-else-if="currentPage === 'opgg'"
+                  class="placeholder-view"
+                >
+                  <div class="view-header">
+                    <h2>{{ $t("common.opgg") }}</h2>
+                  </div>
+                  <div class="view-card">
+                    <div class="avatar-circle op-icon">OP</div>
+                    <h3>{{ $t("common.opgg") }}</h3>
+                    <p>{{ $t("common.opggProxyInfo") }}</p>
+                    <div class="status-box">
+                      <span class="dot online"></span>
+                      <span
+                        >{{ $t("common.opggProxyAddress") }}127.0.0.1:7897</span
+                      >
+                    </div>
+                    <p class="hint">{{ $t("common.opggHint") }}</p>
+                  </div>
+                </div>
+
+                <!-- 更新日志页 -->
+                <Notice v-else-if="currentPage === 'notice'" />
+              </template>
+            </main>
           </div>
         </div>
 
-        <!-- 更新日志页 -->
-        <Notice v-else-if="currentPage === 'notice'" />
-      </template>
-    </main>
-    </div>
-  </div>
-
-    <!-- 自动更新弹窗（在 app-layout 外部，避免 overflow:hidden 限制） -->
-    <UpdateDialog
-      :update-info="updateInfo"
-      @dismiss="updateInfo = null"
-    />
-
+        <!-- 自动更新弹窗（在 app-layout 外部，避免 overflow:hidden 限制） -->
+        <UpdateDialog :update-info="updateInfo" @dismiss="updateInfo = null" />
       </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
@@ -798,7 +1087,10 @@ async function handleClose() {
   align-items: center !important;
 }
 .collapse-card .n-collapse-item__header:hover {
-  background-color: var(--settings-card-bg-hover, var(--card-bg-hover)) !important;
+  background-color: var(
+    --settings-card-bg-hover,
+    var(--card-bg-hover)
+  ) !important;
 }
 .collapse-card .n-collapse-item__header-main {
   flex: 1 !important;
@@ -963,7 +1255,12 @@ async function handleClose() {
   --primary-color-alpha-40: rgba(0, 210, 196, 0.4);
 
   /* 纯白水晶极光主题变量 */
-  --bg-color-gradient: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 50%, #e2e8f0 100%);
+  --bg-color-gradient: linear-gradient(
+    135deg,
+    #f8fafc 0%,
+    #f1f5f9 50%,
+    #e2e8f0 100%
+  );
   --bg-color: #f8fafc;
   --sidebar-bg: rgba(255, 255, 255, 0.75);
   --card-bg: rgba(255, 255, 255, 0.7);
@@ -973,7 +1270,7 @@ async function handleClose() {
   --hover-bg: rgba(0, 0, 0, 0.03);
   --hover-bg-strong: rgba(0, 0, 0, 0.06);
   --titlebar-bg: rgba(255, 255, 255, 0.8);
-  
+
   --text-color: #0f172a;
   --text-muted: #475569;
   --text-dimmed: #64748b;
@@ -994,13 +1291,17 @@ async function handleClose() {
   --tier-blue-bg: rgba(59, 130, 246, 0.08);
   --tier-blue-border: rgba(59, 130, 246, 0.15);
 
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.02);
-  --shadow-md: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 8px -1px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 20px 25px -5px rgba(0,0,0,0.08), 0 10px 10px -5px rgba(0,0,0,0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-md:
+    0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 8px -1px rgba(0, 0, 0, 0.03);
+  --shadow-lg:
+    0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   --glass-filter: blur(20px) saturate(190%);
 
   /* Settings UI 亮色子行卡片变量 */
@@ -1012,7 +1313,12 @@ async function handleClose() {
 
 [data-theme="dark"] {
   /* 暗黑海克斯水晶主题变量 */
-  --bg-color-gradient: linear-gradient(135deg, #0b0f19 0%, #111827 50%, #172033 100%);
+  --bg-color-gradient: linear-gradient(
+    135deg,
+    #0b0f19 0%,
+    #111827 50%,
+    #172033 100%
+  );
   --bg-color: #0b0f19;
   --sidebar-bg: rgba(17, 24, 39, 0.75);
   --card-bg: rgba(30, 41, 59, 0.55);
@@ -1022,7 +1328,7 @@ async function handleClose() {
   --hover-bg: rgba(255, 255, 255, 0.04);
   --hover-bg-strong: rgba(255, 255, 255, 0.08);
   --titlebar-bg: rgba(11, 15, 25, 0.8);
-  
+
   --text-color: #f8fafc;
   --text-muted: #cbd5e1;
   --text-dimmed: #94a3b8;
@@ -1043,9 +1349,11 @@ async function handleClose() {
   --tier-blue-bg: rgba(96, 165, 250, 0.12);
   --tier-blue-border: rgba(96, 165, 250, 0.25);
 
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-  --shadow-md: 0 10px 25px -5px rgba(0,0,0,0.4), 0 8px 10px -6px rgba(0,0,0,0.4);
-  --shadow-lg: 0 20px 25px -5px rgba(0,0,0,0.5), 0 10px 10px -5px rgba(0,0,0,0.5);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md:
+    0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  --shadow-lg:
+    0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.5);
   --glass-filter: blur(25px) saturate(200%);
 
   /* Settings UI 暗色专用 */
@@ -1053,7 +1361,8 @@ async function handleClose() {
   --toggle-slider: #ffffff;
   --toggle-glow: 0 0 14px rgba(0, 210, 196, 0.4);
   --segmented-bg: rgba(255, 255, 255, 0.05);
-  --card-glow-hover: 0 0 0 1px rgba(0, 210, 196, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
+  --card-glow-hover:
+    0 0 0 1px rgba(0, 210, 196, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
   --settings-card-bg: rgba(24, 34, 54, 0.7);
   --settings-card-bg-hover: rgba(30, 41, 64, 0.85);
   --settings-card-border: rgba(255, 255, 255, 0.06);
@@ -1074,7 +1383,8 @@ async function handleClose() {
   --toggle-slider: #ffffff;
   --toggle-glow: 0 0 10px rgba(0, 210, 196, 0.35);
   --segmented-bg: rgba(0, 0, 0, 0.04);
-  --card-glow-hover: 0 0 0 1px rgba(0, 210, 196, 0.3), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --card-glow-hover:
+    0 0 0 1px rgba(0, 210, 196, 0.3), 0 4px 12px rgba(0, 0, 0, 0.05);
   --settings-card-bg: rgba(255, 255, 255, 0.8);
   --settings-card-bg-hover: rgba(255, 255, 255, 0.95);
   --settings-card-border: rgba(0, 0, 0, 0.06);
@@ -1257,7 +1567,8 @@ body {
   gap: 4px;
 }
 
-.back-btn, .hamburger-btn {
+.back-btn,
+.hamburger-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1270,7 +1581,8 @@ body {
   flex-shrink: 0;
 }
 
-.back-btn:hover, .hamburger-btn:hover {
+.back-btn:hover,
+.hamburger-btn:hover {
   background-color: var(--hover-bg);
   color: var(--text-color);
 }
@@ -1521,7 +1833,9 @@ body {
 
 .view-card:hover {
   border-color: var(--primary-color-alpha-40);
-  box-shadow: 0 12px 30px -10px var(--primary-color-alpha-15), var(--shadow-lg);
+  box-shadow:
+    0 12px 30px -10px var(--primary-color-alpha-15),
+    var(--shadow-lg);
   transform: translateY(-4px);
 }
 
@@ -1642,5 +1956,4 @@ body {
 .changelog-list strong {
   color: var(--text-color);
 }
-
 </style>

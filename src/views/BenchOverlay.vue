@@ -16,11 +16,18 @@ const benchChampions = computed(() => {
 
 // 获取当前玩家在该选人会话中可用的英雄 ID 列表
 async function fetchPickableIds(retryCount = 3) {
-  console.log(`[BenchOverlay] 正在获取当前可用英雄列表... (剩余重试次数: ${retryCount})`);
-  const resp = await lcuRequest<number[]>("GET", "/lol-champ-select/v1/pickable-champion-ids");
+  console.log(
+    `[BenchOverlay] 正在获取当前可用英雄列表... (剩余重试次数: ${retryCount})`,
+  );
+  const resp = await lcuRequest<number[]>(
+    "GET",
+    "/lol-champ-select/v1/pickable-champion-ids",
+  );
   if (resp.success && Array.isArray(resp.data)) {
     pickableIds.value = resp.data;
-    console.log(`[BenchOverlay] 可用英雄列表获取成功，共 ${resp.data.length} 个英雄`);
+    console.log(
+      `[BenchOverlay] 可用英雄列表获取成功，共 ${resp.data.length} 个英雄`,
+    );
   } else {
     console.error("[BenchOverlay] 获取可用英雄列表失败:", resp.error);
     if (retryCount > 0) {
@@ -65,15 +72,24 @@ const isPickable = (championId: number) => {
 // 点击选择/抢下板凳席英雄
 async function swapChampion(championId: number) {
   if (!isPickable(championId)) {
-    console.warn(`[BenchOverlay] 拦截点击：英雄 ${championId} 不在玩家当前可用池内`);
+    console.warn(
+      `[BenchOverlay] 拦截点击：英雄 ${championId} 不在玩家当前可用池内`,
+    );
     return;
   }
   console.log(`[BenchOverlay] 尝试兑换板凳席英雄: ${championId}`);
-  const resp = await lcuRequest("POST", `/lol-champ-select/v1/session/bench/swap/${championId}`, {});
+  const resp = await lcuRequest(
+    "POST",
+    `/lol-champ-select/v1/session/bench/swap/${championId}`,
+    {},
+  );
   if (resp.success) {
     console.log(`[BenchOverlay] 抢英雄成功: ${championId}`);
   } else {
-    console.error(`[BenchOverlay] 抢英雄失败: ${championId}, 错误:`, resp.error);
+    console.error(
+      `[BenchOverlay] 抢英雄失败: ${championId}, 错误:`,
+      resp.error,
+    );
   }
 }
 
@@ -84,36 +100,61 @@ function closeOverlay() {
 
 // 开始拖动窗口（JS 兜底方案，避开 Tauri 2 原生 drag-region 的平台兼容性 Bug）
 function startDrag() {
-  getCurrentWindow().startDragging().catch((err) => {
-    console.warn("[BenchOverlay] 启动拖动失败:", err);
-  });
+  getCurrentWindow()
+    .startDragging()
+    .catch((err) => {
+      console.warn("[BenchOverlay] 启动拖动失败:", err);
+    });
 }
 
-watch(() => store.champSelectSession, (session) => {
-  console.log("[BenchOverlay] LCU Session 改变:", session);
-  if (session) {
-    console.log("[BenchOverlay] 板凳席状态: benchEnabled =", session.benchEnabled, "benchChampions =", session.benchChampions);
-  }
-}, { deep: true, immediate: true });
+watch(
+  () => store.champSelectSession,
+  (session) => {
+    console.log("[BenchOverlay] LCU Session 改变:", session);
+    if (session) {
+      console.log(
+        "[BenchOverlay] 板凳席状态: benchEnabled =",
+        session.benchEnabled,
+        "benchChampions =",
+        session.benchChampions,
+      );
+    }
+  },
+  { deep: true, immediate: true },
+);
 </script>
 
 <template>
   <div class="bench-overlay-wrapper">
     <!-- 拖动手柄区 -->
-    <div class="drag-handle" @mousedown="startDrag" data-tauri-drag-region title="拖动调整位置">
-      <svg class="drag-icon" style="pointer-events: none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="9" cy="5" r="1"/>
-        <circle cx="9" cy="12" r="1"/>
-        <circle cx="9" cy="19" r="1"/>
-        <circle cx="15" cy="5" r="1"/>
-        <circle cx="15" cy="12" r="1"/>
-        <circle cx="15" cy="19" r="1"/>
+    <div
+      class="drag-handle"
+      @mousedown="startDrag"
+      data-tauri-drag-region
+      title="拖动调整位置"
+    >
+      <svg
+        class="drag-icon"
+        style="pointer-events: none"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <circle cx="9" cy="5" r="1" />
+        <circle cx="9" cy="12" r="1" />
+        <circle cx="9" cy="19" r="1" />
+        <circle cx="15" cy="5" r="1" />
+        <circle cx="15" cy="12" r="1" />
+        <circle cx="15" cy="19" r="1" />
       </svg>
     </div>
 
     <!-- 英雄头像列表 -->
     <div class="bench-list">
-      <div v-if="benchChampions.length === 0" class="empty-hint">板凳席空空如也</div>
+      <div v-if="benchChampions.length === 0" class="empty-hint">
+        板凳席空空如也
+      </div>
 
       <div
         v-for="champ in benchChampions"
@@ -131,9 +172,14 @@ watch(() => store.champSelectSession, (session) => {
 
     <!-- 关闭按钮 -->
     <div class="close-btn" @click="closeOverlay" title="隐藏浮窗">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <line x1="18" y1="6" x2="6" y2="18"/>
-        <line x1="6" y1="6" x2="18" y2="18"/>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
       </svg>
     </div>
   </div>
@@ -154,7 +200,9 @@ watch(() => store.champSelectSession, (session) => {
   box-shadow: var(--shadow-md);
   color: var(--text-color);
   overflow: hidden;
-  transition: background 0.3s, border-color 0.3s;
+  transition:
+    background 0.3s,
+    border-color 0.3s;
 }
 
 /* 拖动手柄 */
@@ -167,7 +215,9 @@ watch(() => store.champSelectSession, (session) => {
   cursor: move;
   opacity: 0.5;
   color: var(--text-dimmed);
-  transition: opacity 0.2s, color 0.2s;
+  transition:
+    opacity 0.2s,
+    color 0.2s;
 }
 .drag-handle:hover {
   opacity: 1;
@@ -201,7 +251,9 @@ watch(() => store.champSelectSession, (session) => {
   overflow: hidden;
   border: 2px solid var(--border-color);
   cursor: pointer;
-  transition: transform 0.15s, border-color 0.15s;
+  transition:
+    transform 0.15s,
+    border-color 0.15s;
 }
 
 .champ-item:hover {
@@ -236,7 +288,9 @@ watch(() => store.champSelectSession, (session) => {
   cursor: pointer;
   opacity: 0.5;
   color: var(--text-dimmed);
-  transition: opacity 0.2s, color 0.2s;
+  transition:
+    opacity 0.2s,
+    color 0.2s;
 }
 .close-btn:hover {
   opacity: 1;

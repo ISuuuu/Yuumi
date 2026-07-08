@@ -21,22 +21,27 @@ export function cleanError(error: unknown): string {
       cleanMsg = parts[parts.length - 1].trim();
     }
     msg = cleanMsg;
-  } else if (msg.includes('{') && msg.includes('}')) {
+  } else if (msg.includes("{") && msg.includes("}")) {
     // 降级：如果正则未匹配上但含有完整大括号，依然尝试标准 JSON 序列化解析
     try {
-      const start = msg.indexOf('{');
-      const end = msg.lastIndexOf('}');
+      const start = msg.indexOf("{");
+      const end = msg.lastIndexOf("}");
       const jsonStr = msg.slice(start, end + 1);
       const obj = JSON.parse(jsonStr);
       let cleanMsg = obj.message || obj.errorMessage || obj.description;
       if (cleanMsg) {
-        if (cleanMsg.includes("Error response for ") && cleanMsg.includes(":")) {
+        if (
+          cleanMsg.includes("Error response for ") &&
+          cleanMsg.includes(":")
+        ) {
           const parts = cleanMsg.split(":");
           cleanMsg = parts[parts.length - 1].trim();
         }
         msg = cleanMsg;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   // 2. 如果包含“LCU 返回错误”前缀，提取后面的纯消息
@@ -48,7 +53,7 @@ export function cleanError(error: unknown): string {
   }
 
   // 3. 仅安全剥离最外层可能残留的包围单双引号，不损伤任何合法的 {} 符号
-  msg = msg.trim().replace(/^["']+|["']+$/g, '');
+  msg = msg.trim().replace(/^["']+|["']+$/g, "");
 
   // 4. 友好汉化经典的观战业务报错
   if (msg.includes("Already in gameflow")) {
@@ -68,7 +73,7 @@ export function cleanError(error: unknown): string {
 export async function lcuRequest<T>(
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
-  body?: unknown
+  body?: unknown,
 ): Promise<LcuApiResponse<T>> {
   try {
     const data = await invoke<T>("call_lcu_api", { method, path, body });
@@ -128,14 +133,16 @@ export interface MatchDisplay {
 }
 
 /** 获取当前召唤师信息（Rust 解析层清洗后，404 时自动重试） */
-export async function fetchCurrentSummoner(maxRetries = 15): Promise<SummonerDisplay> {
+export async function fetchCurrentSummoner(
+  maxRetries = 15,
+): Promise<SummonerDisplay> {
   for (let i = 0; i <= maxRetries; i++) {
     try {
       return await invoke<SummonerDisplay>("get_current_summoner");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes("404") && i < maxRetries) {
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
       if (msg.includes("404")) {
@@ -148,12 +155,23 @@ export async function fetchCurrentSummoner(maxRetries = 15): Promise<SummonerDis
 }
 
 /** 获取战绩列表（Rust 解析层清洗后） */
-export const fetchMatchHistory = (puuid: string, begIndex?: number, endIndex?: number) =>
-  invoke<MatchDisplay[]>("get_match_history", { puuid, begIndex, endIndex });
+export const fetchMatchHistory = (
+  puuid: string,
+  begIndex?: number,
+  endIndex?: number,
+) => invoke<MatchDisplay[]>("get_match_history", { puuid, begIndex, endIndex });
 
 /** 通过 SGP 接口获取战绩列表（支持分页，仅腾讯国服可用） */
-export const fetchMatchHistorySgp = (puuid: string, begIndex: number, endIndex: number) =>
-  invoke<MatchDisplay[]>("get_match_history_sgp", { puuid, begIndex, endIndex });
+export const fetchMatchHistorySgp = (
+  puuid: string,
+  begIndex: number,
+  endIndex: number,
+) =>
+  invoke<MatchDisplay[]>("get_match_history_sgp", {
+    puuid,
+    begIndex,
+    endIndex,
+  });
 
 /** 获取 LCU 静态资源（图片等），返回 data URL */
 export const fetchLcuAsset = (path: string) =>
@@ -198,7 +216,7 @@ export const selectChampion = (actionId: number, championId: number) =>
   lcuRequest<void>(
     "PATCH",
     `/lol-champ-select/v1/session/actions/${actionId}`,
-    { championId, completed: true }
+    { championId, completed: true },
   );
 
 /** 在选人阶段禁用英雄 */
@@ -206,16 +224,15 @@ export const banChampion = (actionId: number, championId: number) =>
   lcuRequest<void>(
     "PATCH",
     `/lol-champ-select/v1/session/actions/${actionId}`,
-    { championId, completed: true }
+    { championId, completed: true },
   );
 
 /** 设置召唤师技能 */
 export const setSummonerSpells = (spell1Id: number, spell2Id: number) =>
-  lcuRequest<void>(
-    "PATCH",
-    "/lol-champ-select/v1/session/my-selection",
-    { spell1Id, spell2Id }
-  );
+  lcuRequest<void>("PATCH", "/lol-champ-select/v1/session/my-selection", {
+    spell1Id,
+    spell2Id,
+  });
 
 // ─── 应用配置（读写）───
 // 字段名使用 PascalCase，与 Rust serde(rename_all = "PascalCase") 一致

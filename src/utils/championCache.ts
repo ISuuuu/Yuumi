@@ -46,11 +46,16 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
 
   // 尝试 1: champion-summary.json
   try {
-    const resp = await lcuRequest<any>("GET", "/lol-game-data/assets/v1/champion-summary.json");
+    const resp = await lcuRequest<any>(
+      "GET",
+      "/lol-game-data/assets/v1/champion-summary.json",
+    );
     if (resp.success && resp.data) {
       rawData = resp.data;
       success = true;
-      console.log("Yuumi - Successfully fetched champion list via champion-summary.json");
+      console.log(
+        "Yuumi - Successfully fetched champion list via champion-summary.json",
+      );
     }
   } catch (e) {
     console.error("Yuumi - Failed to fetch champion-summary.json:", e);
@@ -59,11 +64,16 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
   // 尝试 2: champions.json
   if (!success) {
     try {
-      const resp = await lcuRequest<any>("GET", "/lol-game-data/assets/v1/champions.json");
+      const resp = await lcuRequest<any>(
+        "GET",
+        "/lol-game-data/assets/v1/champions.json",
+      );
       if (resp.success && resp.data) {
         rawData = resp.data;
         success = true;
-        console.log("Yuumi - Successfully fetched champion list via champions.json");
+        console.log(
+          "Yuumi - Successfully fetched champion list via champions.json",
+        );
       }
     } catch (e) {
       console.error("Yuumi - Failed to fetch champions.json:", e);
@@ -84,11 +94,18 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
         .filter((c: any) => c && c.id > 0)
         .map((c: any) => ({
           id: c.id,
-          name: (isEnglish && c.alias) ? c.alias : (c.name || c.alias || `#${c.id}`),
-          iconPath: c.squarePortraitPath || `/lol-game-data/assets/v1/champion-icons/${c.id}.png`,
+          name:
+            isEnglish && c.alias ? c.alias : c.name || c.alias || `#${c.id}`,
+          iconPath:
+            c.squarePortraitPath ||
+            `/lol-game-data/assets/v1/champion-icons/${c.id}.png`,
         }))
-        .sort((a: ChampionEntry, b: ChampionEntry) => a.name.localeCompare(b.name, "zh"));
-      console.log(`Yuumi - Successfully rendered ${cachedChampions.length} champions`);
+        .sort((a: ChampionEntry, b: ChampionEntry) =>
+          a.name.localeCompare(b.name, "zh"),
+        );
+      console.log(
+        `Yuumi - Successfully rendered ${cachedChampions.length} champions`,
+      );
     } else {
       console.error("Yuumi - Extracted champion list is empty");
     }
@@ -111,14 +128,21 @@ export async function fetchKeywords(): Promise<Record<number, string>> {
 async function doFetchKeywords(): Promise<Record<number, string>> {
   const map: Record<number, string> = {};
   try {
-    const res = await fetch("https://game.gtimg.cn/images/lol/act/img/js/heroList/hero_list.js");
+    const res = await fetch(
+      "https://game.gtimg.cn/images/lol/act/img/js/heroList/hero_list.js",
+    );
     if (res.ok) {
       const data = await res.json();
       if (data && Array.isArray(data.hero)) {
         for (const h of data.hero) {
           const id = Number(h.heroId);
           if (id > 0) {
-            map[id] = (h.keywords || "") + "," + (h.title || "") + "," + (h.alias || "");
+            map[id] =
+              (h.keywords || "") +
+              "," +
+              (h.title || "") +
+              "," +
+              (h.alias || "");
           }
         }
         if (map[901]) map[901] += ",小火龙";
@@ -126,7 +150,9 @@ async function doFetchKeywords(): Promise<Record<number, string>> {
         if (map[902]) map[902] += ",丁真,米利欧";
         if (map[897]) map[897] += ",黑龙,奎桑提";
         cachedKeywords = map;
-        console.log("Yuumi - Successfully loaded Tencent champion alias/pinyin library");
+        console.log(
+          "Yuumi - Successfully loaded Tencent champion alias/pinyin library",
+        );
       }
     }
   } catch (e) {

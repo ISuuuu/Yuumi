@@ -5,7 +5,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { fetchConfig } from "../api/lcu";
 
 const store = useLcuStore();
-const connectionDetails = ref<{ pid: number; port: number; token: string } | null>(null);
+const connectionDetails = ref<{
+  pid: number;
+  port: number;
+  token: string;
+} | null>(null);
 const lolPaths = ref<string[]>([]);
 const selectedPath = ref<string>("");
 
@@ -46,20 +50,24 @@ onMounted(() => {
   loadPaths();
 });
 
-watch(() => store.isConnected, (connected) => {
-  if (connected) {
-    loadConnectionDetails();
-  } else {
-    connectionDetails.value = null;
-  }
-}, { immediate: true });
+watch(
+  () => store.isConnected,
+  (connected) => {
+    if (connected) {
+      loadConnectionDetails();
+    } else {
+      connectionDetails.value = null;
+    }
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
   <div class="home-view">
     <!-- 连接成功状态 -->
     <div v-if="store.isConnected" class="connection-success">
-      <h1 class="status-title">{{ $t('home.connected') }}</h1>
+      <h1 class="status-title">{{ $t("home.connected") }}</h1>
 
       <div v-if="connectionDetails" class="details-box">
         <div class="detail-row">
@@ -76,7 +84,7 @@ watch(() => store.isConnected, (connected) => {
         </div>
       </div>
       <div v-else class="details-loading">
-        {{ $t('home.fetchingDetails') }}
+        {{ $t("home.fetchingDetails") }}
       </div>
     </div>
 
@@ -91,31 +99,40 @@ watch(() => store.isConnected, (connected) => {
     <!-- 未连接状态 -->
     <div v-else class="connection-offline">
       <img src="/logo.png" class="offline-logo" alt="Yuumi" />
-      <h1 class="status-title">{{ $t('home.notConnected') }}</h1>
+      <h1 class="status-title">{{ $t("home.notConnected") }}</h1>
       <p class="offline-desc">
-        {{ $t('home.launchDesc') }}
+        {{ $t("home.launchDesc") }}
       </p>
       <button class="launch-btn" @click="handleLaunchClient">
-        <svg class="launch-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="5 3 19 12 5 21 5 3"/>
+        <svg
+          class="launch-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <polygon points="5 3 19 12 5 21 5 3" />
         </svg>
-        {{ $t('home.launchBtn') }}
+        {{ $t("home.launchBtn") }}
       </button>
       <div v-if="lolPaths.length > 0" class="path-list">
-        <span class="path-label">{{ $t('home.lolPathLabel') }}</span>
+        <span class="path-label">{{ $t("home.lolPathLabel") }}</span>
         <div
           v-for="(p, i) in lolPaths"
           :key="i"
           :class="['path-item', { active: selectedPath === p }]"
           @click="selectedPath = p"
         >
-          <span class="path-radio" :class="{ checked: selectedPath === p }"></span>
+          <span
+            class="path-radio"
+            :class="{ checked: selectedPath === p }"
+          ></span>
           <span class="path-text">{{ p }}</span>
         </div>
       </div>
       <div class="loading-ring">
         <div class="ring-dot"></div>
-        <span>{{ $t('home.waitingForLol') }}</span>
+        <span>{{ $t("home.waitingForLol") }}</span>
       </div>
     </div>
   </div>
@@ -190,7 +207,13 @@ watch(() => store.isConnected, (connected) => {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    monospace;
   font-size: 0.82rem;
   color: var(--text-muted);
   background: var(--card-bg);
@@ -306,7 +329,13 @@ watch(() => store.isConnected, (connected) => {
   gap: 8px;
   font-size: 0.8rem;
   color: var(--text-muted);
-  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    monospace;
   background: var(--card-bg);
   padding: 8px 12px;
   border-radius: 6px;
@@ -363,17 +392,30 @@ watch(() => store.isConnected, (connected) => {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .connected-logo {
@@ -385,15 +427,22 @@ watch(() => store.isConnected, (connected) => {
   object-fit: contain;
   opacity: 0.85;
   filter: drop-shadow(0 4px 12px rgba(108, 92, 231, 0.2));
-  animation: logo-enter 0.6s ease-out, logo-float 3s ease-in-out 1.2s infinite;
-  transition: opacity 0.3s ease, filter 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation:
+    logo-enter 0.6s ease-out,
+    logo-float 3s ease-in-out 1.2s infinite;
+  transition:
+    opacity 0.3s ease,
+    filter 0.3s ease,
+    transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   cursor: default;
 }
 
 .connected-logo:hover {
   opacity: 1;
   filter: drop-shadow(0 6px 20px rgba(108, 92, 231, 0.4));
-  animation: logo-enter 0.6s ease-out, logo-wiggle 0.5s ease-in-out infinite;
+  animation:
+    logo-enter 0.6s ease-out,
+    logo-wiggle 0.5s ease-in-out infinite;
   transform-origin: center bottom;
 }
 
@@ -414,20 +463,40 @@ watch(() => store.isConnected, (connected) => {
 }
 
 @keyframes logo-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
 }
 
 @keyframes logo-wiggle {
-  0%, 100% { transform: rotate(0deg); }
-  25% { transform: rotate(-6deg); }
-  75% { transform: rotate(6deg); }
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-6deg);
+  }
+  75% {
+    transform: rotate(6deg);
+  }
 }
 
 @keyframes logo-bounce {
-  0% { transform: scale(1); }
-  30% { transform: scale(0.85); }
-  60% { transform: scale(1.12); }
-  100% { transform: scale(1); }
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(0.85);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 </style>

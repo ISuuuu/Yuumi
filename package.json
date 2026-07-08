@@ -7,7 +7,13 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "type-check": "vue-tsc --noEmit",
+    "fmt-check": "cd src-tauri && cargo fmt --all -- --check",
+    "clippy": "cd src-tauri && cargo clippy --all-targets -- -D warnings",
+    "test:rust": "cd src-tauri && cargo test",
+    "check-all": "pnpm type-check && pnpm fmt-check && pnpm clippy",
+    "prepare": "husky"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -23,6 +29,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-vue": "^5.2.3",
+    "husky": "^9.1.7",
     "typescript": "~5.7.2",
     "unplugin-vue-components": "^32.1.0",
     "vite": "^6.0.0",

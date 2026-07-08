@@ -147,9 +147,18 @@ export async function initLcuListeners() {
 
   // 页面刷新后从后端同步当前连接状态（后端 AppState 持久，前端 store 会丢失）
   try {
-    const info = await invoke<{ pid: number; port: number; token: string } | null>("get_lcu_connection_info");
+    const info = await invoke<{
+      pid: number;
+      port: number;
+      token: string;
+    } | null>("get_lcu_connection_info");
     if (info && info.pid > 0) {
-      console.log("[lcuStore] 从后端恢复连接状态: pid=", info.pid, "port=", info.port);
+      console.log(
+        "[lcuStore] 从后端恢复连接状态: pid=",
+        info.pid,
+        "port=",
+        info.port,
+      );
       store.setConnected(true);
     }
   } catch (e) {

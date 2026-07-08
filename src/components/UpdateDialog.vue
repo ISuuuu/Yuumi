@@ -40,7 +40,12 @@ const progressPercent = computed(() => {
   if (!progress.value) return 0;
   // 优先用 Rust 端计算的百分比（但用 stableTotal 做上限保护）
   const p = progress.value;
-  if (p.percent != null && stableTotal != null && p.total != null && p.total < stableTotal) {
+  if (
+    p.percent != null &&
+    stableTotal != null &&
+    p.total != null &&
+    p.total < stableTotal
+  ) {
     // total 变小了：用 stableTotal 重新计算，防止百分比倒退
     return Math.min((p.downloaded / stableTotal) * 100, 100);
   }
@@ -61,31 +66,40 @@ let unlistenDownloadError: (() => void) | null = null;
 
 onMounted(async () => {
   // 监听 Rust 后台下载进度（start_background_download 已在 Rust 端自动启动）
-  unlistenProgress = await listen<DownloadProgress>("updater://progress", (event) => {
-    const p = event.payload;
-    // 更新稳定 total（只增不减）
-    if (p.total != null) {
-      if (stableTotal == null || p.total > stableTotal) {
-        stableTotal = p.total;
+  unlistenProgress = await listen<DownloadProgress>(
+    "updater://progress",
+    (event) => {
+      const p = event.payload;
+      // 更新稳定 total（只增不减）
+      if (p.total != null) {
+        if (stableTotal == null || p.total > stableTotal) {
+          stableTotal = p.total;
+        }
+        // 如果 Rust 给的 total 比 stableTotal 小，补全一个基于 stableTotal 的 percent
+        if (p.total < stableTotal) {
+          p.percent = (p.downloaded / stableTotal) * 100;
+          p.total = stableTotal;
+        }
       }
-      // 如果 Rust 给的 total 比 stableTotal 小，补全一个基于 stableTotal 的 percent
-      if (p.total < stableTotal) {
-        p.percent = (p.downloaded / stableTotal) * 100;
-        p.total = stableTotal;
-      }
-    }
-    progress.value = p;
-  });
+      progress.value = p;
+    },
+  );
   // 监听下载完成事件
-  unlistenDownloadReady = await listen<UpdateInfo>("updater://download-ready", () => {
-    downloadReady.value = true;
-    console.log("后台更新下载完成，等待用户确认安装");
-  });
+  unlistenDownloadReady = await listen<UpdateInfo>(
+    "updater://download-ready",
+    () => {
+      downloadReady.value = true;
+      console.log("后台更新下载完成，等待用户确认安装");
+    },
+  );
   // 监听下载失败事件
-  unlistenDownloadError = await listen<string>("updater://download-error", (event) => {
-    errorMsg.value = String(event.payload);
-    isMinimized.value = false; // 出错时弹出显示错误
-  });
+  unlistenDownloadError = await listen<string>(
+    "updater://download-error",
+    (event) => {
+      errorMsg.value = String(event.payload);
+      isMinimized.value = false; // 出错时弹出显示错误
+    },
+  );
 });
 
 onUnmounted(() => {
@@ -139,32 +153,52 @@ function restore() {
 }
 
 function openReleasePage() {
-  openUrl("https://github.com/ISuuuu/Yuumi/releases/latest").catch((err: any) => {
-    console.error("Failed to open release page:", err);
-  });
+  openUrl("https://github.com/ISuuuu/Yuumi/releases/latest").catch(
+    (err: any) => {
+      console.error("Failed to open release page:", err);
+    },
+  );
 }
 </script>
 
 <template>
   <!-- 迷你气泡：直接渲染，不经过 Teleport，永远属于 App.vue 的 DOM 树 -->
-  <div v-if="updateInfo && isMinimized" class="update-mini-badge" @click="restore" :title="downloadReady ? '点击重启安装' : '点击展开更新进度'">
+  <div
+    v-if="updateInfo && isMinimized"
+    class="update-mini-badge"
+    @click="restore"
+    :title="downloadReady ? '点击重启安装' : '点击展开更新进度'"
+  >
     <div class="mini-progress-ring">
       <svg class="ring-svg" viewBox="0 0 36 36">
-        <path class="ring-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+        <path
+          class="ring-bg"
+          d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+        />
         <path
           class="ring-fill"
-          :stroke-dasharray="`${downloadReady ? 100 : (progressPercent >= 0 ? progressPercent : 25)}, 100`"
+          :stroke-dasharray="`${downloadReady ? 100 : progressPercent >= 0 ? progressPercent : 25}, 100`"
           :class="{ 'ring-animate': progressPercent < 0 && !downloadReady }"
           d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
         />
       </svg>
       <div class="mini-percent">
-        {{ downloadReady ? '✓' : (progressPercent >= 0 ? Math.round(progressPercent) + '%' : '...') }}
+        {{
+          downloadReady
+            ? "✓"
+            : progressPercent >= 0
+              ? Math.round(progressPercent) + "%"
+              : "..."
+        }}
       </div>
     </div>
     <div class="mini-info">
-      <div class="mini-title">{{ downloadReady ? '更新就绪' : '正在后台更新' }}</div>
-      <div class="mini-version">{{ downloadReady ? '点击重启安装' : `新版本 v${updateInfo.version}` }}</div>
+      <div class="mini-title">
+        {{ downloadReady ? "更新就绪" : "正在后台更新" }}
+      </div>
+      <div class="mini-version">
+        {{ downloadReady ? "点击重启安装" : `新版本 v${updateInfo.version}` }}
+      </div>
     </div>
   </div>
 
@@ -175,10 +209,17 @@ function openReleasePage() {
         <!-- 头部 -->
         <div class="update-header">
           <div class="update-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
           </div>
           <div class="update-title-group">
@@ -186,10 +227,18 @@ function openReleasePage() {
             <template v-if="downloadReady">
               <h2 class="update-title">更新已就绪</h2>
               <p class="update-subtitle">
-                <span class="version-current">v{{ updateInfo.currentVersion }}</span>
-                <svg class="version-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <line x1="5" y1="12" x2="19" y2="12"/>
-                  <polyline points="12 5 19 12 12 19"/>
+                <span class="version-current"
+                  >v{{ updateInfo.currentVersion }}</span
+                >
+                <svg
+                  class="version-arrow"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                >
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                  <polyline points="12 5 19 12 12 19" />
                 </svg>
                 <span class="version-new">v{{ updateInfo.version }}</span>
               </p>
@@ -198,31 +247,63 @@ function openReleasePage() {
             <template v-else>
               <h2 class="update-title">发现新版本</h2>
               <p class="update-subtitle">
-                <span class="version-current">v{{ updateInfo.currentVersion }}</span>
-                <svg class="version-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <line x1="5" y1="12" x2="19" y2="12"/>
-                  <polyline points="12 5 19 12 12 19"/>
+                <span class="version-current"
+                  >v{{ updateInfo.currentVersion }}</span
+                >
+                <svg
+                  class="version-arrow"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                >
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                  <polyline points="12 5 19 12 12 19" />
                 </svg>
                 <span class="version-new">v{{ updateInfo.version }}</span>
               </p>
             </template>
           </div>
           <!-- 右上角关闭/最小化按钮 -->
-          <button v-if="!installing" class="update-close" @click="downloadReady ? dismiss() : minimize()" :title="downloadReady ? '稍后' : '后台下载'">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line v-if="downloadReady" x1="18" y1="6" x2="6" y2="18"/><line v-if="downloadReady" x1="6" y1="6" x2="18" y2="18"/>
-              <line v-else x1="5" y1="12" x2="19" y2="12"/>
+          <button
+            v-if="!installing"
+            class="update-close"
+            @click="downloadReady ? dismiss() : minimize()"
+            :title="downloadReady ? '稍后' : '后台下载'"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line v-if="downloadReady" x1="18" y1="6" x2="6" y2="18" />
+              <line v-if="downloadReady" x1="6" y1="6" x2="18" y2="18" />
+              <line v-else x1="5" y1="12" x2="19" y2="12" />
             </svg>
           </button>
-          <button v-else class="update-close" @click="minimize" title="后台运行">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="5" y1="12" x2="19" y2="12"/>
+          <button
+            v-else
+            class="update-close"
+            @click="minimize"
+            title="后台运行"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
           </button>
         </div>
 
         <!-- 更新说明（仅手动更新/下载完成时显示） -->
-        <div v-if="updateInfo.notes && (downloadReady || !progress)" class="update-notes">
+        <div
+          v-if="updateInfo.notes && (downloadReady || !progress)"
+          class="update-notes"
+        >
           <div class="notes-label">更新说明</div>
           <pre class="notes-content">{{ updateInfo.notes }}</pre>
         </div>
@@ -231,7 +312,12 @@ function openReleasePage() {
         <div v-if="!downloadReady && progress" class="update-progress-section">
           <div class="progress-label">
             <span>后台下载中...</span>
-            <span v-if="progress?.downloaded">{{ formatBytes(progress.downloaded) }}{{ progress.total ? ` / ${formatBytes(progress.total)}` : '' }}</span>
+            <span v-if="progress?.downloaded"
+              >{{ formatBytes(progress.downloaded)
+              }}{{
+                progress.total ? ` / ${formatBytes(progress.total)}` : ""
+              }}</span
+            >
           </div>
           <div class="progress-bar-track">
             <div
@@ -246,8 +332,17 @@ function openReleasePage() {
 
         <!-- 错误提示 -->
         <div v-if="errorMsg" class="update-error">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            width="14"
+            height="14"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
           {{ errorMsg }}
         </div>
@@ -257,13 +352,19 @@ function openReleasePage() {
           <!-- 下载完成 → 立即重启 -->
           <template v-if="downloadReady">
             <button class="btn-dismiss" @click="dismiss">稍后</button>
-            <button class="btn-install" @click="installPending">立即重启</button>
+            <button class="btn-install" @click="installPending">
+              立即重启
+            </button>
           </template>
           <!-- 手动更新（Settings 页面场景，无后台下载） -->
           <template v-else-if="!progress">
-            <button v-if="errorMsg" class="btn-manual" @click="openReleasePage">浏览器下载</button>
+            <button v-if="errorMsg" class="btn-manual" @click="openReleasePage">
+              浏览器下载
+            </button>
             <button class="btn-dismiss" @click="dismiss">稍后提醒</button>
-            <button class="btn-install" @click="installNow">{{ errorMsg ? '重试' : '立即更新' }}</button>
+            <button class="btn-install" @click="installNow">
+              {{ errorMsg ? "重试" : "立即更新" }}
+            </button>
           </template>
           <!-- 下载中 -->
           <template v-else>
@@ -290,13 +391,17 @@ function openReleasePage() {
 }
 
 @keyframes overlay-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .update-dialog {
   background: var(--bg-card, #1e2030);
-  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
   border-radius: 16px;
   padding: 28px;
   width: 420px;
@@ -306,8 +411,14 @@ function openReleasePage() {
 }
 
 @keyframes dialog-in {
-  from { opacity: 0; transform: translateY(16px) scale(0.96); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* ── 头部 ── */
@@ -322,12 +433,17 @@ function openReleasePage() {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--theme-color, #009faa), color-mix(in srgb, var(--theme-color, #009faa) 70%, #fff));
+  background: linear-gradient(
+    135deg,
+    var(--theme-color, #009faa),
+    color-mix(in srgb, var(--theme-color, #009faa) 70%, #fff)
+  );
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--theme-color, #009faa) 40%, transparent);
+  box-shadow: 0 4px 16px
+    color-mix(in srgb, var(--theme-color, #009faa) 40%, transparent);
 }
 
 .update-icon svg {
@@ -385,12 +501,14 @@ function openReleasePage() {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
   flex-shrink: 0;
 }
 
 .update-close:hover {
-  background: var(--bg-hover, rgba(255,255,255,0.07));
+  background: var(--bg-hover, rgba(255, 255, 255, 0.07));
   color: var(--text-primary, #e8eaf0);
 }
 
@@ -401,8 +519,8 @@ function openReleasePage() {
 
 /* ── 更新说明 ── */
 .update-notes {
-  background: var(--bg-secondary, rgba(255,255,255,0.04));
-  border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
   border-radius: 10px;
   padding: 12px 14px;
   margin-bottom: 20px;
@@ -444,7 +562,7 @@ function openReleasePage() {
 
 .progress-bar-track {
   height: 6px;
-  background: var(--bg-secondary, rgba(255,255,255,0.08));
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.08));
   border-radius: 999px;
   overflow: hidden;
   position: relative;
@@ -452,7 +570,11 @@ function openReleasePage() {
 
 .progress-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--theme-color, #009faa), color-mix(in srgb, var(--theme-color, #009faa) 60%, #fff));
+  background: linear-gradient(
+    90deg,
+    var(--theme-color, #009faa),
+    color-mix(in srgb, var(--theme-color, #009faa) 60%, #fff)
+  );
   border-radius: 999px;
   transition: width 0.3s ease;
 }
@@ -460,7 +582,8 @@ function openReleasePage() {
 .progress-bar-indeterminate {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg,
+  background: linear-gradient(
+    90deg,
     transparent 0%,
     var(--theme-color, #009faa) 40%,
     transparent 100%
@@ -469,8 +592,12 @@ function openReleasePage() {
 }
 
 @keyframes indeterminate {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(200%); }
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
 }
 
 .progress-hint {
@@ -511,7 +638,9 @@ function openReleasePage() {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .btn-manual:hover {
@@ -521,16 +650,19 @@ function openReleasePage() {
 .btn-dismiss {
   padding: 8px 18px;
   border-radius: 8px;
-  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
   background: transparent;
   color: var(--text-secondary, #888);
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .btn-dismiss:hover {
-  background: var(--bg-hover, rgba(255,255,255,0.06));
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
   color: var(--text-primary, #e8eaf0);
 }
 
@@ -543,7 +675,9 @@ function openReleasePage() {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.15s, transform 0.1s;
+  transition:
+    opacity 0.15s,
+    transform 0.1s;
 }
 
 .btn-install:hover {
@@ -564,7 +698,7 @@ function openReleasePage() {
 
 .btn-minimize-text {
   background: transparent;
-  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
   color: var(--text-secondary, #999);
   padding: 6px 18px;
   border-radius: 6px;
@@ -575,7 +709,7 @@ function openReleasePage() {
 }
 
 .btn-minimize-text:hover {
-  background: var(--bg-hover, rgba(255,255,255,0.06));
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
   color: var(--text-primary, #e8eaf0);
   border-color: var(--theme-color, #009faa);
 }
@@ -594,7 +728,7 @@ function openReleasePage() {
   align-items: center;
   gap: 10px;
   background: var(--bg-card, #1e2030);
-  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
   border-radius: 30px;
   padding: 6px 16px 6px 8px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
@@ -615,8 +749,14 @@ function openReleasePage() {
 }
 
 @keyframes badge-in {
-  from { opacity: 0; transform: translateY(24px) scale(0.85); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .mini-progress-ring {
@@ -636,7 +776,7 @@ function openReleasePage() {
 
 .ring-bg {
   fill: none;
-  stroke: var(--bg-secondary, rgba(255,255,255,0.06));
+  stroke: var(--bg-secondary, rgba(255, 255, 255, 0.06));
   stroke-width: 3.5;
 }
 
@@ -653,9 +793,15 @@ function openReleasePage() {
 }
 
 @keyframes ring-dash {
-  0% { stroke-dasharray: 1, 100; }
-  50% { stroke-dasharray: 50, 100; }
-  100% { stroke-dasharray: 1, 100; }
+  0% {
+    stroke-dasharray: 1, 100;
+  }
+  50% {
+    stroke-dasharray: 50, 100;
+  }
+  100% {
+    stroke-dasharray: 1, 100;
+  }
 }
 
 .mini-percent {

@@ -74,7 +74,9 @@ impl RotatingFileWriter {
         let prefix = format!("{}_", self.basename);
         let ext = format!(".{}", self.suffix);
 
-        let Ok(entries) = fs::read_dir(&self.dir) else { return };
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             if !name.starts_with(&prefix) || !name.ends_with(&ext) {
@@ -127,7 +129,11 @@ impl RotatingFileWriter {
 
         let msg = format!(
             "{} [{:<5}] {}:{} - {}\n",
-            ts, level, module, line, record.args()
+            ts,
+            level,
+            module,
+            line,
+            record.args()
         );
 
         if let Some(ref mut f) = self.file {
@@ -213,7 +219,11 @@ pub fn init(log_level: u32) {
     log::set_max_level(level);
     match log::set_boxed_logger(Box::new(logger)) {
         Ok(_) => {
-            log::info!("日志系统已启动，级别={:?}，目录={}", level, log_dir.display());
+            log::info!(
+                "日志系统已启动，级别={:?}，目录={}",
+                level,
+                log_dir.display()
+            );
         }
         Err(e) => {
             eprintln!("日志系统初始化失败: {}", e);

@@ -28,7 +28,7 @@ function renderMarkdown(md: string): string {
 function formatDate(isoStr: string) {
   if (!isoStr) return "";
   const d = new Date(isoStr);
-  const pad = (n: number) => n.toString().padStart(2, '0');
+  const pad = (n: number) => n.toString().padStart(2, "0");
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
 }
 
@@ -36,14 +36,16 @@ async function fetchReleases() {
   loading.value = true;
   hasError.value = false;
   try {
-    const resp = await fetch("https://api.github.com/repos/ISuuuu/Yuumi/releases");
+    const resp = await fetch(
+      "https://api.github.com/repos/ISuuuu/Yuumi/releases",
+    );
     if (!resp.ok) throw new Error("HTTP status " + resp.status);
     const data = await resp.json();
     if (Array.isArray(data) && data.length > 0) {
       versions.value = data.slice(0, 3).map((rel: any) => ({
         tag: rel.tag_name,
         date: formatDate(rel.published_at),
-        body: rel.body || t("noticePage.noDesc")
+        body: rel.body || t("noticePage.noDesc"),
       }));
       console.log("[Notice] 成功拉取 GitHub 最近 3 个版本日志");
     } else {
@@ -66,27 +68,38 @@ onMounted(() => {
   <div class="notice-view">
     <div class="notice-header">
       <div class="header-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path
+            d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"
+          />
         </svg>
       </div>
       <div class="header-text">
-        <h2>{{ $t('noticePage.title') }}</h2>
-        <p class="header-sub">{{ $t('noticePage.sub') }}</p>
+        <h2>{{ $t("noticePage.title") }}</h2>
+        <p class="header-sub">{{ $t("noticePage.sub") }}</p>
       </div>
     </div>
 
     <!-- 动态同步 Loading 骨架屏 -->
     <div v-if="loading && versions.length === 0" class="loading-container">
       <div class="loading-spinner" />
-      <p class="loading-text">{{ $t('noticePage.loadingText') }}</p>
+      <p class="loading-text">{{ $t("noticePage.loadingText") }}</p>
     </div>
 
     <!-- 错误状态提示与重试 -->
     <div v-else-if="hasError && versions.length === 0" class="error-container">
       <div class="offline-logo">⚠️</div>
-      <p class="error-text">{{ $t('noticePage.errorText') }}</p>
-      <button class="retry-btn" @click="fetchReleases">{{ $t('noticePage.retryBtn') }}</button>
+      <p class="error-text">{{ $t("noticePage.errorText") }}</p>
+      <button class="retry-btn" @click="fetchReleases">
+        {{ $t("noticePage.retryBtn") }}
+      </button>
     </div>
 
     <div v-else class="timeline">
@@ -102,10 +115,15 @@ onMounted(() => {
 
         <div class="changelog-card">
           <div class="card-header">
-            <div class="version-tag" :class="{ latest: idx === 0 }">{{ ver.tag }}</div>
+            <div class="version-tag" :class="{ latest: idx === 0 }">
+              {{ ver.tag }}
+            </div>
             <span class="version-date">{{ ver.date }}</span>
           </div>
-          <div class="release-body markdown-body" v-html="renderMarkdown(ver.body)" />
+          <div
+            class="release-body markdown-body"
+            v-html="renderMarkdown(ver.body)"
+          />
           <div class="card-glow" />
         </div>
       </div>
@@ -214,15 +232,19 @@ onMounted(() => {
   border-radius: 50%;
   background: var(--primary-color);
   border: 3px solid var(--bg-color);
-  box-shadow: 0 0 0 3px var(--primary-color-alpha-30),
-              0 0 12px var(--primary-color-alpha-30);
-  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow:
+    0 0 0 3px var(--primary-color-alpha-30),
+    0 0 12px var(--primary-color-alpha-30);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 
 .timeline-node:hover .dot-inner {
   transform: scale(1.25);
-  box-shadow: 0 0 0 4px var(--primary-color-alpha-40),
-              0 0 20px var(--primary-color-alpha-40);
+  box-shadow:
+    0 0 0 4px var(--primary-color-alpha-40),
+    0 0 20px var(--primary-color-alpha-40);
 }
 
 .changelog-card {
@@ -241,8 +263,9 @@ onMounted(() => {
 
 .changelog-card:hover {
   border-color: var(--primary-color-alpha-30);
-  box-shadow: 0 8px 30px -8px var(--primary-color-alpha-15),
-              var(--shadow-md);
+  box-shadow:
+    0 8px 30px -8px var(--primary-color-alpha-15),
+    var(--shadow-md);
   transform: translateY(-2px);
 }
 
@@ -373,7 +396,9 @@ onMounted(() => {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .error-container {
@@ -418,12 +443,24 @@ onMounted(() => {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

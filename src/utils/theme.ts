@@ -5,20 +5,29 @@
 export function updateThemeColor(color: string) {
   if (!color) return;
   const root = document.documentElement;
-  
+
   // 统一转换为 6 位的 hex，用于 --primary-color，防止 CSS 渲染带透明度的 8 位 hex 颜色导致失真
   const hex6 = toHex6(color);
   root.style.setProperty("--primary-color", hex6);
   root.style.setProperty("--primary-color-hover", hex6 + "cc"); // 加上 80% 不透明度的 hover 色
-  
+
   // 提取 RGB，支持转换为各种带透明度的 css rgba 变量
   const hex = hex6.replace("#", "");
   const r = parseInt(hex.substring(0, 2), 16) || 0;
   const g = parseInt(hex.substring(2, 4), 16) || 159;
   const b = parseInt(hex.substring(4, 6), 16) || 170;
-  root.style.setProperty("--primary-color-alpha-15", `rgba(${r}, ${g}, ${b}, 0.15)`);
-  root.style.setProperty("--primary-color-alpha-30", `rgba(${r}, ${g}, ${b}, 0.3)`);
-  root.style.setProperty("--primary-color-alpha-40", `rgba(${r}, ${g}, ${b}, 0.4)`);
+  root.style.setProperty(
+    "--primary-color-alpha-15",
+    `rgba(${r}, ${g}, ${b}, 0.15)`,
+  );
+  root.style.setProperty(
+    "--primary-color-alpha-30",
+    `rgba(${r}, ${g}, ${b}, 0.3)`,
+  );
+  root.style.setProperty(
+    "--primary-color-alpha-40",
+    `rgba(${r}, ${g}, ${b}, 0.4)`,
+  );
 }
 
 /**
@@ -56,7 +65,7 @@ export function applyDpiScale(dpiScale: string) {
   const root = document.documentElement;
   // 确保先清除之前的遗留属性
   document.body.style.removeProperty("zoom");
-  
+
   if (!dpiScale || dpiScale === "Auto" || dpiScale === "100") {
     root.style.removeProperty("font-size");
   } else {
@@ -77,12 +86,16 @@ export function applyDpiScale(dpiScale: string) {
  * @param loseColor 失败卡片颜色 (8位 hex #aarrggbb 或 6位 hex 或 rgba)
  * @param remakeColor 重开卡片颜色 (8位 hex #aarrggbb 或 6位 hex 或 rgba)
  */
-export function updateCardColors(winColor: string, loseColor: string, remakeColor: string) {
+export function updateCardColors(
+  winColor: string,
+  loseColor: string,
+  remakeColor: string,
+) {
   const root = document.documentElement;
-  
-  const DEFAULT_WIN = '#1510b981';
-  const DEFAULT_LOSE = '#12f43f5e';
-  const DEFAULT_REMAKE = '#1294a3b8';
+
+  const DEFAULT_WIN = "#1510b981";
+  const DEFAULT_LOSE = "#12f43f5e";
+  const DEFAULT_REMAKE = "#1294a3b8";
 
   const setCardVars = (prefix: string, color: string, defaultHex: string) => {
     // 如果没有颜色配置，或颜色等于默认配置（不区分大小写），则清除 CSS 自定义属性覆盖，让其回退到样式表的亮暗色自动适应
@@ -94,8 +107,11 @@ export function updateCardColors(winColor: string, loseColor: string, remakeColo
       return;
     }
 
-    let r = 0, g = 0, b = 0, alpha = 0.1;
-    if (color.startsWith('#')) {
+    let r = 0,
+      g = 0,
+      b = 0,
+      alpha = 0.1;
+    if (color.startsWith("#")) {
       if (color.length === 9) {
         alpha = parseInt(color.slice(1, 3), 16) / 255;
         r = parseInt(color.slice(3, 5), 16);
@@ -107,7 +123,7 @@ export function updateCardColors(winColor: string, loseColor: string, remakeColo
         b = parseInt(color.slice(5, 7), 16);
         alpha = 0.1; // 默认大约 10% 的透明度
       }
-    } else if (color.startsWith('rgba') || color.startsWith('rgb')) {
+    } else if (color.startsWith("rgba") || color.startsWith("rgb")) {
       const match = color.match(/\d+(\.\d+)?/g);
       if (match) {
         r = parseInt(match[0], 10);
@@ -116,7 +132,7 @@ export function updateCardColors(winColor: string, loseColor: string, remakeColo
         alpha = match[3] !== undefined ? parseFloat(match[3]) : 0.1;
       }
     }
-    
+
     // 如果解析失败，清除覆盖
     if (isNaN(r) || isNaN(g) || isNaN(b)) {
       root.style.removeProperty(`--${prefix}-color`);
@@ -125,15 +141,23 @@ export function updateCardColors(winColor: string, loseColor: string, remakeColo
       root.style.removeProperty(`--${prefix}-glow`);
       return;
     }
-    
+
     root.style.setProperty(`--${prefix}-color`, `rgba(${r}, ${g}, ${b}, 1)`);
-    root.style.setProperty(`--${prefix}-bg`, `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`);
-    root.style.setProperty(`--${prefix}-border`, `rgba(${r}, ${g}, ${b}, ${(alpha * 2.5).toFixed(2)})`);
-    root.style.setProperty(`--${prefix}-glow`, `rgba(${r}, ${g}, ${b}, ${(alpha * 0.75).toFixed(2)})`);
+    root.style.setProperty(
+      `--${prefix}-bg`,
+      `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`,
+    );
+    root.style.setProperty(
+      `--${prefix}-border`,
+      `rgba(${r}, ${g}, ${b}, ${(alpha * 2.5).toFixed(2)})`,
+    );
+    root.style.setProperty(
+      `--${prefix}-glow`,
+      `rgba(${r}, ${g}, ${b}, ${(alpha * 0.75).toFixed(2)})`,
+    );
   };
 
-  setCardVars('win', winColor, DEFAULT_WIN);
-  setCardVars('loss', loseColor, DEFAULT_LOSE);
-  setCardVars('remake', remakeColor, DEFAULT_REMAKE);
+  setCardVars("win", winColor, DEFAULT_WIN);
+  setCardVars("loss", loseColor, DEFAULT_LOSE);
+  setCardVars("remake", remakeColor, DEFAULT_REMAKE);
 }
-

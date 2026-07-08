@@ -5,8 +5,8 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
 
-use crate::LcuClient;
 use super::game_data::GameDataAssets;
+use crate::LcuClient;
 
 /// 日志脱敏：将命令行中的 token 值替换为 ***
 fn sanitize_cmdline(cmd: &str) -> String {
@@ -40,7 +40,7 @@ pub fn start(
             // 优先尝试从 lockfile 获取，备用从进程参数获取，最后 WMIC 兜底（需管理员）
             let lcu_info = find_via_lockfile(&sys)
                 .or_else(|| find_via_cmdline(&sys))
-                .or_else(|| find_via_wmic());
+                .or_else(find_via_wmic);
             // 诊断日志（写入系统临时目录，避免硬编码开发者路径）
             if lcu_info.is_none() {
                 let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
@@ -67,21 +67,16 @@ pub fn start(
                 let _ = std::fs::remove_file(&debug_path);
             }
 
-
             // ── 阶段 1: 只读检查是否需要重连（不持有写锁）──
             let needs_reconnect = {
                 let lock = lcu_state.read().await;
                 match &lcu_info {
-                    Some((pid, port, token, _server)) => {
-                        match lock.as_ref() {
-                            Some(client) => {
-                                client.pid != *pid
-                                    || client.port != *port
-                                    || client.token != *token
-                            }
-                            None => true,
+                    Some((pid, port, token, _server)) => match lock.as_ref() {
+                        Some(client) => {
+                            client.pid != *pid || client.port != *port || client.token != *token
                         }
-                    }
+                        None => true,
+                    },
                     None => false,
                 }
             };
@@ -91,7 +86,12 @@ pub fn start(
                 Some((pid, port, token, server)) => {
                     if needs_reconnect {
                         // ── 阶段 2: 在获取写锁之前探测 LCU HTTP 是否就绪 ──
-                        log::info!("检测到 LCU: pid={}, port={}, server={:?}, 等待 HTTP 服务器就绪...", pid, port, server);
+                        log::info!(
+                            "检测到 LCU: pid={}, port={}, server={:?}, 等待 HTTP 服务器就绪...",
+                            pid,
+                            port,
+                            server
+                        );
 
                         if let Err(msg) = probe_lcu_readiness(port, &token).await {
                             log::warn!("LCU 就绪探测失败，跳过本轮: {}", msg);
@@ -99,9 +99,9 @@ pub fn start(
                         } else {
                             // ── 阶段 3: 探测通过，构建客户端并提交状态 ──
                             match reqwest::Client::builder()
-                                 .danger_accept_invalid_certs(true)
-                                 .no_proxy()
-                                 .build()
+                                .danger_accept_invalid_certs(true)
+                                .no_proxy()
+                                .build()
                             {
                                 Ok(http_client) => {
                                     let client = LcuClient {
@@ -136,10 +136,15 @@ pub fn start(
                                                     server: None,
                                                     http_client: http,
                                                 };
-                                                let assets = super::game_data::fetch_game_data_assets(&tmp_lcu).await;
+                                                let assets =
+                                                    super::game_data::fetch_game_data_assets(
+                                                        &tmp_lcu,
+                                                    )
+                                                    .await;
                                                 *gd.write().await = assets;
                                                 log::info!("游戏资源已更新");
-                                                let _ = app_handle_for_gd.emit("game-data-ready", ());
+                                                let _ =
+                                                    app_handle_for_gd.emit("game-data-ready", ());
                                             }
                                             Err(e) => log::error!("加载游戏资源失败: {}", e),
                                         }
@@ -229,7 +234,12 @@ fn find_via_lockfile(sys: &System) -> Option<(u32, u16, String, Option<String>)>
     // lockfile 不含大区信息，从进程命令行补充提取 --rso_platform_id=
     let server = extract_server_from_sys(sys);
 
-    log::debug!("从 lockfile 读取: pid={}, port={}, token=***, server={:?}", pid, port, server);
+    log::debug!(
+        "从 lockfile 读取: pid={}, port={}, token=***, server={:?}",
+        pid,
+        port,
+        server
+    );
     Some((pid, port, password, server))
 }
 
@@ -238,7 +248,11 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> 
     for (pid, process) in sys.processes() {
         let name = process.name().to_string_lossy().to_lowercase();
         if name == "leagueclientux.exe" || name == "leagueclientux" {
-            let cmd: Vec<String> = process.cmd().iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+            let cmd: Vec<String> = process
+                .cmd()
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
             let mut cmd_str = cmd.join(" ");
 
             #[cfg(target_os = "windows")]
@@ -248,7 +262,10 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> 
                 }
             }
 
-            log::debug!("找到 LCU 进程，命令行整句为: {}", sanitize_cmdline(&cmd_str));
+            log::debug!(
+                "找到 LCU 进程，命令行整句为: {}",
+                sanitize_cmdline(&cmd_str)
+            );
 
             if cmd_str.is_empty() {
                 log::warn!("LCU 进程命令行为空");
@@ -269,18 +286,22 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> 
             // 提取 --remoting-auth-token=
             if let Some(t_idx) = cmd_str.find("--remoting-auth-token=") {
                 let sub = &cmd_str[t_idx + 22..];
-                let end = sub.find(|c: char| c == ' ' || c == '"' || c == '\'').unwrap_or(sub.len());
+                let end = sub.find([' ', '"', '\'']).unwrap_or(sub.len());
                 token = Some(sub[..end].to_string());
             }
 
             // 提取 --rso_platform_id=（登录大区标识，用于 SGP 观战等）
             if let Some(s_idx) = cmd_str.find("--rso_platform_id=") {
                 let sub = &cmd_str[s_idx + 18..];
-                let end = sub.find(|c: char| c == ' ' || c == '"' || c == '\'').unwrap_or(sub.len());
+                let end = sub.find([' ', '"', '\'']).unwrap_or(sub.len());
                 server = Some(sub[..end].to_string());
             }
 
-            log::debug!("从命令行解析结果: port={:?}, token=***, server={:?}", port, server);
+            log::debug!(
+                "从命令行解析结果: port={:?}, token=***, server={:?}",
+                port,
+                server
+            );
 
             // 只有成功提取到了合规的凭据才返回，避免因遇到无权/僵尸同名进程导致提前退出
             if let (Some(p), Some(t)) = (port, token) {
@@ -297,7 +318,13 @@ fn find_via_wmic() -> Option<(u32, u16, String, Option<String>)> {
     {
         use std::os::windows::process::CommandExt;
         let output = std::process::Command::new("wmic")
-            .args(["process", "WHERE", "name='LeagueClientUx.exe'", "GET", "commandline"])
+            .args([
+                "process",
+                "WHERE",
+                "name='LeagueClientUx.exe'",
+                "GET",
+                "commandline",
+            ])
             .creation_flags(0x08000000) // CREATE_NO_WINDOW: 阻止黑窗口/终端闪烁
             .output()
             .ok()?;
@@ -311,7 +338,11 @@ fn find_via_wmic() -> Option<(u32, u16, String, Option<String>)> {
         // 提取 --rso_platform_id=
         let server = regex_find_value(&stdout, r#"--rso_platform_id=([^"\s]+)"#);
 
-        log::debug!("从 WMIC 解析结果: port={}, token=***, server={:?}", port, server);
+        log::debug!(
+            "从 WMIC 解析结果: port={}, token=***, server={:?}",
+            port,
+            server
+        );
 
         // WMIC 不返回 PID，从进程列表中查找
         let sys = System::new_all();
@@ -341,7 +372,7 @@ fn regex_find_value(haystack: &str, pattern: &str) -> Option<String> {
 
 /// 查找 LeagueClientUx.exe 的可执行文件所在目录
 fn find_lcu_exe_dir(sys: &System) -> Option<PathBuf> {
-    for (_, process) in sys.processes() {
+    for process in sys.processes().values() {
         let name = process.name().to_string_lossy().to_lowercase();
         if name == "leagueclientux.exe" || name == "leagueclientux" {
             // 不使用 ? 语法，防止某个特定的同名进程没有 exe() 权限时直接中断整个函数
@@ -359,7 +390,12 @@ fn extract_server_from_sys(sys: &System) -> Option<String> {
     for (pid, process) in sys.processes() {
         let name = process.name().to_string_lossy().to_lowercase();
         if name == "leagueclientux.exe" || name == "leagueclientux" {
-            let mut cmd_str: String = process.cmd().iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ");
+            let mut cmd_str: String = process
+                .cmd()
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" ");
 
             #[cfg(target_os = "windows")]
             if cmd_str.is_empty() {
@@ -370,7 +406,7 @@ fn extract_server_from_sys(sys: &System) -> Option<String> {
 
             if let Some(s_idx) = cmd_str.find("--rso_platform_id=") {
                 let sub = &cmd_str[s_idx + 18..];
-                let end = sub.find(|c: char| c == ' ' || c == '"' || c == '\'').unwrap_or(sub.len());
+                let end = sub.find([' ', '"', '\'']).unwrap_or(sub.len());
                 return Some(sub[..end].to_string());
             }
         }
@@ -402,7 +438,8 @@ async fn probe_lcu_readiness(port: u16, token: &str) -> Result<(), String> {
             Ok(resp) if resp.status().is_success() => {
                 log::info!(
                     "LCU HTTP 服务器就绪 (第 {}/{} 次探测)",
-                    attempt, PROBE_MAX_RETRIES
+                    attempt,
+                    PROBE_MAX_RETRIES
                 );
                 return Ok(());
             }
@@ -448,12 +485,8 @@ fn get_cmdline_windows(pid: u32) -> Option<String> {
     }
 
     extern "system" {
-        fn OpenProcess(
-            desired_access: u32,
-            inherit_handle: i32,
-            process_id: u32,
-        ) -> *mut c_void;
-        
+        fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> *mut c_void;
+
         fn CloseHandle(handle: *mut c_void) -> i32;
 
         fn NtQueryInformationProcess(
@@ -504,13 +537,11 @@ fn get_cmdline_windows(pid: u32) -> Option<String> {
         }
 
         let unicode_str = *(buffer.as_ptr() as *const UNICODE_STRING);
-        
+
         let offset = unicode_str.buffer as usize - buffer.as_ptr() as usize;
         if offset + (unicode_str.length as usize) <= buffer.len() {
-            let u16_slice = std::slice::from_raw_parts(
-                unicode_str.buffer,
-                (unicode_str.length / 2) as usize
-            );
+            let u16_slice =
+                std::slice::from_raw_parts(unicode_str.buffer, (unicode_str.length / 2) as usize);
             return Some(String::from_utf16_lossy(u16_slice));
         } else {
             let header_size = std::mem::size_of::<UNICODE_STRING>();

@@ -8,17 +8,17 @@ pub mod tools;
 pub mod updater;
 pub mod upload;
 
+use crate::updater::PendingUpdate;
 use base64::Engine;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
+use std::sync::Mutex;
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::window::Effect;
 use tauri::Emitter;
 use tauri::Manager;
-use std::sync::Mutex;
 use tokio::sync::{mpsc, watch, RwLock, Semaphore};
-use crate::updater::PendingUpdate;
 
 /// 包装 tauri::async_runtime::spawn，捕获并记录后台任务异常终止。
 /// 不会丢失 JoinHandle 的错误信息，避免任务静默崩溃。
@@ -101,7 +101,6 @@ pub fn run() {
             let app_config = config::AppConfig::load();
             let api_concurrency = app_config.functions.api_concurrency_number as usize;
 
-
             let app_config_arc = Arc::new(RwLock::new(app_config));
             log::info!("配置已加载");
 
@@ -156,11 +155,7 @@ pub fn run() {
                         "lcu_user_001".to_string()
                     };
                     log::info!("启动 SignalR Hub 远程反代");
-                    signalr::start(
-                        app.handle().clone(),
-                        server_url,
-                        user_id,
-                    );
+                    signalr::start(app.handle().clone(), server_url, user_id);
                 }
             }
 
@@ -199,31 +194,33 @@ pub fn run() {
                 }))
                 .menu(&tray_menu)
                 .tooltip("Yuumi")
-                .on_menu_event(move |app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
-                    let id = event.id().as_ref().to_string();
-                    if id == "exit" {
-                        app.exit(0);
-                    } else {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            // 重新应用云母效果以防失效
-                            let state = app.state::<AppState>();
-                            let is_mica_enabled = {
-                                if let Ok(cfg) = state.config.try_read() {
-                                    cfg.personalization.mica_enabled
-                                } else {
-                                    false
+                .on_menu_event(
+                    move |app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
+                        let id = event.id().as_ref().to_string();
+                        if id == "exit" {
+                            app.exit(0);
+                        } else {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.unminimize();
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                                // 重新应用云母效果以防失效
+                                let state = app.state::<AppState>();
+                                let is_mica_enabled = {
+                                    if let Ok(cfg) = state.config.try_read() {
+                                        cfg.personalization.mica_enabled
+                                    } else {
+                                        false
+                                    }
+                                };
+                                if is_mica_enabled {
+                                    let _ = set_mica_effect(app.clone(), true);
                                 }
-                            };
-                            if is_mica_enabled {
-                                let _ = set_mica_effect(app.clone(), true);
                             }
+                            let _ = app.emit("tray-navigate", &id);
                         }
-                        let _ = app.emit("tray-navigate", &id);
-                    }
-                })
+                    },
+                )
                 .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: TrayIconEvent| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
@@ -364,9 +361,7 @@ async fn get_lcu_connection_info(
 
 /// 获取选人阶段所在队伍（蓝色方/红色方）
 #[tauri::command]
-async fn get_map_side(
-    app_state: tauri::State<'_, AppState>,
-) -> Result<Option<String>, String> {
+async fn get_map_side(app_state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
     let lock = app_state.lcu_client.read().await;
     let lcu = lock.as_ref().ok_or("LCU 未连接")?;
 
@@ -380,18 +375,21 @@ async fn get_map_side(
         if i > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         }
-        match lcu.http_client.get(&map_side_url).header("Authorization", &auth).send().await {
+        match lcu
+            .http_client
+            .get(&map_side_url)
+            .header("Authorization", &auth)
+            .send()
+            .await
+        {
             Ok(resp) if resp.status().is_success() => {
-                match resp.json::<serde_json::Value>().await {
-                    Ok(data) => {
-                        if let Some(side) = data.get("mapSide").and_then(|v| v.as_str()) {
-                            if !side.is_empty() {
-                                log::info!("获取队伍信息成功 (pin-drop): {}", side);
-                                return Ok(Some(side.to_string()));
-                            }
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(side) = data.get("mapSide").and_then(|v| v.as_str()) {
+                        if !side.is_empty() {
+                            log::info!("获取队伍信息成功 (pin-drop): {}", side);
+                            return Ok(Some(side.to_string()));
                         }
                     }
-                    Err(_) => {}
                 }
             }
             Ok(resp) => log::warn!("pin-drop-notification 返回 HTTP {}", resp.status()),
@@ -402,28 +400,46 @@ async fn get_map_side(
     // 方法2: 读取选人会话来推断队伍
     // 如果 myTeam 的 `cellId` 小的一方为蓝色方
     let session_url = format!("{}/lol-champ-select/v1/session", base);
-    match lcu.http_client.get(&session_url).header("Authorization", &auth).send().await {
+    match lcu
+        .http_client
+        .get(&session_url)
+        .header("Authorization", &auth)
+        .send()
+        .await
+    {
         Ok(resp) if resp.status().is_success() => {
             if let Ok(data) = resp.json::<serde_json::Value>().await {
-                let _cell_id = data.get("localPlayerCellId").and_then(|v| v.as_i64()).unwrap_or(0);
+                let _cell_id = data
+                    .get("localPlayerCellId")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
                 if let Some(my_team) = data.get("myTeam").and_then(|v| v.as_array()) {
                     // 检查 myTeam 中最小 cellId 来判断哪一侧
-                    let min_cell = my_team.iter()
+                    let min_cell = my_team
+                        .iter()
                         .filter_map(|p| p.get("cellId").and_then(|c| c.as_i64()))
                         .min()
                         .unwrap_or(0);
-                    let max_cell = my_team.iter()
+                    let max_cell = my_team
+                        .iter()
                         .filter_map(|p| p.get("cellId").and_then(|c| c.as_i64()))
                         .max()
                         .unwrap_or(0);
                     // 在 5v5 中，cellId 范围 0-4 = 蓝色方，5-9 = 红色方
-                    let side = if min_cell < 5 && max_cell < 5 { "blue" }
-                               else if min_cell >= 5 { "red" }
-                               else {
-                                   // 无法从 cellId 确定，尝试从已用的英雄 ID 推断
-                                   return Ok(None);
-                               };
-                    log::info!("获取队伍信息成功 (session cellId): {}, min={}, max={}", side, min_cell, max_cell);
+                    let side = if min_cell < 5 && max_cell < 5 {
+                        "blue"
+                    } else if min_cell >= 5 {
+                        "red"
+                    } else {
+                        // 无法从 cellId 确定，尝试从已用的英雄 ID 推断
+                        return Ok(None);
+                    };
+                    log::info!(
+                        "获取队伍信息成功 (session cellId): {}, min={}, max={}",
+                        side,
+                        min_cell,
+                        max_cell
+                    );
                     return Ok(Some(side.to_string()));
                 }
             }
@@ -443,7 +459,7 @@ fn detect_lol_path() -> Result<Option<String>, String> {
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
     // 1. 优先从运行中的客户端进程推断
-    for (_pid, process) in sys.processes() {
+    for process in sys.processes().values() {
         let name = process.name().to_string_lossy().to_lowercase();
         if name == "leagueclientux.exe" {
             if let Some(exe_path) = process.exe() {
@@ -471,7 +487,7 @@ fn detect_lol_path() -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
     {
         if let Ok(output) = std::process::Command::new("reg")
-            .args(&["query", r"HKCU\SOFTWARE\Tencent\LOL", "/v", "InstallPath"])
+            .args(["query", r"HKCU\SOFTWARE\Tencent\LOL", "/v", "InstallPath"])
             .output()
         {
             if output.status.success() {
@@ -484,7 +500,8 @@ fn detect_lol_path() -> Result<Option<String>, String> {
                                 // 统一成正斜杠格式，规范盘符大小写
                                 let mut path = raw_path.replace("\\", "/");
                                 if path.len() >= 2 && path.as_bytes()[1] == b':' {
-                                    let drive = path.chars().next().unwrap().to_uppercase().to_string();
+                                    let drive =
+                                        path.chars().next().unwrap().to_uppercase().to_string();
                                     path = format!("{}{}", drive, &path[1..]);
                                 }
 
@@ -520,19 +537,23 @@ fn select_lol_folder() -> Result<Option<String>, String> {
 fn set_mica_effect(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         if enabled {
-            window.set_effects(tauri::utils::config::WindowEffectsConfig {
-                effects: vec![Effect::Mica],
-                state: None,
-                radius: None,
-                color: None,
-            }).map_err(|e| e.to_string())?;
+            window
+                .set_effects(tauri::utils::config::WindowEffectsConfig {
+                    effects: vec![Effect::Mica],
+                    state: None,
+                    radius: None,
+                    color: None,
+                })
+                .map_err(|e| e.to_string())?;
         } else {
-            window.set_effects(tauri::utils::config::WindowEffectsConfig {
-                effects: vec![],
-                state: None,
-                radius: None,
-                color: None,
-            }).map_err(|e| e.to_string())?;
+            window
+                .set_effects(tauri::utils::config::WindowEffectsConfig {
+                    effects: vec![],
+                    state: None,
+                    radius: None,
+                    color: None,
+                })
+                .map_err(|e| e.to_string())?;
         }
     }
     Ok(())
@@ -550,7 +571,9 @@ async fn launch_lol_client(
         let mut sys = System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
         let already_running = sys.processes().values().any(|p| {
-            p.name().to_string_lossy().eq_ignore_ascii_case("leagueclientux.exe")
+            p.name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case("leagueclientux.exe")
         });
         if already_running {
             log::info!("客户端已在运行，跳过启动");
@@ -600,29 +623,38 @@ async fn launch_lol_client(
                 let os_err = e.raw_os_error();
                 // 拦截 740 (需要提升) 与 5 (拒绝访问) 并尝试以 UAC 管理员提权运行
                 if os_err == Some(740) || os_err == Some(5) {
-                    log::info!("启动 LOL 客户端遇到权限限制 ({:?})，尝试提升权限启动...", os_err);
+                    log::info!(
+                        "启动 LOL 客户端遇到权限限制 ({:?})，尝试提升权限启动...",
+                        os_err
+                    );
                     #[cfg(target_os = "windows")]
                     {
                         use std::os::windows::process::CommandExt;
-                        let working_dir = exe.parent()
+                        let working_dir = exe
+                            .parent()
                             .map(|p| p.to_string_lossy().to_string())
                             .unwrap_or_default();
-                        
+
                         // 格式化参数传给 PowerShell
-                        let args_str = args.iter()
+                        let args_str = args
+                            .iter()
                             .map(|arg| format!("'{}'", arg))
                             .collect::<Vec<String>>()
                             .join(", ");
 
                         let command_str = if args_str.is_empty() {
-                            format!("Start-Process -FilePath '{}' -WorkingDirectory '{}' -Verb RunAs", exe.to_string_lossy(), working_dir)
+                            format!(
+                                "Start-Process -FilePath '{}' -WorkingDirectory '{}' -Verb RunAs",
+                                exe.to_string_lossy(),
+                                working_dir
+                            )
                         } else {
                             format!("Start-Process -FilePath '{}' -ArgumentList {} -WorkingDirectory '{}' -Verb RunAs", exe.to_string_lossy(), args_str, working_dir)
                         };
 
                         let status = std::process::Command::new("powershell")
                             .creation_flags(0x08000000) // 隐藏 powershell 窗口
-                            .args(&["-Command", &command_str])
+                            .args(["-Command", &command_str])
                             .spawn();
                         if status.is_ok() {
                             return Ok(());
@@ -637,7 +669,9 @@ async fn launch_lol_client(
     // 智能转换：若是 Riot 纳管的外服，改由 RiotClientServices.exe 启动
     let check_and_launch = |exe: std::path::PathBuf| -> Result<(), String> {
         let mut riot_service = None;
-        if exe.file_name().map(|n| n.to_string_lossy().to_lowercase()) == Some("leagueclient.exe".to_string()) {
+        if exe.file_name().map(|n| n.to_string_lossy().to_lowercase())
+            == Some("leagueclient.exe".to_string())
+        {
             if let Some(parent) = exe.parent() {
                 let same_level = parent.join("RiotClientServices.exe");
                 if same_level.exists() {
@@ -675,7 +709,10 @@ async fn launch_lol_client(
             check_and_launch(exe)?;
             return Ok(());
         }
-        return Err(format!("在 {} 中未找到启动程序 (TCLS/client.exe 或 LeagueClient.exe)", p));
+        return Err(format!(
+            "在 {} 中未找到启动程序 (TCLS/client.exe 或 LeagueClient.exe)",
+            p
+        ));
     }
 
     // 否则遍历配置路径
@@ -753,7 +790,7 @@ async fn update_config(
                 lock.functions.lcu_user_id.clone()
             } else {
                 "lcu_user_001".to_string()
-            }
+            },
         )
     };
 
@@ -798,7 +835,9 @@ async fn update_config(
     }
 
     if signalr_changed {
-        if new_config.functions.lcu_realtime_enabled && !new_config.general.upload_api_url.is_empty() {
+        if new_config.functions.lcu_realtime_enabled
+            && !new_config.general.upload_api_url.is_empty()
+        {
             log::info!("配置更新，重新启动 SignalR Hub 远程反代");
             let server_url = new_config.general.upload_api_url.clone();
             signalr::start(app_handle, server_url, new_user_id);
@@ -820,10 +859,7 @@ async fn get_close_to_tray(app_state: tauri::State<'_, AppState>) -> Result<bool
 
 /// 大乱斗板凳席置顶悬浮窗控制命令
 #[tauri::command]
-async fn show_bench_overlay_window(
-    app_handle: tauri::AppHandle,
-    show: bool,
-) -> Result<(), String> {
+async fn show_bench_overlay_window(app_handle: tauri::AppHandle, show: bool) -> Result<(), String> {
     let window = app_handle.get_webview_window("bench-overlay");
     if show {
         if let Some(win) = window {
@@ -834,7 +870,8 @@ async fn show_bench_overlay_window(
                 let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
                 let x = pos.x + (size.width - 550.0) / 2.0;
                 let y = pos.y; // 动态定位至该显示器的最顶端
-                let _ = win.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+                let _ =
+                    win.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
             }
         } else {
             // 计算默认的顶部居中位置
@@ -850,7 +887,7 @@ async fn show_bench_overlay_window(
             let win = tauri::WebviewWindowBuilder::new(
                 &app_handle,
                 "bench-overlay",
-                tauri::WebviewUrl::App("index.html?window=bench-overlay".into())
+                tauri::WebviewUrl::App("index.html?window=bench-overlay".into()),
             )
             .title("Yuumi - ARAM Bench")
             .inner_size(550.0, 70.0)
@@ -880,26 +917,51 @@ fn build_tray_menu<R: tauri::Runtime>(
 ) -> Result<tauri::menu::Menu<R>, tauri::Error> {
     let mut builder = MenuBuilder::new(app)
         .item(&MenuItem::with_id(app, "home", "主页", true, None::<&str>)?)
-        .item(&MenuItem::with_id(app, "career", "生涯", true, None::<&str>)?)
-        .item(&MenuItem::with_id(app, "search", "战绩查询", true, None::<&str>)?)
-        .item(&MenuItem::with_id(app, "gameinfo", "对局信息", true, None::<&str>)?);
+        .item(&MenuItem::with_id(
+            app,
+            "career",
+            "生涯",
+            true,
+            None::<&str>,
+        )?)
+        .item(&MenuItem::with_id(
+            app,
+            "search",
+            "战绩查询",
+            true,
+            None::<&str>,
+        )?)
+        .item(&MenuItem::with_id(
+            app,
+            "gameinfo",
+            "对局信息",
+            true,
+            None::<&str>,
+        )?);
 
     if !hide_tft {
         builder = builder.item(&MenuItem::with_id(app, "tft", "TFT", true, None::<&str>)?);
     }
 
     let menu = builder
-        .item(&MenuItem::with_id(app, "tools", "其他功能", true, None::<&str>)?)
+        .item(&MenuItem::with_id(
+            app,
+            "tools",
+            "其他功能",
+            true,
+            None::<&str>,
+        )?)
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?)
+        .item(&MenuItem::with_id(
+            app,
+            "settings",
+            "设置",
+            true,
+            None::<&str>,
+        )?)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&MenuItem::with_id(app, "exit", "退出", true, None::<&str>)?)
         .build()?;
-        
+
     Ok(menu)
 }
-
-
-
-
-

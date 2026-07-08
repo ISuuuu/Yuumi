@@ -110,8 +110,8 @@ impl LcuMatchGame {
         let participant = &self.participants[0];
         let stats = &participant.stats;
 
-        let cs = stats.total_minions_killed.unwrap_or(0)
-            + stats.neutral_minions_killed.unwrap_or(0);
+        let cs =
+            stats.total_minions_killed.unwrap_or(0) + stats.neutral_minions_killed.unwrap_or(0);
         let gold = stats.gold_earned.unwrap_or(0);
         let total_damage = stats.total_damage_dealt_to_champions.unwrap_or(0);
         let total_heal = stats.total_heal.unwrap_or(0);
@@ -140,8 +140,10 @@ impl LcuMatchGame {
             )
         };
 
-        let champion_icon_url =
-            format!("/lol-game-data/assets/v1/champion-icons/{}.png", participant.champion_id);
+        let champion_icon_url = format!(
+            "/lol-game-data/assets/v1/champion-icons/{}.png",
+            participant.champion_id
+        );
         let spell1_icon_url = assets
             .spells
             .get(&participant.spell1_id)
@@ -152,11 +154,7 @@ impl LcuMatchGame {
             .get(&participant.spell2_id)
             .cloned()
             .unwrap_or_default();
-        let rune_icon_url = assets
-            .runes
-            .get(&stats.perk0)
-            .cloned()
-            .unwrap_or_default();
+        let rune_icon_url = assets.runes.get(&stats.perk0).cloned().unwrap_or_default();
         let item_icon_urls: Vec<String> = item_ids
             .iter()
             .filter(|&&id| id > 0)
@@ -207,36 +205,111 @@ struct QueueInfo {
 fn get_queue_info(queue_id: i32) -> QueueInfo {
     match queue_id {
         // 召唤师峡谷
-        400 => QueueInfo { name: "征召模式", map: "召唤师峡谷" },
-        420 => QueueInfo { name: "排位单双排", map: "召唤师峡谷" },
-        430 => QueueInfo { name: "匹配模式", map: "召唤师峡谷" },
-        440 => QueueInfo { name: "排位灵活组排", map: "召唤师峡谷" },
-        490 => QueueInfo { name: "快速游戏", map: "召唤师峡谷" },
+        400 => QueueInfo {
+            name: "征召模式",
+            map: "召唤师峡谷",
+        },
+        420 => QueueInfo {
+            name: "排位单双排",
+            map: "召唤师峡谷",
+        },
+        430 => QueueInfo {
+            name: "匹配模式",
+            map: "召唤师峡谷",
+        },
+        440 => QueueInfo {
+            name: "排位灵活组排",
+            map: "召唤师峡谷",
+        },
+        490 => QueueInfo {
+            name: "快速游戏",
+            map: "召唤师峡谷",
+        },
         // 嚎哭深渊
-        450 => QueueInfo { name: "极地大乱斗", map: "嚎哭深渊" },
+        450 => QueueInfo {
+            name: "极地大乱斗",
+            map: "嚎哭深渊",
+        },
         // 海克斯大乱斗
-        2400 => QueueInfo { name: "海克斯大乱斗", map: "嚎哭深渊" },
+        2400 => QueueInfo {
+            name: "海克斯大乱斗",
+            map: "嚎哭深渊",
+        },
         // 限时/特殊模式
-        800 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
-        810 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
-        820 => QueueInfo { name: "人机对战", map: "嚎哭深渊" },
-        830 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
-        840 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
-        850 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
-        900 => QueueInfo { name: "无限火力", map: "召唤师峡谷" },
-        1010 => QueueInfo { name: "随机无限火力", map: "嚎哭深渊" },
-        1020 => QueueInfo { name: "克隆模式", map: "召唤师峡谷" },
-        1300 => QueueInfo { name: "极限闪击", map: "极限闪击" },
-        1700 => QueueInfo { name: "斗魂竞技场", map: "斗魂竞技场" },
-        1710 => QueueInfo { name: "斗魂竞技场", map: "斗魂竞技场" },
+        800 => QueueInfo {
+            name: "人机对战",
+            map: "召唤师峡谷",
+        },
+        810 => QueueInfo {
+            name: "人机对战",
+            map: "召唤师峡谷",
+        },
+        820 => QueueInfo {
+            name: "人机对战",
+            map: "嚎哭深渊",
+        },
+        830 => QueueInfo {
+            name: "人机对战",
+            map: "召唤师峡谷",
+        },
+        840 => QueueInfo {
+            name: "人机对战",
+            map: "召唤师峡谷",
+        },
+        850 => QueueInfo {
+            name: "人机对战",
+            map: "召唤师峡谷",
+        },
+        900 => QueueInfo {
+            name: "无限火力",
+            map: "召唤师峡谷",
+        },
+        1010 => QueueInfo {
+            name: "随机无限火力",
+            map: "嚎哭深渊",
+        },
+        1020 => QueueInfo {
+            name: "克隆模式",
+            map: "召唤师峡谷",
+        },
+        1300 => QueueInfo {
+            name: "极限闪击",
+            map: "极限闪击",
+        },
+        1700 => QueueInfo {
+            name: "斗魂竞技场",
+            map: "斗魂竞技场",
+        },
+        1710 => QueueInfo {
+            name: "斗魂竞技场",
+            map: "斗魂竞技场",
+        },
         // 捉鬼模式 (Swarm)
-        1810 => QueueInfo { name: "捉鬼模式", map: "捉鬼模式" },
-        1820 => QueueInfo { name: "捉鬼模式", map: "捉鬼模式" },
-        1830 => QueueInfo { name: "捉鬼模式", map: "捉鬼模式" },
-        1840 => QueueInfo { name: "捉鬼模式", map: "捉鬼模式" },
+        1810 => QueueInfo {
+            name: "捉鬼模式",
+            map: "捉鬼模式",
+        },
+        1820 => QueueInfo {
+            name: "捉鬼模式",
+            map: "捉鬼模式",
+        },
+        1830 => QueueInfo {
+            name: "捉鬼模式",
+            map: "捉鬼模式",
+        },
+        1840 => QueueInfo {
+            name: "捉鬼模式",
+            map: "捉鬼模式",
+        },
         // 自定义
-        0 => QueueInfo { name: "自定义模式", map: "自定义" },
-        _ => QueueInfo { name: "自定义模式", map: "自定义" },
+        0 => QueueInfo {
+            name: "自定义模式",
+            map: "自定义",
+        },
+        _ => QueueInfo {
+            name: "自定义模式",
+            map: "自定义",
+        },
     }
 }
 
@@ -350,7 +423,7 @@ pub async fn get_match_history_sgp(
 ) -> Result<Vec<MatchDisplay>, String> {
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
-    
+
     // 仅腾讯国服支持 SGP
     const TENCENT_SERVERS: &[&str] = &[
         "hn1", "hn10", "bgp2", "tj100", "cq100", "gz100", "nj100", "tj101",
@@ -367,7 +440,7 @@ pub async fn get_match_history_sgp(
         log::info!("非腾讯国服 ({})，跳过 SGP 战绩获取", server);
         return Ok(Vec::new());
     }
-    
+
     let auth = build_auth_header(&lcu.token);
 
     // ── 1. 通过 LCU 获取 SGP token ──
@@ -381,11 +454,16 @@ pub async fn get_match_history_sgp(
         .map_err(|e| format!("获取 SGP token 失败: {}", e))?;
 
     if !token_resp.status().is_success() {
-        return Err(format!("获取 SGP token 失败: HTTP {}", token_resp.status().as_u16()));
+        return Err(format!(
+            "获取 SGP token 失败: HTTP {}",
+            token_resp.status().as_u16()
+        ));
     }
 
-    let token_data: serde_json::Value =
-        token_resp.json().await.map_err(|e| format!("解析 SGP token 失败: {}", e))?;
+    let token_data: serde_json::Value = token_resp
+        .json()
+        .await
+        .map_err(|e| format!("解析 SGP token 失败: {}", e))?;
     let sgp_token = token_data
         .get("accessToken")
         .and_then(|v| v.as_str())
@@ -419,17 +497,25 @@ pub async fn get_match_history_sgp(
     let sgp_resp = sgp_client
         .get(&sgp_url)
         .header("Authorization", format!("Bearer {}", sgp_token))
-        .query(&[("startIndex", &beg_index.to_string()), ("count", &count.to_string())])
+        .query(&[
+            ("startIndex", &beg_index.to_string()),
+            ("count", &count.to_string()),
+        ])
         .send()
         .await
         .map_err(|e| format!("SGP 战绩请求失败: {}", e))?;
 
     if !sgp_resp.status().is_success() {
-        return Err(format!("SGP 战绩返回错误: HTTP {}", sgp_resp.status().as_u16()));
+        return Err(format!(
+            "SGP 战绩返回错误: HTTP {}",
+            sgp_resp.status().as_u16()
+        ));
     }
 
-    let sgp_data: serde_json::Value =
-        sgp_resp.json().await.map_err(|e| format!("解析 SGP 响应失败: {}", e))?;
+    let sgp_data: serde_json::Value = sgp_resp
+        .json()
+        .await
+        .map_err(|e| format!("解析 SGP 响应失败: {}", e))?;
 
     // ── 4. 解析 SGP 返回的对局数据 ──
     // SGP 返回格式: { "games": { "gameCount": N, "games": [{ "json": {...} }] } }
@@ -481,12 +567,18 @@ pub async fn get_match_history_sgp(
         let _map_id = g.get("mapId").and_then(|v| v.as_u64());
 
         // 找到当前玩家的参与数据（SGP 用 puuid 匹配）
-        let participants = g.get("participants").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-        let participant = participants.iter().find(|p| {
-            p.get("puuid").and_then(|v| v.as_str()) == Some(&puuid)
-        });
+        let participants = g
+            .get("participants")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let participant = participants
+            .iter()
+            .find(|p| p.get("puuid").and_then(|v| v.as_str()) == Some(&puuid));
 
-        let Some(participant) = participant else { continue };
+        let Some(participant) = participant else {
+            continue;
+        };
 
         let stats = participant.get("stats").unwrap_or(participant);
 
@@ -494,17 +586,44 @@ pub async fn get_match_history_sgp(
         let kills = stats.get("kills").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let deaths = stats.get("deaths").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let assists = stats.get("assists").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let champ_level = stats.get("champLevel").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let champion_id = participant.get("championId").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let spell1_id = participant.get("spell1Id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let spell2_id = participant.get("spell2Id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let champ_level = stats
+            .get("champLevel")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let champion_id = participant
+            .get("championId")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let spell1_id = participant
+            .get("spell1Id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let spell2_id = participant
+            .get("spell2Id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
         let perk0 = stats.get("perk0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let total_minions = stats.get("totalMinionsKilled").and_then(|v| v.as_i64()).unwrap_or(0)
-            + stats.get("neutralMinionsKilled").and_then(|v| v.as_i64()).unwrap_or(0);
-        let gold = stats.get("goldEarned").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let total_damage = stats.get("totalDamageDealtToChampions").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let total_minions = stats
+            .get("totalMinionsKilled")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0)
+            + stats
+                .get("neutralMinionsKilled")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+        let gold = stats
+            .get("goldEarned")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let total_damage = stats
+            .get("totalDamageDealtToChampions")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
         let total_heal = stats.get("totalHeal").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let remake = stats.get("gameEndedInEarlySurrender").and_then(|v| v.as_bool()).unwrap_or(false);
+        let remake = stats
+            .get("gameEndedInEarlySurrender")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let item0 = stats.get("item0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let item1 = stats.get("item1").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
@@ -527,12 +646,15 @@ pub async fn get_match_history_sgp(
             format!("{:.2}", (kills as f64 + assists as f64) / deaths as f64)
         };
 
-        let champion_icon_url =
-            format!("/lol-game-data/assets/v1/champion-icons/{}.png", champion_id);
+        let champion_icon_url = format!(
+            "/lol-game-data/assets/v1/champion-icons/{}.png",
+            champion_id
+        );
         let spell1_icon_url = assets.spells.get(&spell1_id).cloned().unwrap_or_default();
         let spell2_icon_url = assets.spells.get(&spell2_id).cloned().unwrap_or_default();
         let rune_icon_url = assets.runes.get(&perk0).cloned().unwrap_or_default();
-        let item_icon_urls: Vec<String> = item_ids.iter()
+        let item_icon_urls: Vec<String> = item_ids
+            .iter()
             .filter(|&&id| id > 0)
             .filter_map(|id| assets.items.get(id).cloned())
             .collect();

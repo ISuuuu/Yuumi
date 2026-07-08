@@ -71,27 +71,66 @@ async fn fetch_game_data_assets_inner(lcu: &LcuClient) -> GameDataAssets {
 
     // 先尝试标准数组解析
     let (items, spells, runes, champions) = tokio::join!(
-        fetch_id_map(&lcu.http_client, &base, &auth, "/lol-game-data/assets/v1/items.json"),
-        fetch_id_map(&lcu.http_client, &base, &auth, "/lol-game-data/assets/v1/summoner-spells.json"),
-        fetch_id_map(&lcu.http_client, &base, &auth, "/lol-game-data/assets/v1/perks.json"),
+        fetch_id_map(
+            &lcu.http_client,
+            &base,
+            &auth,
+            "/lol-game-data/assets/v1/items.json"
+        ),
+        fetch_id_map(
+            &lcu.http_client,
+            &base,
+            &auth,
+            "/lol-game-data/assets/v1/summoner-spells.json"
+        ),
+        fetch_id_map(
+            &lcu.http_client,
+            &base,
+            &auth,
+            "/lol-game-data/assets/v1/perks.json"
+        ),
         fetch_champion_map(&lcu.http_client, &base, &auth),
     );
 
     // 对任何为空的资源，用灵活解析器重试
     let items = if items.is_empty() {
         log::warn!("物品数据为空({}条)，使用灵活解析器重试...", items.len());
-        fetch_id_map_flexible(&lcu.http_client, &base, &auth, "/lol-game-data/assets/v1/items.json").await
-    } else { items };
+        fetch_id_map_flexible(
+            &lcu.http_client,
+            &base,
+            &auth,
+            "/lol-game-data/assets/v1/items.json",
+        )
+        .await
+    } else {
+        items
+    };
 
     let spells = if spells.is_empty() {
         log::warn!("技能数据为空({}条)，使用灵活解析器重试...", spells.len());
-        fetch_id_map_flexible(&lcu.http_client, &base, &auth, "/lol-game-data/assets/v1/summoner-spells.json").await
-    } else { spells };
+        fetch_id_map_flexible(
+            &lcu.http_client,
+            &base,
+            &auth,
+            "/lol-game-data/assets/v1/summoner-spells.json",
+        )
+        .await
+    } else {
+        spells
+    };
 
     let runes = if runes.is_empty() {
         log::warn!("符文数据为空({}条)，使用灵活解析器重试...", runes.len());
-        fetch_id_map_flexible(&lcu.http_client, &base, &auth, "/lol-game-data/assets/v1/perks.json").await
-    } else { runes };
+        fetch_id_map_flexible(
+            &lcu.http_client,
+            &base,
+            &auth,
+            "/lol-game-data/assets/v1/perks.json",
+        )
+        .await
+    } else {
+        runes
+    };
 
     log::info!(
         "游戏资源加载完成: 物品={}, 技能={}, 符文={}, 英雄={}",
@@ -104,7 +143,12 @@ async fn fetch_game_data_assets_inner(lcu: &LcuClient) -> GameDataAssets {
         log::warn!("英雄名称映射为空！上传时 championName 将为 Unknown");
     }
 
-    GameDataAssets { items, spells, runes, champions }
+    GameDataAssets {
+        items,
+        spells,
+        runes,
+        champions,
+    }
 }
 
 /// GET JSON 数组 → 提取每个元素的 (id, iconPath) → HashMap
@@ -117,18 +161,16 @@ async fn fetch_id_map(
     let url = format!("{}{}", base, path);
 
     match http.get(&url).header("Authorization", auth).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<Vec<IdEntry>>().await {
-                Ok(entries) => entries
-                    .into_iter()
-                    .filter_map(|e| Some((e.id?, e.icon_path?)))
-                    .collect(),
-                Err(e) => {
-                    log::warn!("解析 {} 失败: {}", path, e);
-                    HashMap::new()
-                }
+        Ok(resp) if resp.status().is_success() => match resp.json::<Vec<IdEntry>>().await {
+            Ok(entries) => entries
+                .into_iter()
+                .filter_map(|e| Some((e.id?, e.icon_path?)))
+                .collect(),
+            Err(e) => {
+                log::warn!("解析 {} 失败: {}", path, e);
+                HashMap::new()
             }
-        }
+        },
         Ok(resp) => {
             log::warn!("获取 {} 失败: HTTP {}", path, resp.status());
             HashMap::new()
@@ -158,7 +200,11 @@ async fn fetch_champion_map(
                     .filter_map(|entry| {
                         let id = entry.get("id")?.as_i64()? as i32;
                         let name = entry.get("name")?.as_str()?.to_string();
-                        if name.is_empty() { None } else { Some((id, name)) }
+                        if name.is_empty() {
+                            None
+                        } else {
+                            Some((id, name))
+                        }
                     })
                     .collect();
                 if !map.is_empty() {

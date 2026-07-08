@@ -1,8 +1,8 @@
+use serde::Deserialize;
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::fs;
-use serde::Deserialize;
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
@@ -41,7 +41,6 @@ fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
 fn get_opgg_cache() -> &'static Mutex<HashMap<String, OpggCacheEntry>> {
     OPGG_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
-
 
 // ─── 创建 5v5 训练营 ───
 
@@ -101,9 +100,7 @@ pub async fn create_5v5_practice_lobby(
 /// 大乱斗 (ARAM) 摇号后换回原英雄。
 /// 逻辑：先 reroll，再从 bench 换回之前暂存的英雄。
 #[tauri::command]
-pub async fn aram_reroll_and_swap_back(
-    app_state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn aram_reroll_and_swap_back(app_state: State<'_, AppState>) -> Result<String, String> {
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
 
@@ -111,10 +108,7 @@ pub async fn aram_reroll_and_swap_back(
     let base = format!("https://127.0.0.1:{}", lcu.port);
 
     // 第一步：获取当前选择的英雄 ID
-    let sel_url = format!(
-        "{}/lol-champ-select/v1/session/my-selection",
-        base
-    );
+    let sel_url = format!("{}/lol-champ-select/v1/session/my-selection", base);
     let sel_resp = lcu
         .http_client
         .get(&sel_url)
@@ -134,10 +128,7 @@ pub async fn aram_reroll_and_swap_back(
     }
 
     // 第二步：reroll
-    let reroll_url = format!(
-        "{}/lol-champ-select/v1/session/my-selection/reroll",
-        base
-    );
+    let reroll_url = format!("{}/lol-champ-select/v1/session/my-selection/reroll", base);
     let reroll_resp = lcu
         .http_client
         .post(&reroll_url)
@@ -204,7 +195,11 @@ pub async fn apply_rune_page(
 
     if get_resp.status().is_success() {
         let page: serde_json::Value = get_resp.json().await.map_err(|e| e.to_string())?;
-        if page.get("isDeletable").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if page
+            .get("isDeletable")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             let page_id = page.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
             if page_id > 0 {
                 let del_url = format!("{}/lol-perks/v1/pages/{}", base, page_id);
@@ -277,24 +272,41 @@ pub async fn get_champion_skins(
     let auth = build_auth_header(&lcu.token);
     let base = format!("https://127.0.0.1:{}", lcu.port);
 
-    let url = format!("{}/lol-game-data/assets/v1/champions/{}.json", base, champion_id);
-    let resp = lcu.http_client.get(&url)
+    let url = format!(
+        "{}/lol-game-data/assets/v1/champions/{}.json",
+        base, champion_id
+    );
+    let resp = lcu
+        .http_client
+        .get(&url)
         .header("Authorization", &auth)
-        .send().await.map_err(|e| e.to_string())?;
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if !resp.status().is_success() {
-        return Err(format!("LCU 返回错误 [{}]: 无法加载该英雄的皮肤数据", resp.status().as_u16()));
+        return Err(format!(
+            "LCU 返回错误 [{}]: 无法加载该英雄的皮肤数据",
+            resp.status().as_u16()
+        ));
     }
 
     let details: LcuChampionDetails = resp.json().await.map_err(|e| e.to_string())?;
-    
-    let skins = details.skins.into_iter().map(|s| SkinEntry {
-        id: s.id,
-        name: s.name,
-        load_screen_path: s.load_screen_path.unwrap_or_else(|| {
-            format!("/lol-game-data/assets/v1/champion-loadscreens/{}/{}.jpg", champion_id, s.id)
-        }),
-    }).collect();
+
+    let skins = details
+        .skins
+        .into_iter()
+        .map(|s| SkinEntry {
+            id: s.id,
+            name: s.name,
+            load_screen_path: s.load_screen_path.unwrap_or_else(|| {
+                format!(
+                    "/lol-game-data/assets/v1/champion-loadscreens/{}/{}.jpg",
+                    champion_id, s.id
+                )
+            }),
+        })
+        .collect();
 
     Ok(skins)
 }
@@ -330,17 +342,29 @@ pub async fn fetch_opgg_data(
         Some(id) => {
             let pos = position.unwrap_or_else(|| "none".into());
             if mode == "arena" {
-                format!("https://lol-api-champion.op.gg/api/{}/champions/{}", region, id)
+                format!(
+                    "https://lol-api-champion.op.gg/api/{}/champions/{}",
+                    region, id
+                )
             } else {
-                format!("https://lol-api-champion.op.gg/api/{}/champions/{}/{}/{}", region, mode, id, pos)
+                format!(
+                    "https://lol-api-champion.op.gg/api/{}/champions/{}/{}/{}",
+                    region, mode, id, pos
+                )
             }
         }
-        None => format!("https://lol-api-champion.op.gg/api/{}/champions/{}", region, mode),
+        None => format!(
+            "https://lol-api-champion.op.gg/api/{}/champions/{}",
+            region, mode
+        ),
     };
 
     let (enable_proxy, proxy_addr) = {
         let cfg = app_state.config.read().await;
-        (cfg.general.enable_opgg_proxy, cfg.general.opgg_proxy_addr.clone())
+        (
+            cfg.general.enable_opgg_proxy,
+            cfg.general.opgg_proxy_addr.clone(),
+        )
     };
 
     let client = build_opgg_client(enable_proxy, &proxy_addr);
@@ -356,12 +380,22 @@ pub async fn fetch_opgg_data(
     // 写入内存缓存（超限时淘汰最旧条目）
     if let Ok(mut cache) = get_opgg_cache().lock() {
         if cache.len() >= OPGG_CACHE_MAX_ENTRIES {
-            if let Some(oldest_key) = cache.iter().min_by_key(|(_, e)| e.inserted_at).map(|(k, _)| k.clone()) {
+            if let Some(oldest_key) = cache
+                .iter()
+                .min_by_key(|(_, e)| e.inserted_at)
+                .map(|(k, _)| k.clone())
+            {
                 cache.remove(&oldest_key);
             }
         }
         log::info!("OP.GG 缓存写入: {}", cache_key);
-        cache.insert(cache_key, OpggCacheEntry { data: data.clone(), inserted_at: std::time::Instant::now() });
+        cache.insert(
+            cache_key,
+            OpggCacheEntry {
+                data: data.clone(),
+                inserted_at: std::time::Instant::now(),
+            },
+        );
     }
 
     Ok(data)
@@ -389,10 +423,8 @@ pub async fn clear_game_cache() -> Result<String, String> {
             if std::fs::remove_dir_all(&path).is_ok() {
                 count += 1;
             }
-        } else if path.is_file() {
-            if std::fs::remove_file(&path).is_ok() {
-                count += 1;
-            }
+        } else if path.is_file() && std::fs::remove_file(&path).is_ok() {
+            count += 1;
         }
     }
 
@@ -420,9 +452,7 @@ pub async fn open_log_folder(app: tauri::AppHandle) -> Result<String, String> {
 
 /// 获取当前 LCU 客户端缩放比例（用于窗口修复）
 #[tauri::command]
-pub async fn get_lcu_zoom(
-    app_state: State<'_, AppState>,
-) -> Result<f64, String> {
+pub async fn get_lcu_zoom(app_state: State<'_, AppState>) -> Result<f64, String> {
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
 
@@ -448,9 +478,7 @@ pub async fn get_lcu_zoom(
 /// 修复 LCU 客户端窗口（黑屏/缩放/转圈）。
 /// 通过系统命令强制重新设置窗口属性。
 #[tauri::command]
-pub async fn fix_lcu_window(
-    app_state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn fix_lcu_window(app_state: State<'_, AppState>) -> Result<String, String> {
     // 获取当前缩放比例
     let zoom = {
         let lock = app_state.lcu().await?;
@@ -474,7 +502,7 @@ pub async fn fix_lcu_window(
     // 通过 Win32 API 直接操作窗口，替代旧的 PowerShell 脚本方案
     #[cfg(target_os = "windows")]
     {
-        return fix_lcu_window_win32(zoom);
+        fix_lcu_window_win32(zoom)
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -494,7 +522,11 @@ fn fix_lcu_window_win32(zoom: f64) -> Result<String, String> {
         fn SetWindowPos(
             hWnd: *mut c_void,
             hWndInsertAfter: *mut c_void,
-            X: i32, Y: i32, cx: i32, cy: i32, uFlags: u32,
+            X: i32,
+            Y: i32,
+            cx: i32,
+            cy: i32,
+            uFlags: u32,
         ) -> i32;
         fn GetWindowThreadProcessId(hWnd: *mut c_void, lpdwProcessId: *mut u32) -> u32;
         fn EnumWindows(
@@ -546,7 +578,10 @@ fn fix_lcu_window_win32(zoom: f64) -> Result<String, String> {
             };
 
             if let Some(pid) = target_pid {
-                let mut data = EnumData { target_pid: pid, hwnd: ptr::null_mut() };
+                let mut data = EnumData {
+                    target_pid: pid,
+                    hwnd: ptr::null_mut(),
+                };
                 EnumWindows(Some(enum_callback), (&mut data as *mut EnumData).cast());
                 hwnd = data.hwnd;
             }
@@ -557,8 +592,15 @@ fn fix_lcu_window_win32(zoom: f64) -> Result<String, String> {
         }
 
         ShowWindow(hwnd, SW_RESTORE);
-        SetWindowPos(hwnd, ptr::null_mut(), 0, 0, 0, 0,
-            SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_SHOWWINDOW);
+        SetWindowPos(
+            hwnd,
+            ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_SHOWWINDOW,
+        );
 
         Ok(format!("窗口已修复 (zoom={})", zoom))
     }
@@ -569,19 +611,18 @@ fn get_persisted_settings_path(lol_paths: &[String]) -> Option<PathBuf> {
         return None;
     }
     let p = Path::new(&lol_paths[0]);
-    let base_dir = if p.is_file() {
-        p.parent()?
-    } else {
-        p
-    };
-    Some(base_dir.join("Game").join("Config").join("PersistedSettings.json"))
+    let base_dir = if p.is_file() { p.parent()? } else { p };
+    Some(
+        base_dir
+            .join("Game")
+            .join("Config")
+            .join("PersistedSettings.json"),
+    )
 }
 
 /// 查询游戏设置（PersistedSettings.json）是否已被锁定（只读）
 #[tauri::command]
-pub async fn get_game_settings_readonly(
-    app_state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn get_game_settings_readonly(app_state: State<'_, AppState>) -> Result<bool, String> {
     let cfg = app_state.config.read().await;
     let path = get_persisted_settings_path(&cfg.general.lol_path)
         .ok_or_else(|| "未配置英雄联盟客户端路径".to_string())?;
@@ -590,9 +631,8 @@ pub async fn get_game_settings_readonly(
         return Ok(false);
     }
 
-    let metadata = fs::metadata(&path)
-        .map_err(|e| format!("获取文件元数据失败: {}", e))?;
-    
+    let metadata = fs::metadata(&path).map_err(|e| format!("获取文件元数据失败: {}", e))?;
+
     Ok(metadata.permissions().readonly())
 }
 
@@ -607,16 +647,17 @@ pub async fn set_game_settings_readonly(
         .ok_or_else(|| "未配置英雄联盟客户端路径".to_string())?;
 
     if !path.exists() {
-        return Err("游戏配置文件 PersistedSettings.json 不存在，请先登录一次游戏以自动生成该文件".to_string());
+        return Err(
+            "游戏配置文件 PersistedSettings.json 不存在，请先登录一次游戏以自动生成该文件"
+                .to_string(),
+        );
     }
 
-    let metadata = fs::metadata(&path)
-        .map_err(|e| format!("获取文件元数据失败: {}", e))?;
+    let metadata = fs::metadata(&path).map_err(|e| format!("获取文件元数据失败: {}", e))?;
     let mut permissions = metadata.permissions();
     permissions.set_readonly(readonly);
 
-    fs::set_permissions(&path, permissions)
-        .map_err(|e| format!("修改文件属性失败: {}", e))?;
+    fs::set_permissions(&path, permissions).map_err(|e| format!("修改文件属性失败: {}", e))?;
 
     if readonly {
         Ok("游戏设置已锁定（只读状态）".to_string())
@@ -691,8 +732,10 @@ pub async fn spectate_directly(
         ));
     }
 
-    let summoner_data: serde_json::Value =
-        summoner_resp.json().await.map_err(|e| format!("解析召唤师数据失败: {}", e))?;
+    let summoner_data: serde_json::Value = summoner_resp
+        .json()
+        .await
+        .map_err(|e| format!("解析召唤师数据失败: {}", e))?;
     let puuid = summoner_data
         .get("puuid")
         .and_then(|v| v.as_str())
@@ -710,11 +753,16 @@ pub async fn spectate_directly(
         .map_err(|e| format!("获取 SGP token 失败: {}", e))?;
 
     if !token_resp.status().is_success() {
-        return Err(format!("获取 SGP token 失败: HTTP {}", token_resp.status().as_u16()));
+        return Err(format!(
+            "获取 SGP token 失败: HTTP {}",
+            token_resp.status().as_u16()
+        ));
     }
 
-    let token_data: serde_json::Value =
-        token_resp.json().await.map_err(|e| format!("解析 SGP token 失败: {}", e))?;
+    let token_data: serde_json::Value = token_resp
+        .json()
+        .await
+        .map_err(|e| format!("解析 SGP token 失败: {}", e))?;
     let sgp_token = token_data
         .get("accessToken")
         .and_then(|v| v.as_str())
@@ -754,7 +802,11 @@ pub async fn spectate_directly(
         let body = sgp_resp.text().await.unwrap_or_default();
         log::warn!("SGP 观战请求失败: HTTP {}, body: {}", status, body);
 
-        let friendly_err = if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::METHOD_NOT_ALLOWED || body.contains("NOT_IN_GAME") || body.contains("not found") {
+        let friendly_err = if status == reqwest::StatusCode::NOT_FOUND
+            || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+            || body.contains("NOT_IN_GAME")
+            || body.contains("not found")
+        {
             "该召唤师当前不在游戏中".to_string()
         } else {
             format!("获取观战数据失败 (HTTP {})", status.as_u16())
@@ -762,8 +814,10 @@ pub async fn spectate_directly(
         return Err(friendly_err);
     }
 
-    let sgp_data: serde_json::Value =
-        sgp_resp.json().await.map_err(|e| format!("解析 SGP 响应失败: {}", e))?;
+    let sgp_data: serde_json::Value = sgp_resp
+        .json()
+        .await
+        .map_err(|e| format!("解析 SGP 响应失败: {}", e))?;
 
     let credentials = sgp_data
         .get("playerCredentials")
@@ -822,11 +876,17 @@ pub async fn spectate_directly(
 
     log::info!(
         "CMD 观战: 启动 {:?} spectator {}:{} {} {} {} (cwd={:?})",
-        game_exe, observer_ip, observer_port, encryption_key, game_id, server, game_dir
+        game_exe,
+        observer_ip,
+        observer_port,
+        encryption_key,
+        game_id,
+        server,
+        game_dir
     );
 
     std::process::Command::new(&game_exe)
-        .args(&[
+        .args([
             "spectator",
             &format!("{}:{}", observer_ip, observer_port),
             encryption_key,

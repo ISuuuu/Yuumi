@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::{build_auth_header, AppState};
 use crate::parsers::match_parser::{LcuMatchHistoryResponse, MatchDisplay};
+use crate::{build_auth_header, AppState};
 
 // ─── 输入数据结构（来自 champ select 的 myTeam / theirTeam）───
 
@@ -119,10 +119,7 @@ async fn fetch_player_summary(
     assets: &crate::lcu::game_data::GameDataAssets,
 ) -> Option<PlayerGameSummary> {
     // 1. 获取召唤师信息
-    let summoner_url = format!(
-        "{}/lol-summoner/v1/summoners/{}",
-        base, player.summoner_id
-    );
+    let summoner_url = format!("{}/lol-summoner/v1/summoners/{}", base, player.summoner_id);
     let summoner: LcuSummonerById = http
         .get(&summoner_url)
         .header("Authorization", auth)
@@ -138,12 +135,17 @@ async fn fetch_player_summary(
     let level = summoner.summoner_level.unwrap_or(0);
 
     // 2. 获取段位信息
-    let rank_url = format!(
-        "{}/lol-ranked/v1/ranked-stats/{}",
-        base, puuid
-    );
-    let rank_info = match http.get(&rank_url).header("Authorization", auth).send().await {
-        Ok(resp) => resp.json::<serde_json::Value>().await.ok()
+    let rank_url = format!("{}/lol-ranked/v1/ranked-stats/{}", base, puuid);
+    let rank_info = match http
+        .get(&rank_url)
+        .header("Authorization", auth)
+        .send()
+        .await
+    {
+        Ok(resp) => resp
+            .json::<serde_json::Value>()
+            .await
+            .ok()
             .and_then(|v| parse_rank_from_value(&v)),
         Err(_) => None,
     };
@@ -153,7 +155,12 @@ async fn fetch_player_summary(
         "{}/lol-match-history/v1/products/lol/{}/matches?begIndex=0&endIndex=11",
         base, puuid
     );
-    let games_info = match http.get(&games_url).header("Authorization", auth).send().await {
+    let games_info = match http
+        .get(&games_url)
+        .header("Authorization", auth)
+        .send()
+        .await
+    {
         Ok(resp) => resp.json::<LcuMatchHistoryResponse>().await.ok(),
         Err(_) => None,
     };
@@ -187,7 +194,15 @@ async fn fetch_player_summary(
 
     // 4. 上局宿命判定：检查最近一局是否与当前玩家有交集
     let fate_flag = if let Some(first_game) = recent_games.first() {
-        check_fate(http, base, auth, first_game.game_id, current_summoner_id, &puuid).await
+        check_fate(
+            http,
+            base,
+            auth,
+            first_game.game_id,
+            current_summoner_id,
+            &puuid,
+        )
+        .await
     } else {
         None
     };
@@ -225,10 +240,7 @@ async fn check_fate(
     current_summoner_id: u64,
     _target_puuid: &str,
 ) -> Option<String> {
-    let url = format!(
-        "{}/lol-match-history/v1/games/{}",
-        base, game_id
-    );
+    let url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
     let resp = http
         .get(&url)
         .header("Authorization", auth)
@@ -262,9 +274,7 @@ async fn check_fate(
     }
 
     // 如果当前玩家不在这局中，无法判定
-    if current_team_id.is_none() {
-        return None;
-    }
+    current_team_id?;
 
     // 这里简化处理：如果有上局数据，标记为"有缘"
     // 完整实现需要对比目标玩家的 teamId
@@ -275,7 +285,10 @@ fn parse_rank_from_value(v: &serde_json::Value) -> Option<RankInfo> {
     // 查找 RANKED_SOLO_5x5 队列
     let queues = v.get("queues")?.as_array()?;
     for queue in queues {
-        let queue_type = queue.get("queueType").and_then(|q| q.as_str()).unwrap_or("");
+        let queue_type = queue
+            .get("queueType")
+            .and_then(|q| q.as_str())
+            .unwrap_or("");
         if queue_type == "RANKED_SOLO_5x5" {
             return Some(RankInfo {
                 tier: queue
@@ -288,7 +301,10 @@ fn parse_rank_from_value(v: &serde_json::Value) -> Option<RankInfo> {
                     .and_then(|r| r.as_str())
                     .unwrap_or("")
                     .to_string(),
-                league_points: queue.get("leaguePoints").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                league_points: queue
+                    .get("leaguePoints")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i32,
                 wins: queue.get("wins").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
                 losses: queue.get("losses").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
             });

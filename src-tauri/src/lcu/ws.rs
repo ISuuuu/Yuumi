@@ -174,9 +174,7 @@ async fn try_connect(
     port: u16,
     token: &str,
 ) -> Result<
-    tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
     // rustls ClientConfig，NoVerifier = Python ssl=False
@@ -284,9 +282,8 @@ fn process_event(text: &str, app_handle: &AppHandle) {
 
     if uri.starts_with("/lol-champ-select/v1/session") {
         if let Some(data) = event_data.get("data") {
-            match serde_json::from_value::<crate::agents::auto_bp::ChampSelectSession>(
-                data.clone(),
-            ) {
+            match serde_json::from_value::<crate::agents::auto_bp::ChampSelectSession>(data.clone())
+            {
                 Ok(session) => {
                     let _ = state.bp_session_tx.try_send(session);
                 }
@@ -303,11 +300,12 @@ fn process_event(text: &str, app_handle: &AppHandle) {
 
     if uri.starts_with("/lol-gameflow/v1/gameflow-phase") {
         if let Some(phase) = event_data.get("data").and_then(|v| v.as_str()) {
-            let _ = state
-                .gameflow_tx
-                .try_send(crate::agents::auto_match::GameflowEvent::PhaseChanged(
-                    phase.to_string(),
-                ));
+            let _ =
+                state
+                    .gameflow_tx
+                    .try_send(crate::agents::auto_match::GameflowEvent::PhaseChanged(
+                        phase.to_string(),
+                    ));
         }
     }
 
@@ -316,11 +314,9 @@ fn process_event(text: &str, app_handle: &AppHandle) {
             if let Ok(ready_check) =
                 serde_json::from_value::<crate::agents::auto_match::ReadyCheckData>(data.clone())
             {
-                let _ = state
-                    .gameflow_tx
-                    .try_send(crate::agents::auto_match::GameflowEvent::ReadyCheck(
-                        ready_check,
-                    ));
+                let _ = state.gameflow_tx.try_send(
+                    crate::agents::auto_match::GameflowEvent::ReadyCheck(ready_check),
+                );
             }
         }
     }
@@ -336,7 +332,10 @@ fn process_event(text: &str, app_handle: &AppHandle) {
         let event_data_clone = event_data.clone();
         let uri = uri.to_string();
         crate::spawn_log_panic(async move {
-            let data = event_data_clone.get("data").unwrap_or(&serde_json::Value::Null).clone();
+            let data = event_data_clone
+                .get("data")
+                .unwrap_or(&serde_json::Value::Null)
+                .clone();
             if uri == "/lol-gameflow/v1/gameflow-phase" {
                 if let Some(phase) = data.as_str() {
                     let phase_name = match phase {
@@ -352,43 +351,67 @@ fn process_event(text: &str, app_handle: &AppHandle) {
                         _ => phase,
                     };
                     let name = crate::signalr::get_current_summoner_name().await;
-                    let _ = crate::signalr::send_event("game_phase_changed", serde_json::json!({
-                        "phase": phase,
-                        "phaseName": phase_name,
-                        "summonerName": name,
-                    })).await;
+                    let _ = crate::signalr::send_event(
+                        "game_phase_changed",
+                        serde_json::json!({
+                            "phase": phase,
+                            "phaseName": phase_name,
+                            "summonerName": name,
+                        }),
+                    )
+                    .await;
                 }
             } else if uri == "/lol-gameflow/v1/session" {
                 let name = crate::signalr::get_current_summoner_name().await;
-                let _ = crate::signalr::send_event("game_session", serde_json::json!({
-                    "data": data,
-                    "summonerName": name,
-                })).await;
+                let _ = crate::signalr::send_event(
+                    "game_session",
+                    serde_json::json!({
+                        "data": data,
+                        "summonerName": name,
+                    }),
+                )
+                .await;
             } else if uri == "/lol-end-of-game/v1/eog-stats-block" {
                 let name = crate::signalr::get_current_summoner_name().await;
-                let _ = crate::signalr::send_event("eog_stats", serde_json::json!({
-                    "data": data,
-                    "summonerName": name,
-                })).await;
+                let _ = crate::signalr::send_event(
+                    "eog_stats",
+                    serde_json::json!({
+                        "data": data,
+                        "summonerName": name,
+                    }),
+                )
+                .await;
             } else if uri == "/lol-gameflow/v1/watch" {
                 let name = crate::signalr::get_current_summoner_name().await;
-                let _ = crate::signalr::send_event("watch_event", serde_json::json!({
-                    "data": data,
-                    "summonerName": name,
-                })).await;
+                let _ = crate::signalr::send_event(
+                    "watch_event",
+                    serde_json::json!({
+                        "data": data,
+                        "summonerName": name,
+                    }),
+                )
+                .await;
             } else if uri == "/lol-champ-select/v1/session" {
-                let phase = data.pointer("/timer/phase").and_then(|v| v.as_str()).unwrap_or("");
-                let actions = data.get("actions").cloned().unwrap_or(serde_json::Value::Array(vec![]));
+                let phase = data
+                    .pointer("/timer/phase")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let actions = data
+                    .get("actions")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Array(vec![]));
                 let name = crate::signalr::get_current_summoner_name().await;
-                let _ = crate::signalr::send_event("champ_select", serde_json::json!({
-                    "phase": phase,
-                    "actions": actions,
-                    "summonerName": name,
-                })).await;
-            } else if uri == "/lol-summoner/v1/current-summoner" {
-                if data.is_object() {
-                    crate::signalr::update_summoner_info(data).await;
-                }
+                let _ = crate::signalr::send_event(
+                    "champ_select",
+                    serde_json::json!({
+                        "phase": phase,
+                        "actions": actions,
+                        "summonerName": name,
+                    }),
+                )
+                .await;
+            } else if uri == "/lol-summoner/v1/current-summoner" && data.is_object() {
+                crate::signalr::update_summoner_info(data).await;
             }
         });
     }

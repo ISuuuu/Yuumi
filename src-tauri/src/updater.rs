@@ -50,11 +50,12 @@ macro_rules! build_updater {
         let mut builder = $app.updater_builder();
         if enable_proxy && !proxy_addr.is_empty() {
             // proxy_addr 格式为 "host:port"，补全为 http://host:port
-            let proxy_url = if proxy_addr.starts_with("http://") || proxy_addr.starts_with("https://") {
-                proxy_addr.clone()
-            } else {
-                format!("http://{}", proxy_addr)
-            };
+            let proxy_url =
+                if proxy_addr.starts_with("http://") || proxy_addr.starts_with("https://") {
+                    proxy_addr.clone()
+                } else {
+                    format!("http://{}", proxy_addr)
+                };
             match proxy_url.parse::<url::Url>() {
                 Ok(url) => {
                     builder = builder.proxy(url);
@@ -65,7 +66,9 @@ macro_rules! build_updater {
                 }
             }
         }
-        builder.build().map_err(|e| format!("无法初始化更新器: {e}"))
+        builder
+            .build()
+            .map_err(|e| format!("无法初始化更新器: {e}"))
     }};
 }
 
@@ -120,7 +123,9 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     update
         .download_and_install(
             move |chunk_length, total| {
-                let current = downloaded_bytes_clone.fetch_add(chunk_length as u64, std::sync::atomic::Ordering::Relaxed) + chunk_length as u64;
+                let current = downloaded_bytes_clone
+                    .fetch_add(chunk_length as u64, std::sync::atomic::Ordering::Relaxed)
+                    + chunk_length as u64;
                 let percent = total.map(|t| {
                     if t > 0 {
                         current as f64 / t as f64 * 100.0
@@ -185,15 +190,24 @@ pub async fn start_background_download(app: AppHandle) {
 
 /// 下载更新并保存到 AppState（共享给 start_background_download 和 check_update）
 /// 使用 is_downloading 标志防止并发下载。
-async fn background_download_update(app: AppHandle, update: tauri_plugin_updater::Update, info: UpdateInfo) {
+async fn background_download_update(
+    app: AppHandle,
+    update: tauri_plugin_updater::Update,
+    info: UpdateInfo,
+) {
     // 防重入：已有下载进行中则跳过
     {
         let state = app.state::<AppState>();
-        if state.is_downloading.load(std::sync::atomic::Ordering::Relaxed) {
+        if state
+            .is_downloading
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             log::info!("后台下载已在进行中，跳过重复下载");
             return;
         }
-        state.is_downloading.store(true, std::sync::atomic::Ordering::Relaxed);
+        state
+            .is_downloading
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let app_for_progress = app.clone();
     let downloaded_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -204,7 +218,9 @@ async fn background_download_update(app: AppHandle, update: tauri_plugin_updater
     match update
         .download(
             |chunk_length, total| {
-                let current = downloaded_bytes_clone.fetch_add(chunk_length as u64, std::sync::atomic::Ordering::Relaxed) + chunk_length as u64;
+                let current = downloaded_bytes_clone
+                    .fetch_add(chunk_length as u64, std::sync::atomic::Ordering::Relaxed)
+                    + chunk_length as u64;
                 let percent = total.map(|t| {
                     if t > 0 {
                         current as f64 / t as f64 * 100.0
@@ -228,16 +244,23 @@ async fn background_download_update(app: AppHandle, update: tauri_plugin_updater
         Ok(bytes) => {
             log::info!("后台更新下载成功 ({} bytes)", bytes.len());
             let state = app.state::<AppState>();
-            state.is_downloading.store(false, std::sync::atomic::Ordering::Relaxed);
+            state
+                .is_downloading
+                .store(false, std::sync::atomic::Ordering::Relaxed);
             let mut pending = state.pending_update.lock().unwrap();
-            *pending = Some(PendingUpdate { bytes, info: info.clone() });
+            *pending = Some(PendingUpdate {
+                bytes,
+                info: info.clone(),
+            });
             drop(pending);
             let _ = app.emit("updater://download-ready", &info);
         }
         Err(e) => {
             log::warn!("后台更新下载失败: {e}");
             let state = app.state::<AppState>();
-            state.is_downloading.store(false, std::sync::atomic::Ordering::Relaxed);
+            state
+                .is_downloading
+                .store(false, std::sync::atomic::Ordering::Relaxed);
             let _ = app.emit("updater://download-error", format!("{}", e));
         }
     }
@@ -247,9 +270,12 @@ async fn background_download_update(app: AppHandle, update: tauri_plugin_updater
 #[tauri::command]
 pub async fn install_pending_update(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let pending = state.pending_update.lock().unwrap().take()
+    let pending = state
+        .pending_update
+        .lock()
+        .unwrap()
+        .take()
         .ok_or_else(|| "没有待安装的更新".to_string())?;
-    drop(state);
 
     let updater = build_updater!(&app)?;
     let update = updater
