@@ -19,6 +19,10 @@ import {
 } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
+import { listen } from "@tauri-apps/api/event";
+import { fetchOpenableLoots, batchOpenLoots, smartOpenAllLoots } from "../api/loot";
+import type { OpenableLoot, LootProgressEvent, OpenBatchItem } from "../api/loot";
+import { useToast } from "../composables/useToast";
 
 // 模块作用域内存缓存单例，防止频繁切换标签页触发无意义的 API 数据刷新
 let cachedSummoner: SummonerDisplay | null = null;
@@ -29,6 +33,280 @@ let lastFetchedTime = 0;
 
 const store = useLcuStore();
 const { t, te } = useI18n();
+const { showToast } = useToast();
+const currentTab = ref("matches"); // matches (生涯战绩), loot (战利品)
+
+// ─── 战利品批量开启逻辑 ───
+const openableLoots = ref<OpenableLoot[]>([]);
+const lootLoading = ref(false);
+const lootError = ref<string | null>(null);
+const selectedLoot = ref<OpenableLoot | null>(null);
+const openQuantity = ref(1);
+const isOpening = ref(false);
+const openProgress = ref(0);
+const openTotal = ref(0);
+const openResults = ref<LootProgressEvent[]>([]);
+const showOpenPanel = ref(false);
+let unlistenProgress: (() => void) | null = null;
+
+function getLootDisplayName(loot: OpenableLoot): string {
+  const name = loot.name;
+  const id = loot.lootId;
+  if (id === "CHEST_promotion") {
+    return "宝箱";
+  }
+  if (id === "CHEST_champion_mastery" || id === "CHEST_generic" || id === "CHEST_hextech") {
+    return "海克斯科技宝箱";
+  }
+  if (id === "CHEST_premium") {
+    return "杰作宝箱";
+  }
+  if (name === id) {
+    if (id.includes("ORB") || id.includes("orb")) return "法球";
+    if (id.includes("CAPSULE")) return "引擎/胶囊";
+  }
+  return name;
+}
+
+const sortedOpenableLoots = computed(() => {
+  return [...openableLoots.value].sort((a, b) => {
+    const getWeight = (loot: OpenableLoot) => {
+      const id = loot.lootId;
+      if (id === "CHEST_promotion") return 10;
+      if (id === "CHEST_champion_mastery" || id === "CHEST_generic" || id === "CHEST_hextech") return 20;
+      if (loot.needKey) return 30;
+      return 40;
+    };
+    return getWeight(a) - getWeight(b);
+  });
+});
+
+async function loadOpenableLoots() {
+  lootLoading.value = true;
+  lootError.value = null;
+  try {
+    openableLoots.value = await fetchOpenableLoots();
+    if (openableLoots.value.length === 0) {
+      lootError.value = t("tools.lootOpener.noLootFound");
+    }
+  } catch (e: any) {
+    lootError.value = e.toString();
+    console.error("获取战利品列表失败:", e);
+  } finally {
+    lootLoading.value = false;
+  }
+}
+
+// ─── 智能分配辅助 ───
+const keyNeededLoots = computed(() =>
+  openableLoots.value
+    .filter((l) => l.needKey && l.count > 0)
+    .sort(
+      (a, b) =>
+        lootPriorityIndex(a.lootId) - lootPriorityIndex(b.lootId) ||
+        b.name.localeCompare(a.name),
+    ),
+);
+
+const noKeyLoots = computed(() =>
+  openableLoots.value.filter((l) => !l.needKey && l.count > 0),
+);
+
+const totalKeyCount = computed(() => {
+  const keyItems = openableLoots.value.filter((l) => l.needKey);
+  if (keyItems.length === 0) return 0;
+  return Math.max(0, ...keyItems.map((l) => l.keyCount ?? 0));
+});
+
+function lootPriorityIndex(lootId: string): number {
+  if (lootId === "CHEST_promotion") return 0;
+  if (lootId === "CHEST_champion_mastery" || lootId === "CHEST_generic" || lootId === "CHEST_hextech") return 1;
+  if (lootId.includes("ORB") || lootId.includes("orb")) return 2;
+  if (lootId.includes("CAPSULE")) return 3;
+  return 4;
+}
+
+function buildSmartOpenBatches(): OpenBatchItem[] {
+  const batches: OpenBatchItem[] = [];
+  let remainingKeys = totalKeyCount.value;
+
+  for (const loot of noKeyLoots.value) {
+    batches.push({
+      lootId: loot.lootId,
+      name: loot.name,
+      count: loot.count,
+      recipeName: loot.recipeName,
+      ingredients: [loot.lootId],
+    });
+  }
+
+  for (const loot of keyNeededLoots.value) {
+    if (remainingKeys <= 0) break;
+    const canOpen = Math.min(loot.count, remainingKeys);
+    if (canOpen <= 0) continue;
+
+    const ingredients = [loot.lootId];
+    if (loot.keyLootId) ingredients.push(loot.keyLootId);
+
+    batches.push({
+      lootId: loot.lootId,
+      name: loot.name,
+      count: canOpen,
+      recipeName: loot.recipeName,
+      ingredients,
+    });
+    remainingKeys -= canOpen;
+  }
+
+  return batches;
+}
+
+async function handleSmartOpenAll() {
+  const batches = buildSmartOpenBatches();
+  const totalCount = batches.reduce((s, b) => s + b.count, 0);
+
+  if (totalCount <= 0) {
+    showToast(t("tools.lootOpener.noLootFound"), "error");
+    return;
+  }
+
+  if (unlistenProgress) unlistenProgress();
+  unlistenProgress = await listen<LootProgressEvent>(
+    "loot-open-progress",
+    (event) => {
+      const evt = event.payload;
+      openProgress.value = evt.current;
+      openTotal.value = evt.total;
+      openResults.value.push(evt);
+      if (evt.current === evt.total) {
+        isOpening.value = false;
+        loadOpenableLoots();
+        loadSummoner(true); // 开启完毕后，自动刷新生涯资产
+      }
+    },
+  );
+
+  showOpenPanel.value = true;
+  isOpening.value = true;
+  openProgress.value = 0;
+  openTotal.value = totalCount;
+  openResults.value = [];
+
+  try {
+    await smartOpenAllLoots(batches);
+  } catch (e: any) {
+    isOpening.value = false;
+    showToast(
+      t("tools.lootOpener.openFailed", { error: e.toString() }),
+      "error",
+    );
+  }
+}
+
+function openLootModal(loot: OpenableLoot) {
+  selectedLoot.value = loot;
+  const maxQ = loot.needKey
+    ? Math.min(loot.count, loot.keyCount ?? 0)
+    : loot.count;
+  openQuantity.value = Math.max(1, maxQ);
+}
+
+function closeLootModal() {
+  selectedLoot.value = null;
+}
+
+const maxOpenQuantity = computed(() => {
+  if (!selectedLoot.value) return 0;
+  const loot = selectedLoot.value;
+  if (!loot.needKey) return loot.count;
+  return Math.min(loot.count, loot.keyCount ?? 0);
+});
+
+const keyDisplayName = computed(() => {
+  const keyId = selectedLoot.value?.keyLootId;
+  if (!keyId) return "";
+  if (keyId === "MATERIAL_key") {
+    return t("tools.lootOpener.hextechKey") || "海克斯科技钥匙";
+  } else if (keyId === "MATERIAL_key_premium") {
+    return t("tools.lootOpener.masterworkKey") || "杰作钥匙";
+  }
+  return selectedLoot.value?.keyName || keyId;
+});
+
+const currentKeyCount = computed(() => {
+  return selectedLoot.value?.keyCount ?? 0;
+});
+
+async function handleBatchOpen() {
+  if (!selectedLoot.value || openQuantity.value <= 0) return;
+  if (openQuantity.value > maxOpenQuantity.value) {
+    showToast(
+      t("tools.lootOpener.insufficientKeys"),
+      "error",
+    );
+    return;
+  }
+
+  const loot = selectedLoot.value;
+  const ingredients = [loot.lootId];
+  if (loot.keyLootId && loot.needKey) {
+    ingredients.push(loot.keyLootId);
+  }
+
+  if (unlistenProgress) unlistenProgress();
+  unlistenProgress = await listen<LootProgressEvent>(
+    "loot-open-progress",
+    (event) => {
+      const evt = event.payload;
+      openProgress.value = evt.current;
+      openTotal.value = evt.total;
+      openResults.value.push(evt);
+      if (evt.current === evt.total) {
+        isOpening.value = false;
+        loadOpenableLoots();
+        loadSummoner(true); // 开启完毕后，自动刷新生涯资产
+      }
+    },
+  );
+
+  showOpenPanel.value = true;
+  isOpening.value = true;
+  openProgress.value = 0;
+  openTotal.value = openQuantity.value;
+  openResults.value = [];
+  selectedLoot.value = null;
+
+  try {
+    await batchOpenLoots(
+      loot.recipeName,
+      ingredients,
+      openQuantity.value,
+    );
+  } catch (e: any) {
+    isOpening.value = false;
+    showToast(
+      t("tools.lootOpener.openFailed", { error: e.toString() }),
+      "error",
+    );
+  }
+}
+
+function closeOpenPanel() {
+  showOpenPanel.value = false;
+  isOpening.value = false;
+  openProgress.value = 0;
+  openTotal.value = 0;
+  if (unlistenProgress) {
+    unlistenProgress();
+    unlistenProgress = null;
+  }
+}
+
+const openPercentage = computed(() => {
+  if (openTotal.value <= 0) return 0;
+  return Math.round((openProgress.value / openTotal.value) * 100);
+});
+
 const summoner = ref<SummonerDisplay | null>(null);
 const matches = ref<MatchDisplay[]>([]);
 const recentMatches = ref<MatchDisplay[]>([]);
@@ -318,10 +596,15 @@ onMounted(async () => {
     console.warn("加载 CareerGamesNumber 配置失败，使用默认值 20:", e);
   }
   document.addEventListener("click", onDocClick);
+  loadOpenableLoots(); // 自动加载战利品列表
 });
 
 onUnmounted(() => {
   document.removeEventListener("click", onDocClick);
+  if (unlistenProgress) {
+    unlistenProgress();
+    unlistenProgress = null;
+  }
 });
 
 function onDocClick() {
@@ -582,8 +865,25 @@ function getQueueName(m: MatchDisplay): string {
         </div>
       </div>
 
-      <!-- 排位段位信息表 -->
-      <div class="rank-table-wrapper">
+      <!-- Tab 导航栏 -->
+      <div v-if="summoner" class="career-tabs">
+        <div
+          :class="['career-tab-item', { active: currentTab === 'matches' }]"
+          @click="currentTab = 'matches'"
+        >
+          生涯战绩
+        </div>
+        <div
+          :class="['career-tab-item', { active: currentTab === 'loot' }]"
+          @click="currentTab = 'loot'"
+        >
+          战利品开启
+        </div>
+      </div>
+
+      <div v-show="currentTab === 'matches'">
+        <!-- 排位段位信息表 -->
+        <div class="rank-table-wrapper">
         <table class="rank-table">
           <thead>
             <tr>
@@ -870,6 +1170,184 @@ function getQueueName(m: MatchDisplay): string {
           <p class="tip">{{ $t("career.empty") }}</p>
         </div>
       </div>
+      </div>
+
+      <!-- 战利品批量开启面板 -->
+      <div v-show="currentTab === 'loot'" class="loot-tab-container">
+        <!-- 战利品控制操作栏：刷新 + 钥匙 + 一键全开 -->
+        <div class="loot-action-bar">
+          <div class="action-bar-left">
+            <n-button
+              size="medium"
+              type="primary"
+              :loading="lootLoading"
+              :disabled="!store.isConnected"
+              @click="loadOpenableLoots"
+            >
+              {{ $t("tools.lootOpener.refreshBtn") }}
+            </n-button>
+            <span v-if="openableLoots.length > 0" class="loot-key-summary">
+              🔑 ×{{ totalKeyCount }}
+            </span>
+          </div>
+          <n-button
+            v-if="openableLoots.length > 0"
+            size="medium"
+            type="warning"
+            :disabled="!store.isConnected || isOpening || totalKeyCount <= 0"
+            @click="handleSmartOpenAll"
+          >
+            {{ $t("tools.lootOpener.smartOpenAll") }}
+          </n-button>
+        </div>
+
+        <!-- 战利品加载/错误态 -->
+        <div v-if="lootLoading" class="loot-loading">
+          <div class="loading-spinner"></div>
+          <span>{{ $t("tools.lootOpener.loading") }}</span>
+        </div>
+
+        <div v-else-if="lootError" class="loot-error">
+          {{ lootError }}
+        </div>
+
+        <!-- 战利品卡片网格列表 -->
+        <div v-else-if="sortedOpenableLoots.length > 0" class="loot-grid">
+          <div
+            v-for="loot in sortedOpenableLoots"
+            :key="loot.lootId"
+            class="loot-card-item"
+            @click="openLootModal(loot)"
+          >
+            <div class="loot-card-icon-container">
+              <LcuImage :src="loot.tilePath ?? undefined" class="loot-card-icon" />
+            </div>
+            <div class="loot-card-info">
+              <div class="loot-card-header">
+                <span class="loot-card-name" :title="getLootDisplayName(loot)">{{ getLootDisplayName(loot) }}</span>
+                <span class="loot-card-count">×{{ loot.count }}</span>
+              </div>
+              <div class="loot-card-footer">
+                <span v-if="loot.needKey" class="loot-key-badge">
+                  {{ $t("tools.lootOpener.needKey") }}
+                </span>
+                <span v-else class="loot-no-key-badge">{{ $t("tools.lootOpener.noKeyNeeded") }}</span>
+                <span class="loot-open-btn">{{ $t("tools.lootOpener.openBtn") }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="loot-empty">
+          {{ $t("tools.lootOpener.clickRefresh") }}
+        </div>
+      </div>
+
+      <!-- 战利品开启数量选择弹窗 -->
+      <Transition name="fade">
+        <div
+          v-if="selectedLoot"
+          class="loot-modal-overlay"
+          @click.self="closeLootModal"
+        >
+          <div class="loot-modal-card">
+            <div class="loot-modal-header">
+              <h3>{{ $t("tools.lootOpener.batchOpen") }} - {{ getLootDisplayName(selectedLoot) }}</h3>
+              <button class="modal-close-btn" @click="closeLootModal">✕</button>
+            </div>
+            <div class="loot-modal-body">
+              <div class="loot-modal-preview">
+                <div class="loot-modal-icon-container">
+                  <LcuImage :src="selectedLoot.tilePath ?? undefined" class="loot-modal-icon" />
+                </div>
+                <div class="loot-modal-details">
+                  <span class="loot-modal-name">{{ getLootDisplayName(selectedLoot) }}</span>
+                  <span class="loot-modal-owned">{{ $t("tools.lootOpener.owned") }}: ×{{ selectedLoot.count }}</span>
+                </div>
+              </div>
+              <div v-if="selectedLoot.needKey && selectedLoot.keyLootId" class="loot-info-row">
+                <span class="loot-info-label">{{ $t("tools.lootOpener.keyRequired") }}</span>
+                <span class="loot-info-value loot-key-count">
+                  {{ keyDisplayName }} ×{{ currentKeyCount }}
+                </span>
+              </div>
+              <div class="loot-quantity-row">
+                <span class="loot-info-label">{{ $t("tools.lootOpener.quantity") }}</span>
+                <n-input-number
+                  v-model:value="openQuantity"
+                  :min="1"
+                  :max="maxOpenQuantity"
+                  style="width: 120px"
+                  size="small"
+                />
+              </div>
+              <div v-if="maxOpenQuantity <= 0 && selectedLoot.needKey" class="loot-insufficient">
+                {{ $t("tools.lootOpener.insufficientKeys") }}
+              </div>
+              <div class="loot-modal-actions">
+                <n-button size="small" @click="closeLootModal">
+                  {{ $t("tools.cancel") }}
+                </n-button>
+                <n-button
+                  size="small"
+                  type="primary"
+                  :disabled="maxOpenQuantity <= 0"
+                  @click="handleBatchOpen"
+                >
+                  {{ $t("tools.lootOpener.startOpen", { count: openQuantity }) }}
+                </n-button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- 批量开启进度面板 -->
+      <Transition name="slide-up">
+        <div v-if="showOpenPanel" class="loot-progress-overlay">
+          <div class="loot-progress-card">
+            <div class="loot-progress-header">
+              <h3>{{ $t("tools.lootOpener.opening") }}</h3>
+              <button
+                class="modal-close-btn"
+                :disabled="isOpening"
+                @click="closeOpenPanel"
+              >✕</button>
+            </div>
+            <div class="loot-progress-body">
+              <n-progress
+                type="line"
+                :percentage="openPercentage"
+                :indicator-placement="'inside'"
+                :border-radius="4"
+                :height="20"
+                status="success"
+              />
+              <div class="loot-progress-info">
+                {{ openProgress }} / {{ openTotal }}
+              </div>
+              <div class="loot-results-list">
+                <div
+                  v-for="(result, idx) in openResults"
+                  :key="idx"
+                  :class="['loot-result-item', result.success ? 'success' : 'error']"
+                >
+                  <span class="loot-result-icon">{{ result.success ? '🎉' : '❌' }}</span>
+                  <span class="loot-result-text">
+                    [{{ result.current }}/{{ result.total }}]
+                    {{ result.success ? result.rewardName : result.errorMsg }}
+                  </span>
+                </div>
+              </div>
+              <div v-if="!isOpening" class="loot-progress-actions" style="margin-top: 14px;">
+                <n-button type="primary" size="medium" block @click="closeOpenPanel">
+                  确定
+                </n-button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
     </div>
   </div>
 </template>
@@ -1639,6 +2117,469 @@ function getQueueName(m: MatchDisplay): string {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+/* ─── 导航 Tab 样式 ─── */
+.career-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 16px 0;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 8px;
+}
+
+.career-tab-item {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 6px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: transparent;
+}
+
+.career-tab-item:hover {
+  color: var(--primary-color);
+  background: var(--card-bg-hover);
+}
+
+.career-tab-item.active {
+  color: var(--primary-color);
+  background: var(--primary-color-alpha-10);
+  box-shadow: inset 0 0 0 1px var(--primary-color-alpha-20);
+}
+
+/* ─── 战利品批量开启样式 ─── */
+.loot-tab-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.loot-action-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(8px);
+}
+
+.action-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.loot-loading,
+.loot-error,
+.loot-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  color: var(--text-dimmed);
+  font-size: 0.88rem;
+  gap: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+}
+
+.loot-error {
+  color: var(--loss-color);
+}
+
+.loot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  padding-bottom: 24px;
+}
+
+.loot-card-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.loot-card-item:hover {
+  border-color: var(--primary-color);
+  box-shadow: var(--shadow-md), 0 0 0 1px var(--primary-color-alpha-30);
+  transform: translateY(-2px);
+  background: var(--card-bg-hover);
+}
+
+.loot-card-icon-container {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.loot-card-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.loot-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.loot-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.loot-card-name {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--text-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.loot-card-count {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--primary-color);
+  background: var(--primary-color-alpha-15);
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.loot-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.loot-key-badge {
+  font-size: 0.7rem;
+  color: var(--warning-color, #e6a23c);
+  background: var(--warning-color-alpha-10, rgba(230, 162, 60, 0.1));
+  border: 1px solid var(--warning-color-alpha-20, rgba(230, 162, 60, 0.2));
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.loot-no-key-badge {
+  font-size: 0.7rem;
+  color: var(--text-dimmed);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.loot-open-btn {
+  font-size: 0.72rem;
+  color: var(--primary-color);
+  font-weight: 700;
+  padding: 3px 10px;
+  border: 1px solid var(--primary-color-alpha-30);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.loot-card-item:hover .loot-open-btn {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+.loot-key-summary {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--warning-color, #e6a23c);
+  background: var(--warning-color-alpha-10, rgba(230, 162, 60, 0.1));
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--warning-color-alpha-20, rgba(230, 162, 60, 0.2));
+}
+
+/* 数量选择弹窗 */
+.loot-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.loot-modal-card {
+  width: 380px;
+  background: var(--settings-card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: modalScaleIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.loot-modal-header {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.01);
+}
+
+.loot-modal-header h3 {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-color);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.loot-modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.loot-modal-preview {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid var(--border-color);
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.loot-modal-icon-container {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.loot-modal-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.loot-modal-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.loot-modal-name {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--text-color);
+}
+
+.loot-modal-owned {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.loot-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.loot-info-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.loot-info-value {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.loot-key-count {
+  color: var(--warning-color, #e6a23c);
+}
+
+.loot-quantity-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px dashed var(--border-color);
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.loot-insufficient {
+  font-size: 0.78rem;
+  color: var(--loss-color);
+  font-weight: 600;
+  text-align: center;
+}
+
+.loot-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+/* 批量开启进度面板 */
+.loot-progress-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.loot-progress-card {
+  width: 420px;
+  max-height: 80vh;
+  background: var(--settings-card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: modalScaleIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.loot-progress-header {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.01);
+}
+
+.loot-progress-header h3 {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-color);
+  margin: 0;
+}
+
+.loot-progress-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.loot-progress-info {
+  font-size: 0.78rem;
+  color: var(--text-dimmed);
+  font-weight: 600;
+  text-align: center;
+}
+
+.loot-results-list {
+  max-height: 300px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.loot-result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  animation: lootResultIn 0.3s ease-out;
+}
+
+.loot-result-item.success {
+  border-color: var(--win-border);
+  background: var(--win-bg);
+}
+
+.loot-result-item.error {
+  border-color: var(--loss-border);
+  background: var(--loss-bg);
+}
+
+.loot-result-icon {
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.loot-result-text {
+  color: var(--text-color);
+  word-break: break-all;
+}
+
+@keyframes lootResultIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
   }
 }
 </style>

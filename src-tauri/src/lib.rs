@@ -2,6 +2,7 @@ pub mod agents;
 pub mod config;
 pub mod lcu;
 pub mod logging;
+pub mod loot;
 pub mod parsers;
 pub mod signalr;
 pub mod tools;
@@ -289,6 +290,9 @@ pub fn run() {
             tools::get_game_settings_readonly,
             tools::set_game_settings_readonly,
             tools::spectate_directly,
+            loot::get_openable_loots,
+            loot::batch_open_loots,
+            loot::smart_open_all_loots,
             get_config,
             update_config,
             get_config_load_error,

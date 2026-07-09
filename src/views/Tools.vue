@@ -19,6 +19,8 @@ import { useDialog } from "naive-ui";
 import { useToast } from "../composables/useToast";
 import { useI18n } from "vue-i18n";
 
+
+
 const config =
   inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 const store = useLcuStore();
@@ -248,6 +250,8 @@ onMounted(async () => {
   }
   await checkGameSettingsLock();
 });
+
+
 
 onUnmounted(() => {
   document.removeEventListener("click", closeAllDropdowns);
@@ -1341,6 +1345,8 @@ async function handleToggleLockGameSettings() {
           />
         </div>
       </div>
+
+
 
       <!-- 3. 客户端组 -->
       <div class="group-header">{{ $t("tools_extra.clientGroupTitle") }}</div>
@@ -2974,4 +2980,26 @@ async function handleToggleLockGameSettings() {
   background: var(--card-bg-hover);
   box-shadow: var(--shadow-sm);
 }
+
 </style>
+
+/* Transition animations */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
