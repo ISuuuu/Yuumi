@@ -88,14 +88,27 @@ pub async fn call_lcu_api(
                     return serde_json::from_str(&text)
                         .map_err(|e| format!("JSON 解析失败: {}", e));
                 } else {
-                    // HTTP 状态码错误不重试，直接返回
-                    log::warn!(
-                        "LCU API 请求失败: {} {}, 状态码: {}, 响应: {}",
-                        method,
-                        path,
-                        status.as_u16(),
-                        text
-                    );
+                    // 对于非选人阶段请求选人接口产生的常规 404 返回，降级为 debug 日志防止刷屏爆红
+                    if status.as_u16() == 404
+                        && (path.contains("pickable-champion-ids")
+                            || path.contains("/lol-champ-select/v1/session"))
+                    {
+                        log::debug!(
+                            "LCU API 常规未激活提示: {} {}, 状态码: {}, 响应: {}",
+                            method,
+                            path,
+                            status.as_u16(),
+                            text
+                        );
+                    } else {
+                        log::warn!(
+                            "LCU API 请求失败: {} {}, 状态码: {}, 响应: {}",
+                            method,
+                            path,
+                            status.as_u16(),
+                            text
+                        );
+                    }
                     return Err(format!("LCU 返回错误 [{}]: {}", status.as_u16(), text));
                 }
             }
@@ -120,27 +133,31 @@ pub async fn call_lcu_api(
 
 /// LCU 资源路径白名单前缀
 const ASSET_PATH_PREFIX: &str = "/lol-game-data/assets/";
+const LOOT_ASSET_PATH_PREFIX: &str = "/fe/lol-loot/assets/";
 
 /// 获取 LCU 静态资源（图片等），返回 data URL。
 /// 前端可用于 <img :src="dataUrl">，绕过自签名证书问题。
-/// 路径限制：必须以 `/lol-game-data/assets/` 开头。
+/// 路径限制：必须以 `/lol-game-data/assets/` 或 `/fe/lol-loot/assets/` 开头。
 #[tauri::command]
 pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Result<String, String> {
-    if !path.starts_with(ASSET_PATH_PREFIX) {
+    let is_valid = path.starts_with(ASSET_PATH_PREFIX) || path.starts_with(LOOT_ASSET_PATH_PREFIX);
+    if !is_valid {
         return Err(format!(
-            "不允许的资源路径，必须以 {} 开头",
-            ASSET_PATH_PREFIX
+            "不允许的资源路径，必须以 {} 或 {} 开头",
+            ASSET_PATH_PREFIX, LOOT_ASSET_PATH_PREFIX
         ));
     }
 
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
 
-    let clean_path = format!(
-        "{}{}",
-        ASSET_PATH_PREFIX,
-        path[ASSET_PATH_PREFIX.len()..].to_lowercase()
-    );
+    let clean_path = if let Some(stripped) = path.strip_prefix(ASSET_PATH_PREFIX) {
+        format!("{}{}", ASSET_PATH_PREFIX, stripped.to_lowercase())
+    } else if let Some(stripped) = path.strip_prefix(LOOT_ASSET_PATH_PREFIX) {
+        format!("{}{}", LOOT_ASSET_PATH_PREFIX, stripped.to_lowercase())
+    } else {
+        unreachable!() // validated above
+    };
     let url = format!("https://127.0.0.1:{}{}", lcu.port, clean_path);
     let auth = build_auth_header(&lcu.token);
 

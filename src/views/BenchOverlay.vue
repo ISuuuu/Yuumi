@@ -16,6 +16,12 @@ const benchChampions = computed(() => {
 
 // 获取当前玩家在该选人会话中可用的英雄 ID 列表
 async function fetchPickableIds(retryCount = 3) {
+  // 如果不在英雄选择阶段，直接跳过，静默返回
+  if (store.gamePhase !== "ChampSelect") {
+    console.log("[BenchOverlay] 当前非选人阶段，跳过拉取可用英雄列表");
+    return;
+  }
+
   console.log(
     `[BenchOverlay] 正在获取当前可用英雄列表... (剩余重试次数: ${retryCount})`,
   );
@@ -30,6 +36,13 @@ async function fetchPickableIds(retryCount = 3) {
     );
   } else {
     console.error("[BenchOverlay] 获取可用英雄列表失败:", resp.error);
+    // 如果是 404 或无活动代理错误（代表没在选人阶段），直接终止重试，静默返回
+    const errStr = String(resp.error || "");
+    if (errStr.includes("404") || errStr.includes("No active delegate")) {
+      console.log("[BenchOverlay] 检测到选人会话未激活，静默终止重试");
+      return;
+    }
+
     if (retryCount > 0) {
       console.log("[BenchOverlay] 2秒后重试拉取可用英雄列表...");
       setTimeout(() => {
