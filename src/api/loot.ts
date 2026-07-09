@@ -48,3 +48,61 @@ export const batchOpenLoots = (
 /** 智能一键开启：按优先级自动分配钥匙 */
 export const smartOpenAllLoots = (items: OpenBatchItem[]) =>
   invoke<string>("smart_open_all_loots", { items });
+
+// ─── 碎片库存管理（分解 / 三合一重随）───
+
+export interface LootItem {
+  lootId: string;
+  lootName: string;
+  itemDesc: string;
+  displayCategories: string; // CHAMPION, SKIN, EMOTE, WARD_SKIN, SUMMONERICON
+  lootType: string;
+  rarity: string;
+  count: number;
+  value: number;
+  disenchantValue: number;
+  itemStatus: string; // OWNED, NONE, RENTAL
+  tilePath: string | null;
+  upgradeRecipeName: string;
+  upgradeEssenceCost: number;
+}
+
+export interface DisenchantItem {
+  lootId: string;
+  count: number;
+  upgradeRecipeName?: string;
+}
+
+export interface ActionProgressEvent {
+  current: number;
+  total: number;
+  success: boolean;
+  lootName: string;
+  rewardDesc: string;
+  errorMsg: string | null;
+}
+
+/** 获取玩家所有的碎片库存（排除了材料） */
+export const fetchLootInventory = () =>
+  invoke<LootItem[]>("get_loot_inventory");
+
+/** 批量分解选中的碎片 */
+export const disenchantLoot = (items: DisenchantItem[]) =>
+  invoke<string>("disenchant_loot", { items });
+
+/** 批量三合一重随选中的碎片 */
+export const rerollLoot = (lootIds: string[]) =>
+  invoke<string>("reroll_loot", { lootIds });
+
+/** 批量升级选中的碎片为永久 */
+export const upgradeLoot = (items: DisenchantItem[]) =>
+  invoke<string>("upgrade_loot", { items });
+
+export interface EssenceBalances {
+  blueEssence: number;
+  orangeEssence: number;
+}
+
+/** 获取玩家蓝/橙精粹余额 */
+export const fetchEssenceBalances = () =>
+  invoke<EssenceBalances>("get_essence_balances");
