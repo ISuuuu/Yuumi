@@ -44,7 +44,7 @@ pnpm tauri build    # 构建生产包
 # 1. 先让 rust 自动格式化
 cargo fmt --all
 # 2. 再跑完整检查，只看还剩哪些真正的问题
-pnpm run check-all  # 本地自测（类型检查 + 格式检查 + 静态分析）
+pnpm run check-all  # 提交前自测（已集成到 husky pre-commit，commit 时自动执行）
 ```
 
 ## 项目结构
