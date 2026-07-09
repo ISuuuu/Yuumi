@@ -20,8 +20,8 @@ import {
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 import { listen } from "@tauri-apps/api/event";
-import { fetchOpenableLoots, batchOpenLoots, smartOpenAllLoots } from "../api/loot";
-import type { OpenableLoot, LootProgressEvent, OpenBatchItem } from "../api/loot";
+import { fetchOpenableLoots, batchOpenLoots, smartOpenAllLoots, fetchLootInventory, disenchantLoot, rerollLoot, upgradeLoot, fetchEssenceBalances } from "../api/loot";
+import type { OpenableLoot, LootProgressEvent, OpenBatchItem, LootItem, DisenchantItem, ActionProgressEvent } from "../api/loot";
 import { useToast } from "../composables/useToast";
 
 // 模块作用域内存缓存单例，防止频繁切换标签页触发无意义的 API 数据刷新
@@ -301,6 +301,399 @@ function closeOpenPanel() {
     unlistenProgress = null;
   }
 }
+
+// ─── 碎片库存管理（分解 / 三合一重随）───
+
+// 精粹余额
+const blueEssenceCount = ref(0);
+const orangeEssenceCount = ref(0);
+
+async function updateEssenceBalances() {
+  try {
+    const balances = await fetchEssenceBalances();
+    blueEssenceCount.value = balances.blueEssence;
+    orangeEssenceCount.value = balances.orangeEssence;
+  } catch (e) {
+    console.error("获取精粹余额失败:", e);
+  }
+}
+
+// 碎片列表
+const rawLootInventory = ref<LootItem[]>([]);
+const isInventoryLoading = ref(false);
+const inventoryError = ref<string | null>(null);
+
+// 筛选字段
+const filterType = ref("CHAMPION"); // CHAMPION, SKIN, EMOTE, WARDSKIN, SUMMONERICON, ALL
+const filterOwned = ref("ALL"); // ALL, OWNED, NOT_OWNED
+const filterValueType = ref<"value" | "disenchantValue">("disenchantValue");
+const filterOperator = ref<"<=" | ">=" | "=">("<=");
+const filterMaxValue = ref<number | null>(null);
+
+// 选中的碎片 IDs
+const selectedLootIds = ref<string[]>([]);
+
+// 切换碎片类型时自动清空已选列表，避免累计不同类型的选择影响批量操作
+watch(filterType, () => {
+  handleClearSelection();
+});
+
+// 自定义美化确认弹窗状态
+const showConfirmModal = ref(false);
+const confirmModalConfig = ref({
+  title: "",
+  message: "",
+  confirmText: "确定",
+  cancelText: "取消",
+  onConfirm: () => {},
+  type: "warning", // 'warning' | 'info' | 'error'
+  details: null as { label: string; value: string; class?: string }[] | null,
+});
+
+function executeConfirmedAction() {
+  showConfirmModal.value = false;
+  confirmModalConfig.value.onConfirm();
+}
+
+// 操作进度状态（复用已有的 showOpenPanel/isOpening/openProgress 相关变量）
+const actionProgressTitle = ref("");
+let actionUnlisten: (() => void) | null = null;
+
+// 根据 lootId 获取友好的显示名称（用于进度面板）
+function getFriendlyNameById(lootId: string): string {
+  const found = rawLootInventory.value.find(i => i.lootId === lootId);
+  return found?.itemDesc ?? lootId;
+}
+
+// 加载碎片库存
+async function loadLootInventory() {
+  isInventoryLoading.value = true;
+  inventoryError.value = null;
+  try {
+    rawLootInventory.value = await fetchLootInventory();
+    await updateEssenceBalances();
+  } catch (e: any) {
+    inventoryError.value = t("tools.lootManager.loadFailed", { error: e.toString() });
+    console.error("获取碎片库存失败:", e);
+  } finally {
+    isInventoryLoading.value = false;
+  }
+}
+
+// 过滤后的碎片
+const filteredInventory = computed(() => {
+  return rawLootInventory.value.filter(item => {
+    // 1. 类型过滤
+    if (filterType.value !== "ALL" && item.displayCategories !== filterType.value) return false;
+    // 2. 拥有状态过滤
+    if (filterOwned.value === "OWNED" && item.itemStatus !== "OWNED") return false;
+    if (filterOwned.value === "NOT_OWNED" && item.itemStatus === "OWNED") return false;
+    // 3. 价值过滤
+    if (filterMaxValue.value !== null) {
+      const cmpValue = filterValueType.value === "value" ? item.value : item.disenchantValue;
+      const threshold = filterMaxValue.value;
+      if (filterOperator.value === "<=" && cmpValue > threshold) return false;
+      if (filterOperator.value === ">=" && cmpValue < threshold) return false;
+      if (filterOperator.value === "=" && cmpValue !== threshold) return false;
+    }
+    return true;
+  }).sort((a, b) => a.disenchantValue - b.disenchantValue);
+});
+
+// 全选 / 清空
+function handleSelectAllFiltered() {
+  selectedLootIds.value = filteredInventory.value.map(item => item.lootId);
+}
+function handleClearSelection() {
+  selectedLootIds.value = [];
+}
+
+// 切换单项选中
+function toggleSelectItem(lootId: string) {
+  const idx = selectedLootIds.value.indexOf(lootId);
+  if (idx > -1) {
+    selectedLootIds.value.splice(idx, 1);
+  } else {
+    selectedLootIds.value.push(lootId);
+  }
+}
+
+// 选中项对应的完整对象
+const selectedLootObjects = computed(() => {
+  return rawLootInventory.value.filter(item => selectedLootIds.value.includes(item.lootId));
+});
+
+// 是否可以升级（选中项中至少存在一个未拥有物品）
+const canUpgrade = computed(() => {
+  if (selectedLootIds.value.length === 0) return false;
+  return selectedLootObjects.value.some(item => item.itemStatus !== "OWNED");
+});
+
+// 分解收益估算
+const gainBlueEssence = computed(() => {
+  return selectedLootObjects.value
+    .filter(item => item.displayCategories === "CHAMPION")
+    .reduce((sum, item) => sum + item.disenchantValue * item.count, 0);
+});
+const gainOrangeEssence = computed(() => {
+  return selectedLootObjects.value
+    .filter(item => item.displayCategories !== "CHAMPION")
+    .reduce((sum, item) => sum + item.disenchantValue * item.count, 0);
+});
+
+// 清除操作监听
+function cleanupActionListen() {
+  if (actionUnlisten) {
+    actionUnlisten();
+    actionUnlisten = null;
+  }
+}
+
+// ─── 一键分解 ───
+function handleBatchDisenchant() {
+  if (selectedLootObjects.value.length === 0) return;
+
+  const count = selectedLootObjects.value.length;
+  confirmModalConfig.value = {
+    title: t("tools.lootManager.disenchantBtn"),
+    message: `您确定要分解当前选中的 ${count} 个碎片吗？此操作无法撤销。`,
+    confirmText: "确定分解",
+    cancelText: "取消",
+    type: "primary",
+    details: [
+      { label: "所选碎片种类", value: `${count} 种` },
+      { label: "🔷 预计蓝色精粹回报", value: `+ ${gainBlueEssence.value}`, class: "blue-essence-text" },
+      { label: "🔶 预计橙色精粹回报", value: `+ ${gainOrangeEssence.value}`, class: "orange-essence-text" }
+    ],
+    onConfirm: proceedWithDisenchant
+  };
+  showConfirmModal.value = true;
+}
+
+async function proceedWithDisenchant() {
+  const payload: DisenchantItem[] = selectedLootObjects.value.map(item => ({
+    lootId: item.lootId,
+    count: item.count,
+  }));
+
+  actionProgressTitle.value = t("tools.lootManager.progressDisenchanting");
+  openResults.value = [];
+  openProgress.value = 0;
+  openTotal.value = 0;
+  showOpenPanel.value = true;
+  isOpening.value = true;
+  if (unlistenProgress) unlistenProgress();
+  unlistenProgress = await listen<ActionProgressEvent>("loot-disenchant-progress", (event) => {
+    const evt = event.payload;
+    openProgress.value = evt.current;
+    openTotal.value = evt.total;
+
+    const displayName = getFriendlyNameById(evt.lootName);
+    if (evt.success) {
+      openResults.value.push({
+        current: evt.current, total: evt.total, success: true, rewardName: `${displayName}: ${evt.rewardDesc}`,
+        errorMsg: null, itemName: null,
+      } as unknown as LootProgressEvent);
+    } else {
+      openResults.value.push({
+        current: evt.current, total: evt.total, success: false, rewardName: "", errorMsg: `${displayName}: ${evt.errorMsg}`,
+        itemName: null,
+      } as unknown as LootProgressEvent);
+    }
+
+    if (evt.current === evt.total) {
+      isOpening.value = false;
+      loadLootInventory();
+      loadSummoner(true);
+    }
+  });
+
+  try {
+    await disenchantLoot(payload);
+    selectedLootIds.value = [];
+  } catch (e: any) {
+    isOpening.value = false;
+    showToast(t("tools.lootManager.disenchantFailed", { error: e.toString() }), "error");
+  }
+}
+
+// ─── 批量升级 ───
+function handleBatchUpgrade() {
+  const unownedItems = selectedLootObjects.value.filter(item => item.itemStatus !== "OWNED");
+  if (unownedItems.length === 0) {
+    showToast("没有选中任何未拥有的碎片进行升级！", "error");
+    return;
+  }
+
+  const count = unownedItems.length;
+  let totalBlueEssence = 0;
+  let totalOrangeEssence = 0;
+  unownedItems.forEach(item => {
+    if (item.displayCategories === "CHAMPION") {
+      totalBlueEssence += item.upgradeEssenceCost * item.count;
+    } else {
+      totalOrangeEssence += item.upgradeEssenceCost * item.count;
+    }
+  });
+
+  const detailsList: { label: string; value: string }[] = [
+    { label: "待升级碎片种类", value: `${count} 种` }
+  ];
+  if (totalBlueEssence > 0) {
+    detailsList.push({ label: "预计消耗蓝色精粹", value: `🔷 ${totalBlueEssence}` });
+  }
+  if (totalOrangeEssence > 0) {
+    detailsList.push({ label: "预计消耗橙色精粹", value: `🔶 ${totalOrangeEssence}` });
+  }
+  detailsList.push({ label: "操作说明", value: "将消耗对应精粹并解锁永久版" });
+
+  confirmModalConfig.value = {
+    title: t("tools.lootManager.upgradeBtn") || "升级选中项",
+    message: `您确定要将选中的 ${count} 个未拥有物品碎片升级为永久吗？`,
+    confirmText: "确定升级",
+    cancelText: "取消",
+    type: "primary",
+    details: detailsList,
+    onConfirm: () => proceedWithUpgrade(unownedItems)
+  };
+  showConfirmModal.value = true;
+}
+
+async function proceedWithUpgrade(unownedItems: LootItem[]) {
+  const payload: DisenchantItem[] = unownedItems.map(item => ({
+    lootId: item.lootId,
+    count: item.count,
+    upgradeRecipeName: item.upgradeRecipeName,
+  }));
+
+  actionProgressTitle.value = "正在升级碎片...";
+  openResults.value = [];
+  openProgress.value = 0;
+  openTotal.value = 0;
+  showOpenPanel.value = true;
+  isOpening.value = true;
+  if (unlistenProgress) unlistenProgress();
+  unlistenProgress = await listen<ActionProgressEvent>("loot-upgrade-progress", (event) => {
+    const evt = event.payload;
+    openProgress.value = evt.current;
+    openTotal.value = evt.total;
+
+    const displayName = getFriendlyNameById(evt.lootName);
+    if (evt.success) {
+      openResults.value.push({
+        current: evt.current, total: evt.total, success: true, rewardName: `${displayName}: ${evt.rewardDesc}`,
+        errorMsg: null, itemName: null,
+      } as unknown as LootProgressEvent);
+    } else {
+      openResults.value.push({
+        current: evt.current, total: evt.total, success: false, rewardName: "", errorMsg: `${displayName}: ${evt.errorMsg}`,
+        itemName: null,
+      } as unknown as LootProgressEvent);
+    }
+
+    if (evt.current === evt.total) {
+      isOpening.value = false;
+      loadLootInventory();
+      loadSummoner(true);
+    }
+  });
+
+  try {
+    await upgradeLoot(payload);
+    selectedLootIds.value = [];
+  } catch (e: any) {
+    isOpening.value = false;
+    showToast(`升级失败: ${e.toString()}`, "error");
+  }
+}
+
+// ─── 一键三合一重随 ───
+function handleBatchReroll() {
+  const grouped: Record<string, string[]> = {};
+  selectedLootObjects.value.forEach(item => {
+    const cat = item.displayCategories;
+    if (!grouped[cat]) grouped[cat] = [];
+    for (let i = 0; i < item.count; i++) grouped[cat].push(item.lootId);
+  });
+
+  const finalLootIdsToReroll: string[] = [];
+  let remainingCount = 0;
+  for (const cat in grouped) {
+    const list = grouped[cat];
+    const usableLen = list.length - (list.length % 3);
+    if (usableLen > 0) finalLootIdsToReroll.push(...list.slice(0, usableLen));
+    remainingCount += list.length % 3;
+  }
+
+  if (finalLootIdsToReroll.length === 0) {
+    showToast(t("tools.lootManager.rerollNoGroup"), "error");
+    return;
+  }
+
+  const groupsCount = finalLootIdsToReroll.length / 3;
+  
+  confirmModalConfig.value = {
+    title: t("tools.lootManager.rerollBtn"),
+    message: `您确定要将选中的碎片进行三合一重随吗？系统将自动分类并按3个一组进行重随。`,
+    confirmText: "确定重随",
+    cancelText: "取消",
+    type: "primary",
+    details: [
+      { label: "重随合成组数", value: `${groupsCount} 组` },
+      { label: "消耗碎片总数", value: `${finalLootIdsToReroll.length} 个` },
+      { label: "保留未配对数", value: `${remainingCount} 个` }
+    ],
+    onConfirm: () => proceedWithReroll(finalLootIdsToReroll)
+  };
+  showConfirmModal.value = true;
+}
+
+async function proceedWithReroll(finalLootIdsToReroll: string[]) {
+  openResults.value = [];
+  openProgress.value = 0;
+  openTotal.value = 0;
+  showOpenPanel.value = true;
+  isOpening.value = true;
+  actionProgressTitle.value = t("tools.lootManager.progressRerolling");
+
+  if (unlistenProgress) unlistenProgress();
+  unlistenProgress = await listen<ActionProgressEvent>("loot-reroll-progress", (event) => {
+    const evt = event.payload;
+    openProgress.value = evt.current;
+    openTotal.value = evt.total;
+
+    if (evt.success) {
+      openResults.value.push({
+        current: evt.current, total: evt.total, success: true, rewardName: `合成成功！获得: ${evt.rewardDesc}`,
+        errorMsg: null, itemName: null,
+      } as unknown as LootProgressEvent);
+    } else {
+      openResults.value.push({
+        current: evt.current, total: evt.total, success: false, rewardName: "", errorMsg: evt.errorMsg ?? "未知错误",
+        itemName: null,
+      } as unknown as LootProgressEvent);
+    }
+
+    if (evt.current === evt.total) {
+      isOpening.value = false;
+      loadLootInventory();
+      loadSummoner(true);
+    }
+  });
+
+  try {
+    await rerollLoot(finalLootIdsToReroll);
+    selectedLootIds.value = [];
+  } catch (e: any) {
+    isOpening.value = false;
+    showToast(t("tools.lootManager.rerollFailed", { error: e.toString() }), "error");
+  }
+}
+
+// 进度面板标题（区分开启/分解/重随）
+const progressPanelTitle = computed(() => {
+  return actionProgressTitle.value || t("tools.lootOpener.opening");
+});
 
 const openPercentage = computed(() => {
   if (openTotal.value <= 0) return 0;
@@ -596,7 +989,10 @@ onMounted(async () => {
     console.warn("加载 CareerGamesNumber 配置失败，使用默认值 20:", e);
   }
   document.addEventListener("click", onDocClick);
-  loadOpenableLoots(); // 自动加载战利品列表
+  if (currentTab.value === 'loot' && store.isConnected) {
+    loadOpenableLoots();
+    loadLootInventory();
+  }
 });
 
 onUnmounted(() => {
@@ -605,11 +1001,20 @@ onUnmounted(() => {
     unlistenProgress();
     unlistenProgress = null;
   }
+  cleanupActionListen();
 });
 
 function onDocClick() {
   showQueueDropdown.value = false;
 }
+
+// 切换到战利品 Tab 时自动加载所有战利品和碎片库存
+watch(currentTab, (tab) => {
+  if (tab === 'loot' && store.isConnected) {
+    loadOpenableLoots();
+    loadLootInventory();
+  }
+});
 
 // 自动加载逻辑
 watch(
@@ -877,11 +1282,11 @@ function getQueueName(m: MatchDisplay): string {
           :class="['career-tab-item', { active: currentTab === 'loot' }]"
           @click="currentTab = 'loot'"
         >
-          战利品开启
+          战利品
         </div>
       </div>
 
-      <div v-show="currentTab === 'matches'">
+      <div v-show="currentTab === 'matches'" class="matches-tab-container">
         <!-- 排位段位信息表 -->
         <div class="rank-table-wrapper">
         <table class="rank-table">
@@ -1172,76 +1577,303 @@ function getQueueName(m: MatchDisplay): string {
       </div>
       </div>
 
-      <!-- 战利品批量开启面板 -->
+      <!-- 战利品面板：子 Tab 切换 -->
+      <!-- 战利品面板：整页上下平铺 -->
       <div v-show="currentTab === 'loot'" class="loot-tab-container">
-        <!-- 战利品控制操作栏：刷新 + 钥匙 + 一键全开 -->
-        <div class="loot-action-bar">
-          <div class="action-bar-left">
-            <n-button
-              size="medium"
-              type="primary"
-              :loading="lootLoading"
-              :disabled="!store.isConnected"
-              @click="loadOpenableLoots"
+        
+        <!-- 区块一：可开启战利品（箱子/法球） -->
+        <div class="loot-section-card">
+          <!-- 头部操作栏 -->
+          <div class="loot-section-header">
+            <div class="header-left">
+              <span class="section-title">📦 {{ $t("tools.lootManager.chestOpen") }}</span>
+              <button
+                class="action-btn"
+                :disabled="!store.isConnected || lootLoading"
+                @click="loadOpenableLoots"
+              >
+                {{ lootLoading ? '正在刷新...' : $t("tools.lootOpener.refreshBtn") }}
+              </button>
+              <span v-if="openableLoots.length > 0" class="loot-key-summary">
+                🔑 ×{{ totalKeyCount }}
+              </span>
+            </div>
+            <button
+              v-if="openableLoots.length > 0"
+              class="action-btn"
+              :disabled="!store.isConnected || isOpening || totalKeyCount <= 0"
+              @click="handleSmartOpenAll"
             >
-              {{ $t("tools.lootOpener.refreshBtn") }}
-            </n-button>
-            <span v-if="openableLoots.length > 0" class="loot-key-summary">
-              🔑 ×{{ totalKeyCount }}
-            </span>
+              {{ $t("tools.lootOpener.smartOpenAll") }}
+            </button>
           </div>
-          <n-button
-            v-if="openableLoots.length > 0"
-            size="medium"
-            type="warning"
-            :disabled="!store.isConnected || isOpening || totalKeyCount <= 0"
-            @click="handleSmartOpenAll"
-          >
-            {{ $t("tools.lootOpener.smartOpenAll") }}
-          </n-button>
-        </div>
 
-        <!-- 战利品加载/错误态 -->
-        <div v-if="lootLoading" class="loot-loading">
-          <div class="loading-spinner"></div>
-          <span>{{ $t("tools.lootOpener.loading") }}</span>
-        </div>
-
-        <div v-else-if="lootError" class="loot-error">
-          {{ lootError }}
-        </div>
-
-        <!-- 战利品卡片网格列表 -->
-        <div v-else-if="sortedOpenableLoots.length > 0" class="loot-grid">
-          <div
-            v-for="loot in sortedOpenableLoots"
-            :key="loot.lootId"
-            class="loot-card-item"
-            @click="openLootModal(loot)"
-          >
-            <div class="loot-card-icon-container">
-              <LcuImage :src="loot.tilePath ?? undefined" class="loot-card-icon" />
+          <!-- 内容主体 -->
+          <div class="loot-section-content">
+            <div v-if="lootLoading" class="loot-loading-inline">
+              <div class="loading-spinner"></div>
+              <span>{{ $t("tools.lootOpener.loading") }}</span>
             </div>
-            <div class="loot-card-info">
-              <div class="loot-card-header">
-                <span class="loot-card-name" :title="getLootDisplayName(loot)">{{ getLootDisplayName(loot) }}</span>
-                <span class="loot-card-count">×{{ loot.count }}</span>
-              </div>
-              <div class="loot-card-footer">
-                <span v-if="loot.needKey" class="loot-key-badge">
-                  {{ $t("tools.lootOpener.needKey") }}
-                </span>
-                <span v-else class="loot-no-key-badge">{{ $t("tools.lootOpener.noKeyNeeded") }}</span>
-                <span class="loot-open-btn">{{ $t("tools.lootOpener.openBtn") }}</span>
+            <div v-else-if="lootError" class="loot-error-inline">{{ lootError }}</div>
+            <div v-else-if="sortedOpenableLoots.length > 0" class="loot-grid">
+              <div
+                v-for="loot in sortedOpenableLoots"
+                :key="loot.lootId"
+                class="loot-card-item"
+                @click="openLootModal(loot)"
+              >
+                <div class="loot-card-icon-container">
+                  <LcuImage :src="loot.tilePath ?? undefined" class="loot-card-icon" />
+                </div>
+                <div class="loot-card-info">
+                  <div class="loot-card-header">
+                    <span class="loot-card-name" :title="getLootDisplayName(loot)">{{ getLootDisplayName(loot) }}</span>
+                    <span class="loot-card-count">×{{ loot.count }}</span>
+                  </div>
+                  <div class="loot-card-footer">
+                    <span v-if="loot.needKey" class="loot-key-badge">{{ $t("tools.lootOpener.needKey") }}</span>
+                    <span v-else class="loot-no-key-badge">{{ $t("tools.lootOpener.noKeyNeeded") }}</span>
+                    <span class="loot-open-btn">{{ $t("tools.lootOpener.openBtn") }}</span>
+                  </div>
+                </div>
               </div>
             </div>
+            <div v-else class="loot-empty-inline">{{ $t("tools.lootOpener.clickRefresh") }}</div>
           </div>
         </div>
 
-        <div v-else class="loot-empty">
-          {{ $t("tools.lootOpener.clickRefresh") }}
+        <!-- 区块二：碎片库存管理 -->
+        <div class="loot-section-card">
+          <!-- 头部操作栏 -->
+          <div class="loot-section-header">
+            <div class="header-left">
+              <span class="section-title">💎 {{ $t("tools.lootManager.title") }}</span>
+              <button
+                class="action-btn"
+                :disabled="!store.isConnected || isInventoryLoading"
+                @click="loadLootInventory"
+              >
+                {{ isInventoryLoading ? '正在刷新...' : $t("tools.lootManager.refreshBtn") }}
+              </button>
+            </div>
+            <div class="header-right essence-header-balance">
+              <span class="blue-essence-text">🔷 {{ blueEssenceCount }}</span>
+              <span class="orange-essence-text">🔶 {{ orangeEssenceCount }}</span>
+            </div>
+          </div>
+
+          <!-- 紧凑精美的水平筛选栏 -->
+          <div class="loot-filter-bar-horizontal">
+            <!-- 碎片类型 -->
+            <div class="horizontal-filter-item">
+              <span class="filter-label-inline">{{ $t("tools.lootManager.filterType") }}</span>
+              <n-select
+                v-model:value="filterType"
+                :options="[
+                  { label: $t('tools.lootManager.filterAll'), value: 'ALL' },
+                  { label: '英雄', value: 'CHAMPION' },
+                  { label: '皮肤', value: 'SKIN' },
+                  { label: '表情', value: 'EMOTE' },
+                  { label: '守卫', value: 'WARDSKIN' },
+                  { label: '图标', value: 'SUMMONERICON' },
+                ]"
+                size="small"
+                style="width: 120px"
+              />
+            </div>
+
+            <!-- 拥有状态 -->
+            <div class="horizontal-filter-item">
+              <span class="filter-label-inline">{{ $t("tools.lootManager.filterOwned") }}</span>
+              <n-select
+                v-model:value="filterOwned"
+                :options="[
+                  { label: '全部', value: 'ALL' },
+                  { label: '已拥有', value: 'OWNED' },
+                  { label: '未拥有', value: 'NOT_OWNED' },
+                ]"
+                size="small"
+                style="width: 110px"
+              />
+            </div>
+
+            <!-- 价值基准 -->
+            <div class="horizontal-filter-item">
+              <span class="filter-label-inline">{{ $t("tools.lootManager.filterValueType") }}</span>
+              <n-select
+                v-model:value="filterValueType"
+                :options="[
+                  { label: $t('tools.lootManager.filterValueTypeDisenchant'), value: 'disenchantValue' },
+                  { label: $t('tools.lootManager.filterValueTypeStore'), value: 'value' },
+                ]"
+                size="small"
+                style="width: 120px"
+              />
+            </div>
+
+            <!-- 价值范围过滤 -->
+            <div class="horizontal-filter-item">
+              <span class="filter-label-inline">价值</span>
+              <n-input-group>
+                <n-select
+                  v-model:value="filterOperator"
+                  :options="[
+                    { label: '小于等于 (<=)', value: '<=' },
+                    { label: '大于等于 (>=)', value: '>=' },
+                    { label: '等于 (=)', value: '=' }
+                  ]"
+                  size="small"
+                  style="width: 115px"
+                />
+                <n-input-number
+                  v-model:value="filterMaxValue"
+                  :min="0"
+                  placeholder="不限"
+                  size="small"
+                  clearable
+                  style="width: 125px"
+                />
+              </n-input-group>
+            </div>
+          </div>
+
+          <!-- 内容主体 -->
+          <div class="loot-section-content">
+            <!-- 加载态 -->
+            <div v-if="isInventoryLoading" class="loot-loading-inline">
+              <div class="loading-spinner"></div>
+              <span>{{ $t("tools.lootManager.loading") }}</span>
+            </div>
+
+            <!-- 错误态 -->
+            <div v-else-if="inventoryError" class="loot-error-inline">{{ inventoryError }}</div>
+
+            <!-- 空态 -->
+            <div v-else-if="filteredInventory.length === 0" class="loot-empty-inline">
+              {{ $t("tools.lootManager.empty") }}
+            </div>
+
+            <!-- 碎片卡片网格 -->
+            <div v-else class="loot-grid loot-inventory-grid">
+              <div
+                v-for="item in filteredInventory"
+                :key="item.lootId"
+                :class="['loot-card-item', { selected: selectedLootIds.includes(item.lootId) }]"
+                @click="toggleSelectItem(item.lootId)"
+                style="position: relative;"
+              >
+                <!-- 选中状态角标 -->
+                <div v-if="selectedLootIds.includes(item.lootId)" class="selected-checkmark-badge">
+                  ✓
+                </div>
+                <div class="loot-card-icon-container">
+                  <LcuImage :src="item.tilePath ?? undefined" class="loot-card-icon" />
+                </div>
+                <div class="loot-card-info">
+                  <div class="loot-card-header">
+                    <span class="loot-card-name" :title="item.itemDesc">{{ item.itemDesc }}</span>
+                    <span class="loot-card-count">×{{ item.count }}</span>
+                  </div>
+                  <div class="loot-card-footer">
+                    <span :class="item.itemStatus === 'OWNED' ? 'loot-badge-owned' : 'loot-badge-not-owned'">
+                      {{ item.itemStatus === 'OWNED' ? $t("tools.lootManager.ownedBadge") : $t("tools.lootManager.notOwnedBadge") }}
+                    </span>
+                    <span class="essence-badge" :class="item.displayCategories === 'CHAMPION' ? 'blue-essence-text' : 'orange-essence-text'">
+                      {{ item.displayCategories === 'CHAMPION' ? '🔷' : '🔶' }} {{ item.disenchantValue }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 底部浮动控制栏 -->
+          <div v-if="filteredInventory.length > 0" class="loot-batch-toolbar">
+            <div class="toolbar-left">
+              <button class="action-btn" @click="handleSelectAllFiltered">
+                {{ $t("tools.lootManager.selectAll") }}
+              </button>
+              <button class="action-btn" @click="handleClearSelection">
+                {{ $t("tools.lootManager.clearAll") }}
+              </button>
+              <span class="selected-count">
+                {{ $t("tools.lootManager.selectedInfo", { count: selectedLootIds.length }) }}
+              </span>
+            </div>
+            <div class="toolbar-right">
+              <span v-if="selectedLootIds.length > 0" class="essence-preview">
+                {{ $t("tools.lootManager.estimateEssence") }}
+                <span class="blue-essence-text">🔷 {{ gainBlueEssence }}</span>
+                <span class="orange-essence-text">🔶 {{ gainOrangeEssence }}</span>
+              </span>
+              <button
+                class="action-btn"
+                :disabled="selectedLootIds.length === 0 || isOpening || !store.isConnected"
+                @click="handleBatchDisenchant"
+              >
+                {{ $t("tools.lootManager.disenchantBtn") }}
+              </button>
+              <button
+                class="action-btn"
+                :disabled="selectedLootIds.length === 0 || isOpening || !store.isConnected"
+                @click="handleBatchReroll"
+              >
+                {{ $t("tools.lootManager.rerollBtn") }}
+              </button>
+              <button
+                class="action-btn"
+                :disabled="!canUpgrade || isOpening || !store.isConnected"
+                @click="handleBatchUpgrade"
+              >
+                {{ $t("tools.lootManager.upgradeBtn") }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
+
+      <!-- 自定义确认操作弹窗 -->
+      <Transition name="fade">
+        <div
+          v-if="showConfirmModal"
+          class="loot-modal-overlay"
+          @click.self="showConfirmModal = false"
+        >
+          <div class="loot-modal-card confirm-modal-card">
+            <div class="loot-modal-header confirm-modal-header" :class="confirmModalConfig.type">
+              <h3>⚠️ {{ confirmModalConfig.title }}</h3>
+              <button class="modal-close-btn" @click="showConfirmModal = false">✕</button>
+            </div>
+            <div class="loot-modal-body confirm-modal-body">
+              <p class="confirm-message">{{ confirmModalConfig.message }}</p>
+              
+              <!-- 额外详情信息 -->
+              <div v-if="confirmModalConfig.details" class="confirm-details-box">
+                <div 
+                  v-for="(detail, index) in confirmModalConfig.details" 
+                  :key="index"
+                  class="confirm-detail-row"
+                >
+                  <span class="detail-label">{{ detail.label }}</span>
+                  <span class="detail-value" :class="detail.class">{{ detail.value }}</span>
+                </div>
+              </div>
+
+              <div class="loot-modal-actions confirm-modal-actions">
+                <button class="action-btn" @click="showConfirmModal = false">
+                  {{ confirmModalConfig.cancelText }}
+                </button>
+                <button
+                  class="action-btn"
+                  @click="executeConfirmedAction"
+                >
+                  {{ confirmModalConfig.confirmText }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
 
       <!-- 战利品开启数量选择弹窗 -->
       <Transition name="fade">
@@ -1285,17 +1917,16 @@ function getQueueName(m: MatchDisplay): string {
                 {{ $t("tools.lootOpener.insufficientKeys") }}
               </div>
               <div class="loot-modal-actions">
-                <n-button size="small" @click="closeLootModal">
+                <button class="action-btn" @click="closeLootModal">
                   {{ $t("tools.cancel") }}
-                </n-button>
-                <n-button
-                  size="small"
-                  type="primary"
+                </button>
+                <button
+                  class="action-btn"
                   :disabled="maxOpenQuantity <= 0"
                   @click="handleBatchOpen"
                 >
                   {{ $t("tools.lootOpener.startOpen", { count: openQuantity }) }}
-                </n-button>
+                </button>
               </div>
             </div>
           </div>
@@ -1307,7 +1938,7 @@ function getQueueName(m: MatchDisplay): string {
         <div v-if="showOpenPanel" class="loot-progress-overlay">
           <div class="loot-progress-card">
             <div class="loot-progress-header">
-              <h3>{{ $t("tools.lootOpener.opening") }}</h3>
+              <h3>{{ progressPanelTitle }}</h3>
               <button
                 class="modal-close-btn"
                 :disabled="isOpening"
@@ -1402,6 +2033,14 @@ function getQueueName(m: MatchDisplay): string {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+}
+
+.matches-tab-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
   min-height: 0;
 }
 
@@ -1601,6 +2240,10 @@ function getQueueName(m: MatchDisplay): string {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
 .action-btn:hover {
@@ -1608,6 +2251,13 @@ function getQueueName(m: MatchDisplay): string {
   color: var(--text-color);
   border-color: var(--primary-color);
 }
+
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 
 /* 排位数据表 */
 .rank-table-wrapper {
@@ -2304,18 +2954,24 @@ function getQueueName(m: MatchDisplay): string {
 }
 
 .loot-open-btn {
-  font-size: 0.72rem;
-  color: var(--primary-color);
-  font-weight: 700;
-  padding: 3px 10px;
-  border: 1px solid var(--primary-color-alpha-30);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 16px;
   border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-color);
+  cursor: pointer;
   transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
-.loot-card-item:hover .loot-open-btn {
-  background: var(--primary-color);
-  color: white;
+.loot-open-btn:hover {
+  background: var(--card-bg-hover);
+  color: var(--text-color);
   border-color: var(--primary-color);
 }
 
@@ -2336,9 +2992,9 @@ function getQueueName(m: MatchDisplay): string {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background-color: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2347,7 +3003,7 @@ function getQueueName(m: MatchDisplay): string {
 
 .loot-modal-card {
   width: 380px;
-  background: var(--settings-card-bg);
+  background: var(--settings-card-bg, rgba(255, 255, 255, 0.95));
   border: 1px solid var(--border-color);
   border-radius: 16px;
   box-shadow: var(--shadow-lg);
@@ -2361,7 +3017,7 @@ function getQueueName(m: MatchDisplay): string {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(0, 0, 0, 0.01);
+  background: var(--hover-bg);
 }
 
 .loot-modal-header h3 {
@@ -2386,7 +3042,7 @@ function getQueueName(m: MatchDisplay): string {
   display: flex;
   align-items: center;
   gap: 16px;
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--hover-bg);
   border: 1px solid var(--border-color);
   padding: 12px;
   border-radius: 10px;
@@ -2479,9 +3135,9 @@ function getQueueName(m: MatchDisplay): string {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background-color: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2491,7 +3147,7 @@ function getQueueName(m: MatchDisplay): string {
 .loot-progress-card {
   width: 420px;
   max-height: 80vh;
-  background: var(--settings-card-bg);
+  background: var(--settings-card-bg, rgba(255, 255, 255, 0.95));
   border: 1px solid var(--border-color);
   border-radius: 16px;
   box-shadow: var(--shadow-lg);
@@ -2507,7 +3163,7 @@ function getQueueName(m: MatchDisplay): string {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(0, 0, 0, 0.01);
+  background: var(--hover-bg);
 }
 
 .loot-progress-header h3 {
@@ -2581,5 +3237,266 @@ function getQueueName(m: MatchDisplay): string {
     opacity: 1;
     transform: translateX(0);
   }
+}
+
+/* ═════════ 战利品区块卡片 & 碎片库存管理 ═════════ */
+
+.loot-section-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.loot-section-card:hover {
+  border-color: var(--primary-color-alpha-30);
+  box-shadow: var(--shadow-md), 0 4px 20px rgba(0, 0, 0, 0.02);
+}
+
+.loot-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 14px;
+}
+
+.essence-header-balance {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  background: var(--hover-bg);
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+}
+
+.loot-section-header .header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--text-color);
+}
+
+.loot-section-content {
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 水平筛选栏 */
+.loot-filter-bar-horizontal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 10px 16px;
+}
+
+.horizontal-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-label-inline {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* 碎片卡片选择态 */
+.loot-card-item.selected {
+  border-color: var(--primary-color) !important;
+  box-shadow: 0 8px 24px var(--primary-color-alpha-30), 0 0 0 2px var(--primary-color) !important;
+  background: var(--primary-color-alpha-15) !important;
+  transform: translateY(-4px) scale(1.02) !important;
+}
+
+/* 选中标记角标 */
+.selected-checkmark-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  background: var(--primary-color);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 900;
+  box-shadow: 0 2px 8px var(--primary-color-alpha-40);
+  border: 1.5px solid #ffffff;
+  z-index: 10;
+  animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes popIn {
+  from {
+    transform: scale(0);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+/* 精品率/拥有状态标签 */
+.loot-badge-owned {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.loot-badge-not-owned {
+  background: rgba(107, 114, 128, 0.1);
+  color: var(--text-muted);
+  border: 1px solid rgba(107, 114, 128, 0.2);
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+/* 精粹数值 */
+.essence-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.blue-essence-text { color: #2563eb; }
+.orange-essence-text { color: #d97706; }
+
+/* 内置加载/错误/空态 */
+.loot-loading-inline,
+.loot-error-inline,
+.loot-empty-inline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--text-dimmed);
+  font-size: 0.88rem;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.loot-error-inline {
+  color: var(--loss-color);
+}
+
+/* 底部浮动控制栏 */
+.loot-batch-toolbar {
+  position: sticky;
+  bottom: 0;
+  background: var(--settings-card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 12px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  margin-top: 16px;
+}
+
+.loot-batch-toolbar .toolbar-left,
+.loot-batch-toolbar .toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.selected-count {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-color);
+  margin-left: 6px;
+}
+
+.essence-preview {
+  font-size: 0.82rem;
+  font-weight: 700;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-right: 6px;
+}
+
+/* 碎片网格负边距修正 */
+.loot-inventory-grid {
+  padding-bottom: 4px;
+}
+
+/* 自定义确认弹窗特殊样式 */
+.confirm-modal-card {
+  width: 350px !important;
+}
+
+.confirm-message {
+  font-size: 0.85rem;
+  color: var(--text-color);
+  line-height: 1.5;
+  margin: 0 0 12px 0;
+}
+
+.confirm-details-box {
+  background: var(--hover-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.confirm-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+}
+
+.confirm-detail-row .detail-label {
+  color: var(--text-muted);
+}
+
+.confirm-detail-row .detail-value {
+  font-weight: 700;
+  color: var(--text-color);
 }
 </style>

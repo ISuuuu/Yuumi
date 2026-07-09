@@ -38,6 +38,46 @@ pub struct OpenBatchItem {
     pub ingredients: Vec<String>,
 }
 
+/// 碎片库存条目（英雄/皮肤/表情/守卫皮肤/召唤师图标）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LootItem {
+    pub loot_id: String,
+    pub loot_name: String,
+    pub item_desc: String,
+    pub display_categories: String,
+    pub loot_type: String,
+    pub rarity: String,
+    pub count: i32,
+    pub value: i32,
+    pub disenchant_value: i32,
+    pub item_status: String,
+    pub tile_path: Option<String>,
+    pub upgrade_recipe_name: String,
+    pub upgrade_essence_cost: i32,
+}
+
+/// 批量分解请求条目
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisenchantItem {
+    pub loot_id: String,
+    pub count: i32,
+    pub upgrade_recipe_name: Option<String>,
+}
+
+/// 碎片操作进度广播事件（分解/重随复用）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionProgressEvent {
+    pub current: i32,
+    pub total: i32,
+    pub success: bool,
+    pub loot_name: String,
+    pub reward_desc: String,
+    pub error_msg: Option<String>,
+}
+
 /// 计算战利品开启优先级（数字越小优先级越高）
 fn loot_priority(loot_id: &str) -> i32 {
     // 优先级：宝箱 > 海克斯宝箱 > 法球/胶囊 > 其他
@@ -492,4 +532,614 @@ pub async fn smart_open_all_loots(
     });
 
     Ok("智能一键开启任务已推入后台队列".to_string())
+}
+
+/// 动态查询某碎片支持的特定动作配方名（按关键字匹配 recipeName）
+/// 关键字如 "disenchant" / "reroll" / "forge"。避免硬编码配方名随版本失效。
+async fn find_recipe_name(
+    base: &str,
+    auth: &str,
+    http_client: &reqwest::Client,
+    loot_id: &str,
+    keyword: &str,
+) -> Result<String, String> {
+    let recipe_url = format!("{}/lol-loot/v1/recipes/initial-item/{}", base, loot_id);
+    let resp = http_client
+        .get(&recipe_url)
+        .header("Authorization", auth)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("获取配方接口返回错误: {}", resp.status()));
+    }
+
+    let recipes: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
+    for r in &recipes {
+        if let Some(recipe_name) = r.get("recipeName").and_then(|v| v.as_str()) {
+            if recipe_name.to_lowercase().contains(keyword) {
+                return Ok(recipe_name.to_string());
+            }
+        }
+    }
+
+    Err(format!("未找到包含关键字 '{}' 的配方", keyword))
+}
+
+/// 4. 获取玩家所有碎片类战利品（排除材料/货币/箱子）
+#[tauri::command]
+pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<LootItem>, String> {
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
+    let auth = build_auth_header(&lcu.token);
+    let base = format!("https://127.0.0.1:{}", lcu.port);
+
+    let url = format!("{}/lol-loot/v1/player-loot", base);
+    let resp = lcu
+        .http_client
+        .get(&url)
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let raw_loots: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
+
+    // 获取 summoner_id 与已拥有皮肤列表并建立 Hash 集合，解决 LCU 中皮肤碎片 itemStatus 始终为 NONE 的问题
+    let mut owned_skin_ids = std::collections::HashSet::new();
+    let summoner_url = format!("{}/lol-summoner/v1/current-summoner", base);
+    if let Ok(summoner_resp) = lcu
+        .http_client
+        .get(&summoner_url)
+        .header("Authorization", &auth)
+        .send()
+        .await
+    {
+        if summoner_resp.status().is_success() {
+            if let Ok(summoner_json) = summoner_resp.json::<serde_json::Value>().await {
+                if let Some(summoner_id) = summoner_json.get("summonerId").and_then(|v| v.as_i64())
+                {
+                    let skins_url = format!(
+                        "{}/lol-champions/v1/inventories/by-summoner/{}/skins",
+                        base, summoner_id
+                    );
+                    if let Ok(skins_resp) = lcu
+                        .http_client
+                        .get(&skins_url)
+                        .header("Authorization", &auth)
+                        .send()
+                        .await
+                    {
+                        if skins_resp.status().is_success() {
+                            if let Ok(skins_json) =
+                                skins_resp.json::<Vec<serde_json::Value>>().await
+                            {
+                                for s in skins_json {
+                                    if let (Some(skin_id), Some(ownership)) =
+                                        (s.get("id").and_then(|v| v.as_i64()), s.get("ownership"))
+                                    {
+                                        if ownership
+                                            .get("owned")
+                                            .and_then(|v| v.as_bool())
+                                            .unwrap_or(false)
+                                        {
+                                            owned_skin_ids.insert(skin_id as i32);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut result = Vec::new();
+
+    for item in raw_loots {
+        let display_category = item
+            .get("displayCategories")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let loot_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let loot_id = item.get("lootId").and_then(|v| v.as_str()).unwrap_or("");
+
+        // 仅筛选碎片、表情、守卫、图标，排除材料(钥匙、传送门、精粹等)
+        let is_shard = matches!(
+            display_category,
+            "CHAMPION" | "SKIN" | "EMOTE" | "WARDSKIN" | "SUMMONERICON"
+        );
+        let is_material = matches!(loot_type, "MATERIAL" | "CURRENCY" | "CHEST" | "ORB");
+
+        if !is_shard || is_material {
+            continue;
+        }
+
+        let count = item.get("count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        if count <= 0 {
+            continue;
+        }
+
+        let item_desc = item
+            .get("itemDesc")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(loot_id)
+            .to_string();
+        let value = item.get("value").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let disenchant_value = item
+            .get("disenchantValue")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let store_item_id = item
+            .get("storeItemId")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let mut item_status = item
+            .get("itemStatus")
+            .and_then(|v| v.as_str())
+            .unwrap_or("NONE")
+            .to_string();
+
+        if display_category == "SKIN"
+            && store_item_id > 0
+            && owned_skin_ids.contains(&store_item_id)
+        {
+            item_status = "OWNED".to_string();
+        }
+        let tile_path = item
+            .get("tilePath")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let rarity = item
+            .get("rarity")
+            .and_then(|v| v.as_str())
+            .unwrap_or("DEFAULT")
+            .to_string();
+        let loot_name = item
+            .get("lootName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let upgrade_recipe_name = item
+            .get("upgradeRecipeName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let upgrade_essence_cost = item
+            .get("upgradeEssenceValue")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+
+        result.push(LootItem {
+            loot_id: loot_id.to_string(),
+            loot_name,
+            item_desc,
+            display_categories: display_category.to_string(),
+            loot_type: loot_type.to_string(),
+            rarity,
+            count,
+            value,
+            disenchant_value,
+            item_status,
+            tile_path,
+            upgrade_recipe_name,
+            upgrade_essence_cost,
+        });
+    }
+
+    Ok(result)
+}
+
+/// 5. 批量分解选中碎片（后台顺序执行，逐条广播进度）
+#[tauri::command]
+pub async fn disenchant_loot(
+    items: Vec<DisenchantItem>,
+    app_handle: tauri::AppHandle,
+    app_state: State<'_, AppState>,
+) -> Result<String, String> {
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
+    let auth = build_auth_header(&lcu.token);
+    let base = format!("https://127.0.0.1:{}", lcu.port);
+    let http_client = lcu.http_client.clone();
+    drop(lock);
+
+    crate::spawn_log_panic(async move {
+        let total_jobs = items.len() as i32;
+
+        for (current_job, job) in items.into_iter().enumerate() {
+            let current_job = current_job as i32 + 1;
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+            // 1. 动态查找分解配方
+            match find_recipe_name(&base, &auth, &http_client, &job.loot_id, "disenchant").await {
+                Ok(recipe_name) => {
+                    // 2. 执行分解请求
+                    let craft_url = format!(
+                        "{}/lol-loot/v1/recipes/{}/craft?repeat={}",
+                        base, recipe_name, job.count
+                    );
+                    let body = vec![job.loot_id.clone()];
+
+                    let craft_resp = http_client
+                        .post(&craft_url)
+                        .header("Authorization", &auth)
+                        .json(&body)
+                        .send()
+                        .await;
+
+                    match craft_resp {
+                        Ok(r) if r.status().is_success() => {
+                            let _ = app_handle.emit(
+                                "loot-disenchant-progress",
+                                ActionProgressEvent {
+                                    current: current_job,
+                                    total: total_jobs,
+                                    success: true,
+                                    loot_name: job.loot_id.clone(),
+                                    reward_desc: format!("成功分解 {} 个", job.count),
+                                    error_msg: None,
+                                },
+                            );
+                        }
+                        Ok(r) => {
+                            let _ = app_handle.emit(
+                                "loot-disenchant-progress",
+                                ActionProgressEvent {
+                                    current: current_job,
+                                    total: total_jobs,
+                                    success: false,
+                                    loot_name: job.loot_id.clone(),
+                                    reward_desc: String::new(),
+                                    error_msg: Some(format!("HTTP 错误: {}", r.status())),
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            let _ = app_handle.emit(
+                                "loot-disenchant-progress",
+                                ActionProgressEvent {
+                                    current: current_job,
+                                    total: total_jobs,
+                                    success: false,
+                                    loot_name: job.loot_id.clone(),
+                                    reward_desc: String::new(),
+                                    error_msg: Some(e.to_string()),
+                                },
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = app_handle.emit(
+                        "loot-disenchant-progress",
+                        ActionProgressEvent {
+                            current: current_job,
+                            total: total_jobs,
+                            success: false,
+                            loot_name: job.loot_id,
+                            reward_desc: String::new(),
+                            error_msg: Some(format!("找不到配方: {}", e)),
+                        },
+                    );
+                }
+            }
+        }
+    });
+
+    Ok("批量分解任务已推入后台队列".to_string())
+}
+
+/// 6. 批量三合一重随：输入平铺 loot_ids 列表（长度需为 3 的倍数，前端按类别分包）
+///    每 3 个为一组，调用对应重随/锻造配方合成一个永久物品。
+#[tauri::command]
+pub async fn reroll_loot(
+    loot_ids: Vec<String>,
+    app_handle: tauri::AppHandle,
+    app_state: State<'_, AppState>,
+) -> Result<String, String> {
+    if loot_ids.is_empty() || !loot_ids.len().is_multiple_of(3) {
+        return Err("重随必须提供3的倍数个物品".to_string());
+    }
+
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
+    let auth = build_auth_header(&lcu.token);
+    let base = format!("https://127.0.0.1:{}", lcu.port);
+    let http_client = lcu.http_client.clone();
+    drop(lock);
+
+    crate::spawn_log_panic(async move {
+        let total_groups = (loot_ids.len() / 3) as i32;
+
+        for g in 0..total_groups {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            let idx = (g * 3) as usize;
+            let group_ingredients = vec![
+                loot_ids[idx].clone(),
+                loot_ids[idx + 1].clone(),
+                loot_ids[idx + 2].clone(),
+            ];
+
+            // 表情用 forge 配方，其他用 reroll 配方
+            let keyword = if group_ingredients[0].contains("EMOTE") {
+                "forge"
+            } else {
+                "reroll"
+            };
+
+            match find_recipe_name(&base, &auth, &http_client, &group_ingredients[0], keyword).await
+            {
+                Ok(recipe_name) => {
+                    let craft_url = format!("{}/lol-loot/v1/recipes/{}/craft", base, recipe_name);
+
+                    let craft_resp = http_client
+                        .post(&craft_url)
+                        .header("Authorization", &auth)
+                        .json(&group_ingredients)
+                        .send()
+                        .await;
+
+                    match craft_resp {
+                        Ok(r) if r.status().is_success() => {
+                            let mut reward_name = "未知永久物品".to_string();
+                            if let Ok(detail) = r.json::<serde_json::Value>().await {
+                                if let Some(added) = detail.get("added").and_then(|v| v.as_array())
+                                {
+                                    let rewards: Vec<String> = added
+                                        .iter()
+                                        .map(|x| {
+                                            x.get("playerLoot")
+                                                .and_then(|pl| pl.get("itemDesc"))
+                                                .and_then(|d| d.as_str())
+                                                .unwrap_or("")
+                                                .to_string()
+                                        })
+                                        .filter(|s| !s.is_empty())
+                                        .collect();
+                                    if !rewards.is_empty() {
+                                        reward_name = rewards.join(", ");
+                                    }
+                                }
+                            }
+
+                            let _ = app_handle.emit(
+                                "loot-reroll-progress",
+                                ActionProgressEvent {
+                                    current: g + 1,
+                                    total: total_groups,
+                                    success: true,
+                                    loot_name: group_ingredients[0].clone(),
+                                    reward_desc: reward_name,
+                                    error_msg: None,
+                                },
+                            );
+                        }
+                        Ok(r) => {
+                            let _ = app_handle.emit(
+                                "loot-reroll-progress",
+                                ActionProgressEvent {
+                                    current: g + 1,
+                                    total: total_groups,
+                                    success: false,
+                                    loot_name: group_ingredients[0].clone(),
+                                    reward_desc: String::new(),
+                                    error_msg: Some(format!("HTTP 错误: {}", r.status())),
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            let _ = app_handle.emit(
+                                "loot-reroll-progress",
+                                ActionProgressEvent {
+                                    current: g + 1,
+                                    total: total_groups,
+                                    success: false,
+                                    loot_name: group_ingredients[0].clone(),
+                                    reward_desc: String::new(),
+                                    error_msg: Some(e.to_string()),
+                                },
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = app_handle.emit(
+                        "loot-reroll-progress",
+                        ActionProgressEvent {
+                            current: g + 1,
+                            total: total_groups,
+                            success: false,
+                            loot_name: group_ingredients[0].clone(),
+                            reward_desc: String::new(),
+                            error_msg: Some(format!("找不到配方: {}", e)),
+                        },
+                    );
+                }
+            }
+        }
+    });
+
+    Ok("三合一重随任务已推入后台队列".to_string())
+}
+
+/// 7. 批量升级选中项为永久物品
+#[tauri::command]
+pub async fn upgrade_loot(
+    items: Vec<DisenchantItem>,
+    app_handle: tauri::AppHandle,
+    app_state: State<'_, AppState>,
+) -> Result<String, String> {
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
+    let auth = build_auth_header(&lcu.token);
+    let base = format!("https://127.0.0.1:{}", lcu.port);
+    let http_client = lcu.http_client.clone();
+    drop(lock);
+
+    crate::spawn_log_panic(async move {
+        let total_jobs = items.len() as i32;
+
+        for (current_job, job) in items.into_iter().enumerate() {
+            let current_job = current_job as i32 + 1;
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+            // 1. 获取升级配方名称 (优先使用前端传来的精确配方，无则用关键字兜底匹配)
+            let recipe_result = if let Some(ref r_name) = job.upgrade_recipe_name {
+                if !r_name.is_empty() {
+                    Ok(r_name.clone())
+                } else {
+                    match find_recipe_name(&base, &auth, &http_client, &job.loot_id, "permanent")
+                        .await
+                    {
+                        Ok(name) => Ok(name),
+                        Err(_) => {
+                            find_recipe_name(&base, &auth, &http_client, &job.loot_id, "upgrade")
+                                .await
+                        }
+                    }
+                }
+            } else {
+                match find_recipe_name(&base, &auth, &http_client, &job.loot_id, "permanent").await
+                {
+                    Ok(name) => Ok(name),
+                    Err(_) => {
+                        find_recipe_name(&base, &auth, &http_client, &job.loot_id, "upgrade").await
+                    }
+                }
+            };
+
+            match recipe_result {
+                Ok(recipe_name) => {
+                    // 2. 执行升级请求
+                    let craft_url = format!(
+                        "{}/lol-loot/v1/recipes/{}/craft?repeat={}",
+                        base, recipe_name, job.count
+                    );
+                    // 皮肤碎片用橙精粹，英雄碎片用蓝精粹
+                    let currency_id = if job.loot_id.to_uppercase().contains("SKIN") {
+                        "CURRENCY_cosmetic"
+                    } else {
+                        "CURRENCY_champion"
+                    };
+                    let body = vec![job.loot_id.clone(), currency_id.to_string()];
+
+                    let craft_resp = http_client
+                        .post(&craft_url)
+                        .header("Authorization", &auth)
+                        .json(&body)
+                        .send()
+                        .await;
+
+                    match craft_resp {
+                        Ok(r) if r.status().is_success() => {
+                            let _ = app_handle.emit(
+                                "loot-upgrade-progress",
+                                ActionProgressEvent {
+                                    current: current_job,
+                                    total: total_jobs,
+                                    success: true,
+                                    loot_name: job.loot_id.clone(),
+                                    reward_desc: format!("成功升级 {} 个", job.count),
+                                    error_msg: None,
+                                },
+                            );
+                        }
+                        Ok(r) => {
+                            let _ = app_handle.emit(
+                                "loot-upgrade-progress",
+                                ActionProgressEvent {
+                                    current: current_job,
+                                    total: total_jobs,
+                                    success: false,
+                                    loot_name: job.loot_id.clone(),
+                                    reward_desc: String::new(),
+                                    error_msg: Some(format!("HTTP 错误: {}", r.status())),
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            let _ = app_handle.emit(
+                                "loot-upgrade-progress",
+                                ActionProgressEvent {
+                                    current: current_job,
+                                    total: total_jobs,
+                                    success: false,
+                                    loot_name: job.loot_id.clone(),
+                                    reward_desc: String::new(),
+                                    error_msg: Some(e.to_string()),
+                                },
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = app_handle.emit(
+                        "loot-upgrade-progress",
+                        ActionProgressEvent {
+                            current: current_job,
+                            total: total_jobs,
+                            success: false,
+                            loot_name: job.loot_id,
+                            reward_desc: String::new(),
+                            error_msg: Some(format!("找不到升级配方: {}", e)),
+                        },
+                    );
+                }
+            }
+        }
+    });
+
+    Ok("批量升级任务已推入后台队列".to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EssenceBalances {
+    pub blue_essence: i32,
+    pub orange_essence: i32,
+}
+
+/// 8. 获取玩家蓝/橙精粹余额
+#[tauri::command]
+pub async fn get_essence_balances(
+    app_state: State<'_, AppState>,
+) -> Result<EssenceBalances, String> {
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().unwrap();
+    let auth = build_auth_header(&lcu.token);
+    let base = format!("https://127.0.0.1:{}", lcu.port);
+    let http_client = lcu.http_client.clone();
+    drop(lock);
+
+    let url = format!("{}/lol-loot/v1/player-loot", base);
+    let resp = http_client
+        .get(&url)
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let raw_loots: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
+
+    let mut blue_essence = 0;
+    let mut orange_essence = 0;
+
+    for item in raw_loots {
+        if let Some(loot_id) = item.get("lootId").and_then(|v| v.as_str()) {
+            if loot_id == "CURRENCY_champion" {
+                blue_essence = item.get("count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            } else if loot_id == "CURRENCY_cosmetic" {
+                orange_essence = item.get("count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            }
+        }
+    }
+
+    Ok(EssenceBalances {
+        blue_essence,
+        orange_essence,
+    })
 }
