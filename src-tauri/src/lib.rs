@@ -559,7 +559,7 @@ fn select_lol_folder() -> Result<Option<String>, String> {
 async fn open_screenshot_folder(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let config_lock = state.config.read().await;
     let custom_path = &config_lock.functions.screenshot_save_path;
-    
+
     let path = if !custom_path.is_empty() {
         std::path::PathBuf::from(custom_path)
     } else {
@@ -579,10 +579,9 @@ async fn open_screenshot_folder(state: tauri::State<'_, AppState>) -> Result<(),
             .spawn()
             .map_err(|e| e.to_string())?;
     }
-    
+
     Ok(())
 }
-
 
 /// 运行时切换云母效果
 #[tauri::command]
