@@ -404,11 +404,16 @@
       "openFailed": "开启失败: {error}",
       "hextechKey": "海克斯科技钥匙",
       "masterworkKey": "杰作钥匙",
-      "smartOpenAll": "全部开启"
+      "smartOpenAll": "全部开启",
+      "forgeBtn": "合成",
+      "batchForge": "批量合成",
+      "startForge": "开始合成 ×{count}",
+      "insufficientFragments": "钥匙碎片不足（需要 3 个碎片合成 1 把钥匙）",
+      "forge3in1": "3合1合成"
     },
     "lootManager": {
       "title": "碎片库存管理",
-      "chestOpen": "箱子/法球开启",
+      "chestOpen": "材料",
       "refreshBtn": "刷新库存",
       "loading": "正在读取您的库存...",
       "empty": "未在此分类下找到符合筛选条件的碎片物品",

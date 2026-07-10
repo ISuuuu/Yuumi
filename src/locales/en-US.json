@@ -404,11 +404,16 @@
       "openFailed": "Open failed: {error}",
       "hextechKey": "Hextech Key",
       "masterworkKey": "Masterwork Key",
-      "smartOpenAll": "Open All"
+      "smartOpenAll": "Open All",
+      "forgeBtn": "Forge",
+      "batchForge": "Batch Forge",
+      "startForge": "Start Forge ×{count}",
+      "insufficientFragments": "Insufficient fragments (3 required to forge 1 key)",
+      "forge3in1": "3-in-1 Forge"
     },
     "lootManager": {
       "title": "Shard Inventory",
-      "chestOpen": "Chests/Orbs",
+      "chestOpen": "Materials",
       "refreshBtn": "Refresh",
       "loading": "Loading your inventory...",
       "empty": "No shards match the current filters",
