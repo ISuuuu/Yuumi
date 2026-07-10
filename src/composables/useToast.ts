@@ -13,12 +13,16 @@ export function useToast() {
     // 忽略错误，防止无 Provider 时 setup 直接报错崩溃
   }
 
-  function showToast(msg: string, type: "success" | "error" = "success") {
+  function showToast(msg: string, type: "success" | "error" | "warning" | "info" = "success") {
     // 优先使用上下文注入的 message，其次尝试全局挂载的 $message 实例，最后静默降级为控制台日志
     const activeMessage = message || (window as any).$message;
     if (activeMessage) {
       if (type === "error") {
         activeMessage.error(msg);
+      } else if (type === "warning") {
+        activeMessage.warning(msg);
+      } else if (type === "info") {
+        activeMessage.info(msg);
       } else {
         activeMessage.success(msg);
       }

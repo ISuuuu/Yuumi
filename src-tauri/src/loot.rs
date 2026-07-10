@@ -55,6 +55,7 @@ pub struct LootItem {
     pub tile_path: Option<String>,
     pub upgrade_recipe_name: String,
     pub upgrade_essence_cost: i32,
+    pub parent_item_status: String,
 }
 
 /// 批量分解请求条目
@@ -138,20 +139,31 @@ pub async fn get_openable_loots(
             .filter(|s| !s.is_empty())
             .unwrap_or(loot_id);
         let count = item.get("count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let tile_path = item
+        let mut tile_path = item
             .get("tilePath")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        if tile_path.is_none() {
+            tile_path = item
+                .get("imagePath")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+        }
 
         let is_openable = loot_type == "CHEST"
             || loot_type == "ORB"
+            || loot_type == "PORTAL"
             || loot_id.contains("ORB")
             || loot_id.contains("Chest")
             || loot_id.contains("Orb")
             || loot_type == "MATERIAL"
                 && (loot_id.contains("ORB")
                     || loot_id.contains("CHEST")
-                    || loot_id.contains("CAPSULE"));
+                    || loot_id.contains("CAPSULE")
+                    || loot_id.contains("key_fragment")
+                    || loot_id.contains("fragment")
+                    || loot_id.contains("KEY_FRAGMENT")
+                    || loot_id.contains("FRAGMENT"));
 
         if !is_openable || count <= 0 {
             continue;
@@ -567,6 +579,138 @@ async fn find_recipe_name(
     Err(format!("未找到包含关键字 '{}' 的配方", keyword))
 }
 
+/// 升级配方查找与额外材料检测：依次尝试 permanent → upgrade → open，并在匹配成功的配方中动态检测是否包含 CURRENCY_champion / CURRENCY_cosmetic 等额外材料
+async fn find_recipe_upgrade_info(
+    base: &str,
+    auth: &str,
+    http_client: &reqwest::Client,
+    loot_id: &str,
+    specific_recipe_name: Option<&str>,
+) -> Result<(String, Vec<String>), String> {
+    let recipe_url = format!("{}/lol-loot/v1/recipes/initial-item/{}", base, loot_id);
+    let resp = http_client
+        .get(&recipe_url)
+        .header("Authorization", auth)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("获取配方接口返回错误: {}", resp.status()));
+    }
+
+    let recipes: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
+
+    let mut selected_recipe: Option<&serde_json::Value> = None;
+    if let Some(r_name) = specific_recipe_name {
+        if !r_name.is_empty() {
+            selected_recipe = recipes.iter().find(|r| {
+                r.get("recipeName")
+                    .and_then(|v| v.as_str())
+                    .map(|name| name == r_name)
+                    .unwrap_or(false)
+            });
+        }
+    }
+
+    if selected_recipe.is_none() {
+        for keyword in &[
+            "permanent",
+            "upgrade",
+            "open",
+            "claim",
+            "activate",
+            "unlock",
+        ] {
+            if let Some(r) = recipes.iter().find(|r| {
+                r.get("recipeName")
+                    .and_then(|v| v.as_str())
+                    .map(|name| name.to_lowercase().contains(keyword))
+                    .unwrap_or(false)
+            }) {
+                selected_recipe = Some(r);
+                break;
+            }
+        }
+    }
+
+    if let Some(r) = selected_recipe {
+        let recipe_name = r
+            .get("recipeName")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+        let recipe_str = r.to_string();
+        let mut extra_ingredients = Vec::new();
+        if recipe_str.contains("CURRENCY_champion") {
+            extra_ingredients.push("CURRENCY_champion".to_string());
+        }
+        if recipe_str.contains("CURRENCY_cosmetic") {
+            extra_ingredients.push("CURRENCY_cosmetic".to_string());
+        }
+        log::info!(
+            "[loot][upgrade] {} 确定配方: {}, 额外材料: {:?}",
+            loot_id,
+            recipe_name,
+            extra_ingredients
+        );
+        Ok((recipe_name, extra_ingredients))
+    } else {
+        let loot_upper = loot_id.to_uppercase();
+        // 针对头像图标 (ICON)、表情 (EMOTE) 和守卫皮肤 (WARDSKIN) 等免费道具，如果配方列表未返回，尝试使用 LCU 静态定义的分类通用解锁配方
+        if loot_upper.contains("ICON") {
+            let guessed_recipe = "SUMMONERICON_open".to_string();
+            log::info!(
+                "[loot][upgrade] {} 未在配方列表中找到，尝试使用通用图标解锁配方: {}",
+                loot_id,
+                guessed_recipe
+            );
+            return Ok((guessed_recipe, Vec::new()));
+        } else if loot_upper.contains("EMOTE") {
+            let guessed_recipe = "EMOTE_open".to_string();
+            log::info!(
+                "[loot][upgrade] {} 未在配方列表中找到，尝试使用通用表情解锁配方: {}",
+                loot_id,
+                guessed_recipe
+            );
+            return Ok((guessed_recipe, Vec::new()));
+        } else if loot_upper.contains("WARDSKIN") {
+            let guessed_recipe = "WARDSKIN_open".to_string();
+            log::info!(
+                "[loot][upgrade] {} 未在配方列表中找到，尝试使用通用守卫解锁配方: {}",
+                loot_id,
+                guessed_recipe
+            );
+            return Ok((guessed_recipe, Vec::new()));
+        }
+
+        let recipe_names: Vec<String> = recipes
+            .iter()
+            .filter_map(|r| {
+                r.get("recipeName")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+            .collect();
+        log::warn!(
+            "[loot][upgrade] {} 无解锁配方，可用: {:?}",
+            loot_id,
+            recipe_names
+        );
+
+        let extra_tip = if loot_upper.contains("ICON") || loot_upper.contains("EMOTE") {
+            " (提示：头像/表情无法重复解锁。此处无解锁配方，通常代表您的账号已拥有该永久道具，您可以将其进行「分解」或「重随」)。"
+        } else {
+            ""
+        };
+
+        Err(format!(
+            "未找到解锁/升级配方（已尝试 permanent/upgrade/open/claim/activate/unlock），可用配方: {:?}{}",
+            recipe_names, extra_tip
+        ))
+    }
+}
+
 /// 4. 获取玩家所有碎片类战利品（排除材料/货币/箱子）
 #[tauri::command]
 pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<LootItem>, String> {
@@ -585,8 +729,12 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
         .map_err(|e| e.to_string())?;
     let raw_loots: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
 
-    // 获取 summoner_id 与已拥有皮肤列表并建立 Hash 集合，解决 LCU 中皮肤碎片 itemStatus 始终为 NONE 的问题
+    // 建立各类已拥有道具的 Hash 集合，解决 LCU 战利品列表中 itemStatus 始终为 NONE 的官方 Bug
     let mut owned_skin_ids = std::collections::HashSet::new();
+    let mut owned_icon_ids = std::collections::HashSet::new();
+    let mut owned_emote_ids = std::collections::HashSet::new();
+    let mut owned_ward_skin_ids = std::collections::HashSet::new();
+
     let summoner_url = format!("{}/lol-summoner/v1/current-summoner", base);
     if let Ok(summoner_resp) = lcu
         .http_client
@@ -599,6 +747,7 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
             if let Ok(summoner_json) = summoner_resp.json::<serde_json::Value>().await {
                 if let Some(summoner_id) = summoner_json.get("summonerId").and_then(|v| v.as_i64())
                 {
+                    // 1. 获取已拥有皮肤列表
                     let skins_url = format!(
                         "{}/lol-champions/v1/inventories/by-summoner/{}/skins",
                         base, summoner_id
@@ -630,6 +779,115 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
                             }
                         }
                     }
+
+                    // 2. 获取已拥有头像图标列表
+                    let icons_url = format!(
+                        "{}/lol-collections/v1/inventories/{}/summoner-icons",
+                        base, summoner_id
+                    );
+                    if let Ok(icons_resp) = lcu
+                        .http_client
+                        .get(&icons_url)
+                        .header("Authorization", &auth)
+                        .send()
+                        .await
+                    {
+                        if icons_resp.status().is_success() {
+                            if let Ok(icons_json) = icons_resp.json::<serde_json::Value>().await {
+                                if let Some(arr) = icons_json.as_array() {
+                                    for item in arr {
+                                        if let Some(id) = item.get("id").and_then(|v| v.as_i64()) {
+                                            owned_icon_ids.insert(id as i32);
+                                        } else if let Some(id) =
+                                            item.get("iconId").and_then(|v| v.as_i64())
+                                        {
+                                            owned_icon_ids.insert(id as i32);
+                                        }
+                                    }
+                                } else if let Some(obj) = icons_json.as_object() {
+                                    if let Some(icons_arr) =
+                                        obj.get("icons").and_then(|v| v.as_array())
+                                    {
+                                        for item in icons_arr {
+                                            if let Some(id) =
+                                                item.get("id").and_then(|v| v.as_i64())
+                                            {
+                                                owned_icon_ids.insert(id as i32);
+                                            } else if let Some(id) =
+                                                item.get("iconId").and_then(|v| v.as_i64())
+                                            {
+                                                owned_icon_ids.insert(id as i32);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. 获取已拥有表情列表
+                    let emotes_url = format!("{}/lol-inventory/v1/inventory/emotes", base);
+                    if let Ok(emotes_resp) = lcu
+                        .http_client
+                        .get(&emotes_url)
+                        .header("Authorization", &auth)
+                        .send()
+                        .await
+                    {
+                        if emotes_resp.status().is_success() {
+                            if let Ok(emotes_json) = emotes_resp.json::<serde_json::Value>().await {
+                                if let Some(arr) = emotes_json.as_array() {
+                                    for item in arr {
+                                        if let Some(id) =
+                                            item.get("itemId").and_then(|v| v.as_i64())
+                                        {
+                                            owned_emote_ids.insert(id as i32);
+                                        } else if let Some(id) =
+                                            item.get("id").and_then(|v| v.as_i64())
+                                        {
+                                            owned_emote_ids.insert(id as i32);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. 获取已拥有守卫皮肤列表
+                    let ward_skins_url = format!(
+                        "{}/lol-collections/v1/inventories/{}/ward-skins",
+                        base, summoner_id
+                    );
+                    if let Ok(ward_skins_resp) = lcu
+                        .http_client
+                        .get(&ward_skins_url)
+                        .header("Authorization", &auth)
+                        .send()
+                        .await
+                    {
+                        if ward_skins_resp.status().is_success() {
+                            if let Ok(ward_skins_json) =
+                                ward_skins_resp.json::<serde_json::Value>().await
+                            {
+                                if let Some(arr) = ward_skins_json.as_array() {
+                                    for item in arr {
+                                        if let (Some(ward_skin_id), Some(ownership)) = (
+                                            item.get("id").and_then(|v| v.as_i64()),
+                                            item.get("ownership"),
+                                        ) {
+                                            if ownership
+                                                .get("owned")
+                                                .and_then(|v| v.as_bool())
+                                                .unwrap_or(false)
+                                            {
+                                                owned_ward_skin_ids.insert(ward_skin_id as i32);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -644,15 +902,8 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
             .unwrap_or("");
         let loot_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
         let loot_id = item.get("lootId").and_then(|v| v.as_str()).unwrap_or("");
-
-        // 仅筛选碎片、表情、守卫、图标，排除材料(钥匙、传送门、精粹等)
-        let is_shard = matches!(
-            display_category,
-            "CHAMPION" | "SKIN" | "EMOTE" | "WARDSKIN" | "SUMMONERICON"
-        );
-        let is_material = matches!(loot_type, "MATERIAL" | "CURRENCY" | "CHEST" | "ORB");
-
-        if !is_shard || is_material {
+        let loot_id_trim = loot_id.trim();
+        if loot_id_trim.is_empty() || loot_id_trim.to_uppercase().starts_with("TFT") {
             continue;
         }
 
@@ -661,12 +912,32 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
             continue;
         }
 
-        let item_desc = item
+        log::debug!(
+            "[loot][inventory] lootId={} type={} displayCategories={} count={}",
+            loot_id,
+            loot_type,
+            display_category,
+            count
+        );
+
+        let mut item_desc = item
             .get("itemDesc")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .unwrap_or(loot_id)
             .to_string();
+
+        if item_desc.trim().is_empty() {
+            continue;
+        }
+
+        if item_desc == "MATERIAL_key_fragment" {
+            item_desc = "钥匙碎片".to_string();
+        } else if item_desc == "MATERIAL_key" {
+            item_desc = "海克斯科技钥匙".to_string();
+        } else if item_desc == "MATERIAL_key_premium" {
+            item_desc = "杰作钥匙".to_string();
+        }
         let value = item.get("value").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let disenchant_value = item
             .get("disenchantValue")
@@ -682,16 +953,26 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
             .unwrap_or("NONE")
             .to_string();
 
-        if display_category == "SKIN"
-            && store_item_id > 0
-            && owned_skin_ids.contains(&store_item_id)
-        {
-            item_status = "OWNED".to_string();
+        let display_upper = display_category.to_uppercase();
+        if store_item_id > 0 {
+            let is_owned = (display_upper == "SKIN" && owned_skin_ids.contains(&store_item_id))
+                || (display_upper == "SUMMONERICON" && owned_icon_ids.contains(&store_item_id))
+                || (display_upper == "EMOTE" && owned_emote_ids.contains(&store_item_id))
+                || (display_upper == "WARDSKIN" && owned_ward_skin_ids.contains(&store_item_id));
+            if is_owned {
+                item_status = "OWNED".to_string();
+            }
         }
-        let tile_path = item
+        let mut tile_path = item
             .get("tilePath")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        if tile_path.is_none() {
+            tile_path = item
+                .get("imagePath")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+        }
         let rarity = item
             .get("rarity")
             .and_then(|v| v.as_str())
@@ -713,6 +994,12 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
             .and_then(|v| v.as_i64())
             .unwrap_or(0) as i32;
 
+        let parent_item_status = item
+            .get("parentItemStatus")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
         result.push(LootItem {
             loot_id: loot_id.to_string(),
             loot_name,
@@ -727,6 +1014,7 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
             tile_path,
             upgrade_recipe_name,
             upgrade_essence_cost,
+            parent_item_status,
         });
     }
 
@@ -988,55 +1276,178 @@ pub async fn upgrade_loot(
             let current_job = current_job as i32 + 1;
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
-            // 1. 获取升级配方名称 (优先使用前端传来的精确配方，无则用关键字兜底匹配)
-            let recipe_result = if let Some(ref r_name) = job.upgrade_recipe_name {
-                if !r_name.is_empty() {
-                    Ok(r_name.clone())
-                } else {
-                    match find_recipe_name(&base, &auth, &http_client, &job.loot_id, "permanent")
+            let loot_upper = job.loot_id.to_uppercase();
+            // 不包含 SHARD 和 RENTAL 的为“永久战利品”，可以直接调用 LCU 自带的兑换接口直接解锁，无需配方
+            let is_permanent = !loot_upper.contains("SHARD") && !loot_upper.contains("RENTAL");
+
+            if is_permanent {
+                let redeem_url = format!("{}/lol-loot/v1/player-loot/{}/redeem", base, job.loot_id);
+                log::info!(
+                    "[loot][upgrade] {} 是永久道具，直接调用兑换接口解锁: {}",
+                    job.loot_id,
+                    redeem_url
+                );
+
+                let mut success_count = 0;
+                let mut last_error: Option<String> = None;
+
+                for _ in 0..job.count {
+                    match http_client
+                        .post(&redeem_url)
+                        .header("Authorization", &auth)
+                        .send()
                         .await
                     {
-                        Ok(name) => Ok(name),
-                        Err(_) => {
-                            find_recipe_name(&base, &auth, &http_client, &job.loot_id, "upgrade")
-                                .await
+                        Ok(r) if r.status().is_success() => {
+                            success_count += 1;
+                        }
+                        Ok(r) => {
+                            let status = r.status();
+                            let body_text = r.text().await.unwrap_or_default();
+                            log::warn!(
+                                "[loot][upgrade] {} 兑换解锁失败 status={} body={}",
+                                job.loot_id,
+                                status,
+                                body_text
+                            );
+                            let extra = if body_text.contains("CLIENT_ERROR") {
+                                " (通常由于未拥有皮肤对应的英雄，或该永久道具已在当前账号拥有。)"
+                            } else {
+                                ""
+                            };
+                            last_error = Some(format!("HTTP {}: {}{}", status, body_text, extra));
+                            break;
+                        }
+                        Err(e) => {
+                            log::warn!("[loot][upgrade] {} 请求失败: {}", job.loot_id, e);
+                            last_error = Some(e.to_string());
+                            break;
                         }
                     }
-                }
-            } else {
-                match find_recipe_name(&base, &auth, &http_client, &job.loot_id, "permanent").await
-                {
-                    Ok(name) => Ok(name),
-                    Err(_) => {
-                        find_recipe_name(&base, &auth, &http_client, &job.loot_id, "upgrade").await
+                    if job.count > 1 {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
                 }
-            };
+
+                if last_error.is_none() {
+                    let _ = app_handle.emit(
+                        "loot-upgrade-progress",
+                        ActionProgressEvent {
+                            current: current_job,
+                            total: total_jobs,
+                            success: true,
+                            loot_name: job.loot_id.clone(),
+                            reward_desc: format!("成功解锁 {} 个", success_count),
+                            error_msg: None,
+                        },
+                    );
+                } else {
+                    let _ = app_handle.emit(
+                        "loot-upgrade-progress",
+                        ActionProgressEvent {
+                            current: current_job,
+                            total: total_jobs,
+                            success: false,
+                            loot_name: job.loot_id.clone(),
+                            reward_desc: String::new(),
+                            error_msg: last_error,
+                        },
+                    );
+                }
+                continue;
+            }
+
+            // 1. 获取升级配方及其需要的额外材料 (优先使用前端传来的精确配方名，无则使用关键字兜底)
+            let recipe_result = find_recipe_upgrade_info(
+                &base,
+                &auth,
+                &http_client,
+                &job.loot_id,
+                job.upgrade_recipe_name.as_deref(),
+            )
+            .await;
 
             match recipe_result {
-                Ok(recipe_name) => {
+                Ok((recipe_name, extra_ingredients)) => {
                     // 2. 执行升级请求
-                    let craft_url = format!(
-                        "{}/lol-loot/v1/recipes/{}/craft?repeat={}",
-                        base, recipe_name, job.count
-                    );
-                    // 皮肤碎片用橙精粹，英雄碎片用蓝精粹
-                    let currency_id = if job.loot_id.to_uppercase().contains("SKIN") {
-                        "CURRENCY_cosmetic"
-                    } else {
-                        "CURRENCY_champion"
-                    };
-                    let body = vec![job.loot_id.clone(), currency_id.to_string()];
+                    let loot_upper = job.loot_id.to_uppercase();
+                    let mut body = vec![job.loot_id.clone()];
+                    for item in extra_ingredients {
+                        body.push(item);
+                    }
 
-                    let craft_resp = http_client
-                        .post(&craft_url)
-                        .header("Authorization", &auth)
-                        .json(&body)
-                        .send()
-                        .await;
+                    // 永恒星碑(STATSTONE)的 LCU 配方不支持 repeat>1，强制逐个调用
+                    let repeat_times = if loot_upper.contains("STATSTONE") {
+                        job.count
+                    } else {
+                        1
+                    };
+                    let repeat_param = if loot_upper.contains("STATSTONE") {
+                        1
+                    } else {
+                        job.count
+                    };
+
+                    log::info!(
+                        "[loot][upgrade] craft lootId={} recipe={} body={:?} repeat_param={} repeat_times={}",
+                        job.loot_id, recipe_name, body, repeat_param, repeat_times
+                    );
+
+                    let mut success_count = 0;
+                    let mut last_error: Option<String> = None;
+
+                    for _ in 0..repeat_times {
+                        let craft_url = format!(
+                            "{}/lol-loot/v1/recipes/{}/craft?repeat={}",
+                            base, recipe_name, repeat_param
+                        );
+                        match http_client
+                            .post(&craft_url)
+                            .header("Authorization", &auth)
+                            .json(&body)
+                            .send()
+                            .await
+                        {
+                            Ok(r) if r.status().is_success() => {
+                                success_count += 1;
+                            }
+                            Ok(r) => {
+                                let status = r.status();
+                                let body_text = r.text().await.unwrap_or_default();
+                                log::warn!(
+                                    "[loot][upgrade] {} 升级失败 status={} body={}",
+                                    job.loot_id,
+                                    status,
+                                    body_text
+                                );
+                                let extra = if body_text.contains("CLIENT_ERROR") {
+                                    " (通常由于精粹余额不足，或者该永久道具已在当前账号拥有。)"
+                                } else {
+                                    ""
+                                };
+                                last_error =
+                                    Some(format!("HTTP {}: {}{}", status, body_text, extra));
+                                break;
+                            }
+                            Err(e) => {
+                                log::warn!("[loot][upgrade] {} 请求失败: {}", job.loot_id, e);
+                                last_error = Some(e.to_string());
+                                break;
+                            }
+                        }
+                        if repeat_times > 1 {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        }
+                    }
+
+                    let craft_resp: Result<(), String> = if last_error.is_none() {
+                        Ok(())
+                    } else {
+                        Err(last_error.unwrap_or_default())
+                    };
 
                     match craft_resp {
-                        Ok(r) if r.status().is_success() => {
+                        Ok(()) => {
                             let _ = app_handle.emit(
                                 "loot-upgrade-progress",
                                 ActionProgressEvent {
@@ -1044,21 +1455,8 @@ pub async fn upgrade_loot(
                                     total: total_jobs,
                                     success: true,
                                     loot_name: job.loot_id.clone(),
-                                    reward_desc: format!("成功升级 {} 个", job.count),
+                                    reward_desc: format!("成功升级 {} 个", success_count),
                                     error_msg: None,
-                                },
-                            );
-                        }
-                        Ok(r) => {
-                            let _ = app_handle.emit(
-                                "loot-upgrade-progress",
-                                ActionProgressEvent {
-                                    current: current_job,
-                                    total: total_jobs,
-                                    success: false,
-                                    loot_name: job.loot_id.clone(),
-                                    reward_desc: String::new(),
-                                    error_msg: Some(format!("HTTP 错误: {}", r.status())),
                                 },
                             );
                         }
@@ -1071,11 +1469,11 @@ pub async fn upgrade_loot(
                                     success: false,
                                     loot_name: job.loot_id.clone(),
                                     reward_desc: String::new(),
-                                    error_msg: Some(e.to_string()),
+                                    error_msg: Some(e),
                                 },
                             );
                         }
-                    }
+                    } // end match craft_resp
                 }
                 Err(e) => {
                     let _ = app_handle.emit(

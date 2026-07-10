@@ -40,6 +40,7 @@ const currentTab = ref("matches"); // matches (生涯战绩), loot (战利品)
 const openableLoots = ref<OpenableLoot[]>([]);
 const lootLoading = ref(false);
 const lootError = ref<string | null>(null);
+const lootFetched = ref(false); // 是否曾执行过刷新
 const selectedLoot = ref<OpenableLoot | null>(null);
 const openQuantity = ref(1);
 const isOpening = ref(false);
@@ -60,6 +61,15 @@ function getLootDisplayName(loot: OpenableLoot): string {
   }
   if (id === "CHEST_premium") {
     return "杰作宝箱";
+  }
+  if (id === "MATERIAL_key_fragment") {
+    return "钥匙碎片";
+  }
+  if (id === "MATERIAL_key") {
+    return "海克斯科技钥匙";
+  }
+  if (id === "MATERIAL_key_premium") {
+    return "杰作钥匙";
   }
   if (name === id) {
     if (id.includes("ORB") || id.includes("orb")) return "法球";
@@ -86,9 +96,8 @@ async function loadOpenableLoots() {
   lootError.value = null;
   try {
     openableLoots.value = await fetchOpenableLoots();
-    if (openableLoots.value.length === 0) {
-      lootError.value = t("tools.lootOpener.noLootFound");
-    }
+    // 没有箱子时不视为错误，由模板空态分支显示灰色提示
+    lootFetched.value = true;
   } catch (e: any) {
     lootError.value = e.toString();
     console.error("获取战利品列表失败:", e);
@@ -113,9 +122,9 @@ const noKeyLoots = computed(() =>
 );
 
 const totalKeyCount = computed(() => {
-  const keyItems = openableLoots.value.filter((l) => l.needKey);
-  if (keyItems.length === 0) return 0;
-  return Math.max(0, ...keyItems.map((l) => l.keyCount ?? 0));
+  const hextechKey = rawLootInventory.value.find(item => item.lootId === "MATERIAL_key");
+  const premiumKey = rawLootInventory.value.find(item => item.lootId === "MATERIAL_key_premium");
+  return (hextechKey?.count ?? 0) + (premiumKey?.count ?? 0);
 });
 
 function lootPriorityIndex(lootId: string): number {
@@ -128,9 +137,29 @@ function lootPriorityIndex(lootId: string): number {
 
 function buildSmartOpenBatches(): OpenBatchItem[] {
   const batches: OpenBatchItem[] = [];
-  let remainingKeys = totalKeyCount.value;
 
+  // 1. 优先提取并合成钥匙碎片，计算新生成的额外钥匙数
+  const fragmentLoot = openableLoots.value.find(l => l.lootId.toLowerCase().includes("fragment"));
+  let forgedKeys = 0;
+  if (fragmentLoot && fragmentLoot.count >= 3) {
+    forgedKeys = Math.floor(fragmentLoot.count / 3);
+    batches.push({
+      lootId: fragmentLoot.lootId,
+      name: fragmentLoot.name,
+      count: forgedKeys,
+      recipeName: fragmentLoot.recipeName,
+      ingredients: [fragmentLoot.lootId],
+    });
+  }
+
+  let remainingKeys = totalKeyCount.value + forgedKeys;
+
+  // 2. 处理不需要钥匙的箱子/法球
   for (const loot of noKeyLoots.value) {
+    // 过滤掉钥匙碎片（已经在上方优先合成处理了）
+    if (loot.lootId.toLowerCase().includes("fragment")) {
+      continue;
+    }
     batches.push({
       lootId: loot.lootId,
       name: loot.name,
@@ -140,7 +169,11 @@ function buildSmartOpenBatches(): OpenBatchItem[] {
     });
   }
 
+  // 3. 处理需要钥匙开启的宝箱
   for (const loot of keyNeededLoots.value) {
+    if (loot.lootId.toLowerCase().includes("fragment")) {
+      continue;
+    }
     if (remainingKeys <= 0) break;
     const canOpen = Math.min(loot.count, remainingKeys);
     if (canOpen <= 0) continue;
@@ -181,6 +214,7 @@ async function handleSmartOpenAll() {
       if (evt.current === evt.total) {
         isOpening.value = false;
         loadOpenableLoots();
+        loadLootInventory(); // 智能全部开启后，刷新库存以同步更新钥匙数量与碎片状态
         loadSummoner(true); // 开启完毕后，自动刷新生涯资产
       }
     },
@@ -205,9 +239,14 @@ async function handleSmartOpenAll() {
 
 function openLootModal(loot: OpenableLoot) {
   selectedLoot.value = loot;
-  const maxQ = loot.needKey
-    ? Math.min(loot.count, loot.keyCount ?? 0)
-    : loot.count;
+  let maxQ = 0;
+  if (loot.lootId.toLowerCase().includes("fragment")) {
+    maxQ = Math.floor(loot.count / 3);
+  } else {
+    maxQ = loot.needKey
+      ? Math.min(loot.count, loot.keyCount ?? 0)
+      : loot.count;
+  }
   openQuantity.value = Math.max(1, maxQ);
 }
 
@@ -218,6 +257,9 @@ function closeLootModal() {
 const maxOpenQuantity = computed(() => {
   if (!selectedLoot.value) return 0;
   const loot = selectedLoot.value;
+  if (loot.lootId.toLowerCase().includes("fragment")) {
+    return Math.floor(loot.count / 3);
+  }
   if (!loot.needKey) return loot.count;
   return Math.min(loot.count, loot.keyCount ?? 0);
 });
@@ -239,17 +281,26 @@ const currentKeyCount = computed(() => {
 
 async function handleBatchOpen() {
   if (!selectedLoot.value || openQuantity.value <= 0) return;
-  if (openQuantity.value > maxOpenQuantity.value) {
+  const loot = selectedLoot.value;
+  const isFragment = loot.lootId.toLowerCase().includes("fragment");
+
+  if (!isFragment && loot.needKey && openQuantity.value > maxOpenQuantity.value) {
     showToast(
       t("tools.lootOpener.insufficientKeys"),
       "error",
     );
     return;
   }
+  if (isFragment && openQuantity.value > maxOpenQuantity.value) {
+    showToast(
+      t("tools.lootOpener.insufficientFragments"),
+      "error",
+    );
+    return;
+  }
 
-  const loot = selectedLoot.value;
   const ingredients = [loot.lootId];
-  if (loot.keyLootId && loot.needKey) {
+  if (!isFragment && loot.keyLootId && loot.needKey) {
     ingredients.push(loot.keyLootId);
   }
 
@@ -264,11 +315,13 @@ async function handleBatchOpen() {
       if (evt.current === evt.total) {
         isOpening.value = false;
         loadOpenableLoots();
+        loadLootInventory(); // 开启/合成完毕后，刷新库存以同步更新钥匙数量与碎片状态
         loadSummoner(true); // 开启完毕后，自动刷新生涯资产
       }
     },
   );
 
+  actionProgressTitle.value = isFragment ? "正在合成钥匙..." : t("tools.lootOpener.opening");
   showOpenPanel.value = true;
   isOpening.value = true;
   openProgress.value = 0;
@@ -284,10 +337,10 @@ async function handleBatchOpen() {
     );
   } catch (e: any) {
     isOpening.value = false;
-    showToast(
-      t("tools.lootOpener.openFailed", { error: e.toString() }),
-      "error",
-    );
+    const errorMsg = isFragment
+      ? `合成失败: ${e.toString()}`
+      : t("tools.lootOpener.openFailed", { error: e.toString() });
+    showToast(errorMsg, "error");
   }
 }
 
@@ -383,8 +436,27 @@ async function loadLootInventory() {
 // 过滤后的碎片
 const filteredInventory = computed(() => {
   return rawLootInventory.value.filter(item => {
-    // 1. 类型过滤
-    if (filterType.value !== "ALL" && item.displayCategories !== filterType.value) return false;
+    // 0. 如果是“全部物品”选项下，隐藏已经单独显示在其他位置的：精粹（货币）、钥匙（保留钥匙残片）、宝箱（各类箱子）
+    if (filterType.value === "ALL") {
+      const cat = item.displayCategories.toUpperCase();
+      const lootId = item.lootId.toUpperCase();
+      const type = item.lootType.toUpperCase();
+      if (cat === "CURRENCY" || lootId.startsWith("CURRENCY")) return false;
+      if (lootId.startsWith("MATERIAL_KEY") && !lootId.includes("FRAGMENT")) return false;
+      if (cat === "CHEST" || type === "CHEST" || lootId.startsWith("CHEST_")) return false;
+    }
+
+    // 1. 类型过滤（ETERNAL 特殊处理，匹配 lootType 含 STATSTONE）
+    if (filterType.value !== "ALL") {
+      if (filterType.value === "ETERNAL") {
+        if (!item.lootType.toUpperCase().includes("STATSTONE")) return false;
+      } else if (filterType.value === "MATERIAL") {
+        const cat = item.displayCategories.toUpperCase();
+        if (cat !== "MATERIAL" && cat !== "CHEST" && cat !== "ORB" && cat !== "CURRENCY") return false;
+      } else {
+        if (item.displayCategories !== filterType.value) return false;
+      }
+    }
     // 2. 拥有状态过滤
     if (filterOwned.value === "OWNED" && item.itemStatus !== "OWNED") return false;
     if (filterOwned.value === "NOT_OWNED" && item.itemStatus === "OWNED") return false;
@@ -423,10 +495,33 @@ const selectedLootObjects = computed(() => {
   return rawLootInventory.value.filter(item => selectedLootIds.value.includes(item.lootId));
 });
 
-// 是否可以升级（选中项中至少存在一个未拥有物品）
+// 是否可以升级或解锁（选中项中至少存在一个非拥有且非材料箱子的项目）
 const canUpgrade = computed(() => {
   if (selectedLootIds.value.length === 0) return false;
-  return selectedLootObjects.value.some(item => item.itemStatus !== "OWNED");
+  return selectedLootObjects.value.some(item => {
+    const cat = item.displayCategories.toUpperCase();
+    return item.itemStatus !== "OWNED" && cat !== "MATERIAL" && cat !== "CHEST" && cat !== "ORB" && cat !== "CURRENCY";
+  });
+});
+
+// 动态按钮文本：对于不需要精粹（upgradeEssenceCost === 0）的叫解锁，需要精粹的叫升级
+const upgradeBtnText = computed(() => {
+  if (selectedLootIds.value.length === 0) return t("tools.lootManager.upgradeBtn") || "升级 / 解锁";
+  const hasUpgrade = selectedLootObjects.value.some(item => item.upgradeEssenceCost > 0);
+  const hasUnlock = selectedLootObjects.value.some(item => item.upgradeEssenceCost === 0);
+  if (hasUpgrade && hasUnlock) return "升级 / 解锁";
+  if (hasUnlock) return "解锁永久";
+  return "升级永久";
+});
+
+// 是否可以重随（有非永恒星碑且非材料箱子的物品）
+const canReroll = computed(() => {
+  if (selectedLootIds.value.length === 0) return false;
+  return selectedLootObjects.value.some(item => {
+    const cat = item.displayCategories.toUpperCase();
+    return !item.lootType.toUpperCase().includes("STATSTONE") &&
+           cat !== "MATERIAL" && cat !== "CHEST" && cat !== "ORB" && cat !== "CURRENCY";
+  });
 });
 
 // 分解收益估算
@@ -517,27 +612,53 @@ async function proceedWithDisenchant() {
   }
 }
 
-// ─── 批量升级 ───
+// ─── 批量升级与解锁 ───
 function handleBatchUpgrade() {
   const unownedItems = selectedLootObjects.value.filter(item => item.itemStatus !== "OWNED");
   if (unownedItems.length === 0) {
-    showToast("没有选中任何未拥有的碎片进行升级！", "error");
+    showToast("没有选中任何未拥有的战利品进行操作！", "error");
     return;
   }
+
+  // 校验皮肤项目对应的英雄是否已拥有
+  const missingChampionSkins = unownedItems.filter(item => {
+    const cat = item.displayCategories.toUpperCase();
+    return cat === "SKIN" && item.parentItemStatus !== "OWNED";
+  });
+  if (missingChampionSkins.length > 0) {
+    const names = missingChampionSkins.map(item => item.itemDesc).join("、");
+    showToast(`未拥有以下皮肤对应的英雄：[${names}]，请先在游戏内解锁或购买该英雄！`, "error");
+    return;
+  }
+
+  const hasUpgrade = unownedItems.some(item => item.upgradeEssenceCost > 0);
+  const hasUnlock = unownedItems.some(item => item.upgradeEssenceCost === 0);
 
   const count = unownedItems.length;
   let totalBlueEssence = 0;
   let totalOrangeEssence = 0;
   unownedItems.forEach(item => {
-    if (item.displayCategories === "CHAMPION") {
-      totalBlueEssence += item.upgradeEssenceCost * item.count;
-    } else {
-      totalOrangeEssence += item.upgradeEssenceCost * item.count;
+    if (item.upgradeEssenceCost > 0) {
+      if (item.displayCategories === "CHAMPION") {
+        totalBlueEssence += item.upgradeEssenceCost * item.count;
+      } else {
+        totalOrangeEssence += item.upgradeEssenceCost * item.count;
+      }
     }
   });
 
+  // 精粹余额校验，防止因余额不足产生难懂的 LCU 500 CLIENT_ERROR 报错
+  if (totalBlueEssence > blueEssenceCount.value) {
+    showToast(`蓝色精粹不足！升级需要 🔷 ${totalBlueEssence}，当前拥有 🔷 ${blueEssenceCount.value}`, "error");
+    return;
+  }
+  if (totalOrangeEssence > orangeEssenceCount.value) {
+    showToast(`橙色精粹不足！升级需要 🔶 ${totalOrangeEssence}，当前拥有 🔶 ${orangeEssenceCount.value}`, "error");
+    return;
+  }
+
   const detailsList: { label: string; value: string }[] = [
-    { label: "待升级碎片种类", value: `${count} 种` }
+    { label: "待处理战利品种类", value: `${count} 种` }
   ];
   if (totalBlueEssence > 0) {
     detailsList.push({ label: "预计消耗蓝色精粹", value: `🔷 ${totalBlueEssence}` });
@@ -545,12 +666,23 @@ function handleBatchUpgrade() {
   if (totalOrangeEssence > 0) {
     detailsList.push({ label: "预计消耗橙色精粹", value: `🔶 ${totalOrangeEssence}` });
   }
-  detailsList.push({ label: "操作说明", value: "将消耗对应精粹并解锁永久版" });
+
+  let desc = "将消耗对应精粹并解锁为永久版";
+  if (hasUnlock && !hasUpgrade) {
+    desc = "将免费解锁/激活永久道具并添加到收藏";
+  } else if (hasUnlock && hasUpgrade) {
+    desc = "消耗精粹升级部分碎片，其余永久道具将免费解锁";
+  }
+  detailsList.push({ label: "操作说明", value: desc });
+
+  let title = "升级 / 解锁选中项";
+  if (hasUnlock && !hasUpgrade) title = "解锁选中项";
+  else if (hasUpgrade && !hasUnlock) title = "升级选中项";
 
   confirmModalConfig.value = {
-    title: t("tools.lootManager.upgradeBtn") || "升级选中项",
-    message: `您确定要将选中的 ${count} 个未拥有物品碎片升级为永久吗？`,
-    confirmText: "确定升级",
+    title: title,
+    message: `您确定要将选中的 ${count} 个未拥有项目进行升级或解锁吗？`,
+    confirmText: "确定执行",
     cancelText: "取消",
     type: "primary",
     details: detailsList,
@@ -566,7 +698,7 @@ async function proceedWithUpgrade(unownedItems: LootItem[]) {
     upgradeRecipeName: item.upgradeRecipeName,
   }));
 
-  actionProgressTitle.value = "正在升级碎片...";
+  actionProgressTitle.value = "正在升级或解锁碎片...";
   openResults.value = [];
   openProgress.value = 0;
   openTotal.value = 0;
@@ -610,11 +742,14 @@ async function proceedWithUpgrade(unownedItems: LootItem[]) {
 // ─── 一键三合一重随 ───
 function handleBatchReroll() {
   const grouped: Record<string, string[]> = {};
-  selectedLootObjects.value.forEach(item => {
-    const cat = item.displayCategories;
-    if (!grouped[cat]) grouped[cat] = [];
-    for (let i = 0; i < item.count; i++) grouped[cat].push(item.lootId);
-  });
+  // 跳过永恒星碑（STATSTONE 系列无重随功能）
+  selectedLootObjects.value
+    .filter(item => !item.lootType.toUpperCase().includes("STATSTONE"))
+    .forEach(item => {
+      const cat = item.displayCategories;
+      if (!grouped[cat]) grouped[cat] = [];
+      for (let i = 0; i < item.count; i++) grouped[cat].push(item.lootId);
+    });
 
   const finalLootIdsToReroll: string[] = [];
   let remainingCount = 0;
@@ -1631,14 +1766,21 @@ function getQueueName(m: MatchDisplay): string {
                     <span class="loot-card-count">×{{ loot.count }}</span>
                   </div>
                   <div class="loot-card-footer">
-                    <span v-if="loot.needKey" class="loot-key-badge">{{ $t("tools.lootOpener.needKey") }}</span>
+                    <span v-if="loot.lootId.toLowerCase().includes('fragment')" class="loot-no-key-badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+                      {{ $t("tools.lootOpener.forge3in1") }}
+                    </span>
+                    <span v-else-if="loot.needKey" class="loot-key-badge">{{ $t("tools.lootOpener.needKey") }}</span>
                     <span v-else class="loot-no-key-badge">{{ $t("tools.lootOpener.noKeyNeeded") }}</span>
-                    <span class="loot-open-btn">{{ $t("tools.lootOpener.openBtn") }}</span>
+                    <span class="loot-open-btn">
+                      {{ loot.lootId.toLowerCase().includes('fragment') ? $t("tools.lootOpener.forgeBtn") : $t("tools.lootOpener.openBtn") }}
+                    </span>
                   </div>
                 </div>
               </div>
             </div>
-            <div v-else class="loot-empty-inline">{{ $t("tools.lootOpener.clickRefresh") }}</div>
+            <div v-else class="loot-empty-inline">
+              {{ lootFetched ? $t("tools.lootOpener.noLootFound") : $t("tools.lootOpener.clickRefresh") }}
+            </div>
           </div>
         </div>
 
@@ -1676,6 +1818,8 @@ function getQueueName(m: MatchDisplay): string {
                   { label: '表情', value: 'EMOTE' },
                   { label: '守卫', value: 'WARDSKIN' },
                   { label: '图标', value: 'SUMMONERICON' },
+                  { label: '永恒星碑', value: 'ETERNAL' },
+                  { label: '材料/宝箱', value: 'MATERIAL' },
                 ]"
                 size="small"
                 style="width: 120px"
@@ -1815,7 +1959,7 @@ function getQueueName(m: MatchDisplay): string {
               </button>
               <button
                 class="action-btn"
-                :disabled="selectedLootIds.length === 0 || isOpening || !store.isConnected"
+                :disabled="!canReroll || isOpening || !store.isConnected"
                 @click="handleBatchReroll"
               >
                 {{ $t("tools.lootManager.rerollBtn") }}
@@ -1825,7 +1969,7 @@ function getQueueName(m: MatchDisplay): string {
                 :disabled="!canUpgrade || isOpening || !store.isConnected"
                 @click="handleBatchUpgrade"
               >
-                {{ $t("tools.lootManager.upgradeBtn") }}
+                {{ upgradeBtnText }}
               </button>
             </div>
           </div>
@@ -1884,7 +2028,9 @@ function getQueueName(m: MatchDisplay): string {
         >
           <div class="loot-modal-card">
             <div class="loot-modal-header">
-              <h3>{{ $t("tools.lootOpener.batchOpen") }} - {{ getLootDisplayName(selectedLoot) }}</h3>
+              <h3>
+                {{ selectedLoot.lootId.toLowerCase().includes('fragment') ? $t("tools.lootOpener.batchForge") : $t("tools.lootOpener.batchOpen") }} - {{ getLootDisplayName(selectedLoot) }}
+              </h3>
               <button class="modal-close-btn" @click="closeLootModal">✕</button>
             </div>
             <div class="loot-modal-body">
@@ -1904,7 +2050,9 @@ function getQueueName(m: MatchDisplay): string {
                 </span>
               </div>
               <div class="loot-quantity-row">
-                <span class="loot-info-label">{{ $t("tools.lootOpener.quantity") }}</span>
+                <span class="loot-info-label">
+                  {{ selectedLoot.lootId.toLowerCase().includes('fragment') ? '合成次数' : $t("tools.lootOpener.quantity") }}
+                </span>
                 <n-input-number
                   v-model:value="openQuantity"
                   :min="1"
@@ -1913,8 +2061,8 @@ function getQueueName(m: MatchDisplay): string {
                   size="small"
                 />
               </div>
-              <div v-if="maxOpenQuantity <= 0 && selectedLoot.needKey" class="loot-insufficient">
-                {{ $t("tools.lootOpener.insufficientKeys") }}
+              <div v-if="maxOpenQuantity <= 0" class="loot-insufficient">
+                {{ selectedLoot.lootId.toLowerCase().includes('fragment') ? $t("tools.lootOpener.insufficientFragments") : (selectedLoot.needKey ? $t("tools.lootOpener.insufficientKeys") : '') }}
               </div>
               <div class="loot-modal-actions">
                 <button class="action-btn" @click="closeLootModal">
@@ -1925,7 +2073,7 @@ function getQueueName(m: MatchDisplay): string {
                   :disabled="maxOpenQuantity <= 0"
                   @click="handleBatchOpen"
                 >
-                  {{ $t("tools.lootOpener.startOpen", { count: openQuantity }) }}
+                  {{ selectedLoot.lootId.toLowerCase().includes('fragment') ? $t("tools.lootOpener.startForge", { count: openQuantity }) : $t("tools.lootOpener.startOpen", { count: openQuantity }) }}
                 </button>
               </div>
             </div>

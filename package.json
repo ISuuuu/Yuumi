@@ -9,10 +9,11 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "type-check": "vue-tsc --noEmit",
+    "format": "cd src-tauri && cargo fmt --all",
     "fmt-check": "cd src-tauri && cargo fmt --all -- --check",
     "clippy": "cd src-tauri && cargo clippy --all-targets -- -D warnings",
     "test:rust": "cd src-tauri && cargo test",
-    "check-all": "pnpm type-check && pnpm fmt-check && pnpm clippy",
+    "check-all": "pnpm run format && pnpm type-check && pnpm fmt-check && pnpm clippy",
     "prepare": "husky"
   },
   "dependencies": {
