@@ -313,6 +313,9 @@ export interface FunctionsConfig {
   UploadEnabled: boolean;
   HideTft: boolean;
   EnableBenchOverlay: boolean;
+  EnableScreenshotOnMultikill: boolean;
+  ScreenshotOnMultikillLevels: number[];
+  ScreenshotSavePath: string;
 }
 
 export interface OtherConfig {

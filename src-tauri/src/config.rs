@@ -99,6 +99,10 @@ impl Default for PersonalizationConfig {
     }
 }
 
+fn default_screenshot_levels() -> Vec<u32> {
+    vec![3, 4, 5, 8]
+}
+
 // ─── 功能设置 ───
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +178,13 @@ pub struct FunctionsConfig {
     /// 大乱斗板凳席悬浮窗（默认开启）
     #[serde(default = "default_true")]
     pub enable_bench_overlay: bool,
+
+    #[serde(default)]
+    pub enable_screenshot_on_multikill: bool,
+    #[serde(default = "default_screenshot_levels")]
+    pub screenshot_on_multikill_levels: Vec<u32>,
+    #[serde(default)]
+    pub screenshot_save_path: String,
 }
 
 impl Default for FunctionsConfig {
@@ -224,6 +235,9 @@ impl Default for FunctionsConfig {
             upload_enabled: true,
             hide_tft: true,
             enable_bench_overlay: true,
+            enable_screenshot_on_multikill: false,
+            screenshot_on_multikill_levels: vec![3, 4, 5, 8],
+            screenshot_save_path: String::new(),
         }
     }
 }
