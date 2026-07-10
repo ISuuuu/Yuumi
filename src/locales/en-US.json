@@ -429,6 +429,7 @@
       "filterMaxValue": "Max Value (≤)",
       "ownedBadge": "Owned",
       "notOwnedBadge": "Not Owned",
+      "noChampionBadge": "No Champion",
       "essenceReturn": "Essence Yield:",
       "selectAll": "Select All Filtered",
       "clearAll": "Clear Selection",

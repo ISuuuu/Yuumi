@@ -429,6 +429,7 @@
       "filterMaxValue": "最高价值 (≤)",
       "ownedBadge": "已拥有",
       "notOwnedBadge": "未拥有",
+      "noChampionBadge": "无英雄",
       "essenceReturn": "分解收益:",
       "selectAll": "选择当前所有过滤项",
       "clearAll": "清空已选",

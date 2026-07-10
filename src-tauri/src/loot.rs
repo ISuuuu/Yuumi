@@ -150,20 +150,7 @@ pub async fn get_openable_loots(
                 .map(|s| s.to_string());
         }
 
-        let is_openable = loot_type == "CHEST"
-            || loot_type == "ORB"
-            || loot_type == "PORTAL"
-            || loot_id.contains("ORB")
-            || loot_id.contains("Chest")
-            || loot_id.contains("Orb")
-            || loot_type == "MATERIAL"
-                && (loot_id.contains("ORB")
-                    || loot_id.contains("CHEST")
-                    || loot_id.contains("CAPSULE")
-                    || loot_id.contains("key_fragment")
-                    || loot_id.contains("fragment")
-                    || loot_id.contains("KEY_FRAGMENT")
-                    || loot_id.contains("FRAGMENT"));
+        let is_openable = is_openable_loot(loot_type, loot_id);
 
         if !is_openable || count <= 0 {
             continue;
@@ -555,6 +542,38 @@ async fn find_recipe_name(
     loot_id: &str,
     keyword: &str,
 ) -> Result<String, String> {
+    let recipes = fetch_recipes(base, auth, http_client, loot_id).await?;
+    if let Some(recipe) = find_recipe_by_keywords(&recipes, &[keyword]) {
+        return Ok(recipe.to_string());
+    }
+
+    Err(format!("未找到包含关键字 '{}' 的配方", keyword))
+}
+
+fn is_key_fragment_loot_id(loot_id: &str) -> bool {
+    loot_id.eq_ignore_ascii_case("MATERIAL_key_fragment")
+}
+
+fn is_openable_loot(loot_type: &str, loot_id: &str) -> bool {
+    let loot_type_upper = loot_type.to_ascii_uppercase();
+    let loot_id_upper = loot_id.to_ascii_uppercase();
+
+    matches!(loot_type_upper.as_str(), "CHEST" | "ORB" | "PORTAL")
+        || loot_id_upper.contains("ORB")
+        || loot_id_upper.contains("CHEST")
+        || (loot_type_upper == "MATERIAL"
+            && (loot_id_upper.contains("ORB")
+                || loot_id_upper.contains("CHEST")
+                || loot_id_upper.contains("CAPSULE")
+                || is_key_fragment_loot_id(loot_id)))
+}
+
+async fn fetch_recipes(
+    base: &str,
+    auth: &str,
+    http_client: &reqwest::Client,
+    loot_id: &str,
+) -> Result<Vec<serde_json::Value>, String> {
     let recipe_url = format!("{}/lol-loot/v1/recipes/initial-item/{}", base, loot_id);
     let resp = http_client
         .get(&recipe_url)
@@ -567,16 +586,75 @@ async fn find_recipe_name(
         return Err(format!("获取配方接口返回错误: {}", resp.status()));
     }
 
-    let recipes: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
-    for r in &recipes {
-        if let Some(recipe_name) = r.get("recipeName").and_then(|v| v.as_str()) {
-            if recipe_name.to_lowercase().contains(keyword) {
-                return Ok(recipe_name.to_string());
-            }
+    resp.json().await.map_err(|e| e.to_string())
+}
+
+fn find_recipe_by_name<'a>(
+    recipes: &'a [serde_json::Value],
+    recipe_name: &str,
+) -> Option<&'a serde_json::Value> {
+    recipes.iter().find(|r| {
+        r.get("recipeName")
+            .and_then(|v| v.as_str())
+            .map(|name| name == recipe_name)
+            .unwrap_or(false)
+    })
+}
+
+fn find_recipe_by_keywords<'a>(
+    recipes: &'a [serde_json::Value],
+    keywords: &[&str],
+) -> Option<&'a str> {
+    for keyword in keywords {
+        let keyword_lower = keyword.to_ascii_lowercase();
+        if let Some(recipe_name) = recipes.iter().find_map(|r| {
+            let recipe_name = r.get("recipeName").and_then(|v| v.as_str())?;
+            recipe_name
+                .to_ascii_lowercase()
+                .contains(&keyword_lower)
+                .then_some(recipe_name)
+        }) {
+            return Some(recipe_name);
         }
     }
+    None
+}
 
-    Err(format!("未找到包含关键字 '{}' 的配方", keyword))
+fn recipe_name(recipe: &serde_json::Value) -> Result<&str, String> {
+    recipe
+        .get("recipeName")
+        .and_then(|v| v.as_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "配方缺少 recipeName 字段".to_string())
+}
+
+fn collect_extra_ingredients(recipe: &serde_json::Value) -> Vec<String> {
+    let mut extra_ingredients = Vec::new();
+    collect_currency_ingredients(recipe, &mut extra_ingredients);
+    extra_ingredients.sort();
+    extra_ingredients.dedup();
+    extra_ingredients
+}
+
+fn collect_currency_ingredients(value: &serde_json::Value, result: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(s) => {
+            if matches!(s.as_str(), "CURRENCY_champion" | "CURRENCY_cosmetic") {
+                result.push(s.clone());
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_currency_ingredients(value, result);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for value in map.values() {
+                collect_currency_ingredients(value, result);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// 升级配方查找与额外材料检测：依次尝试 permanent → upgrade → open，并在匹配成功的配方中动态检测是否包含 CURRENCY_champion / CURRENCY_cosmetic 等额外材料
@@ -587,67 +665,34 @@ async fn find_recipe_upgrade_info(
     loot_id: &str,
     specific_recipe_name: Option<&str>,
 ) -> Result<(String, Vec<String>), String> {
-    let recipe_url = format!("{}/lol-loot/v1/recipes/initial-item/{}", base, loot_id);
-    let resp = http_client
-        .get(&recipe_url)
-        .header("Authorization", auth)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !resp.status().is_success() {
-        return Err(format!("获取配方接口返回错误: {}", resp.status()));
-    }
-
-    let recipes: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
+    let recipes = fetch_recipes(base, auth, http_client, loot_id).await?;
 
     let mut selected_recipe: Option<&serde_json::Value> = None;
     if let Some(r_name) = specific_recipe_name {
         if !r_name.is_empty() {
-            selected_recipe = recipes.iter().find(|r| {
-                r.get("recipeName")
-                    .and_then(|v| v.as_str())
-                    .map(|name| name == r_name)
-                    .unwrap_or(false)
-            });
+            selected_recipe = find_recipe_by_name(&recipes, r_name);
         }
     }
 
     if selected_recipe.is_none() {
-        for keyword in &[
-            "permanent",
-            "upgrade",
-            "open",
-            "claim",
-            "activate",
-            "unlock",
-        ] {
-            if let Some(r) = recipes.iter().find(|r| {
-                r.get("recipeName")
-                    .and_then(|v| v.as_str())
-                    .map(|name| name.to_lowercase().contains(keyword))
-                    .unwrap_or(false)
-            }) {
-                selected_recipe = Some(r);
-                break;
-            }
+        if let Some(selected_recipe_name) = find_recipe_by_keywords(
+            &recipes,
+            &[
+                "permanent",
+                "upgrade",
+                "open",
+                "claim",
+                "activate",
+                "unlock",
+            ],
+        ) {
+            selected_recipe = find_recipe_by_name(&recipes, selected_recipe_name);
         }
     }
 
     if let Some(r) = selected_recipe {
-        let recipe_name = r
-            .get("recipeName")
-            .and_then(|v| v.as_str())
-            .unwrap()
-            .to_string();
-        let recipe_str = r.to_string();
-        let mut extra_ingredients = Vec::new();
-        if recipe_str.contains("CURRENCY_champion") {
-            extra_ingredients.push("CURRENCY_champion".to_string());
-        }
-        if recipe_str.contains("CURRENCY_cosmetic") {
-            extra_ingredients.push("CURRENCY_cosmetic".to_string());
-        }
+        let recipe_name = recipe_name(r)?.to_string();
+        let extra_ingredients = collect_extra_ingredients(r);
         log::info!(
             "[loot][upgrade] {} 确定配方: {}, 额外材料: {:?}",
             loot_id,
@@ -660,7 +705,7 @@ async fn find_recipe_upgrade_info(
         // 针对头像图标 (ICON)、表情 (EMOTE) 和守卫皮肤 (WARDSKIN) 等免费道具，如果配方列表未返回，尝试使用 LCU 静态定义的分类通用解锁配方
         if loot_upper.contains("ICON") {
             let guessed_recipe = "SUMMONERICON_open".to_string();
-            log::info!(
+            log::warn!(
                 "[loot][upgrade] {} 未在配方列表中找到，尝试使用通用图标解锁配方: {}",
                 loot_id,
                 guessed_recipe
@@ -668,7 +713,7 @@ async fn find_recipe_upgrade_info(
             return Ok((guessed_recipe, Vec::new()));
         } else if loot_upper.contains("EMOTE") {
             let guessed_recipe = "EMOTE_open".to_string();
-            log::info!(
+            log::warn!(
                 "[loot][upgrade] {} 未在配方列表中找到，尝试使用通用表情解锁配方: {}",
                 loot_id,
                 guessed_recipe
@@ -676,7 +721,7 @@ async fn find_recipe_upgrade_info(
             return Ok((guessed_recipe, Vec::new()));
         } else if loot_upper.contains("WARDSKIN") {
             let guessed_recipe = "WARDSKIN_open".to_string();
-            log::info!(
+            log::warn!(
                 "[loot][upgrade] {} 未在配方列表中找到，尝试使用通用守卫解锁配方: {}",
                 loot_id,
                 guessed_recipe
