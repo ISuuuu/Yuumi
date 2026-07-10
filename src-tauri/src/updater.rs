@@ -76,6 +76,32 @@ macro_rules! build_updater {
 /// 返回 Some(UpdateInfo) 表示有更新，None 表示已是最新
 #[tauri::command]
 pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let state = app.state::<AppState>();
+
+    // 1. 如果有已下载好的待安装更新，直接返回其信息，不用发起网络请求
+    {
+        let pending = state.pending_update.lock().unwrap();
+        if let Some(p) = &*pending {
+            log::info!("已有下载完成的待安装更新 v{}，直接返回", p.info.version);
+            return Ok(Some(p.info.clone()));
+        }
+    }
+
+    // 2. 如果后台更新正在下载，则直接返回当前正在下载的更新信息，不用发起网络请求
+    if state
+        .is_downloading
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        let downloading = state.downloading_update.lock().unwrap();
+        if let Some(info) = &*downloading {
+            log::info!(
+                "后台下载已在进行中 (v{})，直接返回当前下载的更新信息",
+                info.version
+            );
+            return Ok(Some(info.clone()));
+        }
+    }
+
     let current = app.package_info().version.to_string();
     let updater = build_updater!(&app)?;
 
@@ -106,6 +132,17 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
 /// 通过 `updater://progress` 事件向前端推送下载进度
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if state
+        .is_downloading
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return Err("更新正在后台下载中，请稍候...".to_string());
+    }
+    if state.pending_update.lock().unwrap().is_some() {
+        return Err("更新已下载完成，请重启应用进行安装".to_string());
+    }
+
     let updater = build_updater!(&app)?;
 
     let update = updater
@@ -208,6 +245,9 @@ async fn background_download_update(
         state
             .is_downloading
             .store(true, std::sync::atomic::Ordering::Relaxed);
+
+        let mut downloading = state.downloading_update.lock().unwrap();
+        *downloading = Some(info.clone());
     }
     let app_for_progress = app.clone();
     let downloaded_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -247,6 +287,11 @@ async fn background_download_update(
             state
                 .is_downloading
                 .store(false, std::sync::atomic::Ordering::Relaxed);
+
+            let mut downloading = state.downloading_update.lock().unwrap();
+            *downloading = None;
+            drop(downloading);
+
             let mut pending = state.pending_update.lock().unwrap();
             *pending = Some(PendingUpdate {
                 bytes,
@@ -261,6 +306,11 @@ async fn background_download_update(
             state
                 .is_downloading
                 .store(false, std::sync::atomic::Ordering::Relaxed);
+
+            let mut downloading = state.downloading_update.lock().unwrap();
+            *downloading = None;
+            drop(downloading);
+
             let _ = app.emit("updater://download-error", format!("{}", e));
         }
     }
