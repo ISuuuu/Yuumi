@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/nicklasoverworlds/tauri/refs/heads/dev/crates/tauri-utils/schema.json",
   "identifier": "default",
   "description": "Capability for all windows",
-  "windows": ["*"],
+  "windows": ["main", "bench-overlay", "opgg"],
   "permissions": [
     "core:default",
     "core:window:allow-set-title",
@@ -14,10 +14,8 @@
     "core:window:allow-set-focus",
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
-    "core:window:allow-create",
     "core:window:allow-outer-position",
     "core:window:allow-inner-size",
-    "core:webview:allow-create-webview-window",
     "opener:default"
   ]
 }

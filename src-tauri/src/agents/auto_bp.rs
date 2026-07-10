@@ -625,9 +625,9 @@ async fn do_auto_spell(
     if selection.is_summoner_spell_set {
         return;
     }
-    selection.is_summoner_spell_set = true;
 
     if !cfg.enable_auto_set_spells {
+        selection.is_summoner_spell_set = true;
         return;
     }
 
@@ -646,18 +646,22 @@ async fn do_auto_spell(
     }
     if spells.len() < 2 || spells.contains(&54) {
         log::debug!("召唤师技能未配置完整，跳过");
+        selection.is_summoner_spell_set = true;
         return;
     }
 
     log::info!("自动设置召唤师技能: {} / {}", spells[0], spells[1]);
 
     let body = serde_json::json!({ "spell1Id": spells[0], "spell2Id": spells[1] });
-    lcu_patch_session(
+    let ok = lcu_patch_session(
         app_handle,
         "/lol-champ-select/v1/session/my-selection",
         &body,
     )
     .await;
+    if ok {
+        selection.is_summoner_spell_set = true;
+    }
 }
 
 // ─── LCU API 调用 ───
