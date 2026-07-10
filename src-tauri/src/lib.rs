@@ -61,7 +61,7 @@ pub struct AppState {
     /// WebSocket 连接取消信号发送端（新连接时发送取消旧循环）
     pub ws_cancel_tx: Mutex<Option<watch::Sender<bool>>>,
     /// LCU API 并发信号量（由 config.ApiConcurrencyNumber 控制）
-    pub api_semaphore: Arc<Semaphore>,
+    pub api_semaphore: RwLock<Arc<Semaphore>>,
     /// BP 状态重置标志（gameflow 阶段变化时置为 true，BP agent 检查后置 false）
     pub bp_reset_flag: AtomicBool,
     /// BP 锁定后台任务版本号（用于标记和防止残留协程竞态）
@@ -98,8 +98,18 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // 加载配置
-            let app_config = config::AppConfig::load();
+            // 加载配置并做 clamp 限制，防止因 api_concurrency_number 为 0 导致请求挂起
+            let mut app_config = config::AppConfig::load();
+            if !(1..=32).contains(&app_config.functions.api_concurrency_number) {
+                let clamped = app_config.functions.api_concurrency_number.clamp(1, 32);
+                log::warn!(
+                    "配置的 API 并发数 {} 不在 1..=32 范围内，已自动调整为 {}",
+                    app_config.functions.api_concurrency_number,
+                    clamped
+                );
+                app_config.functions.api_concurrency_number = clamped;
+                app_config.save();
+            }
             let api_concurrency = app_config.functions.api_concurrency_number as usize;
 
             let app_config_arc = Arc::new(RwLock::new(app_config));
@@ -125,7 +135,7 @@ pub fn run() {
                 gameflow_tx,
                 upload_queue,
                 ws_cancel_tx: Mutex::new(None),
-                api_semaphore: Arc::new(Semaphore::new(api_concurrency)),
+                api_semaphore: RwLock::new(Arc::new(Semaphore::new(api_concurrency))),
                 bp_reset_flag: AtomicBool::new(false),
                 bp_task_id: AtomicU64::new(0),
                 is_downloading: AtomicBool::new(false),
@@ -347,11 +357,10 @@ async fn get_game_data_assets(
 pub struct LcuConnectionDetails {
     pub pid: u32,
     pub port: u16,
-    pub token: String,
     pub server: Option<String>,
 }
 
-/// 获取当前 LCU 连接信息（PID、端口、Token、大区）
+/// 获取当前 LCU 连接信息（PID、端口、大区）
 #[tauri::command]
 async fn get_lcu_connection_info(
     app_state: tauri::State<'_, AppState>,
@@ -361,7 +370,6 @@ async fn get_lcu_connection_info(
         Some(client) => Ok(Some(LcuConnectionDetails {
             pid: client.pid,
             port: client.port,
-            token: client.token.clone(),
             server: client.server.clone(),
         })),
         None => Ok(None),
@@ -644,21 +652,30 @@ async fn launch_lol_client(
                             .map(|p| p.to_string_lossy().to_string())
                             .unwrap_or_default();
 
+                        let escape_ps_string = |s: &str| -> String { s.replace("'", "''") };
+
+                        let escaped_exe = escape_ps_string(&exe.to_string_lossy());
+                        let escaped_working_dir = escape_ps_string(&working_dir);
+
                         // 格式化参数传给 PowerShell
                         let args_str = args
                             .iter()
-                            .map(|arg| format!("'{}'", arg))
+                            .map(|arg| format!("'{}'", escape_ps_string(arg)))
                             .collect::<Vec<String>>()
                             .join(", ");
 
                         let command_str = if args_str.is_empty() {
                             format!(
                                 "Start-Process -FilePath '{}' -WorkingDirectory '{}' -Verb RunAs",
-                                exe.to_string_lossy(),
-                                working_dir
+                                escaped_exe, escaped_working_dir
                             )
                         } else {
-                            format!("Start-Process -FilePath '{}' -ArgumentList {} -WorkingDirectory '{}' -Verb RunAs", exe.to_string_lossy(), args_str, working_dir)
+                            format!(
+                                "Start-Process -FilePath '{}' -ArgumentList {} -WorkingDirectory '{}' -Verb RunAs",
+                                escaped_exe,
+                                args_str,
+                                escaped_working_dir
+                            )
                         };
 
                         let status = std::process::Command::new("powershell")
@@ -774,6 +791,9 @@ fn validate_config(cfg: &config::AppConfig) -> Result<(), String> {
     if !cfg.personalization.theme_color.starts_with('#') {
         return Err("theme_color 必须是以 # 开头的颜色值".to_string());
     }
+    if !(1..=32).contains(&cfg.functions.api_concurrency_number) {
+        return Err("api_concurrency_number 必须在 1 到 32 之间".to_string());
+    }
     Ok(())
 }
 
@@ -786,7 +806,7 @@ async fn update_config(
 ) -> Result<(), String> {
     validate_config(&new_config)?;
 
-    let (old_enable, old_mode, old_realtime, old_api_url, old_user_id) = {
+    let (old_enable, old_mode, old_realtime, old_api_url, old_user_id, old_api_concurrency) = {
         let lock = app_state.config.read().await;
         (
             lock.functions.enable_auto_create_lobby,
@@ -800,6 +820,7 @@ async fn update_config(
             } else {
                 "lcu_user_001".to_string()
             },
+            lock.functions.api_concurrency_number,
         )
     };
 
@@ -854,6 +875,17 @@ async fn update_config(
             log::info!("配置更新，停止 SignalR Hub 远程反代");
             signalr::stop().await;
         }
+    }
+
+    if new_config.functions.api_concurrency_number != old_api_concurrency {
+        let mut sem_lock = app_state.api_semaphore.write().await;
+        *sem_lock = Arc::new(Semaphore::new(
+            new_config.functions.api_concurrency_number as usize,
+        ));
+        log::info!(
+            "运行时 API 并发限制数更新为: {}",
+            new_config.functions.api_concurrency_number
+        );
     }
 
     Ok(())

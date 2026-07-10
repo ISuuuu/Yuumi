@@ -8,7 +8,6 @@ const store = useLcuStore();
 const connectionDetails = ref<{
   pid: number;
   port: number;
-  token: string;
 } | null>(null);
 const lolPaths = ref<string[]>([]);
 const selectedPath = ref<string>("");
@@ -77,10 +76,6 @@ watch(
         <div class="detail-row">
           <span class="detail-name">--app-port =</span>
           <span class="detail-value">{{ connectionDetails.port }}</span>
-        </div>
-        <div class="detail-row token-row">
-          <span class="detail-name">--remoting-auth-token =</span>
-          <span class="detail-value">{{ connectionDetails.token }}</span>
         </div>
       </div>
       <div v-else class="details-loading">

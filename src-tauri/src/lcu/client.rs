@@ -44,11 +44,11 @@ pub async fn call_lcu_api(
     }
 
     // 获取并发许可
-    let _permit = app_state
-        .api_semaphore
-        .acquire()
-        .await
-        .map_err(|e| e.to_string())?;
+    let semaphore = {
+        let lock = app_state.api_semaphore.read().await;
+        lock.clone()
+    };
+    let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
 
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();

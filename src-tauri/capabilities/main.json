@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicklasoverworlds/tauri/refs/heads/dev/crates/tauri-utils/schema.json",
+  "identifier": "main-window",
+  "description": "Capability for main window only",
+  "windows": ["main"],
+  "permissions": [
+    "core:window:allow-create",
+    "core:webview:allow-create-webview-window"
+  ]
+}

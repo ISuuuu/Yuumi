@@ -14,12 +14,81 @@ export type GamePhase =
   | "EndOfGame"
   | string;
 
+export interface ChampSelectAction {
+  actorCellId: number;
+  championId: number;
+  completed: boolean;
+  id: number;
+  isInProgress: boolean;
+  type: string;
+}
+
+export interface ChampSelectPlayer {
+  cellId: number;
+  championId: number;
+  championPickIntent: number;
+  assignedPosition: string;
+}
+
+export interface ChampSelectBans {
+  myTeamBans: number[];
+  theirTeamBans: number[];
+}
+
+export interface ChampSelectSwap {
+  id: number;
+  state: string;
+}
+
+export interface ChampSelectTrade {
+  id: number;
+  state: string;
+}
+
+export interface ChampSelectTimer {
+  adjustedTimeLeftInPhase: number;
+  phase: string;
+}
+
+export interface BenchChampion {
+  championId: number;
+  isMine: boolean;
+}
+
+export interface ChampSelectSession {
+  actions: ChampSelectAction[][];
+  localPlayerCellId: number;
+  myTeam: ChampSelectPlayer[];
+  theirTeam: ChampSelectPlayer[];
+  bans: ChampSelectBans;
+  pickOrderSwaps: ChampSelectSwap[];
+  trades: ChampSelectTrade[];
+  timer: ChampSelectTimer;
+  benchEnabled: boolean;
+  benchChampions: BenchChampion[];
+  queueId?: number;
+}
+
+export interface ReadyCheckSession {
+  declinerIds: number[];
+  dodgeWarning: string;
+  playerResponse: string;
+  state: string;
+  timer: number;
+}
+
+export interface LcuWebSocketEvent {
+  uri: string;
+  eventType: string;
+  data: any;
+}
+
 export const useLcuStore = defineStore("lcu", () => {
   const isConnected = ref(false);
   const wsConnected = ref(false);
   const gamePhase = ref<GamePhase>("None");
-  const champSelectSession = ref<any | null>(null);
-  const readyCheck = ref<any | null>(null);
+  const champSelectSession = ref<ChampSelectSession | null>(null);
+  const readyCheck = ref<ReadyCheckSession | null>(null);
   // lcu-client-started 事件计数器，用于触发 App.vue 重新加载状态
   const connectionVersion = ref(0);
 
@@ -38,10 +107,10 @@ export const useLcuStore = defineStore("lcu", () => {
     console.log("[lcuStore] setGamePhase:", v, "prev:", gamePhase.value);
     gamePhase.value = v;
   }
-  function setChampSelectSession(v: any | null) {
+  function setChampSelectSession(v: ChampSelectSession | null) {
     champSelectSession.value = v;
   }
-  function setReadyCheck(v: any | null) {
+  function setReadyCheck(v: ReadyCheckSession | null) {
     readyCheck.value = v;
   }
   function setCurrentPage(v: string) {
@@ -122,7 +191,7 @@ export async function initLcuListeners() {
     console.error("[lcuStore] lcu-ws-error:", event.payload);
   });
 
-  await listen<any>("lcu-ws-event", (event) => {
+  await listen<LcuWebSocketEvent>("lcu-ws-event", (event) => {
     const payload = event.payload;
     const uri: string = payload?.uri ?? "";
     const data = payload?.data;
@@ -150,7 +219,6 @@ export async function initLcuListeners() {
     const info = await invoke<{
       pid: number;
       port: number;
-      token: string;
     } | null>("get_lcu_connection_info");
     if (info && info.pid > 0) {
       console.log(
