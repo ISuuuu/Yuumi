@@ -78,6 +78,10 @@ function getLootDisplayName(loot: OpenableLoot): string {
   return name;
 }
 
+function isKeyFragmentLoot(loot: OpenableLoot): boolean {
+  return loot.lootId === "MATERIAL_key_fragment";
+}
+
 const sortedOpenableLoots = computed(() => {
   return [...openableLoots.value].sort((a, b) => {
     const getWeight = (loot: OpenableLoot) => {
@@ -139,7 +143,7 @@ function buildSmartOpenBatches(): OpenBatchItem[] {
   const batches: OpenBatchItem[] = [];
 
   // 1. 优先提取并合成钥匙碎片，计算新生成的额外钥匙数
-  const fragmentLoot = openableLoots.value.find(l => l.lootId.toLowerCase().includes("fragment"));
+  const fragmentLoot = openableLoots.value.find(isKeyFragmentLoot);
   let forgedKeys = 0;
   if (fragmentLoot && fragmentLoot.count >= 3) {
     forgedKeys = Math.floor(fragmentLoot.count / 3);
@@ -157,7 +161,7 @@ function buildSmartOpenBatches(): OpenBatchItem[] {
   // 2. 处理不需要钥匙的箱子/法球
   for (const loot of noKeyLoots.value) {
     // 过滤掉钥匙碎片（已经在上方优先合成处理了）
-    if (loot.lootId.toLowerCase().includes("fragment")) {
+    if (isKeyFragmentLoot(loot)) {
       continue;
     }
     batches.push({
@@ -171,7 +175,7 @@ function buildSmartOpenBatches(): OpenBatchItem[] {
 
   // 3. 处理需要钥匙开启的宝箱
   for (const loot of keyNeededLoots.value) {
-    if (loot.lootId.toLowerCase().includes("fragment")) {
+    if (isKeyFragmentLoot(loot)) {
       continue;
     }
     if (remainingKeys <= 0) break;
@@ -240,7 +244,7 @@ async function handleSmartOpenAll() {
 function openLootModal(loot: OpenableLoot) {
   selectedLoot.value = loot;
   let maxQ = 0;
-  if (loot.lootId.toLowerCase().includes("fragment")) {
+  if (isKeyFragmentLoot(loot)) {
     maxQ = Math.floor(loot.count / 3);
   } else {
     maxQ = loot.needKey
@@ -257,7 +261,7 @@ function closeLootModal() {
 const maxOpenQuantity = computed(() => {
   if (!selectedLoot.value) return 0;
   const loot = selectedLoot.value;
-  if (loot.lootId.toLowerCase().includes("fragment")) {
+  if (isKeyFragmentLoot(loot)) {
     return Math.floor(loot.count / 3);
   }
   if (!loot.needKey) return loot.count;
@@ -282,7 +286,7 @@ const currentKeyCount = computed(() => {
 async function handleBatchOpen() {
   if (!selectedLoot.value || openQuantity.value <= 0) return;
   const loot = selectedLoot.value;
-  const isFragment = loot.lootId.toLowerCase().includes("fragment");
+  const isFragment = isKeyFragmentLoot(loot);
 
   if (!isFragment && loot.needKey && openQuantity.value > maxOpenQuantity.value) {
     showToast(
@@ -1766,13 +1770,13 @@ function getQueueName(m: MatchDisplay): string {
                     <span class="loot-card-count">×{{ loot.count }}</span>
                   </div>
                   <div class="loot-card-footer">
-                    <span v-if="loot.lootId.toLowerCase().includes('fragment')" class="loot-no-key-badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+                    <span v-if="isKeyFragmentLoot(loot)" class="loot-no-key-badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
                       {{ $t("tools.lootOpener.forge3in1") }}
                     </span>
                     <span v-else-if="loot.needKey" class="loot-key-badge">{{ $t("tools.lootOpener.needKey") }}</span>
                     <span v-else class="loot-no-key-badge">{{ $t("tools.lootOpener.noKeyNeeded") }}</span>
                     <span class="loot-open-btn">
-                      {{ loot.lootId.toLowerCase().includes('fragment') ? $t("tools.lootOpener.forgeBtn") : $t("tools.lootOpener.openBtn") }}
+                      {{ isKeyFragmentLoot(loot) ? $t("tools.lootOpener.forgeBtn") : $t("tools.lootOpener.openBtn") }}
                     </span>
                   </div>
                 </div>
@@ -1918,9 +1922,12 @@ function getQueueName(m: MatchDisplay): string {
                     <span class="loot-card-name" :title="item.itemDesc">{{ item.itemDesc }}</span>
                     <span class="loot-card-count">×{{ item.count }}</span>
                   </div>
-                  <div class="loot-card-footer">
+                  <div class="loot-card-footer loot-manager-card-footer">
                     <span :class="item.itemStatus === 'OWNED' ? 'loot-badge-owned' : 'loot-badge-not-owned'">
                       {{ item.itemStatus === 'OWNED' ? $t("tools.lootManager.ownedBadge") : $t("tools.lootManager.notOwnedBadge") }}
+                    </span>
+                    <span v-if="item.displayCategories.toUpperCase() === 'SKIN' && item.itemStatus !== 'OWNED' && item.parentItemStatus !== 'OWNED'" class="loot-badge-no-parent">
+                      {{ $t("tools.lootManager.noChampionBadge") }}
                     </span>
                     <span class="essence-badge" :class="item.displayCategories === 'CHAMPION' ? 'blue-essence-text' : 'orange-essence-text'">
                       {{ item.displayCategories === 'CHAMPION' ? '🔷' : '🔶' }} {{ item.disenchantValue }}
@@ -2029,7 +2036,7 @@ function getQueueName(m: MatchDisplay): string {
           <div class="loot-modal-card">
             <div class="loot-modal-header">
               <h3>
-                {{ selectedLoot.lootId.toLowerCase().includes('fragment') ? $t("tools.lootOpener.batchForge") : $t("tools.lootOpener.batchOpen") }} - {{ getLootDisplayName(selectedLoot) }}
+                {{ isKeyFragmentLoot(selectedLoot) ? $t("tools.lootOpener.batchForge") : $t("tools.lootOpener.batchOpen") }} - {{ getLootDisplayName(selectedLoot) }}
               </h3>
               <button class="modal-close-btn" @click="closeLootModal">✕</button>
             </div>
@@ -2046,12 +2053,12 @@ function getQueueName(m: MatchDisplay): string {
               <div v-if="selectedLoot.needKey && selectedLoot.keyLootId" class="loot-info-row">
                 <span class="loot-info-label">{{ $t("tools.lootOpener.keyRequired") }}</span>
                 <span class="loot-info-value loot-key-count">
-                  {{ keyDisplayName }} ×{{ currentKeyCount }}
+                  {{ keyDisplayName }} ×{{ openQuantity }} ({{ $t("tools.lootOpener.owned") }}: {{ currentKeyCount }})
                 </span>
               </div>
               <div class="loot-quantity-row">
                 <span class="loot-info-label">
-                  {{ selectedLoot.lootId.toLowerCase().includes('fragment') ? '合成次数' : $t("tools.lootOpener.quantity") }}
+                  {{ isKeyFragmentLoot(selectedLoot) ? '合成次数' : $t("tools.lootOpener.quantity") }}
                 </span>
                 <n-input-number
                   v-model:value="openQuantity"
@@ -2062,7 +2069,7 @@ function getQueueName(m: MatchDisplay): string {
                 />
               </div>
               <div v-if="maxOpenQuantity <= 0" class="loot-insufficient">
-                {{ selectedLoot.lootId.toLowerCase().includes('fragment') ? $t("tools.lootOpener.insufficientFragments") : (selectedLoot.needKey ? $t("tools.lootOpener.insufficientKeys") : '') }}
+                {{ isKeyFragmentLoot(selectedLoot) ? $t("tools.lootOpener.insufficientFragments") : (selectedLoot.needKey ? $t("tools.lootOpener.insufficientKeys") : '') }}
               </div>
               <div class="loot-modal-actions">
                 <button class="action-btn" @click="closeLootModal">
@@ -2073,7 +2080,7 @@ function getQueueName(m: MatchDisplay): string {
                   :disabled="maxOpenQuantity <= 0"
                   @click="handleBatchOpen"
                 >
-                  {{ selectedLoot.lootId.toLowerCase().includes('fragment') ? $t("tools.lootOpener.startForge", { count: openQuantity }) : $t("tools.lootOpener.startOpen", { count: openQuantity }) }}
+                  {{ isKeyFragmentLoot(selectedLoot) ? $t("tools.lootOpener.startForge", { count: openQuantity }) : $t("tools.lootOpener.startOpen", { count: openQuantity }) }}
                 </button>
               </div>
             </div>
@@ -3083,6 +3090,13 @@ function getQueueName(m: MatchDisplay): string {
   align-items: center;
 }
 
+.loot-manager-card-footer {
+  justify-content: flex-start;
+  gap: 4px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
 .loot-key-badge {
   font-size: 0.7rem;
   color: var(--warning-color, #e6a23c);
@@ -3518,6 +3532,10 @@ function getQueueName(m: MatchDisplay): string {
   padding: 1px 6px;
   border-radius: 4px;
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .loot-badge-not-owned {
@@ -3528,6 +3546,23 @@ function getQueueName(m: MatchDisplay): string {
   padding: 1px 6px;
   border-radius: 4px;
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.loot-badge-no-parent {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* 精粹数值 */
@@ -3537,6 +3572,8 @@ function getQueueName(m: MatchDisplay): string {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .blue-essence-text { color: #2563eb; }
 .orange-essence-text { color: #d97706; }

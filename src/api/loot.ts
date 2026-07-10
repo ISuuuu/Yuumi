@@ -65,7 +65,7 @@ export interface LootItem {
   tilePath: string | null;
   upgradeRecipeName: string;
   upgradeEssenceCost: number;
-  parentItemStatus?: string;
+  parentItemStatus: string;
 }
 
 export interface DisenchantItem {
