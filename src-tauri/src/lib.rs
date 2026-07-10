@@ -9,7 +9,7 @@ pub mod tools;
 pub mod updater;
 pub mod upload;
 
-use crate::updater::PendingUpdate;
+use crate::updater::{PendingUpdate, UpdateInfo};
 use base64::Engine;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
@@ -68,6 +68,8 @@ pub struct AppState {
     pub bp_task_id: AtomicU64,
     /// 后台下载进行中标志，防止重复启动多个下载
     pub is_downloading: AtomicBool,
+    /// 正在后台下载的更新信息
+    pub downloading_update: Mutex<Option<UpdateInfo>>,
     /// 后台已下载完成的待安装更新
     pub pending_update: Mutex<Option<PendingUpdate>>,
 }
@@ -139,6 +141,7 @@ pub fn run() {
                 bp_reset_flag: AtomicBool::new(false),
                 bp_task_id: AtomicU64::new(0),
                 is_downloading: AtomicBool::new(false),
+                downloading_update: Mutex::new(None),
                 pending_update: Mutex::new(None),
             };
             app.manage(state);
