@@ -106,6 +106,13 @@ async fn handle_phase_change(
 ) {
     log::info!("游戏阶段: {}", phase);
 
+    // 进入对局阶段时开启自动截图事件监听，退出对局阶段时关闭
+    if phase == "InProgress" {
+        super::auto_screenshot::set_in_game(true);
+    } else {
+        super::auto_screenshot::set_in_game(false);
+    }
+
     // 进入 "None" 空闲状态时重置大厅创建标志（允许 WS 重连后重新创建）
     if phase == "None" {
         *lobby_created = false;

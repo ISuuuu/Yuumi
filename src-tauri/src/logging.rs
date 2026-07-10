@@ -162,6 +162,12 @@ impl Log for Logger {
             return;
         }
 
+        // 过滤 xcap 遍历所有窗口时因权限不足抛出的无害“拒绝访问”报错，防污染日志
+        let module = record.module_path_static().unwrap_or("unknown");
+        if module.contains("xcap") && record.args().to_string().contains("拒绝访问") {
+            return;
+        }
+
         // 写入文件
         if let Ok(mut writer) = self.file.lock() {
             let _ = writer.write_log(record);

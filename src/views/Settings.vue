@@ -187,6 +187,31 @@ async function handleBrowseFolder() {
   }
 }
 
+// 选择自动截图保存目录
+async function handleSelectScreenshotFolder() {
+  try {
+    const path = await invoke<string | null>("select_lol_folder");
+    if (path) {
+      if (!config.value) return;
+      config.value.Functions.ScreenshotSavePath = path;
+      await updateConfig(config.value);
+      showToast("已成功更新截图保存目录");
+    }
+  } catch (e: any) {
+    showToast("选择文件夹失败: " + e.toString(), "error");
+  }
+}
+
+// 在系统资源管理器中打开截图目录
+async function handleOpenScreenshotFolder() {
+  try {
+    await invoke("open_screenshot_folder");
+  } catch (e: any) {
+    showToast("无法打开截图文件夹: " + e.toString(), "error");
+  }
+}
+
+
 // 删除指定路径
 async function handleRemovePath(index: number) {
   if (!config.value) return;
@@ -734,6 +759,75 @@ function applyThemeMode(mode: string) {
           />
         </div>
       </div>
+
+      <!-- 自动截图设置 -->
+      <div class="group-header">{{ $t("settings.screenshotGroup") }}</div>
+
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="screenshot">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left-simple">
+                <span class="card-title">{{ $t("settings.enableScreenshotOnMultikillTitle") }}</span>
+                <span class="card-desc">{{ $t("settings.enableScreenshotOnMultikillDesc") }}</span>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">{{
+                  config.Functions.EnableScreenshotOnMultikill
+                    ? $t("settings.enabled")
+                    : $t("settings.disabled")
+                }}</span>
+              </div>
+            </div>
+          </template>
+
+          <div class="setting-row">
+            <span class="setting-label">{{ $t("settings.enableScreenshotOnMultikillTitle") }}</span>
+            <n-switch
+              v-model:value="config.Functions.EnableScreenshotOnMultikill"
+              @update:value="autoSave"
+            />
+          </div>
+
+          <template v-if="config.Functions.EnableScreenshotOnMultikill">
+            <!-- 截图触发条件选项 -->
+            <div class="setting-row">
+              <span class="setting-label">{{ $t("settings.screenshotLevelsTitle") }}</span>
+              <n-checkbox-group
+                v-model:value="config.Functions.ScreenshotOnMultikillLevels"
+                @update:value="autoSave"
+              >
+                <n-space>
+                  <n-checkbox :value="3">{{ $t("settings.tripleKill") }}</n-checkbox>
+                  <n-checkbox :value="4">{{ $t("settings.quadraKill") }}</n-checkbox>
+                  <n-checkbox :value="5">{{ $t("settings.pentaKill") }}</n-checkbox>
+                  <n-checkbox :value="8">{{ $t("settings.legendary") }}</n-checkbox>
+                </n-space>
+              </n-checkbox-group>
+            </div>
+
+            <!-- 目录配置项 -->
+            <div class="setting-row" style="flex-wrap: wrap; gap: 12px;">
+              <span class="setting-label" style="width: 100%;">{{ $t("settings.screenshotSavePathTitle") }}</span>
+              <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+                <n-input
+                  v-model:value="config.Functions.ScreenshotSavePath"
+                  readonly
+                  :placeholder="t('settings.screenshotSavePathPlaceholder')"
+                  size="small"
+                  style="flex: 1;"
+                />
+                <n-button size="small" type="primary" secondary @click="handleSelectScreenshotFolder">
+                  {{ $t("settings.browseBtn") }}
+                </n-button>
+                <n-button size="small" @click="handleOpenScreenshotFolder">
+                  {{ $t("settings.openScreenshotFolderBtn") }}
+                </n-button>
+              </div>
+            </div>
+          </template>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 4. 日志 -->
       <div class="group-header">{{ $t("settings.logGroup") }}</div>

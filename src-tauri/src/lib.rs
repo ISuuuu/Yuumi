@@ -149,6 +149,7 @@ pub fn run() {
             // 启动 Agents
             agents::auto_bp::start(app.handle().clone(), bp_rx);
             agents::auto_match::start(app.handle().clone(), gameflow_rx, upload_trigger);
+            agents::auto_screenshot::start(app.handle().clone());
 
             // 启动 LCU 进程监测
             let app_handle = app.handle().clone();
@@ -319,6 +320,7 @@ pub fn run() {
             get_map_side,
             detect_lol_path,
             select_lol_folder,
+            open_screenshot_folder,
             set_mica_effect,
             launch_lol_client,
             get_game_data_assets,
@@ -551,6 +553,36 @@ fn select_lol_folder() -> Result<Option<String>, String> {
         .pick_folder();
     Ok(folder.map(|p| p.to_string_lossy().to_string()))
 }
+
+/// 在系统文件管理器中打开截图保存的目录
+#[tauri::command]
+async fn open_screenshot_folder(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let config_lock = state.config.read().await;
+    let custom_path = &config_lock.functions.screenshot_save_path;
+    
+    let path = if !custom_path.is_empty() {
+        std::path::PathBuf::from(custom_path)
+    } else {
+        let mut p = dirs::picture_dir().ok_or_else(|| "无法获取系统图片目录".to_string())?;
+        p.push("Yuumi_Screenshots");
+        p
+    };
+
+    if !path.exists() {
+        std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    
+    Ok(())
+}
+
 
 /// 运行时切换云母效果
 #[tauri::command]
