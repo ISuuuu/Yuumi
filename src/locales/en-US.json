@@ -626,7 +626,8 @@
     "damage": "Damage Out",
     "tank": "Damage Taken",
     "gold": "Gold",
-    "cs": "CS"
+    "cs": "CS",
+    "items": "Items"
   },
   "opgg": {
     "title": "OP.GG Assistant",
