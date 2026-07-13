@@ -627,7 +627,8 @@
     "damage": "输出",
     "tank": "承伤",
     "gold": "金币",
-    "cs": "补刀"
+    "cs": "补刀",
+    "items": "装备"
   },
   "opgg": {
     "title": "OP.GG 辅助模块",
