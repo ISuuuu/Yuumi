@@ -597,6 +597,8 @@
     "empty": "No match history available",
     "detailBtn": "Details",
     "remake": "Remake",
+    "total": "Total",
+    "lastPlayTime": "Last played",
     "totalGames": "Games",
     "winsLabel": "Wins",
     "lossesLabel": "Losses",

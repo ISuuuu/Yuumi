@@ -32,6 +32,7 @@ pub struct PlayerGameSummary {
     pub recent_games: Vec<MatchDisplay>,
     pub fate_flag: Option<String>, // "ally" | "enemy" | null
     pub recently_champion_id: Option<i32>,
+    pub recently_champion_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +210,8 @@ async fn fetch_player_summary(
 
     // 5. 最近常用英雄
     let recently_champion_id = recent_games.first().map(|g| g.champion_id);
+    let recently_champion_name =
+        recently_champion_id.and_then(|id| assets.champions.get(&id).cloned());
 
     let champion_icon_url = format!(
         "/lol-game-data/assets/v1/champion-icons/{}.png",
@@ -228,6 +231,7 @@ async fn fetch_player_summary(
         recent_games,
         fate_flag,
         recently_champion_id,
+        recently_champion_name,
     })
 }
 
@@ -238,7 +242,7 @@ async fn check_fate(
     auth: &str,
     game_id: u64,
     current_summoner_id: u64,
-    _target_puuid: &str,
+    target_puuid: &str,
 ) -> Option<String> {
     let url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
     let resp = http
@@ -249,36 +253,231 @@ async fn check_fate(
         .ok()?;
     let detail: serde_json::Value = resp.json().await.ok()?;
 
-    let participants = detail.get("participants")?.as_array()?;
-    let identities = detail.get("participantIdentities")?.as_array()?;
+    let queue_id = detail.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0);
+    let participants = detail.get("participants").and_then(|v| v.as_array())?;
+    let identities = detail
+        .get("participantIdentities")
+        .and_then(|v| v.as_array())?;
 
-    // 找到当前玩家和目标玩家所在的队伍
-    let mut current_team_id: Option<i32> = None;
+    let mut current_pid: Option<i64> = None;
+    let mut target_pid: Option<i64> = None;
 
-    // 通过 participantIdentities 匹配 summonerId → participantId → teamId
+    // 1. 查找 participantId
     for ident in identities {
-        let player_data = ident.get("player")?;
-        let summoner_id = player_data.get("summonerId").and_then(|v| v.as_u64())?;
-        let participant_id = ident.get("participantId").and_then(|v| v.as_i64())? as i32;
+        let player_data = match ident.get("player") {
+            Some(p) => p,
+            None => continue,
+        };
+        let puuid = player_data
+            .get("puuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let summoner_id = player_data
+            .get("summonerId")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let pid = match ident.get("participantId").and_then(|v| v.as_i64()) {
+            Some(id) => id,
+            None => continue,
+        };
 
-        // 在 participants 中找到对应的 teamId
-        for p in participants {
-            let pid = p.get("participantId").and_then(|v| v.as_i64())? as i32;
-            if pid == participant_id {
-                let team_id = p.get("teamId").and_then(|v| v.as_i64())? as i32;
-                if summoner_id == current_summoner_id {
-                    current_team_id = Some(team_id);
-                }
-            }
+        if puuid == target_puuid {
+            target_pid = Some(pid);
+        }
+        if summoner_id == current_summoner_id {
+            current_pid = Some(pid);
         }
     }
 
-    // 如果当前玩家不在这局中，无法判定
-    current_team_id?;
+    let current_pid = current_pid?;
+    let target_pid = target_pid?;
 
-    // 这里简化处理：如果有上局数据，标记为"有缘"
-    // 完整实现需要对比目标玩家的 teamId
-    Some("encountered".to_string())
+    // 如果是同一个人，则无队友/对手关系
+    if current_pid == target_pid {
+        return None;
+    }
+
+    // 2. 查找对应的队伍 ID
+    let mut current_team: Option<i64> = None;
+    let mut target_team: Option<i64> = None;
+
+    for p in participants {
+        let pid = match p.get("participantId").and_then(|v| v.as_i64()) {
+            Some(id) => id,
+            None => continue,
+        };
+
+        let team_val = if queue_id == 1700 {
+            p.get("stats")
+                .and_then(|s| s.get("subteamPlacement"))
+                .and_then(|v| v.as_i64())
+        } else {
+            p.get("teamId").and_then(|v| v.as_i64())
+        };
+
+        if pid == current_pid {
+            current_team = team_val;
+        }
+        if pid == target_pid {
+            target_team = team_val;
+        }
+    }
+
+    let current_team = current_team?;
+    let target_team = target_team?;
+
+    if current_team == target_team {
+        Some("ally".to_string())
+    } else {
+        Some("enemy".to_string())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerFateInfo {
+    pub fate_flag: Option<String>,
+    pub recently_champion_name: Option<String>,
+}
+
+/// 前端独立调用的单个玩家宿命获取接口
+#[tauri::command]
+pub async fn get_player_fate_info(
+    game_id: u64,
+    target_puuid: String,
+    current_summoner_id: u64,
+    app_state: State<'_, AppState>,
+) -> Result<PlayerFateInfo, String> {
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().ok_or("LCU未连接")?;
+
+    let auth = build_auth_header(&lcu.token);
+    let base = format!("https://127.0.0.1:{}", lcu.port);
+    let http = &lcu.http_client;
+
+    let url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
+    let resp = http
+        .get(&url)
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let detail: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+    let queue_id = detail.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0);
+    let participants = detail
+        .get("participants")
+        .and_then(|v| v.as_array())
+        .ok_or("无法解析 participants")?;
+    let identities = detail
+        .get("participantIdentities")
+        .and_then(|v| v.as_array())
+        .ok_or("无法解析 participantIdentities")?;
+
+    let mut current_pid: Option<i64> = None;
+    let mut target_pid: Option<i64> = None;
+
+    // 1. 查找 participantId
+    for ident in identities {
+        let player_data = match ident.get("player") {
+            Some(p) => p,
+            None => continue,
+        };
+        let puuid = player_data
+            .get("puuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let summoner_id = player_data
+            .get("summonerId")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let pid = match ident.get("participantId").and_then(|v| v.as_i64()) {
+            Some(id) => id,
+            None => continue,
+        };
+
+        if puuid == target_puuid {
+            target_pid = Some(pid);
+        }
+        if summoner_id == current_summoner_id {
+            current_pid = Some(pid);
+        }
+    }
+
+    let target_pid = target_pid.ok_or("找不到目标玩家")?;
+
+    // 查找目标玩家在这一局使用的英雄 ID
+    let mut target_champion_id: Option<i32> = None;
+    for p in participants {
+        let pid = match p.get("participantId").and_then(|v| v.as_i64()) {
+            Some(id) => id,
+            None => continue,
+        };
+        if pid == target_pid {
+            target_champion_id = p
+                .get("championId")
+                .and_then(|v| v.as_i64())
+                .map(|id| id as i32);
+            break;
+        }
+    }
+
+    let recently_champion_name = if let Some(cid) = target_champion_id {
+        let assets = app_state.game_data.read().await;
+        assets.champions.get(&cid).cloned()
+    } else {
+        None
+    };
+
+    let fate_flag = if let Some(curr_pid) = current_pid {
+        if curr_pid == target_pid {
+            None
+        } else {
+            // 2. 查找对应的队伍 ID
+            let mut current_team: Option<i64> = None;
+            let mut target_team: Option<i64> = None;
+
+            for p in participants {
+                let pid = match p.get("participantId").and_then(|v| v.as_i64()) {
+                    Some(id) => id,
+                    None => continue,
+                };
+
+                let team_val = if queue_id == 1700 {
+                    p.get("stats")
+                        .and_then(|s| s.get("subteamPlacement"))
+                        .and_then(|v| v.as_i64())
+                } else {
+                    p.get("teamId").and_then(|v| v.as_i64())
+                };
+
+                if pid == curr_pid {
+                    current_team = team_val;
+                }
+                if pid == target_pid {
+                    target_team = team_val;
+                }
+            }
+
+            if let (Some(ct), Some(tt)) = (current_team, target_team) {
+                if ct == tt {
+                    Some("ally".to_string())
+                } else {
+                    Some("enemy".to_string())
+                }
+            } else {
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    Ok(PlayerFateInfo {
+        fate_flag,
+        recently_champion_name,
+    })
 }
 
 fn parse_rank_from_value(v: &serde_json::Value) -> Option<RankInfo> {

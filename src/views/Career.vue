@@ -16,9 +16,11 @@ import {
   fetchMatchHistorySgp,
   lcuRequest,
   fetchConfig,
+  fetchRecentTeammates,
 } from "../api/lcu";
-import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
+import type { SummonerDisplay, MatchDisplay, RecentTeammate } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
+import { NPopover, NSpin } from "naive-ui";
 import { listen } from "@tauri-apps/api/event";
 import { fetchOpenableLoots, batchOpenLoots, smartOpenAllLoots, fetchLootInventory, disenchantLoot, rerollLoot, upgradeLoot, fetchEssenceBalances } from "../api/loot";
 import type { OpenableLoot, LootProgressEvent, OpenBatchItem, LootItem, DisenchantItem, ActionProgressEvent } from "../api/loot";
@@ -34,6 +36,9 @@ let lastFetchedTime = 0;
 const store = useLcuStore();
 const { t, te } = useI18n();
 const { showToast } = useToast();
+
+const navigateTo = inject<(page: string) => void>("navigateTo");
+
 const currentTab = ref("matches"); // matches (生涯战绩), loot (战利品)
 
 // ─── 战利品批量开启逻辑 ───
@@ -1036,6 +1041,48 @@ function updateRecentMatchesCache(puuid: string, fresh: MatchDisplay[]) {
   } catch {
     /* ignore */
   }
+
+  calculateRecentTeammates();
+}
+
+const loadingTeammates = ref(false);
+const recentTeammates = ref<RecentTeammate[]>([]);
+let currentTeammatePuuid = "";
+
+async function calculateRecentTeammates() {
+  if (!summoner.value?.puuid || recentMatches.value.length === 0) {
+    recentTeammates.value = [];
+    return;
+  }
+
+  const targetPuuid = summoner.value.puuid;
+  currentTeammatePuuid = targetPuuid;
+  loadingTeammates.value = true;
+  try {
+    const gameIds = recentMatches.value.map((m) => m.gameId);
+    const resp = await fetchRecentTeammates(gameIds, targetPuuid);
+    if (currentTeammatePuuid === targetPuuid) {
+      recentTeammates.value = resp.summoners || [];
+    }
+  } catch (err) {
+    console.error("计算最近队友失败:", err);
+    if (currentTeammatePuuid === targetPuuid) {
+      recentTeammates.value = [];
+    }
+  } finally {
+    if (currentTeammatePuuid === targetPuuid) {
+      loadingTeammates.value = false;
+    }
+  }
+}
+
+function handleClickTeammate(name: string) {
+  if (navigateSearchPayload) {
+    navigateSearchPayload.value = { name, gameId: -1 };
+  }
+  if (navigateTo) {
+    navigateTo("search");
+  }
 }
 
 function getKdaClass(kda: string): string {
@@ -1526,9 +1573,63 @@ function getQueueName(m: MatchDisplay): string {
         </div>
 
         <div class="summary-actions">
-          <button class="summary-action-btn">
-            {{ $t("career.recentTeammates") }}
-          </button>
+          <n-popover
+            trigger="click"
+            placement="bottom-start"
+            scrollable
+            class="recent-teammates-popover"
+            style="
+              max-height: 400px;
+              width: 420px;
+              border-radius: 12px;
+              padding: 12px;
+            "
+          >
+            <template #trigger>
+              <button class="summary-action-btn">
+                {{ $t("career.recentTeammates") }}
+              </button>
+            </template>
+            <div class="teammates-flyout">
+              <div v-if="loadingTeammates" class="loading-container">
+                <n-spin size="medium" />
+              </div>
+              <div v-else-if="recentTeammates.length === 0" class="empty-text">
+                暂无最近队友数据
+              </div>
+              <div v-else class="teammates-list">
+                <div
+                  v-for="t in recentTeammates"
+                  :key="t.puuid"
+                  class="teammate-card"
+                  @click="handleClickTeammate(t.name)"
+                >
+                  <div class="teammate-avatar">
+                    <LcuImage :src="t.icon" />
+                  </div>
+                  <div class="teammate-info-col">
+                    <div class="teammate-name">
+                      {{ t.name }}
+                    </div>
+                    <div class="teammate-last-time" v-if="t.lastPlayTime">
+                      {{ formatTime(t.lastPlayTime) }}
+                    </div>
+                  </div>
+                  <div class="teammate-stats">
+                    <span class="stat-item">
+                      {{ $t("career.total") || "总" }}: <span class="stat-value total">{{ t.total }}</span>
+                    </span>
+                    <span class="stat-item">
+                      {{ $t("career.win") || "胜" }}: <span class="stat-value win">{{ t.wins }}</span>
+                    </span>
+                    <span class="stat-item">
+                      {{ $t("career.lose") || "负" }}: <span class="stat-value lose">{{ t.losses }}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </n-popover>
           <div
             class="dropdown-trigger"
             @click.stop="showQueueDropdown = !showQueueDropdown"
@@ -2603,15 +2704,18 @@ function getQueueName(m: MatchDisplay): string {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
+  background: #ffffff;
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
   border-radius: 8px;
   box-shadow: var(--shadow-lg);
   z-index: 100;
   min-width: 130px;
   padding: 4px 0;
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
+}
+
+[data-theme="dark"] .queue-dropdown-menu {
+  background: #18181c;
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .queue-dropdown-item {
@@ -3683,5 +3787,105 @@ function getQueueName(m: MatchDisplay): string {
 .confirm-detail-row .detail-value {
   font-weight: 700;
   color: var(--text-color);
+}
+
+/* 最近队友 Flyout 样式 */
+.teammates-flyout {
+  padding: 4px;
+}
+.teammates-flyout .loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100px;
+}
+.teammates-flyout .empty-text {
+  text-align: center;
+  color: var(--text-dimmed);
+  font-size: 0.85rem;
+  padding: 20px 0;
+}
+.teammates-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.teammate-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md, 10px);
+  background: var(--settings-row-bg, rgba(255, 255, 255, 0.45));
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.05));
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+.teammate-card:hover {
+  background: var(--settings-row-bg-hover, rgba(255, 255, 255, 0.75));
+  border-color: var(--border-color-hover, rgba(0, 210, 196, 0.25));
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md, 0 4px 20px -2px rgba(0, 0, 0, 0.05));
+}
+.teammate-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid var(--border-color, rgba(0, 0, 0, 0.05));
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.teammate-avatar :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.teammate-info-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.teammate-name {
+  font-weight: 600;
+  color: var(--text-color, #0f172a);
+  font-size: 0.88rem;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.teammate-last-time {
+  font-size: 0.72rem;
+  color: var(--text-dimmed, #64748b);
+}
+.teammate-stats {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.82rem;
+  color: var(--text-muted, #475569);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.stat-value {
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+.stat-value.total {
+  color: var(--text-color, #0f172a);
+}
+.stat-value.win {
+  color: var(--win-color, #10b981);
+}
+.stat-value.lose {
+  color: var(--loss-color, #f43f5e);
 }
 </style>
