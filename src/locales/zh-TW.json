@@ -629,7 +629,8 @@
     "damage": "輸出",
     "tank": "承傷",
     "gold": "金幣",
-    "cs": "補刀"
+    "cs": "補刀",
+    "items": "裝備"
   },
   "opgg": {
     "title": "OP.GG 輔助模塊",

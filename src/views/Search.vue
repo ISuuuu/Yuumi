@@ -766,6 +766,7 @@ const gameDetails = computed(() => {
     queriedPlayerChampionIconUrl,
     mapIconUrl,
     blue: {
+      teamId: 100,
       players: bluePlayers,
       kills: blueKills,
       win: isBlueWin,
@@ -776,6 +777,7 @@ const gameDetails = computed(() => {
       riftHeraldKills: blueTeamRaw.riftHeraldKills ?? 0,
     },
     red: {
+      teamId: 200,
       players: redPlayers,
       kills: redKills,
       win: !isBlueWin,
@@ -1073,26 +1075,26 @@ function getQueueName(queueId: number, backendName: string): string {
 
                     <div class="team-objectives">
                       <span class="obj-item" title="击杀"
-                        ><span class="obj-icon">⚔️</span> {{ team.kills }}</span
+                        ><img class="obj-icon-img" src="/images/kills.png" /> {{ team.kills }}</span
                       >
                       <span class="obj-item" title="摧毁防御塔"
-                        ><span class="obj-icon">🏰</span>
+                        ><img class="obj-icon-img" :src="`/images/tower-${team.teamId}.png`" />
                         {{ team.towerKills }}</span
                       >
                       <span class="obj-item" title="摧毁水晶"
-                        ><span class="obj-icon">💎</span>
+                        ><img class="obj-icon-img" :src="`/images/inhibitor-${team.teamId}.png`" />
                         {{ team.inhibitorKills }}</span
                       >
                       <span class="obj-item" title="击杀纳什男爵"
-                        ><span class="obj-icon">👾</span>
+                        ><img class="obj-icon-img" :src="`/images/baron-${team.teamId}.png`" />
                         {{ team.baronKills }}</span
                       >
                       <span class="obj-item" title="击杀巨龙"
-                        ><span class="obj-icon">🐉</span>
+                        ><img class="obj-icon-img" :src="`/images/dragon-${team.teamId}.png`" />
                         {{ team.dragonKills }}</span
                       >
                       <span class="obj-item" title="击杀峡谷先锋 / 虚空巢虫"
-                        ><span class="obj-icon">🦀</span>
+                        ><img class="obj-icon-img" :src="`/images/herald-${team.teamId}.png`" />
                         {{ team.riftHeraldKills }}</span
                       >
                     </div>
@@ -1101,7 +1103,7 @@ function getQueueName(queueId: number, backendName: string): string {
 
                     <div class="team-header-right">
                       <span class="header-items">{{
-                        $t("tools.background.titleModal") || "装备"
+                        $t("search.items")
                       }}</span>
                       <span class="header-kda">{{ $t("career.kda") }}</span>
                       <span class="header-cs">{{ $t("search.cs") }}</span>
@@ -1972,6 +1974,13 @@ function getQueueName(queueId: number, backendName: string): string {
 
 .obj-icon {
   font-size: 0.85rem;
+}
+
+.obj-icon-img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  vertical-align: middle;
 }
 
 /* 玩家列表 Table 行 */
