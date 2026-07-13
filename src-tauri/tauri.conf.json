@@ -18,6 +18,7 @@
         "height": 910,
         "center": true,
         "decorations": false,
+        "transparent": true,
         "visible": false,
         "devtools": true
       },

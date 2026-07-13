@@ -20,6 +20,7 @@ import { setLocale } from "../i18n";
 
 const config =
   inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
+const applyMicaEffect = inject<(enabled: boolean) => void>("applyMicaEffect");
 const dialog = useDialog();
 const { t } = useI18n();
 
@@ -878,9 +879,7 @@ function applyThemeMode(mode: string) {
             v-model:value="config.Personalization.MicaEnabled"
             @update:value="
               autoSave();
-              invoke('set_mica_effect', {
-                enabled: config.Personalization.MicaEnabled,
-              });
+              applyMicaEffect?.(config.Personalization.MicaEnabled);
             "
           />
         </div>

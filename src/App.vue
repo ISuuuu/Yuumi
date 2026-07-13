@@ -43,6 +43,19 @@ function applyThemeMode(mode: string) {
   }
 }
 
+function applyMicaEffect(enabled: boolean) {
+  const root = document.documentElement;
+  if (enabled) {
+    root.setAttribute("data-mica", "true");
+  } else {
+    root.removeAttribute("data-mica");
+  }
+  invoke("set_mica_effect", { enabled }).catch((e: any) =>
+    console.warn("应用云母效果失败:", e),
+  );
+}
+provide("applyMicaEffect", applyMicaEffect);
+
 // 水晶极光主题覆盖（动态响应系统主题色）
 const themeOverrides = computed<GlobalThemeOverrides>(() => {
   const customColor = appConfig.value?.Personalization?.ThemeColor
@@ -209,13 +222,7 @@ onMounted(async () => {
     if (!cfg?.General?.EnableGameStartMinimize) {
       await getCurrentWindow().show();
     }
-    // 无论是否静默启动，都在配置加载完后尝试应用一次云母效果，防止窗口创建时隐藏导致 DWM 特效应用失败
-    if (cfg?.Personalization?.MicaEnabled) {
-      invoke("set_mica_effect", { enabled: true }).catch((e: any) =>
-        console.warn("应用云母效果失败:", e),
-      );
-    }
-    // 应用主题色、死亡数字颜色 & 界面缩放
+    // 应用主题色、死亡数字颜色、界面缩放、云母效果
     if (cfg?.Personalization) {
       if (cfg.Personalization.ThemeColor) {
         updateThemeColor(cfg.Personalization.ThemeColor);
@@ -231,6 +238,7 @@ onMounted(async () => {
       );
       applyDpiScale(cfg.Personalization.DpiScale);
       applyThemeMode(cfg.Personalization.ThemeMode);
+      applyMicaEffect(!!cfg.Personalization.MicaEnabled);
     }
   } catch (e) {
     console.warn("[App] 启动配置检查失败:", e);
@@ -1412,6 +1420,10 @@ body {
   user-select: none;
 }
 
+html[data-mica="true"] body {
+  background-color: transparent !important;
+}
+
 /* 悬浮窗容器：全透明背景，无滚动 */
 .overlay-container {
   width: 100vw;
@@ -1446,6 +1458,10 @@ body {
   width: 100vw;
   overflow: hidden;
   background: var(--bg-color-gradient);
+}
+
+html[data-mica="true"] .app-layout {
+  background: transparent !important;
 }
 
 /* 自定义标题栏 */
