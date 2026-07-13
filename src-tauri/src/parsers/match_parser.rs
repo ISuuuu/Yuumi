@@ -708,6 +708,7 @@ pub struct RecentTeammate {
     pub total: u32,
     pub wins: u32,
     pub losses: u32,
+    pub last_play_time: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -721,11 +722,12 @@ struct TeammateInfo {
     name: String,
     puuid: String,
     icon: i32,
+    win: bool,
 }
 
 struct GameTeammates {
-    win: bool,
     remake: bool,
+    game_creation: u64,
     summoners: Vec<TeammateInfo>,
 }
 
@@ -745,9 +747,15 @@ async fn fetch_game_teammates(
         .ok()?;
     let detail: serde_json::Value = resp.json().await.ok()?;
 
+    let game_creation = detail
+        .get("gameCreation")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let queue_id = detail.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0);
     let participants = detail.get("participants").and_then(|v| v.as_array())?;
-    let identities = detail.get("participantIdentities").and_then(|v| v.as_array())?;
+    let identities = detail
+        .get("participantIdentities")
+        .and_then(|v| v.as_array())?;
 
     let mut target_pid: Option<i64> = None;
 
@@ -757,7 +765,10 @@ async fn fetch_game_teammates(
             Some(p) => p,
             None => continue,
         };
-        let p_puuid = player_data.get("puuid").and_then(|v| v.as_str()).unwrap_or("");
+        let p_puuid = player_data
+            .get("puuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if p_puuid == target_puuid {
             target_pid = ident.get("participantId").and_then(|v| v.as_i64());
             break;
@@ -766,9 +777,8 @@ async fn fetch_game_teammates(
 
     let target_pid = target_pid?;
 
-    // 2. 查找目标玩家对应的 teamId 和这一局的胜负、remake 状态
+    // 2. 查找目标玩家对应的 teamId 和这一局的 remake 状态
     let mut target_team: Option<i64> = None;
-    let mut win = false;
     let mut remake = false;
 
     for p in participants {
@@ -781,9 +791,11 @@ async fn fetch_game_teammates(
                 Some(s) => s,
                 None => continue,
             };
-            win = stats.get("win").and_then(|v| v.as_bool()).unwrap_or(false);
-            remake = stats.get("teamEarlySurrendered").and_then(|v| v.as_bool()).unwrap_or(false);
-            
+            remake = stats
+                .get("teamEarlySurrendered")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
             target_team = if queue_id == 1700 {
                 stats.get("subteamPlacement").and_then(|v| v.as_i64())
             } else {
@@ -815,6 +827,11 @@ async fn fetch_game_teammates(
         };
 
         if p_team == Some(target_team) {
+            let p_win = p
+                .get("stats")
+                .and_then(|s| s.get("win"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             // 在 identities 中匹配玩家信息
             for ident in identities {
                 let ident_pid = match ident.get("participantId").and_then(|v| v.as_i64()) {
@@ -826,20 +843,51 @@ async fn fetch_game_teammates(
                         Some(p) => p,
                         None => continue,
                     };
-                    let name = player_data.get("summonerName")
+                    let game_name = player_data
+                        .get("gameName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let summoner_name = player_data
+                        .get("summonerName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let display_name = player_data
+                        .get("displayName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    let mut name = if !game_name.is_empty() {
+                        game_name.to_string()
+                    } else if !summoner_name.is_empty() {
+                        summoner_name.to_string()
+                    } else {
+                        display_name.to_string()
+                    };
+
+                    let tag_line = player_data
+                        .get("tagLine")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if !tag_line.is_empty() && !name.is_empty() {
+                        name = format!("{}#{}", name, tag_line);
+                    }
+                    let puuid = player_data
+                        .get("puuid")
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
-                    let puuid = player_data.get("puuid")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let icon = player_data.get("profileIcon")
+                    let icon = player_data
+                        .get("profileIcon")
                         .and_then(|v| v.as_i64())
                         .unwrap_or(0) as i32;
-                    
+
                     if !puuid.is_empty() && puuid != "00000000-0000-0000-0000-000000000000" {
-                        summoners.push(TeammateInfo { name, puuid, icon });
+                        summoners.push(TeammateInfo {
+                            name,
+                            puuid,
+                            icon,
+                            win: p_win,
+                        });
                     }
                     break;
                 }
@@ -847,7 +895,11 @@ async fn fetch_game_teammates(
         }
     }
 
-    Some(GameTeammates { win, remake, summoners })
+    Some(GameTeammates {
+        remake,
+        game_creation,
+        summoners,
+    })
 }
 
 #[tauri::command]
@@ -882,12 +934,13 @@ pub async fn get_recent_teammates(
     }
 
     // 统计队友
-    let mut stats: std::collections::HashMap<String, RecentTeammate> = std::collections::HashMap::new();
+    let mut stats: std::collections::HashMap<String, RecentTeammate> =
+        std::collections::HashMap::new();
 
     for game in all_teammates {
         for p in game.summoners {
             let entry = stats.entry(p.puuid.clone()).or_insert_with(|| {
-                let icon_path = format!("/lol-game-data/assets/v1/profile-icons/{}.png", p.icon);
+                let icon_path = format!("/lol-game-data/assets/v1/profile-icons/{}.jpg", p.icon);
                 RecentTeammate {
                     name: p.name,
                     puuid: p.puuid,
@@ -895,11 +948,12 @@ pub async fn get_recent_teammates(
                     total: 0,
                     wins: 0,
                     losses: 0,
+                    last_play_time: game.game_creation,
                 }
             });
             entry.total += 1;
             if !game.remake {
-                if game.win {
+                if p.win {
                     entry.wins += 1;
                 } else {
                     entry.losses += 1;
@@ -910,16 +964,9 @@ pub async fn get_recent_teammates(
 
     let mut summoners: Vec<RecentTeammate> = stats.into_values().collect();
     // 按照 total 降序排序，总场数相同的按胜场降序
-    summoners.sort_by(|a, b| {
-        b.total.cmp(&a.total)
-            .then_with(|| b.wins.cmp(&a.wins))
-    });
+    summoners.sort_by(|a, b| b.total.cmp(&a.total).then_with(|| b.wins.cmp(&a.wins)));
     // 取前 5 个
     summoners.truncate(5);
 
-    Ok(RecentTeammatesResponse {
-        puuid,
-        summoners,
-    })
+    Ok(RecentTeammatesResponse { puuid, summoners })
 }
-

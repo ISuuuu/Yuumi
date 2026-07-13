@@ -9,6 +9,7 @@ import {
   fetchCurrentSummoner,
   lcuRequest,
   fetchConfig,
+  fetchPlayerFateInfo,
 } from "../api/lcu";
 import type { MatchDisplay, AppConfig } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
@@ -187,6 +188,7 @@ interface PlayerData {
   winCount?: number;
   lossesCount?: number;
   fateFlag?: "ally" | "enemy" | null; // 上一局宿命：队友/对手/无
+  recentlyChampionName?: string; // 上一局使用的英雄名
 }
 const playerData = ref<Record<number, PlayerData>>({});
 
@@ -440,41 +442,21 @@ async function loadPlayerData(cellId: number, summonerId: number) {
 
     // 宿命检测：取该玩家最近一局，查自己是否在其中（上局队友/对手），排除自己本身
     let fateFlag: "ally" | "enemy" | null = null;
+    let recentlyChampionName = "";
     if (currentSummonerId.value && matches.length > 0 && !isCurrentPlayer) {
       try {
         const lastGameId = matches[0].gameId;
-        const gameResp = await lcuRequest<any>(
-          "GET",
-          `/lol-match-history/v1/games/${lastGameId}`,
+        const fateInfo = await fetchPlayerFateInfo(
+          lastGameId,
+          info.puuid,
+          currentSummonerId.value,
         );
-        if (gameResp.success && gameResp.data?.participants) {
-          const participants: any[] = gameResp.data.participants;
-          // 找到该玩家自己在哪个 teamId
-          const targetParticipant = participants.find(
-            (pt: any) =>
-              pt.participantId ===
-              gameResp.data.participantIdentities?.find(
-                (id: any) => id.player?.summonerId === summonerId,
-              )?.participantId,
-          );
-          const targetTeamId = targetParticipant?.teamId;
-
-          // 找到当前用户（自己）在哪个 teamId
-          const selfIdentity = gameResp.data.participantIdentities?.find(
-            (id: any) => id.player?.summonerId === currentSummonerId.value,
-          );
-          if (selfIdentity) {
-            const selfParticipant = participants.find(
-              (pt: any) => pt.participantId === selfIdentity.participantId,
-            );
-            const selfTeamId = selfParticipant?.teamId;
-            if (targetTeamId !== undefined && selfTeamId !== undefined) {
-              fateFlag = selfTeamId === targetTeamId ? "ally" : "enemy";
-            }
-          }
+        if (fateInfo) {
+          fateFlag = fateInfo.fateFlag;
+          recentlyChampionName = fateInfo.recentlyChampionName || "";
         }
-      } catch {
-        /* 查询失败忽略，不影响主流程 */
+      } catch (e) {
+        console.error("宿命检测失败:", e);
       }
     }
 
@@ -488,6 +470,7 @@ async function loadPlayerData(cellId: number, summonerId: number) {
       winCount,
       lossesCount,
       fateFlag,
+      recentlyChampionName,
     };
     try {
       localStorage.setItem(
@@ -926,9 +909,13 @@ watch(activeTab, () => loadAllPlayers());
                   v-if="playerData[p.cellId]?.fateFlag"
                   :class="['fate-badge', playerData[p.cellId].fateFlag]"
                   :title="
-                    playerData[p.cellId].fateFlag === 'ally'
-                      ? $t('gameInfo.fateAllyTitle')
-                      : $t('gameInfo.fateEnemyTitle')
+                    playerData[p.cellId].recentlyChampionName
+                      ? (playerData[p.cellId].fateFlag === 'ally'
+                        ? `${$t('gameInfo.fateAllyTitle')} (使用: ${playerData[p.cellId].recentlyChampionName})`
+                        : `${$t('gameInfo.fateEnemyTitle')} (使用: ${playerData[p.cellId].recentlyChampionName})`)
+                      : (playerData[p.cellId].fateFlag === 'ally'
+                        ? $t('gameInfo.fateAllyTitle')
+                        : $t('gameInfo.fateEnemyTitle'))
                   "
                   >{{
                     playerData[p.cellId].fateFlag === "ally"

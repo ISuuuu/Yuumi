@@ -173,6 +173,42 @@ export const fetchMatchHistorySgp = (
     endIndex,
   });
 
+export interface RecentTeammate {
+  name: string;
+  puuid: string;
+  icon: string;
+  total: number;
+  wins: number;
+  losses: number;
+  lastPlayTime: number;
+}
+
+export interface RecentTeammatesResponse {
+  puuid: string;
+  summoners: RecentTeammate[];
+}
+
+export interface PlayerFateInfo {
+  fateFlag: "ally" | "enemy" | null;
+  recentlyChampionName: string | null;
+}
+
+/** 获取最近队友统计 */
+export const fetchRecentTeammates = (gameIds: number[], puuid: string) =>
+  invoke<RecentTeammatesResponse>("get_recent_teammates", { gameIds, puuid });
+
+/** 获取单个玩家上一局与自己的宿命关系及英雄名 */
+export const fetchPlayerFateInfo = (
+  gameId: number,
+  targetPuuid: string,
+  currentSummonerId: number,
+) =>
+  invoke<PlayerFateInfo>("get_player_fate_info", {
+    gameId,
+    targetPuuid,
+    currentSummonerId,
+  });
+
 /** 获取 LCU 静态资源（图片等），返回 data URL */
 export const fetchLcuAsset = (path: string) =>
   invoke<string>("get_lcu_asset", { path });

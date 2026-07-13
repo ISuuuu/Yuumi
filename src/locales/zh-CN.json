@@ -598,6 +598,8 @@
     "empty": "暂无历史战绩数据",
     "detailBtn": "对局详情",
     "remake": "重开",
+    "total": "总",
+    "lastPlayTime": "最近一次",
     "totalGames": "总场次",
     "winsLabel": "胜场",
     "lossesLabel": "负场",
