@@ -57,14 +57,12 @@ jobs:
   build-windows:
     needs: create-release
     runs-on: windows-latest
+    env:
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-C linker=lld-link"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -72,16 +70,11 @@ jobs:
           version: 8
           run_install: false
 
-      - name: Get pnpm store directory
-        shell: bash
-        run: echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          path: ${{ env.PNPM_STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: ${{ runner.os }}-pnpm-store-
+          node-version: '24'
+          cache: 'pnpm'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -91,36 +84,32 @@ jobs:
         with:
           workspaces: './src-tauri'
 
+      - name: Cache NSIS
+        id: cache-nsis
+        uses: actions/cache@v4
+        with:
+          path: C:\Program Files (x86)\NSIS
+          key: ${{ runner.os }}-nsis-v1
+
       - name: Install NSIS (required for Tauri Windows bundler)
+        if: steps.cache-nsis.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          Write-Host "Checking existing NSIS installation..."
-          $defaultNsisPath = "C:\Program Files (x86)\NSIS"
+          Write-Host "NSIS cache miss. Installing via Chocolatey..."
+          choco install nsis -y
 
-          # 1. 优先检查默认预装路径是否存在，存在则直接加入环境变量
+      - name: Add NSIS to PATH
+        shell: pwsh
+        run: |
+          $defaultNsisPath = "C:\Program Files (x86)\NSIS"
           if (Test-Path $defaultNsisPath) {
-            Write-Host "Found pre-installed NSIS at: $defaultNsisPath. Adding to PATH..."
+            Write-Host "Found NSIS at: $defaultNsisPath. Adding to PATH..."
             echo "$defaultNsisPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
             # 在当前步骤中也临时加入 PATH 以便下方验证
             $env:PATH = "$defaultNsisPath;" + $env:PATH
-          }
-
-          # 2. 验证 makensis 是否可用
-          $existingNsis = Get-Command makensis -ErrorAction SilentlyContinue
-          if ($existingNsis) {
-            Write-Host "NSIS is ready to use!"
-            & makensis -VERSION
           } else {
-            # 3. 只有前两步都失败了，才使用 choco 安装（备用兜底逻辑）
-            Write-Host "NSIS not found in PATH or default folder, installing via Chocolatey..."
-            choco install nsis -y
-            if (Test-Path $defaultNsisPath) {
-              echo "$defaultNsisPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-              Write-Host "Added NSIS to PATH: $defaultNsisPath"
-            } else {
-              Write-Error "NSIS installation failed - directory not found at $defaultNsisPath"
-              exit 1
-            }
+            Write-Error "NSIS not found at $defaultNsisPath! Tauri NSIS bundler will fail."
+            exit 1
           }
 
           # 最终确认 makensis 可用
