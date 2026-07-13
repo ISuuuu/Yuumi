@@ -221,8 +221,12 @@ fn get_queue_info(queue_id: i32) -> QueueInfo {
             name: "排位灵活组排",
             map: "召唤师峡谷",
         },
+        480 => QueueInfo {
+            name: "快速模式",
+            map: "召唤师峡谷",
+        },
         490 => QueueInfo {
-            name: "快速游戏",
+            name: "快速模式",
             map: "召唤师峡谷",
         },
         // 嚎哭深渊
@@ -694,3 +698,228 @@ pub async fn get_match_history_sgp(
 
     Ok(displays)
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentTeammate {
+    pub name: String,
+    pub puuid: String,
+    pub icon: String,
+    pub total: u32,
+    pub wins: u32,
+    pub losses: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentTeammatesResponse {
+    pub puuid: String,
+    pub summoners: Vec<RecentTeammate>,
+}
+
+struct TeammateInfo {
+    name: String,
+    puuid: String,
+    icon: i32,
+}
+
+struct GameTeammates {
+    win: bool,
+    remake: bool,
+    summoners: Vec<TeammateInfo>,
+}
+
+async fn fetch_game_teammates(
+    http: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    game_id: u64,
+    target_puuid: &str,
+) -> Option<GameTeammates> {
+    let url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
+    let resp = http
+        .get(&url)
+        .header("Authorization", auth)
+        .send()
+        .await
+        .ok()?;
+    let detail: serde_json::Value = resp.json().await.ok()?;
+
+    let queue_id = detail.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0);
+    let participants = detail.get("participants").and_then(|v| v.as_array())?;
+    let identities = detail.get("participantIdentities").and_then(|v| v.as_array())?;
+
+    let mut target_pid: Option<i64> = None;
+
+    // 1. 查找目标玩家的 participantId
+    for ident in identities {
+        let player_data = match ident.get("player") {
+            Some(p) => p,
+            None => continue,
+        };
+        let p_puuid = player_data.get("puuid").and_then(|v| v.as_str()).unwrap_or("");
+        if p_puuid == target_puuid {
+            target_pid = ident.get("participantId").and_then(|v| v.as_i64());
+            break;
+        }
+    }
+
+    let target_pid = target_pid?;
+
+    // 2. 查找目标玩家对应的 teamId 和这一局的胜负、remake 状态
+    let mut target_team: Option<i64> = None;
+    let mut win = false;
+    let mut remake = false;
+
+    for p in participants {
+        let pid = match p.get("participantId").and_then(|v| v.as_i64()) {
+            Some(id) => id,
+            None => continue,
+        };
+        if pid == target_pid {
+            let stats = match p.get("stats") {
+                Some(s) => s,
+                None => continue,
+            };
+            win = stats.get("win").and_then(|v| v.as_bool()).unwrap_or(false);
+            remake = stats.get("teamEarlySurrendered").and_then(|v| v.as_bool()).unwrap_or(false);
+            
+            target_team = if queue_id == 1700 {
+                stats.get("subteamPlacement").and_then(|v| v.as_i64())
+            } else {
+                p.get("teamId").and_then(|v| v.as_i64())
+            };
+            break;
+        }
+    }
+
+    let target_team = target_team?;
+
+    // 3. 收集其他相同 teamId 的玩家作为队友
+    let mut summoners = Vec::new();
+    for p in participants {
+        let pid = match p.get("participantId").and_then(|v| v.as_i64()) {
+            Some(id) => id,
+            None => continue,
+        };
+        if pid == target_pid {
+            continue;
+        }
+
+        let p_team = if queue_id == 1700 {
+            p.get("stats")
+                .and_then(|s| s.get("subteamPlacement"))
+                .and_then(|v| v.as_i64())
+        } else {
+            p.get("teamId").and_then(|v| v.as_i64())
+        };
+
+        if p_team == Some(target_team) {
+            // 在 identities 中匹配玩家信息
+            for ident in identities {
+                let ident_pid = match ident.get("participantId").and_then(|v| v.as_i64()) {
+                    Some(id) => id,
+                    None => continue,
+                };
+                if ident_pid == pid {
+                    let player_data = match ident.get("player") {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    let name = player_data.get("summonerName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let puuid = player_data.get("puuid")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let icon = player_data.get("profileIcon")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0) as i32;
+                    
+                    if !puuid.is_empty() && puuid != "00000000-0000-0000-0000-000000000000" {
+                        summoners.push(TeammateInfo { name, puuid, icon });
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    Some(GameTeammates { win, remake, summoners })
+}
+
+#[tauri::command]
+pub async fn get_recent_teammates(
+    game_ids: Vec<u64>,
+    puuid: String,
+    app_state: State<'_, AppState>,
+) -> Result<RecentTeammatesResponse, String> {
+    let lock = app_state.lcu().await?;
+    let lcu = lock.as_ref().ok_or("LCU未连接")?;
+
+    let auth = build_auth_header(&lcu.token);
+    let base = format!("https://127.0.0.1:{}", lcu.port);
+    let http = lcu.http_client.clone();
+
+    let mut handles = Vec::new();
+    for game_id in game_ids {
+        let auth = auth.clone();
+        let base = base.clone();
+        let http = http.clone();
+        let target_puuid = puuid.clone();
+        handles.push(tokio::spawn(async move {
+            fetch_game_teammates(&http, &base, &auth, game_id, &target_puuid).await
+        }));
+    }
+
+    let mut all_teammates = Vec::new();
+    for h in handles {
+        if let Ok(Some(res)) = h.await {
+            all_teammates.push(res);
+        }
+    }
+
+    // 统计队友
+    let mut stats: std::collections::HashMap<String, RecentTeammate> = std::collections::HashMap::new();
+
+    for game in all_teammates {
+        for p in game.summoners {
+            let entry = stats.entry(p.puuid.clone()).or_insert_with(|| {
+                let icon_path = format!("/lol-game-data/assets/v1/profile-icons/{}.png", p.icon);
+                RecentTeammate {
+                    name: p.name,
+                    puuid: p.puuid,
+                    icon: icon_path,
+                    total: 0,
+                    wins: 0,
+                    losses: 0,
+                }
+            });
+            entry.total += 1;
+            if !game.remake {
+                if game.win {
+                    entry.wins += 1;
+                } else {
+                    entry.losses += 1;
+                }
+            }
+        }
+    }
+
+    let mut summoners: Vec<RecentTeammate> = stats.into_values().collect();
+    // 按照 total 降序排序，总场数相同的按胜场降序
+    summoners.sort_by(|a, b| {
+        b.total.cmp(&a.total)
+            .then_with(|| b.wins.cmp(&a.wins))
+    });
+    // 取前 5 个
+    summoners.truncate(5);
+
+    Ok(RecentTeammatesResponse {
+        puuid,
+        summoners,
+    })
+}
+
