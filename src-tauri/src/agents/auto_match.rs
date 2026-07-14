@@ -1,5 +1,6 @@
 use tauri::{AppHandle, Manager};
 use tokio::sync::mpsc;
+use tokio::time::{sleep, Duration};
 
 use crate::config::FunctionsConfig;
 
@@ -133,10 +134,24 @@ async fn handle_phase_change(
         try_create_default_lobby(app_handle, cfg, lobby_created).await;
     }
 
-    // 游戏进行中 → 自动重连
+    // 游戏进行中 → 自动重连（指数退避，最多 5 次）
     if phase == "InProgress" && cfg.enable_auto_reconnect {
         log::info!("检测到游戏进行中，尝试自动重连...");
-        lcu_post(app_handle, "/lol-gameflow/v1/reconnect").await;
+        for attempt in 1..=5 {
+            if lcu_post(app_handle, "/lol-gameflow/v1/reconnect").await {
+                log::info!("自动重连成功");
+                break;
+            }
+            if attempt < 5 {
+                let delay = Duration::from_millis(500 * (1 << (attempt - 1)));
+                log::info!(
+                    "重连失败，{}s 后重试（第 {}/5 次）",
+                    delay.as_secs_f32(),
+                    attempt + 1
+                );
+                sleep(delay).await;
+            }
+        }
     }
 
     // 状态转换检测 → 上传队列（包含延迟 2 秒 + 去重）
