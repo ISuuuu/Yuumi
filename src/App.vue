@@ -1293,15 +1293,17 @@ async function handleClose() {
   --text-muted: #475569;
   --text-dimmed: #64748b;
 
-  --win-color: #10b981;
-  --win-bg: rgba(16, 185, 129, 0.08);
-  --win-border: rgba(16, 185, 129, 0.2);
-  --win-glow: rgba(16, 185, 129, 0.06);
+  --win-color: #065f46;
+  --win-bg: rgba(57, 176, 27, 0.20);
+  --win-bg-hover: rgba(57, 176, 27, 0.32);
+  --win-border: rgba(57, 176, 27, 0.40);
+  --win-glow: rgba(57, 176, 27, 0.10);
 
-  --loss-color: #f43f5e;
-  --loss-bg: rgba(244, 63, 94, 0.08);
-  --loss-border: rgba(244, 63, 94, 0.2);
-  --loss-glow: rgba(244, 63, 94, 0.06);
+  --loss-color: #9f1239;
+  --loss-bg: rgba(211, 25, 12, 0.20);
+  --loss-bg-hover: rgba(211, 25, 12, 0.32);
+  --loss-border: rgba(211, 25, 12, 0.40);
+  --loss-glow: rgba(211, 25, 12, 0.10);
   --death-color: #f43f5e;
   --accent-color: #f59e0b;
   --accent-bg: rgba(245, 158, 11, 0.08);
@@ -1310,7 +1312,7 @@ async function handleClose() {
   --tier-blue-border: rgba(59, 130, 246, 0.15);
 
   --font-sans:
-    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    'Outfit', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -1352,14 +1354,16 @@ async function handleClose() {
   --text-dimmed: #94a3b8;
 
   --win-color: #34d399;
-  --win-bg: rgba(52, 211, 153, 0.12);
-  --win-border: rgba(52, 211, 153, 0.25);
-  --win-glow: rgba(52, 211, 153, 0.1);
+  --win-bg: rgba(57, 176, 27, 0.20);
+  --win-bg-hover: rgba(57, 176, 27, 0.32);
+  --win-border: rgba(57, 176, 27, 0.40);
+  --win-glow: rgba(57, 176, 27, 0.12);
 
   --loss-color: #fb7185;
-  --loss-bg: rgba(251, 113, 133, 0.12);
-  --loss-border: rgba(251, 113, 133, 0.25);
-  --loss-glow: rgba(251, 113, 133, 0.1);
+  --loss-bg: rgba(211, 25, 12, 0.20);
+  --loss-bg-hover: rgba(211, 25, 12, 0.32);
+  --loss-border: rgba(211, 25, 12, 0.40);
+  --loss-glow: rgba(211, 25, 12, 0.12);
   --death-color: #fb7185;
   --accent-color: #fbbf24;
   --accent-bg: rgba(251, 191, 36, 0.12);
@@ -1442,21 +1446,100 @@ html[data-mica="true"] body {
   overflow: hidden;
 }
 
-/* 美化全局滚动条 */
+/* 精致苹果风悬浮滚动条 */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 4px;
-  transition: background 0.2s;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--border-color-hover);
+  background: var(--primary-color-alpha-30) !important;
+}
+
+/* 性能保障降级策略：非云母模式下使用实色背景，减少 GPU 重绘 */
+:root:not([data-mica="true"]) {
+  --sidebar-bg: #ffffff;
+  --card-bg: #f8fafc;
+  --card-bg-hover: #f1f5f9;
+  --titlebar-bg: #ffffff;
+  --settings-row-bg: #f1f5f9;
+  --settings-row-bg-hover: #e2e8f0;
+}
+[data-theme="dark"]:not([data-mica="true"]) {
+  --sidebar-bg: #111827;
+  --card-bg: #1e293b;
+  --card-bg-hover: #334155;
+  --titlebar-bg: #0b0f19;
+  --settings-row-bg: #1e293b;
+  --settings-row-bg-hover: #334155;
+}
+
+/* 全局 Naive UI 浮动弹出层毛玻璃化与硬件加速 */
+.n-popover,
+.n-dropdown-menu,
+.n-select-menu,
+.n-modal,
+.n-drawer {
+  background-color: var(--card-bg) !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: var(--shadow-lg) !important;
+  transform: translateZ(0); /* 开启 GPU 硬件加速 */
+}
+
+/* 如果开启了云母效果，且不是嵌套状态，赋予菜单毛玻璃质感 */
+html[data-mica="true"] .n-popover,
+html[data-mica="true"] .n-dropdown-menu,
+html[data-mica="true"] .n-select-menu,
+html[data-mica="true"] .n-modal,
+html[data-mica="true"] .n-drawer {
+  backdrop-filter: var(--glass-filter, blur(24px) saturate(200%)) !important;
+  -webkit-backdrop-filter: var(--glass-filter, blur(24px) saturate(200%)) !important;
+}
+
+/* 全局输入框聚焦时的呼吸发光高亮 */
+.n-input {
+  transition: border-color 0.25s cubic-bezier(0.25, 0.8, 0.25, 1), 
+              box-shadow 0.25s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}
+.n-input--focus {
+  border-color: var(--primary-color) !important;
+  box-shadow: 0 0 0 3px var(--primary-color-alpha-15) !important;
+}
+
+/* 全局战绩卡片物理上浮微动效 */
+.match-card {
+  transition: transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1), 
+              box-shadow 0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+              border-color 0.25s, 
+              background-color 0.25s !important;
+}
+.match-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md) !important;
+  border-color: var(--primary-color-alpha-30) !important;
+}
+
+/* 战绩卡片鼠标滑过时背景颜色变深，支持动态变量 */
+.match-card.win:hover,
+.mini-match-card.win:hover {
+  background-color: var(--win-bg-hover) !important;
+}
+.match-card.lose:hover,
+.mini-match-card.lose:hover {
+  background-color: var(--loss-bg-hover) !important;
+}
+.match-card.remake:hover,
+.mini-match-card.remake:hover {
+  background-color: var(--remake-bg-hover) !important;
 }
 </style>
 

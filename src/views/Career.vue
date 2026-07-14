@@ -2306,6 +2306,22 @@ function getQueueName(m: MatchDisplay): string {
   overflow-y: auto;
   padding-right: 4px;
   margin-top: 1rem;
+  scroll-behavior: smooth;
+  /* 顶部与底部边缘 16px 渐变淡出羽化，消除滑动硬切裂感，极致顺滑 */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 16px,
+    black calc(100% - 16px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 16px,
+    black calc(100% - 16px),
+    transparent 100%
+  );
 }
 
 /* 召唤师头部卡片 */
@@ -2317,7 +2333,7 @@ function getQueueName(m: MatchDisplay): string {
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   box-shadow: var(--shadow-sm);
   transition: all 0.25s ease;
 }
@@ -2521,7 +2537,7 @@ function getQueueName(m: MatchDisplay): string {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   box-shadow: var(--shadow-sm);
   transition: all 0.25s ease;
 }
@@ -2540,7 +2556,7 @@ function getQueueName(m: MatchDisplay): string {
 
 .rank-table th,
 .rank-table td {
-  padding: 12px 16px;
+  padding: 6px 16px;
   font-size: 0.82rem;
   border-bottom: 1px solid var(--border-color);
 }
@@ -3032,7 +3048,7 @@ function getQueueName(m: MatchDisplay): string {
 .career-tabs {
   display: flex;
   gap: 8px;
-  margin: 12px 0 16px 0;
+  margin: 6px 0 10px 0;
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 8px;
 }

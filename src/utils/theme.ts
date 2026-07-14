@@ -93,9 +93,9 @@ export function updateCardColors(
 ) {
   const root = document.documentElement;
 
-  const DEFAULT_WIN = "#1510b981";
-  const DEFAULT_LOSE = "#12f43f5e";
-  const DEFAULT_REMAKE = "#1294a3b8";
+  const DEFAULT_WIN = "#3339b01b";
+  const DEFAULT_LOSE = "#33d3190c";
+  const DEFAULT_REMAKE = "#33a2a2a2";
 
   const setCardVars = (prefix: string, color: string, defaultHex: string) => {
     // 如果没有颜色配置，或颜色等于默认配置（不区分大小写），则清除 CSS 自定义属性覆盖，让其回退到样式表的亮暗色自动适应
@@ -137,6 +137,7 @@ export function updateCardColors(
     if (isNaN(r) || isNaN(g) || isNaN(b)) {
       root.style.removeProperty(`--${prefix}-color`);
       root.style.removeProperty(`--${prefix}-bg`);
+      root.style.removeProperty(`--${prefix}-bg-hover`);
       root.style.removeProperty(`--${prefix}-border`);
       root.style.removeProperty(`--${prefix}-glow`);
       return;
@@ -146,6 +147,10 @@ export function updateCardColors(
     root.style.setProperty(
       `--${prefix}-bg`,
       `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`,
+    );
+    root.style.setProperty(
+      `--${prefix}-bg-hover`,
+      `rgba(${r}, ${g}, ${b}, ${Math.min(0.9, alpha * 1.5).toFixed(2)})`,
     );
     root.style.setProperty(
       `--${prefix}-border`,
