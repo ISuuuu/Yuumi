@@ -16,12 +16,6 @@ const benchChampions = computed(() => {
 
 // 获取当前玩家在该选人会话中可用的英雄 ID 列表
 async function fetchPickableIds(retryCount = 3) {
-  // 如果不在英雄选择阶段，直接跳过，静默返回
-  if (store.gamePhase !== "ChampSelect") {
-    console.log("[BenchOverlay] 当前非选人阶段，跳过拉取可用英雄列表");
-    return;
-  }
-
   console.log(
     `[BenchOverlay] 正在获取当前可用英雄列表... (剩余重试次数: ${retryCount})`,
   );
@@ -131,6 +125,11 @@ watch(
         "benchChampions =",
         session.benchChampions,
       );
+      // 如果可用英雄列表仍为空，则通过更新 session 触发拉取（不依赖 gamePhase 状态同步）
+      if (pickableIds.value.length === 0) {
+        console.log("[BenchOverlay] 选人会话更新且可用列表为空，补充拉取...");
+        fetchPickableIds();
+      }
     }
   },
   { deep: true, immediate: true },
