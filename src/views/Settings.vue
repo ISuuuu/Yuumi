@@ -191,9 +191,12 @@ async function handleBrowseFolder() {
 // 选择自动截图保存目录
 async function handleSelectScreenshotFolder() {
   try {
-    const path = await invoke<string | null>("select_lol_folder");
+    if (!config.value) return;
+    const path = await invoke<string | null>("select_folder", { 
+      title: "选择自动截图保存目录",
+      defaultPath: config.value.Functions.ScreenshotSavePath
+    });
     if (path) {
-      if (!config.value) return;
       config.value.Functions.ScreenshotSavePath = path;
       await updateConfig(config.value);
       showToast("已成功更新截图保存目录");

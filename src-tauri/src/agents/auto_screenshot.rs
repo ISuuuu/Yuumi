@@ -27,13 +27,43 @@ fn compare_names(name_a: &str, name_b: &str) -> bool {
     clean_a == clean_b
 }
 
+/// Fallback 方案：尝试从 LCU 接口获取当前登录召唤师的 displayName
+async fn get_summoner_name_from_lcu(app_handle: &AppHandle) -> Option<String> {
+    let state = app_handle.state::<crate::AppState>();
+    let lcu_lock = state.lcu().await.ok()?;
+    let lcu = lcu_lock.as_ref()?;
+    let url = format!(
+        "https://127.0.0.1:{}/lol-summoner/v1/current-summoner",
+        lcu.port
+    );
+    let auth = crate::build_auth_header(&lcu.token);
+
+    let resp = lcu
+        .http_client
+        .get(&url)
+        .header("Authorization", auth)
+        .send()
+        .await
+        .ok()?;
+
+    if resp.status().is_success() {
+        if let Ok(val) = resp.json::<serde_json::Value>().await {
+            return val
+                .get("displayName")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+        }
+    }
+    None
+}
+
 /// 开启多杀截图的后台守护任务
 pub fn start(app_handle: AppHandle) {
     crate::spawn_log_panic(async move {
         let mut last_processed_event_id: i32 = -1;
         let mut active_player_name: Option<String> = None;
 
-        // 创建专用 HTTP 客户端，设置短超时以防连接卡住
+        // 创建专用 HTTP 客户端，设置 short 超时以防连接卡住
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .no_proxy()
@@ -52,27 +82,50 @@ pub fn start(app_handle: AppHandle) {
 
             // 1. 获取当前控制的玩家名字（API 会在游戏正式载入完成后可用）
             if active_player_name.is_none() {
+                let mut lcd_name = None;
                 match client
                     .get("https://127.0.0.1:2999/liveclientdata/activeplayername")
                     .send()
                     .await
                 {
-                    Ok(resp) => match resp.text().await {
-                        Ok(name) => {
-                            let name_clean = name.trim_matches('"').to_string();
-                            if !name_clean.is_empty() {
-                                active_player_name = Some(name_clean);
-                                log::info!("已获取到当前游戏内角色名: {:?}", active_player_name);
+                    Ok(resp) => {
+                        if resp.status().is_success() {
+                            match resp.text().await {
+                                Ok(name) => {
+                                    let name_clean = name.trim_matches('"').to_string();
+                                    if !name_clean.is_empty() {
+                                        lcd_name = Some(name_clean);
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!("读取 activeplayername 响应失败: {}", e);
+                                }
                             }
+                        } else {
+                            log::warn!(
+                                "获取 activeplayername 接口返回错误状态码: {}",
+                                resp.status()
+                            );
                         }
-                        Err(e) => {
-                            log::warn!("读取 activeplayername 响应失败: {}", e);
-                        }
-                    },
+                    }
                     Err(e) => {
                         log::debug!(
                             "尝试连接游戏内 Live Client Data 端口失败 (游戏可能未完全载入): {}",
                             e
+                        );
+                    }
+                }
+
+                if let Some(name) = lcd_name {
+                    active_player_name = Some(name.clone());
+                    log::info!("已获取到当前游戏内角色名 (LCD): {:?}", active_player_name);
+                } else {
+                    // Fallback: 尝试从 LCU 获取当前召唤师名字
+                    if let Some(lcu_name) = get_summoner_name_from_lcu(&app_handle).await {
+                        active_player_name = Some(lcu_name.clone());
+                        log::info!(
+                            "已获取到当前游戏内角色名 (LCU Fallback): {:?}",
+                            active_player_name
                         );
                     }
                 }

@@ -322,6 +322,7 @@ pub fn run() {
             get_map_side,
             detect_lol_path,
             select_lol_folder,
+            select_folder,
             open_screenshot_folder,
             set_mica_effect,
             launch_lol_client,
@@ -553,6 +554,47 @@ fn select_lol_folder() -> Result<Option<String>, String> {
     let folder = rfd::FileDialog::new()
         .set_title("选择英雄联盟客户端安装目录")
         .pick_folder();
+    Ok(folder.map(|p| p.to_string_lossy().to_string()))
+}
+
+/// 打开原生文件夹选择对话框，支持自定义标题和默认起始目录，返回用户选择的路径
+#[tauri::command]
+fn select_folder(
+    title: Option<String>,
+    default_path: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut dialog = rfd::FileDialog::new();
+    if let Some(t) = title {
+        dialog = dialog.set_title(&t);
+    }
+
+    // 确定起始定位的目录
+    let mut start_path = None;
+    if let Some(ref dp) = default_path {
+        if !dp.is_empty() {
+            start_path = Some(std::path::PathBuf::from(dp));
+        }
+    }
+
+    // 如果没有指定（或者为空），则使用默认的 "图片/Yuumi_Screenshots" 目录
+    let path_to_set = match start_path {
+        Some(p) => p,
+        None => {
+            if let Some(mut p) = dirs::picture_dir() {
+                p.push("Yuumi_Screenshots");
+                let _ = std::fs::create_dir_all(&p); // 确保它存在
+                p
+            } else {
+                std::path::PathBuf::new()
+            }
+        }
+    };
+
+    if path_to_set.exists() {
+        dialog = dialog.set_directory(path_to_set);
+    }
+
+    let folder = dialog.pick_folder();
     Ok(folder.map(|p| p.to_string_lossy().to_string()))
 }
 
