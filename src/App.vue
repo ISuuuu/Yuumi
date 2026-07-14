@@ -599,11 +599,22 @@ watch(
   { deep: true },
 );
 
+async function reconnectWithRetry(maxAttempts = 5) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const r = await lcuRequest("POST", "/lol-gameflow/v1/reconnect");
+    if (r.success) return r;
+    if (i < maxAttempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * Math.pow(2, i)));
+    }
+  }
+  return { success: false, error: `${t("common.reconnectFailed")}（已重试 ${maxAttempts} 次）` };
+}
+
 function handleReconnect() {
   initLcuListeners();
   // 先查询当前游戏阶段，按情况处理
   lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase")
-    .then((resp) => {
+    .then(async (resp) => {
       if (!resp.success) {
         showToast("LCU 未连接，请先启动英雄联盟客户端", "success");
         return;
@@ -614,17 +625,16 @@ function handleReconnect() {
         phase === "GameStart" ||
         phase === "Reconnect"
       ) {
-        // 游戏中 → 调用 reconnect API
-        lcuRequest("POST", "/lol-gameflow/v1/reconnect").then((r) => {
-          if (r.success) {
-            showToast("🔄 " + t("common.reconnectTriggered"));
-          } else {
-            showToast(
-              t("common.reconnectFailed") + ": " + (r.error || ""),
-              "success",
-            );
-          }
-        });
+        // 游戏中 → 调用 reconnect API（含指数退避重试）
+        const r = await reconnectWithRetry();
+        if (r.success) {
+          showToast("🔄 " + t("common.reconnectTriggered"));
+        } else {
+          showToast(
+            t("common.reconnectFailed") + ": " + (r.error || ""),
+            "success",
+          );
+        }
       } else {
         showToast(
           t("common.lcuReset") +
