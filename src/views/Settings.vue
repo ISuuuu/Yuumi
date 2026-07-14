@@ -322,9 +322,9 @@ function onDeathColorSelect(
 
 const DEFAULT_COLORS = {
   ThemeColor: "#00d2c4",
-  WinCardColor: "#1510b981",
-  LoseCardColor: "#12f43f5e",
-  RemakeCardColor: "#1294a3b8",
+  WinCardColor: "#3339b01b",
+  LoseCardColor: "#33d3190c",
+  RemakeCardColor: "#33a2a2a2",
   LightDeathsNumberColor: "#ffb60000",
   DarkDeathsNumberColor: "#ffff8d8d",
 };
