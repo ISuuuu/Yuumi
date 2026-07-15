@@ -68,7 +68,6 @@ export function useLoot() {
 
   // 操作进度状态
   const actionProgressTitle = ref("");
-  let actionUnlisten: (() => void) | null = null;
 
   function executeConfirmedAction() {
     showConfirmModal.value = false;
@@ -76,6 +75,26 @@ export function useLoot() {
   }
 
   // ─── 辅助函数 ───
+
+  /** 将 ActionProgressEvent 安全转换为 LootProgressEvent，用于分解/升级/重随进度展示 */
+  function toLootProgress(evt: ActionProgressEvent, displayName: string, isReroll = false): LootProgressEvent {
+    if (evt.success) {
+      return {
+        current: evt.current,
+        total: evt.total,
+        success: true,
+        rewardName: isReroll ? `合成成功！获得: ${evt.rewardDesc}` : `${displayName}: ${evt.rewardDesc}`,
+        errorMsg: null,
+      };
+    }
+    return {
+      current: evt.current,
+      total: evt.total,
+      success: false,
+      rewardName: "",
+      errorMsg: isReroll ? (evt.errorMsg ?? "未知错误") : `${displayName}: ${evt.errorMsg}`,
+    };
+  }
 
   function getLootDisplayName(loot: OpenableLoot): string {
     const name = loot.name;
@@ -196,9 +215,9 @@ export function useLoot() {
     if (selectedLootIds.value.length === 0) return t("tools.lootManager.upgradeBtn") || "升级 / 解锁";
     const hasUpgrade = selectedLootObjects.value.some(item => item.upgradeEssenceCost > 0);
     const hasUnlock = selectedLootObjects.value.some(item => item.upgradeEssenceCost === 0);
-    if (hasUpgrade && hasUnlock) return "升级 / 解锁";
-    if (hasUnlock) return "解锁永久";
-    return "升级永久";
+    if (hasUpgrade && hasUnlock) return t("tools.lootManager.upgradeAndUnlock") || "升级 / 解锁";
+    if (hasUnlock) return t("tools.lootManager.unlockPermanent") || "解锁永久";
+    return t("tools.lootManager.upgradePermanent") || "升级永久";
   });
 
   const canReroll = computed(() => {
@@ -441,7 +460,7 @@ export function useLoot() {
       },
     );
 
-    actionProgressTitle.value = isFragment ? "正在合成钥匙..." : t("tools.lootOpener.opening");
+    actionProgressTitle.value = isFragment ? (t("tools.lootOpener.forgingKey") || "正在合成钥匙...") : t("tools.lootOpener.opening");
     showOpenPanel.value = true;
     isOpening.value = true;
     openProgress.value = 0;
@@ -454,7 +473,7 @@ export function useLoot() {
     } catch (e: any) {
       isOpening.value = false;
       const errorMsg = isFragment
-        ? `合成失败: ${e.toString()}`
+        ? t("tools.lootOpener.forgingFailed", { error: e.toString() }) || `合成失败: ${e.toString()}`
         : t("tools.lootOpener.openFailed", { error: e.toString() });
       showToast(errorMsg, "error");
     }
@@ -490,14 +509,6 @@ export function useLoot() {
     }
   }
 
-  // 清除操作监听
-  function cleanupActionListen() {
-    if (actionUnlisten) {
-      actionUnlisten();
-      actionUnlisten = null;
-    }
-  }
-
   // ─── 一键分解 ───
 
   function handleBatchDisenchant() {
@@ -505,14 +516,14 @@ export function useLoot() {
     const count = selectedLootObjects.value.length;
     confirmModalConfig.value = {
       title: t("tools.lootManager.disenchantBtn"),
-      message: `您确定要分解当前选中的 ${count} 个碎片吗？此操作无法撤销。`,
-      confirmText: "确定分解",
-      cancelText: "取消",
+      message: t("tools.lootManager.disenchantConfirmMsg", { count }) || `您确定要分解当前选中的 ${count} 个碎片吗？此操作无法撤销。`,
+      confirmText: t("tools.lootManager.confirmDisenchant") || "确定分解",
+      cancelText: t("common.cancel") || "取消",
       type: "primary",
       details: [
-        { label: "所选碎片种类", value: `${count} 种` },
-        { label: "🔷 预计蓝色精粹回报", value: `+ ${gainBlueEssence.value}`, class: "blue-essence-text" },
-        { label: "🔶 预计橙色精粹回报", value: `+ ${gainOrangeEssence.value}`, class: "orange-essence-text" }
+        { label: t("tools.lootManager.selectedCount") || "所选碎片种类", value: `${count} 种` },
+        { label: t("tools.lootManager.expectedBlueEssence") || "🔷 预计蓝色精粹回报", value: `+ ${gainBlueEssence.value}`, class: "blue-essence-text" },
+        { label: t("tools.lootManager.expectedOrangeEssence") || "🔶 预计橙色精粹回报", value: `+ ${gainOrangeEssence.value}`, class: "orange-essence-text" }
       ],
       onConfirm: () => proceedWithDisenchant(refreshCallback)
     };
@@ -544,17 +555,7 @@ export function useLoot() {
       openTotal.value = evt.total;
 
       const displayName = getFriendlyNameById(evt.lootName);
-      if (evt.success) {
-        openResults.value.push({
-          current: evt.current, total: evt.total, success: true, rewardName: `${displayName}: ${evt.rewardDesc}`,
-          errorMsg: null, itemName: null,
-        } as unknown as LootProgressEvent);
-      } else {
-        openResults.value.push({
-          current: evt.current, total: evt.total, success: false, rewardName: "", errorMsg: `${displayName}: ${evt.errorMsg}`,
-          itemName: null,
-        } as unknown as LootProgressEvent);
-      }
+      openResults.value.push(toLootProgress(evt, displayName));
 
       if (evt.current === evt.total) {
         isOpening.value = false;
@@ -577,7 +578,7 @@ export function useLoot() {
   function handleBatchUpgrade() {
     const unownedItems = selectedLootObjects.value.filter(item => item.itemStatus !== "OWNED");
     if (unownedItems.length === 0) {
-      showToast("没有选中任何未拥有的战利品进行操作！", "error");
+      showToast(t("tools.lootManager.noUnownedSelected") || "没有选中任何未拥有的战利品进行操作！", "error");
       return;
     }
 
@@ -587,7 +588,7 @@ export function useLoot() {
     });
     if (missingChampionSkins.length > 0) {
       const names = missingChampionSkins.map(item => item.itemDesc).join("、");
-      showToast(`未拥有以下皮肤对应的英雄：[${names}]，请先在游戏内解锁或购买该英雄！`, "error");
+      showToast(t("tools.lootManager.missingChampion", { names }) || `未拥有以下皮肤对应的英雄：[${names}]，请先在游戏内解锁或购买该英雄！`, "error");
       return;
     }
 
@@ -608,49 +609,49 @@ export function useLoot() {
     });
 
     if (totalBlueEssence > blueEssenceCount.value) {
-      showToast(`蓝色精粹不足！升级需要 🔷 ${totalBlueEssence}，当前拥有 🔷 ${blueEssenceCount.value}`, "error");
+      showToast(t("tools.lootManager.blueEssenceInsufficient", { need: totalBlueEssence, have: blueEssenceCount.value }) || `蓝色精粹不足！升级需要 🔷 ${totalBlueEssence}，当前拥有 🔷 ${blueEssenceCount.value}`, "error");
       return;
     }
     if (totalOrangeEssence > orangeEssenceCount.value) {
-      showToast(`橙色精粹不足！升级需要 🔶 ${totalOrangeEssence}，当前拥有 🔶 ${orangeEssenceCount.value}`, "error");
+      showToast(t("tools.lootManager.orangeEssenceInsufficient", { need: totalOrangeEssence, have: orangeEssenceCount.value }) || `橙色精粹不足！升级需要 🔶 ${totalOrangeEssence}，当前拥有 🔶 ${orangeEssenceCount.value}`, "error");
       return;
     }
 
     const detailsList: { label: string; value: string }[] = [
-      { label: "待处理战利品种类", value: `${count} 种` }
+      { label: t("tools.lootManager.selectedCount") || "待处理战利品种类", value: `${count} 种` }
     ];
-    if (totalBlueEssence > 0) detailsList.push({ label: "预计消耗蓝色精粹", value: `🔷 ${totalBlueEssence}` });
-    if (totalOrangeEssence > 0) detailsList.push({ label: "预计消耗橙色精粹", value: `🔶 ${totalOrangeEssence}` });
+    if (totalBlueEssence > 0) detailsList.push({ label: t("tools.lootManager.costBlueEssence") || "预计消耗蓝色精粹", value: `🔷 ${totalBlueEssence}` });
+    if (totalOrangeEssence > 0) detailsList.push({ label: t("tools.lootManager.costOrangeEssence") || "预计消耗橙色精粹", value: `🔶 ${totalOrangeEssence}` });
 
-    let desc = "将消耗对应精粹并解锁为永久版";
-    if (hasUnlock && !hasUpgrade) desc = "将免费解锁/激活永久道具并添加到收藏";
-    else if (hasUnlock && hasUpgrade) desc = "消耗精粹升级部分碎片，其余永久道具将免费解锁";
-    detailsList.push({ label: "操作说明", value: desc });
+    let desc = t("tools.lootManager.upgradeDesc") || "将消耗对应精粹并解锁为永久版";
+    if (hasUnlock && !hasUpgrade) desc = t("tools.lootManager.unlockDesc") || "将免费解锁/激活永久道具并添加到收藏";
+    else if (hasUnlock && hasUpgrade) desc = t("tools.lootManager.mixedDesc") || "消耗精粹升级部分碎片，其余永久道具将免费解锁";
+    detailsList.push({ label: t("tools.lootManager.operationDesc") || "操作说明", value: desc });
 
-    let title = "升级 / 解锁选中项";
-    if (hasUnlock && !hasUpgrade) title = "解锁选中项";
-    else if (hasUpgrade && !hasUnlock) title = "升级选中项";
+    let title = t("tools.lootManager.upgradeUnlockSelected") || "升级 / 解锁选中项";
+    if (hasUnlock && !hasUpgrade) title = t("tools.lootManager.unlockSelected") || "解锁选中项";
+    else if (hasUpgrade && !hasUnlock) title = t("tools.lootManager.upgradeSelected") || "升级选中项";
 
     confirmModalConfig.value = {
       title,
-      message: `您确定要将选中的 ${count} 个未拥有项目进行升级或解锁吗？`,
-      confirmText: "确定执行",
-      cancelText: "取消",
+      message: t("tools.lootManager.upgradeConfirmMsg", { count }) || `您确定要将选中的 ${count} 个未拥有项目进行升级或解锁吗？`,
+      confirmText: t("tools.lootManager.confirmExecute") || "确定执行",
+      cancelText: t("common.cancel") || "取消",
       type: "primary",
       details: detailsList,
-      onConfirm: () => proceedWithUpgrade(unownedItems)
+      onConfirm: () => proceedWithUpgrade(unownedItems, refreshCallback)
     };
     showConfirmModal.value = true;
   }
 
-  async function proceedWithUpgrade(unownedItems: LootItem[]) {
+  async function proceedWithUpgrade(unownedItems: LootItem[], refreshCb?: () => void) {
     const payload: DisenchantItem[] = unownedItems.map(item => ({
       lootId: item.lootId,
       count: item.count,
       upgradeRecipeName: item.upgradeRecipeName,
     }));
 
-    actionProgressTitle.value = "正在升级或解锁碎片...";
+    actionProgressTitle.value = t("tools.lootManager.progressUpgrading") || "正在升级或解锁碎片...";
     openResults.value = [];
     openProgress.value = 0;
     openTotal.value = 0;
@@ -663,22 +664,12 @@ export function useLoot() {
       openTotal.value = evt.total;
 
       const displayName = getFriendlyNameById(evt.lootName);
-      if (evt.success) {
-        openResults.value.push({
-          current: evt.current, total: evt.total, success: true, rewardName: `${displayName}: ${evt.rewardDesc}`,
-          errorMsg: null, itemName: null,
-        } as unknown as LootProgressEvent);
-      } else {
-        openResults.value.push({
-          current: evt.current, total: evt.total, success: false, rewardName: "", errorMsg: `${displayName}: ${evt.errorMsg}`,
-          itemName: null,
-        } as unknown as LootProgressEvent);
-      }
+      openResults.value.push(toLootProgress(evt, displayName));
 
       if (evt.current === evt.total) {
         isOpening.value = false;
         loadLootInventory();
-        if (refreshCallback) refreshCallback();
+        if (refreshCb) refreshCb();
       }
     });
 
@@ -687,7 +678,7 @@ export function useLoot() {
       selectedLootIds.value = [];
     } catch (e: any) {
       isOpening.value = false;
-      showToast(`升级失败: ${e.toString()}`, "error");
+      showToast(t("tools.lootManager.upgradeFailed", { error: e.toString() }), "error");
     }
   }
 
@@ -720,14 +711,14 @@ export function useLoot() {
     const groupsCount = finalLootIdsToReroll.length / 3;
     confirmModalConfig.value = {
       title: t("tools.lootManager.rerollBtn"),
-      message: `您确定要将选中的碎片进行三合一重随吗？系统将自动分类并按3个一组进行重随。`,
-      confirmText: "确定重随",
-      cancelText: "取消",
+      message: t("tools.lootManager.rerollConfirmMsg") || `您确定要将选中的碎片进行三合一重随吗？系统将自动分类并按3个一组进行重随。`,
+      confirmText: t("tools.lootManager.confirmReroll") || "确定重随",
+      cancelText: t("common.cancel") || "取消",
       type: "primary",
       details: [
-        { label: "重随合成组数", value: `${groupsCount} 组` },
-        { label: "消耗碎片总数", value: `${finalLootIdsToReroll.length} 个` },
-        { label: "保留未配对数", value: `${remainingCount} 个` }
+        { label: t("tools.lootManager.rerollGroups") || "重随合成组数", value: `${groupsCount} 组` },
+        { label: t("tools.lootManager.rerollConsumed") || "消耗碎片总数", value: `${finalLootIdsToReroll.length} 个` },
+        { label: t("tools.lootManager.rerollRemaining") || "保留未配对数", value: `${remainingCount} 个` }
       ],
       onConfirm: () => proceedWithReroll(finalLootIdsToReroll)
     };
@@ -748,17 +739,7 @@ export function useLoot() {
       openProgress.value = evt.current;
       openTotal.value = evt.total;
 
-      if (evt.success) {
-        openResults.value.push({
-          current: evt.current, total: evt.total, success: true, rewardName: `合成成功！获得: ${evt.rewardDesc}`,
-          errorMsg: null, itemName: null,
-        } as unknown as LootProgressEvent);
-      } else {
-        openResults.value.push({
-          current: evt.current, total: evt.total, success: false, rewardName: "", errorMsg: evt.errorMsg ?? "未知错误",
-          itemName: null,
-        } as unknown as LootProgressEvent);
-      }
+      openResults.value.push(toLootProgress(evt, "", true));
 
       if (evt.current === evt.total) {
         isOpening.value = false;
@@ -783,7 +764,6 @@ export function useLoot() {
       unlistenProgress();
       unlistenProgress = null;
     }
-    cleanupActionListen();
   }
 
   // 切换碎片类型时清空选择

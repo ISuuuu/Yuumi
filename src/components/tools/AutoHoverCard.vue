@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, inject, type Ref } from "vue";
-import { updateConfig } from "../../api/lcu";
-import type { AppConfig } from "../../api/lcu";
+import { ref, computed } from "vue";
+import { useAutoSaveConfig } from "../../composables/useAutoSaveConfig";
 import { useI18n } from "vue-i18n";
 import { NSwitch, NInputNumber, NCollapse, NCollapseItem } from "naive-ui";
 import ChampionPicker from "../ChampionPicker.vue";
 import SpellPicker from "../SpellPicker.vue";
 
-const config = inject<Ref<AppConfig | null>>("appConfig");
-const updateConfigFn = inject<(config: AppConfig) => void>("updateConfig");
+const { config, triggerAutoSave } = useAutoSaveConfig();
 const { t } = useI18n();
 
 // 分路选择状态
@@ -33,20 +31,6 @@ const LANE_OPTIONS = computed(
       { value: "sup", label: t("tools.lane.sup") },
     ] as const,
 );
-
-async function triggerAutoSave() {
-  if (!config?.value || !updateConfigFn) return;
-  const newConfig = { ...config.value };
-  newConfig.Functions = { ...newConfig.Functions };
-  newConfig.Functions.EnableAutoSelectChampion =
-    newConfig.Functions.EnableAutoHoverChampion;
-  updateConfigFn(newConfig);
-  try {
-    await updateConfig(newConfig);
-  } catch (e) {
-    console.error("自动保存设置失败:", e);
-  }
-}
 
 function onPickerChange() {
   triggerAutoSave();
