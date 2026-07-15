@@ -28,9 +28,9 @@ import Settings from "./views/Settings.vue";
 import Tools from "./views/Tools.vue";
 import Notice from "./views/Notice.vue";
 import BenchOverlay from "./views/BenchOverlay.vue";
-import LcuImage from "./components/LcuImage.vue";
 import UpdateDialog, { type UpdateInfo } from "./components/UpdateDialog.vue";
-import opggIcon from "./assets/opgg.svg";
+import CustomTitleBar from "./components/layout/CustomTitleBar.vue";
+import NavigationSidebar from "./components/layout/NavigationSidebar.vue";
 
 function applyThemeMode(mode: string) {
   const root = document.documentElement;
@@ -682,341 +682,27 @@ async function handleClose() {
         <!-- 否则渲染常规的主程序界面 -->
         <div v-else class="app-layout">
           <!-- 自定义标题栏 -->
-          <div class="titlebar" data-tauri-drag-region>
-            <div class="titlebar-left">
-              <div
-                v-if="pageHistory.length > 0"
-                class="titlebar-btn"
-                @click="goBack"
-                :title="$t('titlebar.back')"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <polyline points="15 18 9 12 15 6" />
-                </svg>
-              </div>
-              <img src="/logo.png" class="titlebar-logo" alt="logo" />
-              <span class="titlebar-title">
-                Yummi
-                <span
-                  v-if="store.isConnected && gamePhase !== 'None'"
-                  class="titlebar-phase"
-                >
-                  · {{ $t("phase." + gamePhase)
-                  }}<span v-if="mapSideLabel"> - {{ mapSideLabel }}</span>
-                </span>
-              </span>
-            </div>
-            <div class="titlebar-controls">
-              <div
-                class="titlebar-btn"
-                @click="getCurrentWindow().minimize()"
-                :title="$t('titlebar.minimize')"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-              </div>
-              <div
-                class="titlebar-btn"
-                @click="getCurrentWindow().toggleMaximize()"
-                :title="$t('titlebar.maximize')"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <rect x="5" y="5" width="14" height="14" rx="2" />
-                </svg>
-              </div>
-              <div
-                class="titlebar-btn close-btn"
-                @click="handleClose"
-                :title="$t('titlebar.close')"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </div>
-            </div>
-          </div>
+          <CustomTitleBar
+            :page-history="pageHistory"
+            :game-phase="gamePhase"
+            :map-side-label="mapSideLabel"
+            @go-back="goBack"
+            @close="handleClose"
+          />
 
           <!-- 主体区域：侧边栏 + 内容 -->
           <div class="main-row">
-            <aside
-              :class="['sidebar', isSidebarExpanded ? 'expanded' : 'collapsed']"
-            >
-              <!-- 顶部折叠按钮 -->
-              <div class="sidebar-header">
-                <div class="hamburger-btn" @click="toggleSidebar">
-                  <svg
-                    class="hamburger-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path
-                      d="M3 12h18M3 6h18M3 18h18"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                </div>
-              </div>
-
-              <!-- 中间功能导航 -->
-              <nav class="sidebar-nav">
-                <div
-                  :class="['nav-item', { active: currentPage === 'home' }]"
-                  @click="navigate('home')"
-                  :title="$t('nav.home')"
-                >
-                  <span class="nav-icon">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path
-                        d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-                      />
-                      <polyline points="9 22 9 12 15 12 15 22" />
-                    </svg>
-                  </span>
-                  <span class="nav-label">{{ $t("nav.home") }}</span>
-                </div>
-
-                <div
-                  :class="['nav-item', { active: currentPage === 'career' }]"
-                  @click="navigate('career')"
-                  :title="$t('nav.career')"
-                >
-                  <span class="nav-icon">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                      <circle cx="12" cy="7" r="4" />
-                    </svg>
-                  </span>
-                  <span class="nav-label">{{ $t("nav.career") }}</span>
-                </div>
-
-                <div
-                  :class="['nav-item', { active: currentPage === 'search' }]"
-                  @click="navigate('search')"
-                  :title="$t('nav.search')"
-                >
-                  <span class="nav-icon">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <circle cx="11" cy="11" r="8" />
-                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                    </svg>
-                  </span>
-                  <span class="nav-label">{{ $t("nav.search") }}</span>
-                </div>
-
-                <div
-                  :class="['nav-item', { active: currentPage === 'gameinfo' }]"
-                  @click="navigate('gameinfo')"
-                  :title="$t('nav.gameinfo')"
-                >
-                  <span class="nav-icon">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <rect x="2" y="6" width="20" height="12" rx="3" />
-                      <path d="M6 12h4M8 10v4M15 11h.01M18 13h.01" />
-                    </svg>
-                  </span>
-                  <span class="nav-label">{{ $t("nav.gameinfo") }}</span>
-                </div>
-
-                <div
-                  v-if="!appConfig?.Functions?.HideTft"
-                  :class="['nav-item', { active: currentPage === 'tft' }]"
-                  @click="navigate('tft')"
-                  :title="$t('nav.tft')"
-                >
-                  <span class="nav-icon">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <polygon points="12 2 2 7 12 12 22 7 12 2" />
-                      <polyline points="2 17 12 22 22 17" />
-                      <polyline points="2 12 12 17 22 12" />
-                    </svg>
-                  </span>
-                  <span class="nav-label">{{ $t("nav.tft") }}</span>
-                </div>
-
-                <div
-                  :class="['nav-item', { active: currentPage === 'tools' }]"
-                  @click="navigate('tools')"
-                  :title="$t('nav.tools')"
-                >
-                  <span class="nav-icon">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path
-                        d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
-                      />
-                    </svg>
-                  </span>
-                  <span class="nav-label">{{ $t("nav.tools") }}</span>
-                </div>
-              </nav>
-
-              <!-- 底部附加操作 -->
-              <div class="sidebar-bottom">
-                <div
-                  class="nav-item"
-                  @click="openOpggWindow"
-                  :title="$t('nav.opgg')"
-                >
-                  <span class="nav-icon"
-                    ><img
-                      :src="opggIcon"
-                      style="width: 18px; height: 18px; border-radius: 3px"
-                  /></span>
-                  <span class="nav-label">{{ $t("nav.opgg") }}</span>
-                </div>
-
-                <div
-                  class="nav-item"
-                  @click="handleReconnect"
-                  :title="$t('nav.reconnect')"
-                >
-                  <span class="nav-icon">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path
-                        d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
-                      />
-                    </svg>
-                  </span>
-                  <span class="nav-label">{{ $t("nav.reconnect") }}</span>
-                </div>
-
-                <div
-                  :class="['nav-item', { active: currentPage === 'notice' }]"
-                  @click="navigate('notice')"
-                  :title="$t('nav.notice')"
-                >
-                  <span class="nav-icon">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path
-                        d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"
-                      />
-                    </svg>
-                  </span>
-                  <span class="nav-label">{{ $t("nav.notice") }}</span>
-                </div>
-
-                <!-- 召唤师简短信息 -->
-                <div
-                  v-if="summoner"
-                  class="user-card"
-                  @click="navigate('career')"
-                  :title="`${summoner.displayName} (${regionName})`"
-                >
-                  <div class="user-avatar">
-                    <LcuImage :src="summoner.profileIconUrl" alt="avatar" />
-                  </div>
-                  <div class="user-info">
-                    <span class="user-name">{{ summoner.displayName }}</span>
-                    <span class="user-region">{{ regionName }}</span>
-                  </div>
-                </div>
-
-                <div
-                  :class="['nav-item', { active: currentPage === 'settings' }]"
-                  @click="navigate('settings')"
-                  :title="$t('nav.settings')"
-                >
-                  <span class="nav-icon">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <circle cx="12" cy="12" r="3" />
-                      <path
-                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-                      />
-                    </svg>
-                  </span>
-                  <span class="nav-label">{{ $t("nav.settings") }}</span>
-                </div>
-              </div>
-            </aside>
+            <NavigationSidebar
+              :current-page="currentPage"
+              :is-sidebar-expanded="isSidebarExpanded"
+              :app-config="appConfig"
+              :summoner="summoner"
+              :region-name="regionName"
+              @navigate="navigate"
+              @toggle-sidebar="toggleSidebar"
+              @open-opgg="openOpggWindow"
+              @reconnect="handleReconnect"
+            />
 
             <!-- 右侧内容区域 -->
             <main class="content-wrapper">
