@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, watch, type Ref } from "vue";
+import { ref, inject, watch, provide, type Ref } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import MatchHistoryTab from "../components/career/MatchHistoryTab.vue";
 import LootManagerTab from "../components/career/LootManagerTab.vue";
@@ -9,7 +9,18 @@ import { useMatchHistory } from "../composables/useMatchHistory";
 const store = useLcuStore();
 const currentTab = ref("matches");
 
-const { summoner, loading, copied, loadSummoner, copyRiotId } = useMatchHistory();
+const {
+  summoner, matches, recentMatches, rankedQueues, loading, copied,
+  loadSummoner, loadMatches, loadRecentMatches, loadRankedStats,
+  copyRiotId, clearCache, fetchMatchHistoryWithFallback,
+} = useMatchHistory();
+
+// 向子组件 provide 共享的 composable 状态（避免重复实例化）
+provide("matchHistoryState", {
+  summoner, matches, recentMatches, rankedQueues, loading,
+  loadSummoner, loadMatches, loadRecentMatches, loadRankedStats,
+  clearCache, fetchMatchHistoryWithFallback,
+});
 
 // 自动加载召唤师数据
 watch(
@@ -17,9 +28,26 @@ watch(
   (connected) => {
     if (connected) {
       loadSummoner();
+    } else {
+      summoner.value = null;
+      clearCache();
     }
   },
   { immediate: true },
+);
+
+// 对局结束后自动刷新召唤师数据
+watch(
+  () => store.gamePhase,
+  async (phase: string, oldPhase: string | undefined) => {
+    if (!summoner.value?.puuid) return;
+    const gamePhases = ["InProgress", "GameStart", "ChampSelect", "ReadyCheck", "PreEndOfGame"];
+    const endPhases = ["EndOfGame", "Lobby", "None"];
+    if (gamePhases.includes(oldPhase ?? "") && endPhases.includes(phase ?? "")) {
+      await new Promise((r) => setTimeout(r, 2000));
+      await loadSummoner(true);
+    }
+  },
 );
 
 // 从 App.vue 注入 → Search 跳转状态
@@ -39,10 +67,8 @@ function goToHistory() {
 }
 
 // 供 LootManagerTab 开启战利品后刷新召唤师数据
-const matchHistoryTabRef = ref<InstanceType<typeof MatchHistoryTab> | null>(null);
 function refreshSummoner() {
   loadSummoner(true);
-  matchHistoryTabRef.value?.loadSummoner(true);
 }
 </script>
 
@@ -128,7 +154,6 @@ function refreshSummoner() {
       <template v-if="summoner">
         <MatchHistoryTab
           v-show="currentTab === 'matches'"
-          ref="matchHistoryTabRef"
         />
         <LootManagerTab
           v-show="currentTab === 'loot'"

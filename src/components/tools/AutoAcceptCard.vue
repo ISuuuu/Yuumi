@@ -1,28 +1,10 @@
 <script setup lang="ts">
-import { inject, type Ref } from "vue";
-import { updateConfig } from "../../api/lcu";
-import type { AppConfig } from "../../api/lcu";
+import { useAutoSaveConfig } from "../../composables/useAutoSaveConfig";
 import { useI18n } from "vue-i18n";
 import { NSwitch, NInputNumber, NCollapse, NCollapseItem } from "naive-ui";
 
-const config = inject<Ref<AppConfig | null>>("appConfig");
-const updateConfigFn = inject<(config: AppConfig) => void>("updateConfig");
+const { config, triggerAutoSave } = useAutoSaveConfig();
 const { t } = useI18n();
-
-async function triggerAutoSave() {
-  if (!config?.value || !updateConfigFn) return;
-  const newConfig = { ...config.value };
-  newConfig.Functions = { ...newConfig.Functions };
-  // 同步自动选用开关和自动亮起开关
-  newConfig.Functions.EnableAutoSelectChampion =
-    newConfig.Functions.EnableAutoHoverChampion;
-  updateConfigFn(newConfig);
-  try {
-    await updateConfig(newConfig);
-  } catch (e) {
-    console.error("自动保存设置失败:", e);
-  }
-}
 
 function updateDelay(value: number | null) {
   if (!config?.value) return;

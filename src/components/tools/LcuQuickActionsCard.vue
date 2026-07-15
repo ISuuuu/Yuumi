@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, computed, inject, type Ref } from "vue";
+import { ref, watch, onMounted, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { updateConfig, lcuRequest } from "../../api/lcu";
-import type { AppConfig } from "../../api/lcu";
+import { lcuRequest } from "../../api/lcu";
+import { useAutoSaveConfig } from "../../composables/useAutoSaveConfig";
 import { useToast } from "../../composables/useToast";
 import { useI18n } from "vue-i18n";
 import {
@@ -17,8 +17,7 @@ import {
 import ChampionPicker from "../ChampionPicker.vue";
 import LcuImage from "../LcuImage.vue";
 
-const config = inject<Ref<AppConfig | null>>("appConfig");
-const updateConfigFn = inject<(config: AppConfig) => void>("updateConfig");
+const { config, triggerAutoSave } = useAutoSaveConfig();
 
 const { showToast } = useToast();
 const { t } = useI18n();
@@ -202,19 +201,7 @@ onMounted(async () => {
   await checkGameSettingsLock();
 });
 
-async function triggerAutoSave() {
-  if (!config?.value || !updateConfigFn) return;
-  const newConfig = { ...config.value };
-  newConfig.Functions = { ...newConfig.Functions };
-  newConfig.Functions.EnableAutoSelectChampion =
-    newConfig.Functions.EnableAutoHoverChampion;
-  updateConfigFn(newConfig);
-  try {
-    await updateConfig(newConfig);
-  } catch (e) {
-    console.error("自动保存设置失败:", e);
-  }
-}
+// triggerAutoSave 已从 useAutoSaveConfig composable 获取
 
 // 修复客户端窗口
 async function handleFixWindow() {
