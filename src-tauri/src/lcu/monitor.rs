@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use sysinfo::System;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
@@ -10,9 +11,9 @@ use crate::LcuClient;
 
 /// 日志脱敏：将命令行中的 token 值替换为 ***
 fn sanitize_cmdline(cmd: &str) -> String {
-    regex_lite::Regex::new(r"--remoting-auth-token=\S+")
-        .map(|re| re.replace_all(cmd, "--remoting-auth-token=***").to_string())
-        .unwrap_or_else(|_| cmd.to_string())
+    static RE: LazyLock<regex_lite::Regex> =
+        LazyLock::new(|| regex_lite::Regex::new(r"--remoting-auth-token=\S+").unwrap());
+    RE.replace_all(cmd, "--remoting-auth-token=***").to_string()
 }
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -31,37 +32,69 @@ pub fn start(
 ) {
     crate::spawn_log_panic(async move {
         let mut was_connected = false;
+        let mut sys = System::new();
+        let mut consecutive_misses: u32 = 0;
+        // 每 MISS_THRESHOLD 次连续未找到 LCU，做一次全量重建（兜底增量刷新的边界情况）
+        const MISS_THRESHOLD: u32 = 10;
 
         loop {
             sleep(POLL_INTERVAL).await;
-            // 每次循环重新初始化 System 进程树，彻底杜绝 sysinfo 增量/局部刷新可能导致的平台进程未更新 Bug
-            let sys = System::new_all();
+            // 增量刷新进程列表，避免每 2 秒全量重建带来的 CPU 和内存开销
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
             // 优先尝试从 lockfile 获取，备用从进程参数获取，最后 WMIC 兜底（需管理员）
-            let lcu_info = find_via_lockfile(&sys)
+            let mut lcu_info = find_via_lockfile(&sys)
                 .or_else(|| find_via_cmdline(&sys))
                 .or_else(find_via_wmic);
-            // 诊断日志（写入系统临时目录，避免硬编码开发者路径）
+
+            // 连续未找到 LCU 达到阈值时，全量重建进程树作为兜底
             if lcu_info.is_none() {
-                let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
-                if let Ok(mut file) = std::fs::File::create(&debug_path) {
-                    use std::io::Write;
-                    let _ = writeln!(file, "====== 实时 LOL 进程诊断 ======");
-                    for (pid, process) in sys.processes() {
-                        let name = process.name().to_string_lossy();
-                        if name.to_lowercase().contains("leagueclientux") {
-                            let _ = writeln!(
-                                file,
-                                "找到进程: PID={:?}, Name={:?}, EXE={:?}, CMD={:?}",
-                                pid,
-                                name,
-                                process.exe(),
-                                process.cmd()
-                            );
-                        }
+                consecutive_misses += 1;
+                if consecutive_misses.is_multiple_of(MISS_THRESHOLD) {
+                    log::debug!("连续 {} 次未找到 LCU，执行全量进程刷新", consecutive_misses);
+                    sys = System::new_all();
+                    // 用全量数据再试一次（lockfile + cmdline，WMIC 不依赖 sys 无需重试）
+                    lcu_info = find_via_lockfile(&sys).or_else(|| find_via_cmdline(&sys));
+                    if lcu_info.is_some() {
+                        consecutive_misses = 0;
                     }
-                    let _ = writeln!(file, "===============================");
                 }
+            } else {
+                consecutive_misses = 0;
+            }
+
+            // 诊断日志：异步写入，避免阻塞 tokio 工作线程
+            if lcu_info.is_none() {
+                let processes_snapshot: Vec<_> = sys
+                    .processes()
+                    .iter()
+                    .filter(|(_, p)| {
+                        p.name()
+                            .to_string_lossy()
+                            .to_lowercase()
+                            .contains("leagueclientux")
+                    })
+                    .map(|(pid, p)| {
+                        format!(
+                            "PID={:?}, Name={:?}, EXE={:?}, CMD={:?}",
+                            pid,
+                            p.name(),
+                            p.exe(),
+                            p.cmd()
+                        )
+                    })
+                    .collect();
+                tokio::task::spawn_blocking(move || {
+                    let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
+                    if let Ok(mut file) = std::fs::File::create(&debug_path) {
+                        use std::io::Write;
+                        let _ = writeln!(file, "====== 实时 LOL 进程诊断 ======");
+                        for entry in &processes_snapshot {
+                            let _ = writeln!(file, "找到进程: {}", entry);
+                        }
+                        let _ = writeln!(file, "===============================");
+                    }
+                });
             } else {
                 let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
                 let _ = std::fs::remove_file(&debug_path);
@@ -332,11 +365,11 @@ fn find_via_wmic() -> Option<(u32, u16, String, Option<String>)> {
         let stdout = String::from_utf8_lossy(&output.stdout);
 
         // 提取 --app-port=
-        let port = regex_find_number(&stdout, r"--app-port=(\d+)")?;
+        let port = regex_find_number(&stdout, &RE_APP_PORT)?;
         // 提取 --remoting-auth-token=
-        let token = regex_find_value(&stdout, r#"--remoting-auth-token=([^"\s]+)"#)?;
+        let token = regex_find_value(&stdout, &RE_AUTH_TOKEN)?;
         // 提取 --rso_platform_id=
-        let server = regex_find_value(&stdout, r#"--rso_platform_id=([^"\s]+)"#);
+        let server = regex_find_value(&stdout, &RE_PLATFORM_ID);
 
         log::debug!(
             "从 WMIC 解析结果: port={}, token=***, server={:?}",
@@ -344,31 +377,30 @@ fn find_via_wmic() -> Option<(u32, u16, String, Option<String>)> {
             server
         );
 
-        // WMIC 不返回 PID，从进程列表中查找
-        let sys = System::new_all();
-        for (pid, process) in sys.processes() {
-            let name = process.name().to_string_lossy().to_lowercase();
-            if name == "leagueclientux.exe" || name == "leagueclientux" {
-                return Some((pid.as_u32(), port, token, server));
-            }
-        }
+        // WMIC 不返回 PID，lockfile 方式才是主路径；此处 PID 仅作标识，不影响连接建立
         Some((0, port, token, server))
     }
     #[cfg(not(target_os = "windows"))]
     None
 }
 
-fn regex_find_number(haystack: &str, pattern: &str) -> Option<u16> {
-    let re = regex_lite::Regex::new(pattern).ok()?;
+fn regex_find_number(haystack: &str, re: &regex_lite::Regex) -> Option<u16> {
     let cap = re.captures(haystack)?;
     cap.get(1)?.as_str().parse::<u16>().ok()
 }
 
-fn regex_find_value(haystack: &str, pattern: &str) -> Option<String> {
-    let re = regex_lite::Regex::new(pattern).ok()?;
+fn regex_find_value(haystack: &str, re: &regex_lite::Regex) -> Option<String> {
     let cap = re.captures(haystack)?;
     Some(cap.get(1)?.as_str().to_string())
 }
+
+/// 预编译的 WMIC 解析正则（避免每次调用重新编译）
+static RE_APP_PORT: LazyLock<regex_lite::Regex> =
+    LazyLock::new(|| regex_lite::Regex::new(r"--app-port=(\d+)").unwrap());
+static RE_AUTH_TOKEN: LazyLock<regex_lite::Regex> =
+    LazyLock::new(|| regex_lite::Regex::new(r#"--remoting-auth-token=([^"\s]+)"#).unwrap());
+static RE_PLATFORM_ID: LazyLock<regex_lite::Regex> =
+    LazyLock::new(|| regex_lite::Regex::new(r#"--rso_platform_id=([^"\s]+)"#).unwrap());
 
 /// 查找 LeagueClientUx.exe 的可执行文件所在目录
 fn find_lcu_exe_dir(sys: &System) -> Option<PathBuf> {
