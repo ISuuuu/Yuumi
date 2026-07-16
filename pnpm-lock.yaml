@@ -14,9 +14,6 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.5.4
-      '@vicons/ionicons5':
-        specifier: ^0.13.0
-        version: 0.13.0
       marked:
         specifier: ^18.0.5
         version: 18.0.5
@@ -531,9 +528,6 @@ packages:
 
   '@types/lodash@4.17.24':
     resolution: {integrity: sha512-gIW7lQLZbue7lRSWEFql49QJJWThrTFFeIMJdp3eH4tKoxm1OvEPg02rm4wCCSHS0cL3/Fizimb35b7k8atwsQ==}
-
-  '@vicons/ionicons5@0.13.0':
-    resolution: {integrity: sha512-zvZKBPjEXKN7AXNo2Na2uy+nvuv6SP4KAMQxpKL2vfHMj0fSvuw7JZcOPCjQC3e7ayssKnaoFVAhbYcW6v41qQ==}
 
   '@vitejs/plugin-vue@5.2.3':
     resolution: {integrity: sha512-IYSLEQj4LgZZuoVpdSUCw3dIynTWQgPlaRP6iAvMle4My0HdYwr5g5wQAfwOeHQBmYwEkqF70nRpSilr6PoUDg==}
@@ -1312,8 +1306,6 @@ snapshots:
       '@types/lodash': 4.17.24
 
   '@types/lodash@4.17.24': {}
-
-  '@vicons/ionicons5@0.13.0': {}
 
   '@vitejs/plugin-vue@5.2.3(vite@6.4.3(yaml@2.9.0))(vue@3.5.38(typescript@5.7.2))':
     dependencies:

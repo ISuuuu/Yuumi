@@ -11,11 +11,19 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AutoAcceptCard: typeof import('./components/tools/AutoAcceptCard.vue')['default']
+    AutoHoverCard: typeof import('./components/tools/AutoHoverCard.vue')['default']
+    AutoSwapCard: typeof import('./components/tools/AutoSwapCard.vue')['default']
     ChampionPicker: typeof import('./components/ChampionPicker.vue')['default']
     ColorPicker: typeof import('./components/ColorPicker.vue')['default']
     ColorPickerWithAlpha: typeof import('./components/ColorPickerWithAlpha.vue')['default']
+    CustomTitleBar: typeof import('./components/layout/CustomTitleBar.vue')['default']
     LcuImage: typeof import('./components/LcuImage.vue')['default']
+    LcuQuickActionsCard: typeof import('./components/tools/LcuQuickActionsCard.vue')['default']
+    LootManagerTab: typeof import('./components/career/LootManagerTab.vue')['default']
+    MatchHistoryTab: typeof import('./components/career/MatchHistoryTab.vue')['default']
     NaiveUIBridge: typeof import('./components/NaiveUIBridge.vue')['default']
+    NavigationSidebar: typeof import('./components/layout/NavigationSidebar.vue')['default']
     NButton: typeof import('naive-ui')['NButton']
     NCheckbox: typeof import('naive-ui')['NCheckbox']
     NCheckboxGroup: typeof import('naive-ui')['NCheckboxGroup']
@@ -25,10 +33,8 @@ declare module 'vue' {
     NConfigProvider: typeof import('naive-ui')['NConfigProvider']
     NDialogProvider: typeof import('naive-ui')['NDialogProvider']
     NInput: typeof import('naive-ui')['NInput']
-    NInputGroup: typeof import('naive-ui')['NInputGroup']
     NInputNumber: typeof import('naive-ui')['NInputNumber']
     NMessageProvider: typeof import('naive-ui')['NMessageProvider']
-    NProgress: typeof import('naive-ui')['NProgress']
     NSelect: typeof import('naive-ui')['NSelect']
     NSlider: typeof import('naive-ui')['NSlider']
     NSpace: typeof import('naive-ui')['NSpace']
@@ -38,6 +44,7 @@ declare module 'vue' {
     OpggWindow: typeof import('./components/OpggWindow.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SpectateCard: typeof import('./components/tools/SpectateCard.vue')['default']
     SpellPicker: typeof import('./components/SpellPicker.vue')['default']
     UpdateDialog: typeof import('./components/UpdateDialog.vue')['default']
   }

@@ -34,6 +34,13 @@ export default defineConfig(async () => ({
         main: resolve(__dirname, "index.html"),
         opgg: resolve(__dirname, "opgg.html"),
       },
+      output: {
+        manualChunks: {
+          "vue-vendor": ["vue", "vue-router", "pinia"],
+          "naive-ui": ["naive-ui"],
+          "i18n": ["vue-i18n"],
+        },
+      },
     },
   },
 }));

@@ -1,9 +1,21 @@
 import { ref, watch, type Ref } from "vue";
 import { fetchLcuAsset } from "../api/lcu";
 
-// 全局缓存，避免重复请求同一资源
+// LRU 缓存：Map 保持插入顺序，超过上限时淘汰最久未使用的条目
+const MAX_CACHE_SIZE = 500;
 const cache = new Map<string, string>();
 const inflight = new Map<string, Promise<string>>();
+
+function cacheSet(key: string, value: string) {
+  if (cache.has(key)) {
+    cache.delete(key); // 移到最新位置
+  } else if (cache.size >= MAX_CACHE_SIZE) {
+    // 淘汰最旧的条目（Map 迭代器第一个）
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(key, value);
+}
 
 /**
  * 包装带重试机制的 LCU 资源获取方法，处理客户端初始启动时的暂时不可达问题
@@ -68,7 +80,7 @@ export function useLcuAsset(pathRef: Ref<string | undefined>) {
         .get(path)!
         .then(
           (dataUrl) => {
-            cache.set(path, dataUrl);
+            cacheSet(path, dataUrl);
             // 仅当 pathRef 未变化时才写入（防止竞态）
             if (pathRef.value === path) {
               src.value = dataUrl;
