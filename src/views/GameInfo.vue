@@ -588,12 +588,38 @@ async function loadFromGameflowSession() {
     }
 
     const { teamOne, teamTwo } = data.gameData;
-    // 队伍数据缺失或为空时不覆盖已有数据（退出游戏过程中可能出现）
+    // 队伍数据缺失或为空时延迟重试（GameStart 初期 LCU 可能尚未填充 teamOne/teamTwo）
     if (!teamOne || !teamTwo || teamOne.length === 0 || teamTwo.length === 0) {
+      let retried = 0;
+      while (retried < 5) {
+        await new Promise((r) => setTimeout(r, 3000));
+        cachedSession = null; // 强制刷新缓存
+        const retryData = await fetchSessionCached();
+        const rt = retryData?.gameData;
+        if (rt?.teamOne?.length > 0 && rt?.teamTwo?.length > 0) {
+          // 用重试获取到的数据继续后续逻辑
+          const rTeamOne = rt.teamOne;
+          const rTeamTwo = rt.teamTwo;
+          return processTeamData(rTeamOne, rTeamTwo);
+        }
+        retried++;
+        console.log(`[GameInfo] 队伍数据为空，重试 ${retried}/5`);
+      }
+      console.warn("[GameInfo] 重试 5 次后队伍数据仍为空");
       loading.value = false;
       return;
     }
 
+    await processTeamData(teamOne, teamTwo);
+  } catch (e) {
+    console.error("加载 gameflow session 失败:", e);
+    error.value = "加载对局数据失败";
+  }
+  loading.value = false;
+}
+
+/** 处理双方队伍数据：迁移己方缓存、注入队伍列表、加载玩家详情 */
+async function processTeamData(teamOne: any[], teamTwo: any[]) {
     // 用当前玩家 summonerId 判断哪队是己方
     console.log("[GameInfo] currentSummonerId:", currentSummonerId.value);
     const isTeamOne = teamOne.some(
@@ -651,11 +677,6 @@ async function loadFromGameflowSession() {
       ...allyTeam.map((p: any) => loadPlayerData(p.summonerId, p.summonerId)),
       ...enemyTeam.map((p: any) => loadPlayerData(p.summonerId, p.summonerId)),
     ]);
-  } catch (e) {
-    console.error("加载 gameflow session 失败:", e);
-    error.value = "加载对局数据失败";
-  }
-  loading.value = false;
 }
 
 function getChampionIcon(id: number): string {

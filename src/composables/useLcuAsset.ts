@@ -56,13 +56,6 @@ export function useLcuAsset(pathRef: Ref<string | undefined>) {
         return;
       }
 
-      // 拦截以 /fe/lol-loot/ 开头的战利品前端资源，映射至 CommunityDragon 在线 CDN
-      if (path.startsWith("/fe/lol-loot/")) {
-        const subPath = path.slice(13); // 移除 "/fe/lol-loot/" (长度 13)
-        src.value = `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-loot/global/default/${subPath}`;
-        return;
-      }
-
       // 缓存命中 — 直接赋值
       if (cache.has(path)) {
         src.value = cache.get(path)!;
