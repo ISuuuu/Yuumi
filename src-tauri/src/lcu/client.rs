@@ -1,7 +1,9 @@
 use base64::Engine;
 use serde_json::Value;
+use std::path::PathBuf;
+use std::time::Duration;
 use tauri::State;
-use tokio::time::{sleep, Duration};
+use tokio::time::sleep;
 
 use crate::{build_auth_header, AppState};
 
@@ -9,6 +11,87 @@ use crate::{build_auth_header, AppState};
 /// 仅对连接拒绝/超时等传输层错误重试，HTTP 状态码错误不重试。
 const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
+
+/// 资源缓存有效期：7 天
+const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// 返回资源缓存目录，不存在时自动创建
+fn get_asset_cache_dir() -> Option<PathBuf> {
+    let dir = dirs::config_dir()?
+        .join("Yuumi")
+        .join("cache")
+        .join("assets");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+/// 根据 URL 或路径中的扩展名猜测 content-type
+fn guess_content_type(path: &str) -> String {
+    let ext = path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .chars()
+        .take_while(|c| c.is_alphanumeric())
+        .collect::<String>();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        _ => "image/png",
+    }
+    .to_string()
+}
+
+/// 尝试从文件缓存读取，返回 (data_url, content_type)，过期或不存在则返回 None
+fn try_read_asset_cache(path: &str) -> Option<(String, String)> {
+    let dir = get_asset_cache_dir()?;
+    // 使用路径的 hash 作为文件名，避免路径分隔符问题
+    let hash = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        path.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    };
+    let file_path = dir.join(&hash);
+
+    let meta = std::fs::metadata(&file_path).ok()?;
+    let modified = meta.modified().ok()?;
+    if modified.elapsed().unwrap_or(Duration::MAX) > CACHE_TTL {
+        return None;
+    }
+
+    let data_url = std::fs::read_to_string(&file_path).ok()?;
+    if data_url.starts_with("data:") {
+        let content_type = data_url
+            .split(';')
+            .next()
+            .unwrap_or("data:image/png")
+            .trim_start_matches("data:")
+            .to_string();
+        Some((data_url, content_type))
+    } else {
+        None
+    }
+}
+
+/// 将 data URL 写入文件缓存
+fn write_asset_cache(path: &str, data_url: &str) {
+    let Some(dir) = get_asset_cache_dir() else {
+        return;
+    };
+    let hash = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        path.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    };
+    let _ = std::fs::write(dir.join(&hash), data_url);
+}
 
 /// 允许前端调用的 LCU API 路径前缀白名单
 const ALLOWED_API_PREFIXES: &[&str] = &[
@@ -131,43 +214,62 @@ pub async fn call_lcu_api(
     Err(last_err)
 }
 
-/// LCU 资源路径白名单前缀
-const ASSET_PATH_PREFIX: &str = "/lol-game-data/assets/";
-const LOOT_ASSET_PATH_PREFIX: &str = "/fe/lol-loot/assets/";
-
 /// 获取 LCU 静态资源（图片等），返回 data URL。
 /// 前端可用于 <img :src="dataUrl">，绕过自签名证书问题。
 /// 路径限制：必须以 `/lol-game-data/assets/` 或 `/fe/lol-loot/assets/` 开头。
+/// 支持 7 天文件缓存，相同资源在缓存有效期内直接返回，无需重复请求。
 #[tauri::command]
 pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Result<String, String> {
-    let is_valid = path.starts_with(ASSET_PATH_PREFIX) || path.starts_with(LOOT_ASSET_PATH_PREFIX);
-    if !is_valid {
-        return Err(format!(
-            "不允许的资源路径，必须以 {} 或 {} 开头",
-            ASSET_PATH_PREFIX, LOOT_ASSET_PATH_PREFIX
-        ));
+    let is_lcu_asset = path.starts_with("/lol-game-data/assets/");
+    let is_loot_asset = path.starts_with("/fe/lol-loot/assets/");
+    if !is_lcu_asset && !is_loot_asset {
+        return Err(
+            "不允许的资源路径，必须以 /lol-game-data/assets/ 或 /fe/lol-loot/assets/ 开头"
+                .to_string(),
+        );
+    }
+
+    // 优先读取文件缓存
+    if let Some((data_url, _)) = try_read_asset_cache(&path) {
+        log::debug!("LCU 资源缓存命中: {}", path);
+        return Ok(data_url);
     }
 
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
 
-    let clean_path = if let Some(stripped) = path.strip_prefix(ASSET_PATH_PREFIX) {
-        format!("{}{}", ASSET_PATH_PREFIX, stripped.to_lowercase())
-    } else if let Some(stripped) = path.strip_prefix(LOOT_ASSET_PATH_PREFIX) {
-        format!("{}{}", LOOT_ASSET_PATH_PREFIX, stripped.to_lowercase())
+    // 根据路径类型决定请求 URL：LCU 资源走本地代理，战利品资源走 CommunityDragon CDN
+    let url = if is_lcu_asset {
+        let clean_path = path
+            .strip_prefix("/lol-game-data/assets/")
+            .map(|s| format!("/lol-game-data/assets/{}", s.to_lowercase()))
+            .unwrap_or(path.clone());
+        format!("https://127.0.0.1:{}{}", lcu.port, clean_path)
     } else {
-        unreachable!() // validated above
+        // /fe/lol-loot/assets/... → CommunityDragon CDN
+        let sub_path = path.strip_prefix("/fe/lol-loot/").unwrap_or(&path);
+        format!(
+            "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-loot/global/default/{}",
+            sub_path
+        )
     };
-    let url = format!("https://127.0.0.1:{}{}", lcu.port, clean_path);
-    let auth = build_auth_header(&lcu.token);
 
-    let resp = lcu
-        .http_client
-        .get(&url)
-        .header("Authorization", auth)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = if is_lcu_asset {
+        let auth = build_auth_header(&lcu.token);
+        lcu.http_client
+            .get(&url)
+            .header("Authorization", auth)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        // CommunityDragon CDN 无需认证
+        lcu.http_client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+    };
 
     if !resp.status().is_success() {
         log::warn!("LCU 资源加载失败 [{}]: {}", path, resp.status());
@@ -178,8 +280,9 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
         .headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("image/png")
-        .to_string();
+        .map(|s| s.to_string())
+        .filter(|s| s.starts_with("image/"))
+        .unwrap_or_else(|| guess_content_type(&path));
 
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
@@ -190,5 +293,13 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
         bytes.len(),
         data_url.len()
     );
+
+    // 异步写入缓存（不阻塞返回）
+    let cache_path = path.clone();
+    let cache_data = data_url.clone();
+    tokio::spawn(async move {
+        write_asset_cache(&cache_path, &cache_data);
+    });
+
     Ok(data_url)
 }
