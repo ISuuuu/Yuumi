@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { marked } from "marked";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
@@ -9,13 +8,14 @@ interface VersionEntry {
   tag: string;
   date: string;
   body: string;
+  html: string;
 }
 
 const versions = ref<VersionEntry[]>([]);
 const loading = ref(false);
 const hasError = ref(false);
 
-function renderMarkdown(md: string): string {
+function renderMarkdownSync(marked: any, md: string): string {
   if (!md) return "";
   try {
     return marked.parse(md) as string;
@@ -42,11 +42,16 @@ async function fetchReleases() {
     if (!resp.ok) throw new Error("HTTP status " + resp.status);
     const data = await resp.json();
     if (Array.isArray(data) && data.length > 0) {
-      versions.value = data.slice(0, 3).map((rel: any) => ({
-        tag: rel.tag_name,
-        date: formatDate(rel.published_at),
-        body: rel.body || t("noticePage.noDesc"),
-      }));
+      const { marked } = await import("marked");
+      versions.value = data.slice(0, 3).map((rel: any) => {
+        const body = rel.body || t("noticePage.noDesc");
+        return {
+          tag: rel.tag_name,
+          date: formatDate(rel.published_at),
+          body,
+          html: renderMarkdownSync(marked, body),
+        };
+      });
       console.log("[Notice] 成功拉取 GitHub 最近 3 个版本日志");
     } else {
       throw new Error("No release entries found");
@@ -122,7 +127,7 @@ onMounted(() => {
           </div>
           <div
             class="release-body markdown-body"
-            v-html="renderMarkdown(ver.body)"
+            v-html="ver.html"
           />
           <div class="card-glow" />
         </div>

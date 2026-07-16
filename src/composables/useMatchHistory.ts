@@ -162,8 +162,8 @@ export function useMatchHistory() {
         await Promise.all([
           loadRankedStats(summoner.value.puuid),
           loadMatches(summoner.value.puuid),
+          loadRecentMatches(summoner.value.puuid),
         ]);
-        await loadRecentMatches(summoner.value.puuid);
 
         cachedSummoner = summoner.value;
         cachedRankedQueues = rankedQueues.value;
@@ -227,8 +227,13 @@ export function useMatchHistory() {
       if (raw) cached = JSON.parse(raw);
     } catch { /* ignore */ }
 
+    const seen = new Set<number>();
     const merged = [...fresh, ...cached]
-      .filter((m, idx, arr) => arr.findIndex((x) => x.gameId === m.gameId) === idx)
+      .filter((m) => {
+        if (seen.has(m.gameId)) return false;
+        seen.add(m.gameId);
+        return true;
+      })
       .sort((a, b) => b.timeStamp - a.timeStamp)
       .slice(0, careerGamesNumber.value);
 
