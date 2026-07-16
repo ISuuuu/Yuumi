@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed, provide } from "vue";
+import { ref, onMounted, watch, computed, provide, defineAsyncComponent } from "vue";
 import { useLcuStore, initLcuListeners } from "./store/lcuStore";
 import { storeToRefs } from "pinia";
 import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
@@ -23,11 +23,11 @@ import Home from "./views/Home.vue";
 import Career from "./views/Career.vue";
 import Search from "./views/Search.vue";
 import GameInfo from "./views/GameInfo.vue";
-import TFT from "./views/TFT.vue";
-import Settings from "./views/Settings.vue";
-import Tools from "./views/Tools.vue";
-import Notice from "./views/Notice.vue";
 import BenchOverlay from "./views/BenchOverlay.vue";
+const TFT = defineAsyncComponent(() => import("./views/TFT.vue"));
+const Settings = defineAsyncComponent(() => import("./views/Settings.vue"));
+const Tools = defineAsyncComponent(() => import("./views/Tools.vue"));
+const Notice = defineAsyncComponent(() => import("./views/Notice.vue"));
 import UpdateDialog, { type UpdateInfo } from "./components/UpdateDialog.vue";
 import CustomTitleBar from "./components/layout/CustomTitleBar.vue";
 import NavigationSidebar from "./components/layout/NavigationSidebar.vue";
@@ -340,43 +340,36 @@ async function loadLcuState() {
   // 等待 1 秒，让 LCU API 完全就绪
   await new Promise((r) => setTimeout(r, 1000));
 
-  // 每一步独立 try-catch，互不影响
-
-  // 1. 获取当前召唤师数据
-  try {
-    summoner.value = await fetchCurrentSummoner();
-    console.log("[loadLcuState] 召唤师:", summoner.value?.displayName);
-  } catch (e) {
-    console.warn("[loadLcuState] 获取召唤师失败:", e);
-  }
-
-  // 2. 获取大区平台
-  try {
-    const resp = await lcuRequest<any>(
+  // 步骤 1/2/3/5 互不依赖，并行请求以减少启动延迟
+  const [summonerResp, _platformResp, phaseResp, cfg] = await Promise.allSettled([
+    fetchCurrentSummoner(),
+    lcuRequest<any>(
       "GET",
       "/lol-platform-config/v1/namespaces/LoginPlatformLocalization/platformId",
-    );
-    if (resp.success && resp.data) {
-      platformId.value = resp.data;
-    }
-  } catch (e) {
-    console.warn("[loadLcuState] 获取大区失败:", e);
+    ),
+    lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase"),
+    appConfig.value ? Promise.resolve(appConfig.value) : fetchConfig(),
+  ]);
+
+  // 1. 召唤师
+  if (summonerResp.status === "fulfilled") {
+    summoner.value = summonerResp.value;
+    console.log("[loadLcuState] 召唤师:", summoner.value?.displayName);
+  } else {
+    console.warn("[loadLcuState] 获取召唤师失败:", summonerResp.reason);
   }
 
-  // 3. 同步拉取当前 LCU 对局状态（游戏中重启时关键，必须执行）
-  try {
-    const phaseResp = await lcuRequest<string>(
-      "GET",
-      "/lol-gameflow/v1/gameflow-phase",
-    );
-    if (phaseResp.success && phaseResp.data) {
-      store.setGamePhase(phaseResp.data);
-    }
-  } catch (e) {
-    console.warn("[loadLcuState] 获取游戏阶段失败:", e);
+  // 2. 大区平台
+  if (_platformResp.status === "fulfilled" && _platformResp.value.success && _platformResp.value.data) {
+    platformId.value = _platformResp.value.data;
   }
 
-  // 4. 同步拉取对局 Session
+  // 3. 游戏阶段
+  if (phaseResp.status === "fulfilled" && phaseResp.value.success && phaseResp.value.data) {
+    store.setGamePhase(phaseResp.value.data);
+  }
+
+  // 4. 选人 Session（依赖步骤 3 的结果）
   if (store.gamePhase === "ChampSelect") {
     try {
       const sessionResp = await lcuRequest<any>(
@@ -391,20 +384,20 @@ async function loadLcuState() {
     }
   }
 
-  // 5. 初始化加载主题色
+  // 5. 主题色
   try {
-    const cfg = appConfig.value || (await fetchConfig());
-    if (cfg && cfg.Personalization) {
-      if (cfg.Personalization.ThemeColor) {
-        updateThemeColor(cfg.Personalization.ThemeColor);
+    const config = cfg.status === "fulfilled" ? cfg.value : null;
+    if (config && config.Personalization) {
+      if (config.Personalization.ThemeColor) {
+        updateThemeColor(config.Personalization.ThemeColor);
       }
       updateCardColors(
-        cfg.Personalization.WinCardColor,
-        cfg.Personalization.LoseCardColor,
-        cfg.Personalization.RemakeCardColor,
+        config.Personalization.WinCardColor,
+        config.Personalization.LoseCardColor,
+        config.Personalization.RemakeCardColor,
       );
-      if (cfg.Personalization.ThemeMode) {
-        applyThemeMode(cfg.Personalization.ThemeMode);
+      if (config.Personalization.ThemeMode) {
+        applyThemeMode(config.Personalization.ThemeMode);
       }
     }
   } catch (e) {
@@ -596,7 +589,6 @@ watch(
       await showBenchOverlay();
     }
   },
-  { deep: true },
 );
 
 async function reconnectWithRetry(maxAttempts = 5) {

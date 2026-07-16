@@ -1,7 +1,5 @@
 import { createI18n } from "vue-i18n";
 import zh_CN from "./locales/zh-CN.json";
-import zh_TW from "./locales/zh-TW.json";
-import en_US from "./locales/en-US.json";
 
 // 获取浏览器语言并映射到受支持的 locale
 function getBrowserLocale(): string {
@@ -33,14 +31,30 @@ const i18n = createI18n({
   fallbackLocale: "zh_CN",
   messages: {
     zh_CN,
-    zh_TW,
-    en_US,
   },
 });
 
-// 提供即时切换的辅助方法
-export function setLocale(lang: string) {
+// 按需加载其他语言包（首次切换时动态导入）
+const loadedLocales = new Set<string>(["zh_CN"]);
+
+export async function setLocale(lang: string) {
   const targetLocale = getLocaleFromConfig(lang);
+  if (!loadedLocales.has(targetLocale)) {
+    try {
+      let messages: any;
+      if (targetLocale === "zh_TW") {
+        messages = await import("./locales/zh-TW.json");
+      } else if (targetLocale === "en_US") {
+        messages = await import("./locales/en-US.json");
+      }
+      if (messages) {
+        i18n.global.setLocaleMessage(targetLocale, messages.default);
+        loadedLocales.add(targetLocale);
+      }
+    } catch (e) {
+      console.warn(`[i18n] 加载语言包 ${targetLocale} 失败:`, e);
+    }
+  }
   (i18n.global.locale as any).value = targetLocale;
 }
 

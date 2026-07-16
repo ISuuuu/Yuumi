@@ -27,6 +27,55 @@ const appConfig =
 const currentSummonerId = ref<number>(0);
 const currentSummonerPuuid = ref<string>("");
 
+// ── 排位数据缓存（puuid → { data, timestamp }），避免重复请求同一玩家的排位信息
+const rankCache = new Map<string, { data: any; timestamp: number }>();
+const RANK_CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+
+// ── gameflow session 短期缓存，避免同一流程中多次请求同一端点
+let cachedSession: { data: any; timestamp: number } | null = null;
+const SESSION_CACHE_TTL = 30 * 1000; // 30 秒
+
+async function fetchSessionCached(): Promise<any | null> {
+  const now = Date.now();
+  if (cachedSession && now - cachedSession.timestamp < SESSION_CACHE_TTL) {
+    return cachedSession.data;
+  }
+  try {
+    const resp = await lcuRequest<any>("GET", "/lol-gameflow/v1/session");
+    if (resp.success && resp.data) {
+      cachedSession = { data: resp.data, timestamp: now };
+      return resp.data;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+// ── localStorage 写入防抖（10 个玩家并发加载时避免重复序列化）
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function debouncedSavePlayerData() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(
+        "yuumi_last_game_player_data",
+        JSON.stringify(playerData.value),
+      );
+      localStorage.setItem(
+        "yuumi_last_gameflow_my_team",
+        JSON.stringify(myTeam.value),
+      );
+      localStorage.setItem(
+        "yuumi_last_gameflow_their_team",
+        JSON.stringify(theirTeam.value),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, 500);
+}
+
 // 预组队颜色方案（降低饱和度与透明度，非常柔和剔透，不刺眼）
 const PREMADE_COLORS = [
   {
@@ -90,9 +139,9 @@ function computePremadeColors(team: any[]): Record<number, number> {
 /** 从 gameflow session 获取组队信息（ChampSelect 阶段使用） */
 async function fetchPremadeColors() {
   try {
-    const resp = await lcuRequest<any>("GET", "/lol-gameflow/v1/session");
-    if (!resp.success || !resp.data?.gameData) return;
-    const { teamOne, teamTwo } = resp.data.gameData;
+    const data = await fetchSessionCached();
+    if (!data?.gameData) return;
+    const { teamOne, teamTwo } = data.gameData;
     if (!teamOne || !teamTwo || teamOne.length === 0) return;
 
     const isTeamOne = teamOne.some(
@@ -152,16 +201,16 @@ const isTftMode = ref(false);
 
 async function updateCurrentQueueId() {
   try {
-    const resp = await lcuRequest<any>("GET", "/lol-gameflow/v1/session");
-    if (resp.success && resp.data?.gameData?.queue?.id !== undefined) {
-      currentQueueId.value = resp.data.gameData.queue.id;
+    const data = await fetchSessionCached();
+    if (data?.gameData?.queue?.id !== undefined) {
+      currentQueueId.value = data.gameData.queue.id;
       console.log(
         "[GameInfo] Detected current game mode queueId:",
         currentQueueId.value,
       );
 
       const qId = currentQueueId.value;
-      const gameMode = resp.data.gameData.queue.gameMode;
+      const gameMode = data.gameData.queue.gameMode;
       if (gameMode === "TFT" || (qId !== null && qId >= 1090 && qId <= 1200)) {
         isTftMode.value = true;
       } else {
@@ -373,7 +422,20 @@ async function loadPlayerData(cellId: number, summonerId: number) {
         ? fetchMatchHistory(info.puuid, 0, maxMatches)
         : Promise.resolve([]),
       info.puuid
-        ? lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${info.puuid}`)
+        ? (() => {
+            // 优先从缓存获取排位数据
+            const cached = rankCache.get(info.puuid);
+            if (cached && Date.now() - cached.timestamp < RANK_CACHE_TTL) {
+              return Promise.resolve({ success: true, data: cached.data });
+            }
+            return lcuRequest<any>("GET", `/lol-ranked/v1/ranked-stats/${info.puuid}`)
+              .then((resp) => {
+                if (resp.success && resp.data) {
+                  rankCache.set(info.puuid, { data: resp.data, timestamp: Date.now() });
+                }
+                return resp;
+              });
+          })()
         : Promise.resolve({ success: false } as any),
     ]);
 
@@ -472,22 +534,7 @@ async function loadPlayerData(cellId: number, summonerId: number) {
       fateFlag,
       recentlyChampionName,
     };
-    try {
-      localStorage.setItem(
-        "yuumi_last_game_player_data",
-        JSON.stringify(playerData.value),
-      );
-      localStorage.setItem(
-        "yuumi_last_gameflow_my_team",
-        JSON.stringify(myTeam.value),
-      );
-      localStorage.setItem(
-        "yuumi_last_gameflow_their_team",
-        JSON.stringify(theirTeam.value),
-      );
-    } catch {
-      /* ignore */
-    }
+    debouncedSavePlayerData();
   } catch {
     playerData.value[cellId] = {
       info: null,
@@ -533,14 +580,14 @@ async function loadFromGameflowSession() {
   }
 
   try {
-    const resp = await lcuRequest<any>("GET", "/lol-gameflow/v1/session");
-    if (!resp.success || !resp.data?.gameData) {
+    const data = await fetchSessionCached();
+    if (!data?.gameData) {
       error.value = "无法获取对局 Session";
       loading.value = false;
       return;
     }
 
-    const { teamOne, teamTwo } = resp.data.gameData;
+    const { teamOne, teamTwo } = data.gameData;
     // 队伍数据缺失或为空时不覆盖已有数据（退出游戏过程中可能出现）
     if (!teamOne || !teamTwo || teamOne.length === 0 || teamTwo.length === 0) {
       loading.value = false;
@@ -771,7 +818,6 @@ watch(
       }
     }
   },
-  { deep: true },
 );
 
 function getKdaClass(kda: number | undefined): string {
