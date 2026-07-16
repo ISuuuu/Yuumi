@@ -17,6 +17,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@fontsource/outfit": "^5.2.8",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "marked": "^18.0.5",
