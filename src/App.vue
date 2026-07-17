@@ -437,6 +437,11 @@ watch(navigateSearchPayload, (payload) => {
   }
 });
 
+// 监听本地路由变化并同步到 Pinia 状态库，确保其他子组件可按需刷新
+watch(currentPage, (val) => {
+  store.setCurrentPage(val);
+}, { immediate: true });
+
 async function showBenchOverlay(show: boolean = true) {
   console.log(
     "[bench-debug] showBenchOverlay 被调用: show =",
