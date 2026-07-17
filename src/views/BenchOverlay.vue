@@ -78,83 +78,57 @@ const isPickable = (championId: number) => {
   return pickableIds.value.includes(championId);
 };
 
-// 判断板凳英雄是否可点击
-const isBenchChampionClickable = (champ: any) => {
-  if (!isPickable(champ.championId)) return false;
+// 保护期时长常量（毫秒）
+const OPENING_PROTECT_MS = 5000; // 开局前 5 秒，大家英雄还在加载/随机，非本人英雄禁点
+const BENCH_PROTECT_MS = 3500; // 新入席英雄的队友优先保护期
+
+// 计算板凳英雄的保护期状态，供 UI 置灰、tooltip 提示、点击拦截三处统一使用
+const getProtectionState = (champ: any): { clickable: boolean; reason: string } => {
+  if (!isPickable(champ.championId)) {
+    return { clickable: false, reason: "未拥有/不可用" };
+  }
 
   // 自己的随时可以点回，不作保护期限制
-  if (champ.isMine === true) return true;
+  if (champ.isMine === true) {
+    return { clickable: true, reason: "点击秒抢" };
+  }
 
   // 倒计时 timer.phase === "FINALIZATION" 是最后的全面开放阶段，肯定是可以选的
   if (store.champSelectSession?.timer?.phase === "FINALIZATION") {
-    return true;
+    return { clickable: true, reason: "点击秒抢" };
   }
 
   const addedTime = benchChampionsAddedTime.value[champ.championId] || sessionStartTimestamp.value;
-  const elapsed = Date.now() - addedTime;
-  const elapsedFromStart = Date.now() - sessionStartTimestamp.value;
+  const now = Date.now();
+  const elapsed = now - addedTime;
+  const elapsedFromStart = now - sessionStartTimestamp.value;
 
   // 1. 刚开局前 5 秒内，大家的英雄都还在加载或随机，非本人的英雄直接禁用
-  if (elapsedFromStart < 5000) {
-    return false;
+  if (elapsedFromStart < OPENING_PROTECT_MS) {
+    return { clickable: false, reason: "开局准备中，请稍候" };
   }
 
   // 2. 新放到板凳席不足 3.5 秒的，还在队友保护冷却期内，不能选择
-  if (elapsed < 3500) {
-    return false;
+  if (elapsed < BENCH_PROTECT_MS) {
+    return { clickable: false, reason: "保护期内 (队友优先)" };
   }
 
   // 其它情况（过了保护期），所有人均可自由交换
-  return true;
+  return { clickable: true, reason: "点击秒抢" };
 };
+
+// 判断板凳英雄是否可点击
+const isBenchChampionClickable = (champ: any) => getProtectionState(champ).clickable;
 
 // 获取不可选原因的提示文案
-const getDisabledReason = (champ: any) => {
-  if (!isPickable(champ.championId)) return "未拥有/不可用";
-  if (champ.isMine === true) return "点击秒抢";
-
-  if (store.champSelectSession?.timer?.phase !== "FINALIZATION") {
-    const addedTime = benchChampionsAddedTime.value[champ.championId] || sessionStartTimestamp.value;
-    const elapsed = Date.now() - addedTime;
-    const elapsedFromStart = Date.now() - sessionStartTimestamp.value;
-
-    if (elapsedFromStart < 5000) {
-      return "开局准备中，请稍候";
-    }
-    if (elapsed < 3500) {
-      return "保护期内 (队友优先)";
-    }
-  }
-  return "点击秒抢";
-};
+const getDisabledReason = (champ: any) => getProtectionState(champ).reason;
 
 // 点击选择/抢下板凳席英雄
 async function swapChampion(champ: any) {
-  if (!isPickable(champ.championId)) {
-    console.warn(
-      `[BenchOverlay] 拦截点击：英雄 ${champ.championId} 不在玩家当前可用池内`,
-    );
+  const { clickable, reason } = getProtectionState(champ);
+  if (!clickable) {
+    console.warn(`[BenchOverlay] 拦截点击：英雄 ${champ.championId} - ${reason}`);
     return;
-  }
-  
-  if (champ.isMine !== true) {
-    const addedTime = benchChampionsAddedTime.value[champ.championId] || sessionStartTimestamp.value;
-    const elapsed = Date.now() - addedTime;
-    const elapsedFromStart = Date.now() - sessionStartTimestamp.value;
-    const isFinalization = store.champSelectSession?.timer?.phase === "FINALIZATION";
-
-    if (!isFinalization) {
-      if (elapsedFromStart < 5000) {
-        console.warn(`[BenchOverlay] 拦截点击：开局前5秒保护中`);
-        return;
-      }
-      if (elapsed < 3500) {
-        console.warn(
-          `[BenchOverlay] 拦截点击：英雄 ${champ.championId} 处于队友保护期内`,
-        );
-        return;
-      }
-    }
   }
 
   console.log(
@@ -207,7 +181,7 @@ watch(
       // 智能初始化 sessionStartTimestamp，防止中途打开悬浮窗时误判为“刚开局”
       const timeLeft = session.timer?.adjustedTimeLeftInPhase ?? 0;
       if (timeLeft > 0 && timeLeft < 53000 && session.timer?.phase === "PLANNING") {
-        if (Date.now() - sessionStartTimestamp.value < 5000) {
+        if (Date.now() - sessionStartTimestamp.value < OPENING_PROTECT_MS) {
           sessionStartTimestamp.value = Date.now() - 10000;
           console.log("[BenchOverlay] 检测到中途打开悬浮窗，已跳过开局保护时间");
         }
@@ -250,7 +224,7 @@ watch(
       for (const c of newChampions) {
         if (c && c.championId) {
           if (benchChampionsAddedTime.value[c.championId] === undefined) {
-            const isFreshSession = now - sessionStartTimestamp.value < 5000;
+            const isFreshSession = now - sessionStartTimestamp.value < OPENING_PROTECT_MS;
             benchChampionsAddedTime.value[c.championId] = isFreshSession ? sessionStartTimestamp.value : now;
             console.log(`[BenchOverlay] 英雄 ${c.championId} 录入板凳席，设定加入时间为: ${benchChampionsAddedTime.value[c.championId]}`);
           }

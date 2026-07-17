@@ -48,9 +48,19 @@ async fn get_summoner_name_from_lcu(app_handle: &AppHandle) -> Option<String> {
 
     if resp.status().is_success() {
         if let Ok(val) = resp.json::<serde_json::Value>().await {
+            // 国服 Riot ID 体系下 displayName 可能为空，优先取 gameName
+            let game_name = val
+                .get("gameName")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+            if game_name.is_some() {
+                return game_name;
+            }
             return val
                 .get("displayName")
                 .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
                 .map(|s| s.to_string());
         }
     }
