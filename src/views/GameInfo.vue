@@ -562,6 +562,9 @@ async function loadAllPlayers() {
 async function loadFromGameflowSession() {
   loading.value = true;
   error.value = "";
+  // 强制清除 gameflow session 缓存，确保拿到当前局的 teamOne/teamTwo，
+  // 避免 30 秒过期时间内快速重开导致读到上一局的旧数据
+  cachedSession = null;
   await updateCurrentQueueId();
   if (isTftMode.value) {
     loading.value = false;
@@ -726,53 +729,55 @@ function formatRank(q: any): string {
 }
 
 onMounted(async () => {
-  // 从 localStorage 加载上一局数据以支持持久化显示
-  try {
-    const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
-    const savedTheirTeam = localStorage.getItem(
-      "yuumi_last_gameflow_their_team",
-    );
-    const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
-    if (savedMyTeam) {
-      const parsed = JSON.parse(savedMyTeam);
-      if (Array.isArray(parsed) && parsed.length > 0)
-        gameflowMyTeam.value = parsed;
-    }
-    if (savedTheirTeam) {
-      const parsed = JSON.parse(savedTheirTeam);
-      if (Array.isArray(parsed) && parsed.length > 0)
-        gameflowTheirTeam.value = parsed;
-    }
-    if (savedPlayerData) {
-      const parsed = JSON.parse(savedPlayerData);
-      if (parsed && Object.keys(parsed).length > 0) playerData.value = parsed;
-    }
-
-    // 从已加载的队伍数据恢复组队颜色
-    if (gameflowMyTeam.value.length > 0)
-      premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
-    if (gameflowTheirTeam.value.length > 0)
-      premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
-  } catch {
-    /* ignore */
-  }
-
-  // 获取当前玩家 summonerId，用于 InProgress 阶段分离队伍
-  try {
-    const s = await fetchCurrentSummoner();
-    if (s?.summonerId) currentSummonerId.value = s.summonerId;
-    if (s?.puuid) currentSummonerPuuid.value = s.puuid;
-  } catch {
-    /* ignore */
-  }
-
-  // 获取应用配置（用于对局卡片颜色）
+  // 1. 获取应用配置（用于判定是否加载持久化数据）
   if (!appConfig.value) {
     try {
       appConfig.value = await fetchConfig();
     } catch {
       /* ignore */
     }
+  }
+
+  // 2. 从 localStorage 加载上一局数据以支持持久化显示（仅在非游戏活跃且开启保留配置时恢复）
+  if (!isGameActive.value && appConfig.value?.Functions?.EnableReserveGameinfo) {
+    try {
+      const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
+      const savedTheirTeam = localStorage.getItem(
+        "yuumi_last_gameflow_their_team",
+      );
+      const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
+      if (savedMyTeam) {
+        const parsed = JSON.parse(savedMyTeam);
+        if (Array.isArray(parsed) && parsed.length > 0)
+          gameflowMyTeam.value = parsed;
+      }
+      if (savedTheirTeam) {
+        const parsed = JSON.parse(savedTheirTeam);
+        if (Array.isArray(parsed) && parsed.length > 0)
+          gameflowTheirTeam.value = parsed;
+      }
+      if (savedPlayerData) {
+        const parsed = JSON.parse(savedPlayerData);
+        if (parsed && Object.keys(parsed).length > 0) playerData.value = parsed;
+      }
+
+      // 从已加载的队伍数据恢复组队颜色
+      if (gameflowMyTeam.value.length > 0)
+        premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
+      if (gameflowTheirTeam.value.length > 0)
+        premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // 3. 获取当前玩家 summonerId，用于 InProgress 阶段分离队伍
+  try {
+    const s = await fetchCurrentSummoner();
+    if (s?.summonerId) currentSummonerId.value = s.summonerId;
+    if (s?.puuid) currentSummonerPuuid.value = s.puuid;
+  } catch {
+    /* ignore */
   }
 
   refreshState();
@@ -857,6 +862,23 @@ function getWinRateClass(rate: number | undefined): string {
 }
 
 watch(activeTab, () => loadAllPlayers());
+
+// 监听全局路由变化，当重新切回该页面且对局处于活跃状态时，主动触发数据拉取，防止缓存滞后
+watch(
+  () => store.currentPage,
+  (newPage) => {
+    if (newPage === "gameinfo") {
+      console.log("[GameInfo] 页面切换到对局信息，执行主动刷新");
+      if (store.gamePhase === "InProgress" || store.gamePhase === "GameStart") {
+        loadFromGameflowSession();
+      } else if (store.gamePhase === "ChampSelect") {
+        loadAllPlayers();
+      } else {
+        refreshState();
+      }
+    }
+  }
+);
 </script>
 
 <template>

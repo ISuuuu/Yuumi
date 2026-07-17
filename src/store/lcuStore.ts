@@ -106,6 +106,9 @@ export const useLcuStore = defineStore("lcu", () => {
   function setGamePhase(v: GamePhase) {
     console.log("[lcuStore] setGamePhase:", v, "prev:", gamePhase.value);
     gamePhase.value = v;
+    if (v !== "ChampSelect") {
+      champSelectSession.value = null;
+    }
   }
   function setChampSelectSession(v: ChampSelectSession | null) {
     champSelectSession.value = v;
