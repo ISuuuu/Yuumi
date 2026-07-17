@@ -15,7 +15,23 @@ import type { MatchDisplay, AppConfig } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 
 const store = useLcuStore();
-const { t } = useI18n();
+const { t, te } = useI18n();
+
+function getQueueName(queueId: number, backendName: string): string {
+  const key = `gameModes.${queueId}`;
+  if (te(key)) {
+    const translation = t(key);
+    if (
+      (translation.includes("云顶") || translation.includes("TFT")) &&
+      !backendName.includes("云顶") && !backendName.includes("TFT")
+    ) {
+      return backendName;
+    }
+    return translation;
+  }
+  return backendName;
+}
+
 const loading = ref(false);
 const error = ref("");
 const activeTab = ref<"my" | "their">("my");
@@ -1158,11 +1174,7 @@ watch(
                   </div>
                   <div class="cm-detail">
                     <div class="cm-top-row">
-                      <span class="cm-mode">{{
-                        $te("gameModes." + m.queueId)
-                          ? $t("gameModes." + m.queueId)
-                          : m.name
-                      }}</span>
+                      <span class="cm-mode">{{ getQueueName(m.queueId, m.name) }}</span>
                     </div>
                     <div class="cm-bottom">
                       <span class="cm-kda">
