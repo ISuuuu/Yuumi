@@ -343,6 +343,7 @@ watch(isGameActive, (active) => {
     // 游戏再次活跃时，先清空以加载新状态
     gameflowMyTeam.value = [];
     gameflowTheirTeam.value = [];
+    playerData.value = {};
   }
 });
 
