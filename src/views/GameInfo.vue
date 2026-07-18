@@ -1004,30 +1004,32 @@ watch(
                     })
                   "
                 ></span>
-                <span class="name-text">{{
-                  playerData[p.cellId]?.info?.gameName ||
-                  playerData[p.cellId]?.info?.displayName ||
-                  p.displayName ||
-                  "未知"
-                }}</span>
-                <span
-                  v-if="playerData[p.cellId]?.fateFlag"
-                  :class="['fate-badge', playerData[p.cellId].fateFlag]"
-                  :title="
-                    playerData[p.cellId].recentlyChampionName
-                      ? (playerData[p.cellId].fateFlag === 'ally'
-                        ? `${$t('gameInfo.fateAllyTitle')} (使用: ${playerData[p.cellId].recentlyChampionName})`
-                        : `${$t('gameInfo.fateEnemyTitle')} (使用: ${playerData[p.cellId].recentlyChampionName})`)
-                      : (playerData[p.cellId].fateFlag === 'ally'
-                        ? $t('gameInfo.fateAllyTitle')
-                        : $t('gameInfo.fateEnemyTitle'))
-                  "
+                <span class="name-group">
+                  <span class="name-text">{{
+                    playerData[p.cellId]?.info?.gameName ||
+                    playerData[p.cellId]?.info?.displayName ||
+                    p.displayName ||
+                    "未知"
+                  }}</span>
+                  <span
+                    v-if="playerData[p.cellId]?.fateFlag"
+                    :class="['fate-badge', playerData[p.cellId].fateFlag]"
+                    :title="
+                      playerData[p.cellId].recentlyChampionName
+                        ? (playerData[p.cellId].fateFlag === 'ally'
+                          ? `${$t('gameInfo.fateAllyTitle')} (使用: ${playerData[p.cellId].recentlyChampionName})`
+                          : `${$t('gameInfo.fateEnemyTitle')} (使用: ${playerData[p.cellId].recentlyChampionName})`)
+                        : (playerData[p.cellId].fateFlag === 'ally'
+                          ? $t('gameInfo.fateAllyTitle')
+                          : $t('gameInfo.fateEnemyTitle'))
+                    "
                   >{{
-                    playerData[p.cellId].fateFlag === "ally"
-                      ? $t("gameInfo.fateAllyText")
-                      : $t("gameInfo.fateEnemyText")
-                  }}</span
-                >
+                      playerData[p.cellId].fateFlag === "ally"
+                        ? $t("gameInfo.fateAllyText")
+                        : $t("gameInfo.fateEnemyText")
+                    }}</span
+                  >
+                </span>
               </div>
 
               <div
@@ -1478,6 +1480,12 @@ watch(
   justify-content: center;
   width: 100%;
   min-height: 20px;
+}
+.name-group {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
 }
 .name-text {
   font-size: 0.82rem;
