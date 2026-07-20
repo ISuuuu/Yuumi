@@ -173,6 +173,8 @@ watch(
   { immediate: true }
 );
 
+let isRefreshingIsMine = false;
+
 watch(
   () => store.champSelectSession,
   async (session) => {
@@ -203,9 +205,12 @@ watch(
       const hasMissingIsMine = session.benchChampions?.some(
         (c: any) => c && c.isMine === undefined,
       );
-      if (hasMissingIsMine) {
-        console.log("[BenchOverlay] 检测到 isMine 缺失，从 REST API 补充拉取 session...");
-        refreshSessionIsMine();
+      if (hasMissingIsMine && !isRefreshingIsMine) {
+        console.log("[BenchOverlay] 检测到 isMine 缺失，开启 REST API 补充拉取锁，执行重试...");
+        isRefreshingIsMine = true;
+        refreshSessionIsMine().finally(() => {
+          isRefreshingIsMine = false;
+        });
       }
 
       // 更新板凳席英雄加入的时间戳

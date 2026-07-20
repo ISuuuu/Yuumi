@@ -25,6 +25,16 @@ fn get_asset_cache_dir() -> Option<PathBuf> {
     Some(dir)
 }
 
+/// FNV-1a 64位稳定哈希算法，保证相同路径在跨平台、跨编译器版本下生成的哈希名一致
+fn stable_hash(s: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in s.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x00000100000001B3);
+    }
+    format!("{:016x}", hash)
+}
+
 /// 根据 URL 或路径中的扩展名猜测 content-type
 fn guess_content_type(path: &str) -> String {
     let ext = path
@@ -48,19 +58,13 @@ fn guess_content_type(path: &str) -> String {
 /// 尝试从文件缓存读取，返回 (data_url, content_type)，过期或不存在则返回 None
 fn try_read_asset_cache(path: &str) -> Option<(String, String)> {
     let dir = get_asset_cache_dir()?;
-    // 使用路径的 hash 作为文件名，避免路径分隔符问题
-    let hash = {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        path.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
-    };
+    let hash = stable_hash(path);
     let file_path = dir.join(&hash);
 
     let meta = std::fs::metadata(&file_path).ok()?;
     let modified = meta.modified().ok()?;
     if modified.elapsed().unwrap_or(Duration::MAX) > CACHE_TTL {
+        let _ = std::fs::remove_file(&file_path); // 物理删除过期文件，避免磁盘垃圾无限膨胀
         return None;
     }
 
@@ -83,14 +87,14 @@ fn write_asset_cache(path: &str, data_url: &str) {
     let Some(dir) = get_asset_cache_dir() else {
         return;
     };
-    let hash = {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        path.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
-    };
-    let _ = std::fs::write(dir.join(&hash), data_url);
+    let hash = stable_hash(path);
+    let target_path = dir.join(&hash);
+    let temp_path = dir.join(format!("{}.tmp", &hash));
+
+    // 先写临时文件，成功后再原子重命名覆盖，规避并发写锁定和文件内容截断损坏风险
+    if std::fs::write(&temp_path, data_url).is_ok() {
+        let _ = std::fs::rename(&temp_path, target_path);
+    }
 }
 
 /// 允许前端调用的 LCU API 路径前缀白名单
