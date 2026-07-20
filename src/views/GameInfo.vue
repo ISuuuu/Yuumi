@@ -50,6 +50,7 @@ const RANK_CACHE_TTL = 5 * 60 * 1000; // 5 分钟
 // ── gameflow session 短期缓存，避免同一流程中多次请求同一端点
 let cachedSession: { data: any; timestamp: number } | null = null;
 const SESSION_CACHE_TTL = 30 * 1000; // 30 秒
+let currentGameflowSessionRequestId = 0; // 用于防并发竞态的请求标识计数器
 
 async function fetchSessionCached(): Promise<any | null> {
   const now = Date.now();
@@ -579,6 +580,9 @@ async function loadAllPlayers() {
 async function loadFromGameflowSession() {
   loading.value = true;
   error.value = "";
+  
+  const reqId = ++currentGameflowSessionRequestId; // 分配当前请求的唯一 ID
+  
   // 强制清除 gameflow session 缓存，确保拿到当前局的 teamOne/teamTwo，
   // 避免 30 秒过期时间内快速重开导致读到上一局的旧数据
   cachedSession = null;
@@ -601,6 +605,8 @@ async function loadFromGameflowSession() {
 
   try {
     const data = await fetchSessionCached();
+    if (reqId !== currentGameflowSessionRequestId) return; // 拦截旧请求的执行
+
     if (!data?.gameData) {
       error.value = "无法获取对局 Session";
       loading.value = false;
@@ -613,8 +619,19 @@ async function loadFromGameflowSession() {
       let retried = 0;
       while (retried < 5) {
         await new Promise((r) => setTimeout(r, 3000));
+        
+        // 1. 重试期间安全终止校验：如果已被新的请求覆盖，或者对局阶段已退出，则立刻终止
+        if (reqId !== currentGameflowSessionRequestId) return;
+        if (store.gamePhase !== "InProgress" && store.gamePhase !== "GameStart") {
+          console.log("[GameInfo] 对局已不再活跃，终止队伍数据重试");
+          loading.value = false;
+          return;
+        }
+
         cachedSession = null; // 强制刷新缓存
         const retryData = await fetchSessionCached();
+        if (reqId !== currentGameflowSessionRequestId) return;
+
         const rt = retryData?.gameData;
         if (rt?.teamOne?.length > 0 && rt?.teamTwo?.length > 0) {
           // 用重试获取到的数据继续后续逻辑
@@ -630,8 +647,10 @@ async function loadFromGameflowSession() {
       return;
     }
 
+    if (reqId !== currentGameflowSessionRequestId) return; // 拦截旧请求的执行
     await processTeamData(teamOne, teamTwo);
   } catch (e) {
+    if (reqId !== currentGameflowSessionRequestId) return; // 拦截旧请求的执行
     console.error("加载 gameflow session 失败:", e);
     error.value = "加载对局数据失败";
   }

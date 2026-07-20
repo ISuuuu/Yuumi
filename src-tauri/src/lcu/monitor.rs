@@ -39,8 +39,9 @@ pub fn start(
 
         loop {
             sleep(POLL_INTERVAL).await;
-            // 增量刷新进程列表，避免每 2 秒全量重建带来的 CPU 和内存开销
-            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+            // 增量刷新进程列表，避免每 2 秒全量重建带来的 CPU 和内存开销；
+            // 第二参数传 false 代表若进程在系统中已不存在，则从进程列表中移除，杜绝内存泄漏和死进程残留
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, false);
 
             // 优先尝试从 lockfile 获取，备用从进程参数获取，最后 WMIC 兜底（需管理员）
             let mut lcu_info = find_via_lockfile(&sys)
