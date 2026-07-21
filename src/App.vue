@@ -437,9 +437,14 @@ watch(navigateSearchPayload, (payload) => {
   }
 });
 
+const hasVisitedSearch = ref(false);
+
 // 监听本地路由变化并同步到 Pinia 状态库，确保其他子组件可按需刷新
 watch(currentPage, (val) => {
   store.setCurrentPage(val);
+  if (val === "search") {
+    hasVisitedSearch.value = true;
+  }
 }, { immediate: true });
 
 async function showBenchOverlay(show: boolean = true) {
@@ -716,9 +721,23 @@ async function handleClose() {
               >
                 <GameInfo />
               </div>
-              <template v-if="currentPage !== 'gameinfo'">
-                <Search v-if="currentPage === 'search'" />
-                <Home v-else-if="currentPage === 'home'" @navigate="navigate" />
+
+              <!-- Search 用 v-show 保持状态，配合 hasVisitedSearch 延迟挂载 -->
+              <div
+                v-show="currentPage === 'search'"
+                style="
+                  flex: 1;
+                  display: flex;
+                  flex-direction: column;
+                  overflow-y: auto;
+                  min-height: 0;
+                "
+              >
+                <Search v-if="hasVisitedSearch || currentPage === 'search'" />
+              </div>
+
+              <template v-if="currentPage !== 'gameinfo' && currentPage !== 'search'">
+                <Home v-if="currentPage === 'home'" @navigate="navigate" />
                 <Career v-else-if="currentPage === 'career'" />
                 <TFT
                   v-else-if="

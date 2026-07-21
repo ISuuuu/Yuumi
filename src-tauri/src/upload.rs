@@ -177,103 +177,119 @@ impl UploadTrigger {
         log::info!("检测到游戏结束转换: {} → {}，准备上传...", prev, phase);
 
         // 如果该对局已完成上传，跳过重复处理
+        // 如果该对局已完成上传或正在上传中，跳过重复处理
         {
-            let completed = self.upload_completed.lock().await;
+            let mut completed = self.upload_completed.lock().await;
             if *completed {
-                log::debug!("该对局的上传已完成，跳过重复处理 (phase={})", phase);
+                log::debug!("该对局的上传已完成或处理中，跳过重复处理 (phase={})", phase);
                 return;
             }
+            // 立即标记为处理中，防止 Phase 抖动叠加多个异步任务
+            *completed = true;
         }
 
-        // 延迟 2 秒等待 LCU 数据写入
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let queue = self.queue.clone();
+        let puuid_cache = self.puuid.clone();
+        let last_game_id = self.last_game_id.clone();
+        let current_game_id = self.current_game_id.clone();
+        let upload_completed = self.upload_completed.clone();
+        let app_handle = app_handle.clone();
+        let phase_str = phase.to_string();
 
-        // 获取 puuid（首次需要查询，后续缓存）
-        let puuid = match self.get_or_fetch_puuid(app_handle).await {
-            Ok(p) => p,
-            Err(e) => {
-                log::warn!("无法获取 puuid，跳过上传: {}", e);
-                return;
-            }
-        };
+        crate::spawn_log_panic(async move {
+            // 延迟 2 秒等待 LCU 数据写入
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        // 优先使用游戏进行中记录的当前对局 ID；LCU 战绩列表在结算后可能短暂滞后。
-        let game_id = match *self.current_game_id.lock().await {
-            Some(id) => id,
-            None => match fetch_latest_game_id(app_handle, &puuid).await {
-                Ok(id) => id,
+            // 获取 puuid（首次需要查询，后续缓存）
+            let puuid = match fetch_or_cache_puuid(&puuid_cache, &app_handle).await {
+                Ok(p) => p,
                 Err(e) => {
-                    log::warn!("无法获取最近对局 ID，跳过上传: {}", e);
+                    log::warn!("无法获取 puuid，跳过上传: {}", e);
+                    *upload_completed.lock().await = false;
                     return;
                 }
-            },
-        };
-        // 去重：与上次上传对比
-        let mut last_id = self.last_game_id.lock().await;
-        if game_id == *last_id {
-            log::debug!("对局 {} 已上传过，跳过", game_id);
-            *self.current_game_id.lock().await = None;
-            *self.upload_completed.lock().await = true;
-            return;
-        }
-        *last_id = game_id;
-        drop(last_id);
+            };
 
-        // 推入上传队列
-        self.queue.enqueue(game_id).await;
-        *self.current_game_id.lock().await = None;
-        *self.upload_completed.lock().await = true;
-    }
-
-    async fn get_or_fetch_puuid(&self, app_handle: &AppHandle) -> Result<String, String> {
-        // 检查缓存
-        {
-            let cached = self.puuid.lock().await;
-            if let Some(ref p) = *cached {
-                return Ok(p.clone());
+            // 优先使用游戏进行中记录的当前对局 ID；LCU 战绩列表在结算后可能短暂滞后。
+            let game_id = match *current_game_id.lock().await {
+                Some(id) => id,
+                None => match fetch_latest_game_id(&app_handle, &puuid).await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        log::warn!("无法获取最近对局 ID，跳过上传: {}", e);
+                        *upload_completed.lock().await = false;
+                        return;
+                    }
+                },
+            };
+            // 去重：与上次上传对比
+            let mut last_id = last_game_id.lock().await;
+            if game_id == *last_id {
+                log::debug!("对局 {} 已上传过，跳过 (phase={})", game_id, phase_str);
+                *current_game_id.lock().await = None;
+                return;
             }
-        }
+            *last_id = game_id;
+            drop(last_id);
 
-        // 从 LCU 获取
-        let state = app_handle.state::<crate::AppState>();
-        let lock = state.lcu_client.read().await;
-        let lcu = lock.as_ref().ok_or("LCU 未连接")?;
-
-        let url = format!(
-            "https://127.0.0.1:{}/lol-summoner/v1/current-summoner",
-            lcu.port
-        );
-        let auth = crate::build_auth_header(&lcu.token);
-
-        let resp = lcu
-            .http_client
-            .get(&url)
-            .header("Authorization", auth)
-            .send()
-            .await
-            .map_err(|e| format!("请求当前召唤师信息失败: {}", e))?;
-
-        if !resp.status().is_success() {
-            return Err(format!("获取当前召唤师信息: HTTP {}", resp.status()));
-        }
-
-        let data: Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("解析当前召唤师信息失败: {}", e))?;
-
-        let puuid = data
-            .get("puuid")
-            .and_then(|v| v.as_str())
-            .ok_or("当前召唤师信息中缺少 puuid 字段")?
-            .to_string();
-
-        // 缓存
-        let mut cached = self.puuid.lock().await;
-        *cached = Some(puuid.clone());
-
-        Ok(puuid)
+            // 推入上传队列
+            queue.enqueue(game_id).await;
+            *current_game_id.lock().await = None;
+        });
     }
+}
+
+async fn fetch_or_cache_puuid(
+    puuid_cache: &Arc<Mutex<Option<String>>>,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    // 检查缓存
+    {
+        let cached = puuid_cache.lock().await;
+        if let Some(ref p) = *cached {
+            return Ok(p.clone());
+        }
+    }
+
+    // 从 LCU 获取
+    let state = app_handle.state::<crate::AppState>();
+    let lock = state.lcu_client.read().await;
+    let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+
+    let url = format!(
+        "https://127.0.0.1:{}/lol-summoner/v1/current-summoner",
+        lcu.port
+    );
+    let auth = crate::build_auth_header(&lcu.token);
+
+    let resp = lcu
+        .http_client
+        .get(&url)
+        .header("Authorization", auth)
+        .send()
+        .await
+        .map_err(|e| format!("请求当前召唤师信息失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("获取当前召唤师信息: HTTP {}", resp.status()));
+    }
+
+    let data: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析当前召唤师信息失败: {}", e))?;
+
+    let puuid = data
+        .get("puuid")
+        .and_then(|v| v.as_str())
+        .ok_or("当前召唤师信息中缺少 puuid 字段")?
+        .to_string();
+
+    // 缓存
+    let mut cached = puuid_cache.lock().await;
+    *cached = Some(puuid.clone());
+
+    Ok(puuid)
 }
 
 // ─── URL 构建（对齐 Python get_upload_url / get_batch_upload_url）───

@@ -285,7 +285,18 @@ fn process_event(text: &str, app_handle: &AppHandle) {
             match serde_json::from_value::<crate::agents::auto_bp::ChampSelectSession>(data.clone())
             {
                 Ok(session) => {
-                    let _ = state.bp_session_tx.try_send(session);
+                    if let Err(e) = state.bp_session_tx.try_send(session) {
+                        match e {
+                            tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                                log::warn!(
+                                    "[WS] BP Session 消息发送频繁，通道已满，丢弃过密中间帧"
+                                );
+                            }
+                            tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                                log::warn!("[WS] 推送 BP Session 失败: 通道已关闭");
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     log::warn!(
@@ -300,12 +311,15 @@ fn process_event(text: &str, app_handle: &AppHandle) {
 
     if uri.starts_with("/lol-gameflow/v1/gameflow-phase") {
         if let Some(phase) = event_data.get("data").and_then(|v| v.as_str()) {
-            let _ =
+            if let Err(e) =
                 state
                     .gameflow_tx
                     .try_send(crate::agents::auto_match::GameflowEvent::PhaseChanged(
                         phase.to_string(),
-                    ));
+                    ))
+            {
+                log::warn!("[WS] 推送 Gameflow PhaseChanged 失败: {}", e);
+            }
         }
     }
 
@@ -314,9 +328,11 @@ fn process_event(text: &str, app_handle: &AppHandle) {
             if let Ok(ready_check) =
                 serde_json::from_value::<crate::agents::auto_match::ReadyCheckData>(data.clone())
             {
-                let _ = state.gameflow_tx.try_send(
+                if let Err(e) = state.gameflow_tx.try_send(
                     crate::agents::auto_match::GameflowEvent::ReadyCheck(ready_check),
-                );
+                ) {
+                    log::warn!("[WS] 推送 Gameflow ReadyCheck 失败: {}", e);
+                }
             }
         }
     }
