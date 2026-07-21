@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, inject, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import type { PlayerData } from "../../types/gameInfo";
 import { PREMADE_COLORS } from "../../types/gameInfo";
 import LcuImage from "../LcuImage.vue";
 
-defineProps<{
+const props = defineProps<{
   player: any;
   playerData?: PlayerData;
   premadeIdx: number;
@@ -13,7 +13,38 @@ defineProps<{
   premadeCardStyle: Record<string, string>;
 }>();
 
+const navigateSearchPayload = inject<
+  Ref<{ name: string; gameId: number | null } | null>
+>("navigateSearchPayload");
+const navigateTo = inject<(page: string) => void>("navigateTo");
+
 const { t } = useI18n();
+
+function getPlayerSearchName(): string {
+  const info = props.playerData?.info;
+  const gameName =
+    info?.gameName ||
+    info?.displayName ||
+    props.player?.displayName ||
+    props.player?.summonerName ||
+    "";
+  if (!gameName || gameName === "未知") return "";
+  if (gameName.includes("#")) return gameName;
+  const tagLine = info?.tagLine || props.player?.tagLine || "";
+  return tagLine ? `${gameName}#${tagLine}` : gameName;
+}
+
+function handleNameClick(e: MouseEvent) {
+  e.stopPropagation();
+  const searchName = getPlayerSearchName();
+  if (!searchName) return;
+  if (navigateSearchPayload) {
+    navigateSearchPayload.value = { name: searchName, gameId: -1 };
+  }
+  if (navigateTo) {
+    navigateTo("search");
+  }
+}
 
 const TIER_MAP = computed<Record<string, string>>(() => ({
   NONE: "",
@@ -124,7 +155,11 @@ function formatRank(q: any): string {
           "
         ></span>
         <span class="name-group">
-          <span class="name-text">{{
+          <span
+            class="name-text"
+            :title="getPlayerSearchName() ? `${$t('nav.search')} ${getPlayerSearchName()}` : undefined"
+            @click="handleNameClick"
+          >{{
             playerData?.info?.gameName ||
             playerData?.info?.displayName ||
             player.displayName ||
@@ -342,6 +377,11 @@ function formatRank(q: any): string {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 0.15s ease-in-out;
+}
+.name-text:hover {
+  color: var(--primary-color);
 }
 .premade-dot {
   display: inline-block;
