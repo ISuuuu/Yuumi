@@ -117,6 +117,13 @@ pub async fn update_config(
         }
     }
 
+    if new_config.general.upload_api_url != old_api_url
+        && !new_config.general.upload_api_url.is_empty()
+    {
+        log::info!("上传 API 地址发生变更，正在触发挂起战绩队列重试...");
+        app_state.upload_queue.trigger_pending_retry().await;
+    }
+
     if new_config.functions.api_concurrency_number != old_api_concurrency {
         let mut sem_lock = app_state.api_semaphore.write().await;
         *sem_lock = Arc::new(Semaphore::new(

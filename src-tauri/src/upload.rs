@@ -1,31 +1,147 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
 
+// ─── 本地暂存持久化模型 ───
+
+/// 暂存战绩条目，存储在 %APPDATA%/Yuumi/pending_uploads.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingUploadItem {
+    pub game_id: u64,
+    pub payload: UploadPayload,
+    pub retry_count: u32,
+    pub last_error: String,
+    pub created_at: String,
+}
+
+/// 上传任务枚举：可以是待构建 Payload 的 game_id，也可以是已生成的 PendingUploadItem
+#[derive(Debug, Clone)]
+pub enum UploadTask {
+    GameId(u64),
+    Pending(Box<PendingUploadItem>), // 使用 Box 进行堆内存包装
+}
+
+impl UploadTask {
+    pub fn game_id(&self) -> u64 {
+        match self {
+            UploadTask::GameId(id) => *id,
+            UploadTask::Pending(item) => item.game_id,
+        }
+    }
+}
+
+/// 获取暂存文件路径: %APPDATA%/Yuumi/pending_uploads.json
+fn pending_uploads_path() -> std::path::PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    path.push("Yuumi");
+    path.push("pending_uploads.json");
+    path
+}
+
+/// 从本地读取所有挂起的上传任务
+pub fn load_pending_uploads_file() -> Vec<PendingUploadItem> {
+    let path = pending_uploads_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(e) => {
+            log::warn!("读取 pending_uploads.json 失败: {}", e);
+            Vec::new()
+        }
+    }
+}
+
+/// 将挂起的上传任务写入本地 JSON
+pub fn save_pending_uploads_file(items: &[PendingUploadItem]) {
+    let path = pending_uploads_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string_pretty(items) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                log::error!("写入 pending_uploads.json 失败: {}", e);
+            }
+        }
+        Err(e) => log::error!("序列化 pending_uploads 失败: {}", e),
+    }
+}
+
+/// 添加或更新一条挂起上传记录
+pub fn add_or_update_pending_upload(payload: UploadPayload, error: String) {
+    let mut items = load_pending_uploads_file();
+    let game_id = payload.match_info.match_id;
+    let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+
+    if let Some(existing) = items.iter_mut().find(|i| i.game_id == game_id) {
+        existing.retry_count += 1;
+        existing.last_error = error;
+    } else {
+        items.push(PendingUploadItem {
+            game_id,
+            payload,
+            retry_count: 1,
+            last_error: error,
+            created_at: now,
+        });
+    }
+
+    if items.len() > 100 {
+        items.drain(0..items.len() - 100);
+    }
+
+    save_pending_uploads_file(&items);
+}
+
+/// 上传成功后，清除该条落盘任务
+pub fn remove_pending_upload(game_id: u64) {
+    let mut items = load_pending_uploads_file();
+    let original_len = items.len();
+    items.retain(|i| i.game_id != game_id);
+    if items.len() != original_len {
+        save_pending_uploads_file(&items);
+    }
+}
+
 // ─── 上传队列管理器 ───
 
 /// 本地去重异步上传队列状态机。
 /// 内部维护 `mpsc::channel` + `HashSet<u64>` 去重 + 后台 Worker。
+#[derive(Clone)]
 pub struct UploadQueue {
-    /// 上传请求发送端（推入 gameId）
-    tx: mpsc::Sender<u64>,
+    /// 上传请求发送端
+    tx: mpsc::Sender<UploadTask>,
     /// 已入队的 gameId 集合（去重用）
     enqueued: Arc<Mutex<HashSet<u64>>>,
 }
 
 impl UploadQueue {
     pub fn new(app_handle: AppHandle) -> Self {
-        let (tx, rx) = mpsc::channel::<u64>(64);
+        let (tx, rx) = mpsc::channel::<UploadTask>(128);
         let enqueued = Arc::new(Mutex::new(HashSet::new()));
 
-        // 启动后台 Worker（使用 Tauri 异步运行时，避免 setup 阶段无 Tokio runtime）
-        let enqueued_clone = enqueued.clone();
-        crate::spawn_log_panic(upload_worker(app_handle, rx, enqueued_clone));
+        let queue = Self {
+            tx: tx.clone(),
+            enqueued: enqueued.clone(),
+        };
 
-        Self { tx, enqueued }
+        // 启动后台 Worker（使用 Tauri 异步运行时）
+        crate::spawn_log_panic(upload_worker(app_handle.clone(), rx, enqueued.clone()));
+
+        // 启动应用恢复（仅启动时拉起 1 次，不在后台周期性循环）
+        let queue_clone = queue.clone();
+        crate::spawn_log_panic(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            queue_clone.trigger_pending_retry().await;
+        });
+
+        queue
     }
 
     /// 将 gameId 推入上传队列（自动去重）。
@@ -43,25 +159,47 @@ impl UploadQueue {
         set.insert(game_id);
         drop(set);
 
-        if let Err(e) = self.tx.try_send(game_id) {
+        if let Err(e) = self.tx.try_send(UploadTask::GameId(game_id)) {
             log::warn!("推入上传队列失败: {}", e);
         } else {
             log::info!("对局 {} 已加入上传队列", game_id);
+        }
+    }
+
+    /// 读取本地 pending_uploads.json，将挂起的未完成任务全部拉起并排队重试
+    pub async fn trigger_pending_retry(&self) {
+        let pending_items = load_pending_uploads_file();
+        if pending_items.is_empty() {
+            return;
+        }
+        log::info!(
+            "检测到 {} 条挂起未完成的对局上传记录，准备重新入队上传...",
+            pending_items.len()
+        );
+
+        let mut set = self.enqueued.lock().await;
+        for item in pending_items {
+            let game_id = item.game_id;
+            if !set.contains(&game_id) {
+                set.insert(game_id);
+                let _ = self.tx.try_send(UploadTask::Pending(Box::new(item)));
+            }
         }
     }
 }
 
 // ─── 后台 Worker ───
 
-/// 串行处理上传队列，每局最多 30 秒超时。
+/// 串行处理上传队列，每局最多 35 秒超时。
 async fn upload_worker(
     app_handle: AppHandle,
-    mut rx: mpsc::Receiver<u64>,
+    mut rx: mpsc::Receiver<UploadTask>,
     enqueued: Arc<Mutex<HashSet<u64>>>,
 ) {
     log::info!("上传 Worker 已启动");
 
-    while let Some(game_id) = rx.recv().await {
+    while let Some(task) = rx.recv().await {
+        let game_id = task.game_id();
         log::info!("开始上传对局: {}", game_id);
 
         // 从配置读取上传 URL（每次重新读取，支持运行时修改）
@@ -71,7 +209,6 @@ async fn upload_worker(
             let raw = cfg.general.upload_api_url.clone();
             if raw.is_empty() {
                 log::warn!("对局 {} 跳过上传: 未配置上传 API 地址", game_id);
-                // 未配置 API 时也移出去重缓存，避免后续配置填上后依然被拦截无法上传
                 let mut set = enqueued.lock().await;
                 set.remove(&game_id);
                 continue;
@@ -80,8 +217,8 @@ async fn upload_worker(
         };
 
         let result = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            upload_single_game(&app_handle, game_id, &upload_url),
+            std::time::Duration::from_secs(35),
+            upload_single_task(&app_handle, task, &upload_url),
         )
         .await;
 
@@ -89,20 +226,19 @@ async fn upload_worker(
             Ok(Ok(status)) => {
                 log::info!("对局 {} 上传完成: {}", game_id, status);
                 if status == "new" {
-                    // 上传成功，向前端推送通知
                     let _ =
                         app_handle.emit("upload-success", serde_json::json!({ "gameId": game_id }));
                 }
+                let mut set = enqueued.lock().await;
+                set.remove(&game_id);
             }
             Ok(Err(e)) => {
-                log::warn!("对局 {} 上传失败: {}", game_id, e);
-                // 失败时从去重集合中移出，允许后续重试
+                log::warn!("对局 {} 上传处理失败: {}", game_id, e);
                 let mut set = enqueued.lock().await;
                 set.remove(&game_id);
             }
             Err(_) => {
-                log::warn!("对局 {} 上传超时 (30s)", game_id);
-                // 超时从去重集合中移出，允许后续重试
+                log::warn!("对局 {} 上传超时 (35s)", game_id);
                 let mut set = enqueued.lock().await;
                 set.remove(&game_id);
             }
@@ -176,7 +312,6 @@ impl UploadTrigger {
 
         log::info!("检测到游戏结束转换: {} → {}，准备上传...", prev, phase);
 
-        // 如果该对局已完成上传，跳过重复处理
         // 如果该对局已完成上传或正在上传中，跳过重复处理
         {
             let mut completed = self.upload_completed.lock().await;
@@ -234,6 +369,8 @@ impl UploadTrigger {
 
             // 推入上传队列
             queue.enqueue(game_id).await;
+            // 下一场对局结束时，顺带触发重试一次以往暂存未完成的战绩
+            queue.trigger_pending_retry().await;
             *current_game_id.lock().await = None;
         });
     }
@@ -333,13 +470,62 @@ fn external_http_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-/// 上传单局对局数据。
-/// 构建 Smart Split Payload → POST 到外部 API。
-async fn upload_single_game(
+/// 执行单场对局上传任务（支持自动离线降级与落盘存盘）
+async fn upload_single_task(
     app_handle: &AppHandle,
-    game_id: u64,
+    task: UploadTask,
     upload_url: &str,
 ) -> Result<String, String> {
+    let payload = match task {
+        UploadTask::Pending(item) => item.payload,
+        UploadTask::GameId(game_id) => {
+            match fetch_payload_from_lcu(app_handle, game_id).await {
+                Ok(p) => p,
+                Err(err_msg) => {
+                    // 无法从 LCU 拉取详情时，查找是否有之前已被落盘的 pending 记录
+                    let existing = load_pending_uploads_file()
+                        .into_iter()
+                        .find(|i| i.game_id == game_id);
+                    if let Some(item) = existing {
+                        log::info!(
+                            "LCU 暂无法获取详情，使用本地暂存的对局 {} 数据尝试上传",
+                            game_id
+                        );
+                        item.payload
+                    } else {
+                        return Err(err_msg);
+                    }
+                }
+            }
+        }
+    };
+
+    let game_id = payload.match_info.match_id;
+
+    match post_payload_to_api(&payload, upload_url).await {
+        Ok(status) => {
+            // 上传成功，擦除磁盘落盘记录
+            remove_pending_upload(game_id);
+            Ok(status)
+        }
+        Err(err_msg) => {
+            // 上传失败（网络/5xx/超时），保存/更新至本地 pending_uploads.json
+            log::warn!(
+                "对局 {} API 请求失败，保存暂存数据至 pending_uploads.json: {}",
+                game_id,
+                err_msg
+            );
+            add_or_update_pending_upload(payload, err_msg.clone());
+            Err(err_msg)
+        }
+    }
+}
+
+/// 从 LCU 拉取对局详情并构建 Smart Split Payload
+async fn fetch_payload_from_lcu(
+    app_handle: &AppHandle,
+    game_id: u64,
+) -> Result<UploadPayload, String> {
     let (lcu_client, auth, base) = {
         let state = app_handle.state::<crate::AppState>();
         let lock = state.lcu_client.read().await;
@@ -351,13 +537,11 @@ async fn upload_single_game(
         )
     };
 
-    // 获取当前召唤师名称和 puuid
     let current_summoner_info = get_current_summoner_info(&lcu_client, &auth, &base).await;
     let current_puuid = current_summoner_info
         .as_ref()
         .map(|(_, puuid)| puuid.as_str());
 
-    // 获取对局详情
     let detail_url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
     let resp = lcu_client
         .get(&detail_url)
@@ -375,7 +559,6 @@ async fn upload_single_game(
         .await
         .map_err(|e| format!("解析对局详情失败: {}", e))?;
 
-    // 构建 Smart Split Payload
     let champion_names = {
         let state = app_handle.state::<crate::AppState>();
         let gd = state.game_data.read().await;
@@ -390,14 +573,20 @@ async fn upload_single_game(
         payload.participants.len()
     );
 
-    // POST 到外部 API（最多重试 5 次，使用独立的外部 HTTP Client）
+    Ok(payload)
+}
+
+/// 发送 UploadPayload 至外部 API（内部最多重试 5 次）
+async fn post_payload_to_api(payload: &UploadPayload, upload_url: &str) -> Result<String, String> {
+    let game_id = payload.match_info.match_id;
     let ext_client = external_http_client();
     let mut last_err = String::new();
+
     for retry in 0..=5 {
         match ext_client
             .post(upload_url)
             .header("Content-Type", "application/json")
-            .json(&payload)
+            .json(payload)
             .send()
             .await
         {
@@ -557,14 +746,14 @@ async fn fetch_latest_game_id(app_handle: &AppHandle, puuid: &str) -> Result<u64
 
 // ─── 上传数据结构 ───
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadPayload {
     pub match_info: MatchInfo,
     pub participants: Vec<ParticipantInfo>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchInfo {
     pub match_id: u64,
@@ -574,12 +763,12 @@ pub struct MatchInfo {
     pub game_creation: String,
     pub game_duration: u64,
     pub game_version: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub participants: Vec<ParticipantInfo>,
 }
 
 /// 上传的 participant 字段严格对齐 Python build_upload_payload
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParticipantInfo {
     pub summoner_name: String,
