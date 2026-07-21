@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inject, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import type { MatchDisplay, AppConfig } from "../../api/lcu";
 import type { PlayerData } from "../../types/gameInfo";
@@ -11,7 +12,38 @@ const props = defineProps<{
   appConfig: AppConfig | null;
 }>();
 
+const navigateSearchPayload = inject<
+  Ref<{ name: string; gameId: number | null } | null>
+>("navigateSearchPayload");
+const navigateTo = inject<(page: string) => void>("navigateTo");
+
 const { t, te } = useI18n();
+
+function getPlayerSearchName(): string {
+  const info = props.playerData?.info;
+  const gameName =
+    info?.gameName ||
+    info?.displayName ||
+    props.player?.displayName ||
+    props.player?.summonerName ||
+    "";
+  if (!gameName || gameName.startsWith("玩家") || gameName === "未知") return "";
+  if (gameName.includes("#")) return gameName;
+  const tagLine = info?.tagLine || props.player?.tagLine || "";
+  return tagLine ? `${gameName}#${tagLine}` : gameName;
+}
+
+function handleNameClick(e: MouseEvent) {
+  e.stopPropagation();
+  const searchName = getPlayerSearchName();
+  if (!searchName) return;
+  if (navigateSearchPayload) {
+    navigateSearchPayload.value = { name: searchName, gameId: -1 };
+  }
+  if (navigateTo) {
+    navigateTo("search");
+  }
+}
 
 function getQueueName(queueId: number, backendName: string): string {
   const key = `gameModes.${queueId}`;
@@ -64,7 +96,11 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
     <div class="col-header">
       <div class="col-header-top">
         <div class="col-header-info">
-          <span class="col-name">{{
+          <span
+            class="col-name"
+            :title="getPlayerSearchName() ? `${$t('nav.search')} ${getPlayerSearchName()}` : undefined"
+            @click="handleNameClick"
+          >{{
             playerData?.info?.gameName ||
             player.displayName ||
             `玩家${index + 1}`
@@ -172,6 +208,11 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 0.15s ease-in-out;
+}
+.col-name:hover {
+  color: var(--primary-color);
 }
 .col-summary {
   font-size: 0.68rem;
