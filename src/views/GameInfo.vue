@@ -153,6 +153,10 @@ function computePremadeColors(team: any[]): Record<number, number> {
   return result;
 }
 
+// 补充缓存 session 团队以确保选人阶段能拿到敌方真实数据
+const sessionAllyTeam = ref<any[]>([]);
+const sessionEnemyTeam = ref<any[]>([]);
+
 /** 从 gameflow session 获取组队信息（ChampSelect 阶段使用） */
 async function fetchPremadeColors() {
   try {
@@ -166,6 +170,8 @@ async function fetchPremadeColors() {
     );
     const ally = isTeamOne ? teamOne : teamTwo;
     const enemy = isTeamOne ? teamTwo : teamOne;
+    sessionAllyTeam.value = ally;
+    sessionEnemyTeam.value = enemy;
     premadeColorsMy.value = computePremadeColors(ally);
     premadeColorsTheir.value = computePremadeColors(enemy);
   } catch {
@@ -194,22 +200,109 @@ function getPremadeCardStyle(
   };
 }
 
-/** 是否有组队信息 */
-const hasPremadeInfo = computed(() => {
-  const colors =
-    activeTab.value === "my" ? premadeColorsMy.value : premadeColorsTheir.value;
-  return Object.keys(colors).length > 0;
+interface PremadeMember {
+  summonerId: number;
+  displayName: string;
+  championId: number;
+}
+
+interface PremadeGroup {
+  colorIdx: number;
+  members: PremadeMember[];
+}
+
+function buildPremadeGroups(team: any[], colors: Record<number, number>): PremadeGroup[] {
+  if (!team || team.length === 0 || !colors) return [];
+  const map: Record<number, PremadeMember[]> = {};
+
+  for (const p of team) {
+    const sid = p.summonerId;
+    if (!sid) continue;
+    const cIdx = colors[sid];
+    if (cIdx === undefined || cIdx < 0) continue;
+
+    if (!map[cIdx]) map[cIdx] = [];
+    const champId = p.championId || p.championPickIntent || 0;
+    const name =
+      playerData.value[p.cellId || sid]?.info?.gameName ||
+      playerData.value[p.cellId || sid]?.info?.displayName ||
+      p.displayName ||
+      p.summonerName ||
+      "";
+
+    map[cIdx].push({
+      summonerId: sid,
+      displayName: name,
+      championId: champId,
+    });
+  }
+
+  return Object.entries(map).map(([cIdxStr, members]) => ({
+    colorIdx: Number(cIdxStr),
+    members,
+  })).sort((a, b) => a.colorIdx - b.colorIdx);
+}
+
+// 己方组队列表
+const myPremadeGroups = computed(() => {
+  const teamList = myTeam.value.length > 0 ? myTeam.value : sessionAllyTeam.value;
+  return buildPremadeGroups(teamList, premadeColorsMy.value);
 });
 
-/** 当前 Tab 的组队颜色索引列表（去重、排序） */
-const premadeLegendIndices = computed(() => {
-  const colors =
-    activeTab.value === "my" ? premadeColorsMy.value : premadeColorsTheir.value;
-  const indices = new Set<number>();
-  for (const v of Object.values(colors)) {
-    if (v >= 0) indices.add(v);
+// 敌方组队列表
+const theirPremadeGroups = computed(() => {
+  const teamList = theirTeam.value.length > 0 ? theirTeam.value : sessionEnemyTeam.value;
+  return buildPremadeGroups(teamList, premadeColorsTheir.value);
+});
+
+// 是否有任何组队信息
+const hasAnyPremadeInfo = computed(() => {
+  return myPremadeGroups.value.length > 0 || theirPremadeGroups.value.length > 0;
+});
+
+interface PremadeRow {
+  ally?: PremadeGroup;
+  enemy?: PremadeGroup;
+}
+
+/** 逐行交错配对我方与敌方组队（优先保证友方显示在第一行，人数 >= 4 独占一行） */
+const premadeRows = computed<PremadeRow[]>(() => {
+  const my = [...myPremadeGroups.value];
+  const their = [...theirPremadeGroups.value];
+  const rows: PremadeRow[] = [];
+
+  let mIdx = 0;
+  let tIdx = 0;
+
+  while (mIdx < my.length || tIdx < their.length) {
+    const mGroup = my[mIdx];
+    const tGroup = their[tIdx];
+
+    if (mGroup) {
+      // 我方组队 >= 4 人时，我方独占一行
+      if (mGroup.members.length >= 4) {
+        rows.push({ ally: mGroup });
+        mIdx++;
+      } else {
+        // 我方组队 < 4 人，如果敌方组队也 < 4 人，则同行并排展示
+        if (tGroup && tGroup.members.length < 4) {
+          rows.push({ ally: mGroup, enemy: tGroup });
+          mIdx++;
+          tIdx++;
+        } else {
+          // 如果敌方无组队或敌方组队 >= 4 人，优先将我方安排在当前行
+          rows.push({ ally: mGroup });
+          mIdx++;
+        }
+      }
+    } else if (tGroup) {
+      // 我方组队处理完毕，仅剩敌方组队
+      rows.push({ enemy: tGroup });
+      tIdx++;
+    }
   }
-  return Array.from(indices).sort((a, b) => a - b);
+
+  return rows;
 });
 
 // 当前游戏模式对应的队列 ID（用于过滤战绩）
@@ -1120,22 +1213,73 @@ watch(
             {{ $t("gameInfo.noTeamData") }}
           </div>
         </div>
-        <!-- 组队图例 -->
-        <div v-if="hasPremadeInfo" class="premade-legend">
-          <span class="legend-label">{{ $t("gameInfo.premadeLegend") }}</span>
-          <span
-            v-for="idx in premadeLegendIndices"
+        <!-- 组队图例 (按行交错配对) -->
+        <div v-if="hasAnyPremadeInfo" class="premade-legend">
+          <div
+            v-for="(row, idx) in premadeRows"
             :key="idx"
-            class="legend-item"
+            class="premade-legend-row"
           >
-            <span
-              class="legend-dot"
-              :style="{
-                background: PREMADE_COLORS[idx % PREMADE_COLORS.length].dot,
-              }"
-            ></span>
-            {{ idx + 1 }}
-          </span>
+            <!-- 我方组队 (靠左) -->
+            <div class="premade-slot ally-slot">
+              <div
+                v-if="row.ally"
+                class="premade-group-chip"
+                :style="{
+                  borderColor: PREMADE_COLORS[row.ally.colorIdx % PREMADE_COLORS.length].border,
+                  backgroundColor: PREMADE_COLORS[row.ally.colorIdx % PREMADE_COLORS.length].bg,
+                }"
+              >
+                <span
+                  class="legend-dot"
+                  :style="{
+                    background: PREMADE_COLORS[row.ally.colorIdx % PREMADE_COLORS.length].dot,
+                  }"
+                ></span>
+                <div class="premade-avatars">
+                  <template v-for="m in row.ally.members" :key="m.summonerId">
+                    <LcuImage
+                      v-if="m.championId > 0"
+                      :src="getChampionIcon(m.championId)"
+                      class="premade-avatar"
+                      :title="m.displayName"
+                    />
+                    <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">?</div>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- 敌方组队 (靠右) -->
+            <div class="premade-slot enemy-slot">
+              <div
+                v-if="row.enemy"
+                class="premade-group-chip"
+                :style="{
+                  borderColor: PREMADE_COLORS[row.enemy.colorIdx % PREMADE_COLORS.length].border,
+                  backgroundColor: PREMADE_COLORS[row.enemy.colorIdx % PREMADE_COLORS.length].bg,
+                }"
+              >
+                <span
+                  class="legend-dot"
+                  :style="{
+                    background: PREMADE_COLORS[row.enemy.colorIdx % PREMADE_COLORS.length].dot,
+                  }"
+                ></span>
+                <div class="premade-avatars">
+                  <template v-for="m in row.enemy.members" :key="m.summonerId">
+                    <LcuImage
+                      v-if="m.championId > 0"
+                      :src="getChampionIcon(m.championId)"
+                      class="premade-avatar"
+                      :title="m.displayName"
+                    />
+                    <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">?</div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1314,31 +1458,83 @@ watch(
   background: var(--card-bg);
 }
 
-/* 组队图例 */
+/* 组队图例：逐行配对交错显示 */
 .premade-legend {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  font-size: 0.7rem;
-  color: var(--text-dimmed);
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 12px;
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.03);
+  box-sizing: border-box;
 }
-.legend-label {
-  white-space: nowrap;
-}
-.legend-item {
+
+.premade-legend-row {
   display: flex;
   align-items: center;
-  gap: 3px;
-  font-weight: 600;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
 }
+
+.premade-slot {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.premade-slot.ally-slot {
+  justify-content: flex-start;
+}
+
+.premade-slot.enemy-slot {
+  justify-content: flex-end;
+}
+
+.premade-group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
 .legend-dot {
   display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.premade-avatars {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.premade-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  box-sizing: border-box;
+}
+
+.premade-avatar-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-dimmed);
+  font-size: 0.7rem;
+  font-weight: 700;
 }
 
 .player-list {
