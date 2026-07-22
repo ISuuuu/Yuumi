@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, inject, type Ref } from "vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { PlayerData } from "../../types/gameInfo";
 import { PREMADE_COLORS } from "../../types/gameInfo";
+import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import LcuImage from "../LcuImage.vue";
 
-const props = defineProps<{
+defineProps<{
   player: any;
   playerData?: PlayerData;
   premadeIdx: number;
@@ -13,38 +14,8 @@ const props = defineProps<{
   premadeCardStyle: Record<string, string>;
 }>();
 
-const navigateSearchPayload = inject<
-  Ref<{ name: string; gameId: number | null } | null>
->("navigateSearchPayload");
-const navigateTo = inject<(page: string) => void>("navigateTo");
-
 const { t } = useI18n();
-
-function getPlayerSearchName(): string {
-  const info = props.playerData?.info;
-  const gameName =
-    info?.gameName ||
-    info?.displayName ||
-    props.player?.displayName ||
-    props.player?.summonerName ||
-    "";
-  if (!gameName || gameName === "未知") return "";
-  if (gameName.includes("#")) return gameName;
-  const tagLine = info?.tagLine || props.player?.tagLine || "";
-  return tagLine ? `${gameName}#${tagLine}` : gameName;
-}
-
-function handleNameClick(e: MouseEvent) {
-  e.stopPropagation();
-  const searchName = getPlayerSearchName();
-  if (!searchName) return;
-  if (navigateSearchPayload) {
-    navigateSearchPayload.value = { name: searchName, gameId: -1 };
-  }
-  if (navigateTo) {
-    navigateTo("search");
-  }
-}
+const { getPlayerSearchName, handleNameClick } = usePlayerSearch();
 
 const TIER_MAP = computed<Record<string, string>>(() => ({
   NONE: "",
@@ -157,8 +128,8 @@ function formatRank(q: any): string {
         <span class="name-group">
           <span
             class="name-text"
-            :title="getPlayerSearchName() ? `${$t('nav.search')} ${getPlayerSearchName()}` : undefined"
-            @click="handleNameClick"
+            :title="getPlayerSearchName(player, playerData) ? `${$t('nav.search')} ${getPlayerSearchName(player, playerData)}` : undefined"
+            @click="(e) => handleNameClick(e, player, playerData)"
           >{{
             playerData?.info?.gameName ||
             playerData?.info?.displayName ||
