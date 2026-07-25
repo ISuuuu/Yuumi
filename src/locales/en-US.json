@@ -678,9 +678,36 @@
     }
   },
   "tftPage": {
-    "title": "🧩 Teamfight Tactics Helper",
+    "title": "🧩 Teamfight Tactics",
+    "tabs": {
+      "career": "TFT Career",
+      "recommend": "Meta Comps",
+      "augments": "Augments"
+    },
+    "stats": {
+      "standardRank": "Ranked TFT",
+      "turboRank": "Hyper Roll",
+      "doubleRank": "Double Up",
+      "top4Rate": "Top 4 Rate",
+      "winRate": "Win Rate",
+      "avgPlacement": "Avg Rank",
+      "totalGames": "Recent Games",
+      "unranked": "Unranked",
+      "rating": "Rating"
+    },
+    "match": {
+      "firstPlace": "#1 🥇 Victory",
+      "top4": "Top 4 🥈",
+      "bottom4": "#{n} Place",
+      "rank": "#{n}",
+      "level": "Lvl {n}",
+      "goldLeft": "{n}g left",
+      "noMatches": "No TFT matches found",
+      "augments": "Augments: ",
+      "traits": "Traits: "
+    },
     "recommendTitle": "Recommended Compositions",
-    "recommendDesc": "Top meta comps for current season (Data integration with OP.GG pending)",
+    "recommendDesc": "Top meta comps for current season",
     "core": "Core",
     "detail": "Detailed Guide",
     "earlyGame": "Early Transitions",

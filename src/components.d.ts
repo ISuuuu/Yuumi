@@ -49,6 +49,11 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     SpectateCard: typeof import('./components/tools/SpectateCard.vue')['default']
     SpellPicker: typeof import('./components/SpellPicker.vue')['default']
+    TftAugmentsTab: typeof import('./components/tft/TftAugmentsTab.vue')['default']
+    TftMatchCard: typeof import('./components/tft/TftMatchCard.vue')['default']
+    TftMatchDetailModal: typeof import('./components/tft/TftMatchDetailModal.vue')['default']
+    TftMetaCompsTab: typeof import('./components/tft/TftMetaCompsTab.vue')['default']
+    TftRankHeader: typeof import('./components/tft/TftRankHeader.vue')['default']
     UpdateDialog: typeof import('./components/UpdateDialog.vue')['default']
   }
 }

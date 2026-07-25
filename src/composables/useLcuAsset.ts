@@ -23,12 +23,20 @@ function cacheSet(key: string, value: string) {
 function fetchLcuAssetWithRetry(
   path: string,
   retries = 3,
-  delay = 1000,
+  delay = 800,
 ): Promise<string> {
   return fetchLcuAsset(path).catch((err) => {
-    if (retries > 0) {
+    const errStr = String(err || "");
+    // 如果是 400 Bad Request、404 Not Found 等明确缺失资源的错误，不浪费时间重试
+    const isPermanentError =
+      errStr.includes("400") ||
+      errStr.includes("404") ||
+      errStr.includes("Bad Request") ||
+      errStr.includes("Not Found");
+
+    if (retries > 0 && !isPermanentError) {
       console.warn(
-        `[LcuImage] 资源加载失败，将在 ${delay}ms 后重试 (剩余 ${retries} 次):`,
+        `[LcuImage] 资源加载临时异常，将在 ${delay}ms 后重试 (剩余 ${retries} 次):`,
         path,
         err,
       );

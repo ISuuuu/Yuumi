@@ -679,9 +679,36 @@
     }
   },
   "tftPage": {
-    "title": "🧩 雲頂之弈助手",
+    "title": "🧩 雲頂之弈",
+    "tabs": {
+      "career": "雲頂戰績",
+      "recommend": "陣容推薦",
+      "augments": "海克斯強化"
+    },
+    "stats": {
+      "standardRank": "雲頂排位",
+      "turboRank": "狂暴模式",
+      "doubleRank": "雙人作戰",
+      "top4Rate": "前四率",
+      "winRate": "登頂率",
+      "avgPlacement": "平均排名",
+      "totalGames": "近期場次",
+      "unranked": "未組排位",
+      "rating": "積分"
+    },
+    "match": {
+      "firstPlace": "登頂 🥇",
+      "top4": "前四 🥈",
+      "bottom4": "第 {n} 名",
+      "rank": "第 {n} 名",
+      "level": "{n} 級",
+      "goldLeft": "剩 {n} 金",
+      "noMatches": "暫無雲頂之弈戰績記錄",
+      "augments": "海克斯: ",
+      "traits": "激活羈絆: "
+    },
     "recommendTitle": "上分陣容推薦",
-    "recommendDesc": "當前賽季強勢陣容（數據待接入 OP.GG）",
+    "recommendDesc": "當前賽季強勢熱門陣容推薦",
     "core": "核心",
     "detail": "詳細攻略",
     "earlyGame": "前期過渡",

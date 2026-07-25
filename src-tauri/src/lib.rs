@@ -295,6 +295,8 @@ pub fn run() {
             parsers::game_info::get_game_player_summaries,
             parsers::game_info::get_player_fate_info,
             parsers::tft::get_tft_data,
+            parsers::tft::get_tft_ranked_stats,
+            parsers::tft::get_tft_match_history,
             tools::create_5v5_practice_lobby,
             tools::aram_reroll_and_swap_back,
             tools::apply_rune_page,

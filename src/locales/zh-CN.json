@@ -679,9 +679,36 @@
     }
   },
   "tftPage": {
-    "title": "🧩 云顶之弈助手",
+    "title": "🧩 云顶之弈",
+    "tabs": {
+      "career": "云顶战绩",
+      "recommend": "阵容推荐",
+      "augments": "海克斯强化"
+    },
+    "stats": {
+      "standardRank": "云顶排位",
+      "turboRank": "狂暴模式",
+      "doubleRank": "双人作战",
+      "top4Rate": "前四率",
+      "winRate": "登顶率",
+      "avgPlacement": "平均排名",
+      "totalGames": "近期场次",
+      "unranked": "未组排位",
+      "rating": "积分"
+    },
+    "match": {
+      "firstPlace": "登顶 🥇",
+      "top4": "前四 🥈",
+      "bottom4": "第 {n} 名",
+      "rank": "第 {n} 名",
+      "level": "{n} 级",
+      "goldLeft": "剩 {n} 金",
+      "noMatches": "暂无云顶之弈战绩记录",
+      "augments": "海克斯: ",
+      "traits": "激活羁绊: "
+    },
     "recommendTitle": "上分阵容推荐",
-    "recommendDesc": "当前赛季强势阵容（数据待接入 OP.GG）",
+    "recommendDesc": "当前赛季强势热门阵容推荐",
     "core": "核心",
     "detail": "详细攻略",
     "earlyGame": "前期过渡",
