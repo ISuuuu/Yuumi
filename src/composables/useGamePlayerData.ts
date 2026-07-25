@@ -468,6 +468,18 @@ export function useGamePlayerData(
     cachedSession = null;
     await updateCurrentQueueId();
     if (isTftMode.value) {
+      gameflowMyTeam.value = [];
+      gameflowTheirTeam.value = [];
+      playerData.value = {};
+      premadeColorsMy.value = {};
+      premadeColorsTheir.value = {};
+      try {
+        localStorage.removeItem("yuumi_last_gameflow_my_team");
+        localStorage.removeItem("yuumi_last_gameflow_their_team");
+        localStorage.removeItem("yuumi_last_game_player_data");
+      } catch {
+        /* ignore */
+      }
       loading.value = false;
       return;
     }
@@ -569,11 +581,10 @@ export function useGamePlayerData(
   watch(
     () => store.gamePhase,
     (phase: string) => {
-      if (phase === "None" || phase === "Lobby") {
+      if (phase !== "InProgress" && phase !== "GameStart") {
         isTftMode.value = false;
       }
       if (phase === "ChampSelect") {
-        isTftMode.value = false;
         gameflowMyTeam.value = [];
         gameflowTheirTeam.value = [];
         playerData.value = {};

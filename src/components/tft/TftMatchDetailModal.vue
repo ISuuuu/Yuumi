@@ -344,14 +344,14 @@ function getParticipantTraits(p: TftParticipantDisplay) {
   align-items: center;
   gap: 2px;
   margin-top: 2px;
-  height: 12px;
-  min-height: 12px;
+  height: 15px;
+  min-height: 15px;
 }
 
 .item-icon-box {
-  width: 11px;
-  height: 11px;
-  border-radius: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.4);
   background: #000;

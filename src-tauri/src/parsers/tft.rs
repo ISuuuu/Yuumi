@@ -201,6 +201,25 @@ fn parse_single_tft_participant(
     }
 
     if summoner_name.is_empty() {
+        // TFT 新版数据：riotIdGameName + riotIdTagline
+        let riot_game_name = p
+            .get("riotIdGameName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let riot_tagline = p
+            .get("riotIdTagline")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if !riot_game_name.is_empty() {
+            summoner_name = if riot_tagline.is_empty() {
+                riot_game_name.to_string()
+            } else {
+                format!("{}#{}", riot_game_name, riot_tagline)
+            };
+        }
+    }
+
+    if summoner_name.is_empty() {
         summoner_name = p
             .get("summonerName")
             .or_else(|| p.get("gameName"))
@@ -1004,7 +1023,11 @@ pub async fn get_tft_match_history(
             .cloned()
             .unwrap_or_default();
 
-        let mut identity_map: HashMap<i64, (String, String)> = HashMap::new();
+        // participantId → (puuid, name)，用于 SR 风格数据
+        let mut pid_map: HashMap<i64, (String, String)> = HashMap::new();
+        // puuid → name，用于 TFT 风格数据（participants 无 participantId）
+        let mut puuid_name_map: HashMap<String, String> = HashMap::new();
+
         if let Some(identities) = g_obj
             .get("participantIdentities")
             .and_then(|v| v.as_array())
@@ -1048,7 +1071,10 @@ pub async fn get_tft_match_history(
                     };
 
                     if pid > 0 {
-                        identity_map.insert(pid, (player_puuid, summoner_name));
+                        pid_map.insert(pid, (player_puuid.clone(), summoner_name.clone()));
+                    }
+                    if !player_puuid.is_empty() && !summoner_name.is_empty() {
+                        puuid_name_map.insert(player_puuid, summoner_name);
                     }
                 }
             }
@@ -1060,8 +1086,24 @@ pub async fn get_tft_match_history(
                 .get("participantId")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
-            let pid_identity = identity_map.get(&pid);
-            let parsed_p = parse_single_tft_participant(p_val, pid_identity, &tft_data, &puuid);
+            // 优先用 participantId 查（SR 风格），取不到再用 participant 自身 puuid 查（TFT 风格）
+            let pid_identity = if pid > 0 { pid_map.get(&pid) } else { None };
+            let p_puuid_for_lookup = p_val
+                .get("puuid")
+                .or_else(|| p_val.get("stats").and_then(|s| s.get("puuid")))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let puuid_identity: Option<(String, String)> =
+                if pid_identity.is_none() && !p_puuid_for_lookup.is_empty() {
+                    puuid_name_map
+                        .get(p_puuid_for_lookup)
+                        .map(|name| (p_puuid_for_lookup.to_string(), name.clone()))
+                } else {
+                    None
+                };
+            let effective_identity = pid_identity.or(puuid_identity.as_ref());
+            let parsed_p =
+                parse_single_tft_participant(p_val, effective_identity, &tft_data, &puuid);
             parsed_participants.push(parsed_p);
         }
 

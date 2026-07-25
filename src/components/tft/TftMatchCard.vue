@@ -289,14 +289,14 @@ const fullTraitsTooltip = computed(() => {
   align-items: center;
   gap: 2px;
   margin-top: 3px;
-  height: 14px;
-  min-height: 14px;
+  height: 17px;
+  min-height: 17px;
 }
 
 .item-icon-box {
-  width: 13px;
-  height: 13px;
-  border-radius: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.4);
   background: #000;

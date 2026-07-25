@@ -43,25 +43,25 @@ onMounted(() => {
 
 <template>
   <div class="tft-view">
-    <div class="header-title-bar">
-      <h2>{{ t("tftPage.title") }}</h2>
-      <n-button
-        v-if="store.isConnected"
-        size="small"
-        quaternary
-        :loading="loading"
-        @click="refresh"
-      >
-        刷新
-      </n-button>
-    </div>
-
     <!-- 离线提示 -->
     <div v-if="!store.isConnected" class="tip-container">
+      <div class="offline-logo">🎮</div>
       <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
     </div>
 
     <div v-else class="tft-content">
+      <div class="header-title-bar">
+        <h2>{{ t("tftPage.title") }}</h2>
+        <n-button
+          size="small"
+          quaternary
+          :loading="loading"
+          @click="refresh"
+        >
+          刷新
+        </n-button>
+      </div>
+
       <!-- 顶部 TFT 段位与数据统计汇总 Header -->
       <TftRankHeader :rankedStats="rankedStats" :summary="summary" />
 
@@ -114,8 +114,9 @@ onMounted(() => {
 
 <style scoped>
 .tft-view {
-  padding: 16px 20px;
-  height: 100%;
+  padding: 1rem 1.5rem 1rem 0.6rem;
+  background-color: transparent;
+  flex: 1;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -138,14 +139,23 @@ onMounted(() => {
 
 .tip-container {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
-  padding: 40px 0;
+  justify-content: center;
+  padding: 6rem 2rem;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.offline-logo {
+  font-size: 3rem;
+  margin-bottom: 1rem;
 }
 
 .tip {
-  color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  color: var(--text-dimmed);
+  margin: 0;
 }
 
 .tft-content {

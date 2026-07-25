@@ -813,7 +813,7 @@ function getQueueName(queueId: number, backendName: string): string {
   <div class="search-view">
     <div v-if="!store.isConnected" class="tip-container">
       <div class="offline-logo">🎮</div>
-      <p class="tip">请先启动英雄联盟客户端</p>
+      <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
     </div>
 
     <div v-else class="search-container">
@@ -2171,7 +2171,7 @@ function getQueueName(queueId: number, backendName: string): string {
   display: flex;
   align-items: center;
   gap: 3px;
-  width: 190px;
+  width: 210px;
   flex-shrink: 0;
 }
 
@@ -2181,8 +2181,8 @@ function getQueueName(queueId: number, backendName: string): string {
 }
 
 .row-item-slot {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   background: rgba(0, 0, 0, 0.03);
   border-radius: 3px;
   overflow: hidden;
@@ -2196,8 +2196,8 @@ function getQueueName(queueId: number, backendName: string): string {
 }
 
 .row-ward-slot {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 3px;
   overflow: hidden;
   border: 1px solid var(--accent-color, #e6a23c);
