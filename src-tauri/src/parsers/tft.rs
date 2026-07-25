@@ -316,16 +316,12 @@ fn parse_single_tft_participant(
                         .cloned()
                         .unwrap_or_else(|| key.clone());
 
-                    let mut raw_item_icon = tft_data
+                    let raw_item_icon = tft_data
                         .item_icons
                         .get(&key)
                         .or_else(|| tft_data.item_icons.get(&key_lower))
                         .cloned()
                         .unwrap_or_default();
-
-                    if raw_item_icon.is_empty() && !key.is_empty() {
-                        raw_item_icon = format!("assets/ux/tft/items/{}.png", key_lower);
-                    }
 
                     let item_icon_url = convert_seraphine_lcu_icon_path(&raw_item_icon);
 
@@ -336,7 +332,7 @@ fn parse_single_tft_participant(
                 }
             }
 
-            let mut raw_icon = tft_data
+            let raw_icon = tft_data
                 .champion_icons
                 .get(&character_id)
                 .or_else(|| tft_data.champion_icons.get(&char_lower))
@@ -350,10 +346,6 @@ fn parse_single_tft_participant(
                         .unwrap_or("")
                         .to_string()
                 });
-
-            if raw_icon.is_empty() && !character_id.is_empty() {
-                raw_icon = format!("assets/ux/tft/champions/{}.png", char_lower);
-            }
 
             let icon_url = convert_seraphine_lcu_icon_path(&raw_icon);
 
@@ -404,7 +396,7 @@ fn parse_single_tft_participant(
                 .unwrap_or(0) as i32;
 
             if tier_current > 0 || num_units > 0 {
-                let mut raw_trait_icon = tft_data
+                let raw_trait_icon = tft_data
                     .trait_icons
                     .get(&trait_api_name)
                     .or_else(|| tft_data.trait_icons.get(&trait_lower))
@@ -417,10 +409,6 @@ fn parse_single_tft_participant(
                             .unwrap_or("")
                             .to_string()
                     });
-
-                if raw_trait_icon.is_empty() && !trait_api_name.is_empty() {
-                    raw_trait_icon = format!("assets/ux/tft/traits/{}.png", trait_lower);
-                }
 
                 let icon_url = convert_seraphine_lcu_icon_path(&raw_trait_icon);
 
@@ -607,7 +595,8 @@ fn get_tft_data_cache_path() -> Option<std::path::PathBuf> {
     Some(dir.join("tft_data.json"))
 }
 
-/// 抓取 TFT 基础数据字典（优先 LCU，备用 CDragon，带内存静态缓存 & 1.5s 超时）
+/// 抓取 TFT 基础数据字典（优先 LCU，备用 CDragon，带内存与磁盘缓存）
+/// 参照 Seraphine：LCU → CDragon（一次，无重试，无代理）
 async fn fetch_tft_data_mapping(lcu: &crate::LcuClient) -> TftDataMapping {
     let mut cache = CACHED_TFT_DATA.write().await;
     if let Some(ref mapping) = *cache {
@@ -636,11 +625,11 @@ async fn fetch_tft_data_mapping(lcu: &crate::LcuClient) -> TftDataMapping {
         lcu.port
     );
 
-    // 请求本地 LCU，超时调大到 5 秒（因为 tft.json 资源相当庞大）
+    // 参照 Seraphine checkAndUpdate：先尝试 LCU
     let lcu_client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .no_proxy()
-        .timeout(std::time::Duration::from_millis(5000))
+        .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -655,7 +644,6 @@ async fn fetch_tft_data_mapping(lcu: &crate::LcuClient) -> TftDataMapping {
                 let m = parse_tft_data(&content);
                 if !m.champions.is_empty() {
                     *cache = Some(m.clone());
-                    // 异步保存到本地磁盘缓存
                     let m_clone = m.clone();
                     tokio::spawn(async move {
                         if let Some(cache_path) = get_tft_data_cache_path() {
@@ -670,10 +658,10 @@ async fn fetch_tft_data_mapping(lcu: &crate::LcuClient) -> TftDataMapping {
         }
     }
 
+    // 2. 参照 Seraphine update 方法：LCU 失败后降级 CDragon，一次请求不重试
     let cdn_url = "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json";
     let cdn_client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
-        .timeout(std::time::Duration::from_secs(10))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -683,7 +671,6 @@ async fn fetch_tft_data_mapping(lcu: &crate::LcuClient) -> TftDataMapping {
                 let m = parse_tft_data(&content);
                 if !m.champions.is_empty() {
                     *cache = Some(m.clone());
-                    // 异步保存到本地磁盘缓存
                     let m_clone = m.clone();
                     tokio::spawn(async move {
                         if let Some(cache_path) = get_tft_data_cache_path() {

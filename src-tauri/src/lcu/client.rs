@@ -59,11 +59,20 @@ fn guess_content_type(path: &str) -> String {
 fn get_tft_local_cache_path(path: &str) -> Option<PathBuf> {
     let lower_path = path.to_lowercase();
 
-    // 只有路径中含有 tft 资源特征的才走持久化文件名缓存，其他普通 LCU 资源仍然使用 stable_hash 缓存
+    // TFT 资源路径特征检测：兼容 LCU 和 CDragon 两套命名体系
     let is_tft = lower_path.contains("/tft/")
         || lower_path.contains("tft_champion_icons")
         || lower_path.contains("tft_item_icons")
-        || lower_path.contains("tft_trait_icons");
+        || lower_path.contains("tft_trait_icons")
+        || lower_path.contains("tft13_")
+        || lower_path.contains("tft14_")
+        || lower_path.contains("tft15_")
+        || lower_path.contains("tft16_")
+        || lower_path.contains("tft17_")
+        || lower_path.contains("tft9_")
+        || lower_path.contains("tft8_")
+        || lower_path.contains("/traiticons/")
+        || lower_path.contains("trait_icon_");
 
     if !is_tft {
         return None;
@@ -74,9 +83,9 @@ fn get_tft_local_cache_path(path: &str) -> Option<PathBuf> {
         return None;
     }
 
-    let sub_folder = if lower_path.contains("champion") {
+    let sub_folder = if lower_path.contains("champion") || lower_path.contains("championsplashes") {
         "tft_champion_icons"
-    } else if lower_path.contains("trait") {
+    } else if lower_path.contains("trait") || lower_path.contains("traiticons") {
         "tft_trait_icons"
     } else {
         // items or augments
