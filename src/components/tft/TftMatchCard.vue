@@ -42,17 +42,19 @@ const fullTraitsTooltip = computed(() => {
   <div :class="['tft-match-card', placementClass]">
     <!-- 左侧：名次与基础统计 -->
     <div class="match-left">
-      <div class="placement-badge">
-        <span class="placement-num">#{{ match.placement }}</span>
-        <span class="placement-text">
-          {{ isFirst ? t("tftPage.match.firstPlace") : isTop4 ? t("tftPage.match.top4") : t("tftPage.match.rank", { n: match.placement }) }}
-        </span>
+      <div class="top-row">
+        <div class="placement-badge">
+          <span class="placement-num">#{{ match.placement }}</span>
+          <span class="placement-text">
+            {{ isFirst ? t("tftPage.match.firstPlace") : isTop4 ? t("tftPage.match.top4") : t("tftPage.match.rank", { n: match.placement }) }}
+          </span>
+        </div>
+        <span class="duration-badge">{{ match.durationStr }}</span>
       </div>
 
       <div class="meta-info">
         <span class="queue-tag">{{ match.queueName }}</span>
         <span class="time-str">{{ match.timeStr }}</span>
-        <span class="duration-str">{{ match.durationStr }}</span>
       </div>
 
       <div class="economy-info">
@@ -162,13 +164,26 @@ const fullTraitsTooltip = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 120px;
+  min-width: 140px;
+}
+
+.top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .placement-badge {
   display: flex;
   align-items: baseline;
   gap: 6px;
+}
+
+.duration-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-dimmed);
 }
 
 .placement-num {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch, nextTick } from "vue";
 import { NModal } from "naive-ui";
 import LcuImage from "../LcuImage.vue";
 import type { TftMatchDisplay, TftParticipantDisplay } from "../../composables/useTftData";
@@ -18,6 +18,19 @@ const visible = computed({
   set: (val) => emit("update:show", val),
 });
 
+const modalBodyRef = ref<HTMLElement | null>(null);
+
+watch(
+  () => props.show,
+  (newVal) => {
+    if (newVal) {
+      nextTick(() => {
+        modalBodyRef.value?.focus();
+      });
+    }
+  }
+);
+
 function getParticipantTraits(p: TftParticipantDisplay) {
   if (!p.traits) return [];
   return [...p.traits]
@@ -32,47 +45,43 @@ function getParticipantTraits(p: TftParticipantDisplay) {
     v-model:show="visible"
     preset="card"
     class="tft-detail-modal"
-    :style="{ width: '960px', maxWidth: '95vw' }"
+    :style="{ width: '1100px', maxWidth: '95vw' }"
     :segmented="{ content: 'soft', footer: 'soft' }"
+    :auto-focus="false"
   >
     <template #header>
       <div v-if="match" class="modal-header-content">
         <div class="header-left">
-          <span class="queue-title">{{ match.queueName }}</span>
-          <span class="match-meta">{{ match.timeStr }} • {{ match.durationStr }}</span>
-        </div>
-        <div class="header-right">
           <span :class="['my-rank-badge', `rank-${match.placement}`]">
-            战绩: #{{ match.placement }}
+            第 {{ match.placement }} 名
           </span>
+          <span class="queue-title">对局结算榜 (8人对决)</span>
+          <span class="match-meta">{{ match.timeStr }} • {{ match.durationStr }}</span>
         </div>
       </div>
     </template>
 
-    <div v-if="match" class="tft-modal-body">
-      <div class="modal-subhead">
-        <span>对局结算榜 (8人对决)</span>
-      </div>
-
+    <div v-if="match" ref="modalBodyRef" tabindex="-1" class="tft-modal-body" style="outline: none;">
       <div class="participants-list">
         <div
           v-for="p in match.participants"
           :key="p.puuid || p.placement"
           :class="['p-card', { 'is-self': p.isSelf, 'top4': p.placement <= 4 }]"
         >
-          <!-- 排名 -->
-          <div class="p-rank-col">
-            <span :class="['rank-tag', `rank-${p.placement}`]">
-              #{{ p.placement }}
-            </span>
-          </div>
-
           <!-- 召唤师名称 & 等级 -->
           <div class="p-info-col">
+            <!-- 排名 -->
+            <div class="p-rank-row">
+              <span :class="['rank-tag', `rank-${p.placement}`]">
+                #{{ p.placement }}
+              </span>
+            </div>
+            <!-- 召唤师名称 -->
             <div class="p-name-row">
               <span class="p-name" :title="p.summonerName">{{ p.summonerName }}</span>
               <span v-if="p.isSelf" class="self-badge">我</span>
             </div>
+            <!-- 等级等其它信息 -->
             <div class="p-meta-row">
               <span class="p-lvl">Lvl {{ p.level }}</span>
               <span class="p-gold">💰 {{ p.goldLeft }}</span>
@@ -129,6 +138,7 @@ function getParticipantTraits(p: TftParticipantDisplay) {
                 :title="`${tr.name}: ${tr.numUnits}`"
               >
                 <LcuImage v-if="tr.iconUrl" :src="tr.iconUrl" class="trait-img" />
+                <span class="trait-name">{{ tr.name }}</span>
                 <span class="trait-val">{{ tr.numUnits }}</span>
               </div>
             </div>
@@ -153,7 +163,7 @@ function getParticipantTraits(p: TftParticipantDisplay) {
 
 .header-left {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
 }
 
@@ -194,19 +204,11 @@ function getParticipantTraits(p: TftParticipantDisplay) {
   gap: 12px;
 }
 
-.modal-subhead {
-  font-size: 0.82rem;
-  font-weight: bold;
-  color: var(--text-muted);
-  padding-bottom: 4px;
-  border-bottom: 1px dashed var(--border-color);
-}
-
 .participants-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 68vh;
+  gap: 6px;
+  max-height: 76vh;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -214,11 +216,11 @@ function getParticipantTraits(p: TftParticipantDisplay) {
 .p-card {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border-radius: 8px;
   background: var(--card-bg, rgba(0, 0, 0, 0.02));
   border: 1px solid var(--border-color);
-  gap: 14px;
+  gap: 12px;
   transition: all 0.15s ease;
 }
 
@@ -236,12 +238,12 @@ function getParticipantTraits(p: TftParticipantDisplay) {
   border-left: 4px solid var(--win-color);
 }
 
-.p-rank-col {
-  min-width: 32px;
+.p-rank-row {
+  line-height: 1.2;
 }
 
 .rank-tag {
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 900;
   color: var(--text-muted);
 }
@@ -254,14 +256,17 @@ function getParticipantTraits(p: TftParticipantDisplay) {
 .p-info-col {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  align-items: flex-start;
+  gap: 4px;
   min-width: 130px;
-  max-width: 150px;
+  max-width: 160px;
+  text-align: left;
 }
 
 .p-name-row {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 4px;
 }
 
@@ -272,6 +277,7 @@ function getParticipantTraits(p: TftParticipantDisplay) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: left;
 }
 
 .self-badge {
@@ -324,8 +330,8 @@ function getParticipantTraits(p: TftParticipantDisplay) {
 
 .unit-img-box {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--border-color);
@@ -377,8 +383,8 @@ function getParticipantTraits(p: TftParticipantDisplay) {
 }
 
 .p-traits-col {
-  min-width: 140px;
-  max-width: 170px;
+  min-width: 240px;
+  max-width: 300px;
   flex-shrink: 0;
 }
 
@@ -386,26 +392,36 @@ function getParticipantTraits(p: TftParticipantDisplay) {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 4px 5px;
-  max-height: 48px;
+  gap: 3px;
+  max-height: 56px;
   overflow: hidden;
 }
 
 .trait-chip {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   padding: 1px 5px;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.05);
   border: 1px solid var(--border-color);
   font-size: 0.68rem;
+  max-width: 95px;
 }
 
 .trait-img {
   width: 13px;
   height: 13px;
   object-fit: contain;
+}
+
+.trait-name {
+  font-size: 0.68rem;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60px;
 }
 
 .trait-val {

@@ -995,9 +995,13 @@ pub async fn get_tft_match_history(
             .get("gameCreation")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        let game_duration = g_obj
-            .get("gameDuration")
-            .and_then(|v| v.as_u64())
+        let raw_duration = g_obj
+            .get("game_length")
+            .or_else(|| g_obj.get("gameDuration"))
+            .or_else(|| g_obj.get("gameLength"));
+
+        let game_duration = raw_duration
+            .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
             .unwrap_or(0);
         let queue_id = g_obj.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
 
@@ -1012,7 +1016,12 @@ pub async fn get_tft_match_history(
 
         let secs = (game_creation / 1000) as i64;
         let time_str = chrono::DateTime::from_timestamp(secs, 0)
-            .map(|dt| dt.format("%m-%d %H:%M").to_string())
+            .map(|dt| {
+                let utc8_fixed = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+                dt.with_timezone(&utc8_fixed)
+                    .format("%m-%d %H:%M")
+                    .to_string()
+            })
             .unwrap_or_else(|| "01-01 00:00".to_string());
 
         let duration_str = format!("{:02}:{:02}", game_duration / 60, game_duration % 60);

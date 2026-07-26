@@ -159,6 +159,9 @@ onMounted(() => {
 }
 
 .tft-content {
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 16px;

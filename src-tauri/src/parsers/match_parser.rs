@@ -62,6 +62,8 @@ pub struct LcuMatchStats {
     pub total_heal: Option<i32>,
     #[serde(default)]
     pub game_ended_in_early_surrender: bool,
+    #[serde(default)]
+    pub subteam_placement: Option<u32>,
 }
 
 // ─── 前端展示用的清洗结构体 ───
@@ -79,6 +81,7 @@ pub struct MatchDisplay {
     pub duration: String,
     pub remake: bool,
     pub win: bool,
+    pub placement: Option<u32>,
     pub champion_id: i32,
     pub spell1_id: i32,
     pub spell2_id: i32,
@@ -171,6 +174,7 @@ impl LcuMatchGame {
             duration,
             remake: stats.game_ended_in_early_surrender,
             win: stats.win,
+            placement: stats.subteam_placement,
             champion_id: participant.champion_id,
             spell1_id: participant.spell1_id,
             spell2_id: participant.spell2_id,
@@ -566,7 +570,10 @@ pub async fn get_match_history_sgp(
 
         let game_id = g.get("gameId").and_then(|v| v.as_u64()).unwrap_or(0);
         let game_creation = g.get("gameCreation").and_then(|v| v.as_u64()).unwrap_or(0);
-        let game_duration = g.get("gameDuration").and_then(|v| v.as_u64()).unwrap_or(0);
+        let game_duration = g
+            .get("gameDuration")
+            .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+            .unwrap_or(0);
         let queue_id = g.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let _map_id = g.get("mapId").and_then(|v| v.as_u64());
 
@@ -628,6 +635,10 @@ pub async fn get_match_history_sgp(
             .get("gameEndedInEarlySurrender")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let subteam_placement = stats
+            .get("subteamPlacement")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
 
         let item0 = stats.get("item0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let item1 = stats.get("item1").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
@@ -673,6 +684,7 @@ pub async fn get_match_history_sgp(
             duration,
             remake,
             win,
+            placement: subteam_placement,
             champion_id,
             spell1_id,
             spell2_id,

@@ -110,6 +110,7 @@ export interface MatchDisplay {
   duration: string;
   remake: boolean;
   win: boolean;
+  placement?: number;
   championId: number;
   spell1Id: number;
   spell2Id: number;

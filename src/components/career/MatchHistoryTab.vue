@@ -155,6 +155,25 @@ function getQueueName(m: MatchDisplay): string {
   return m.name;
 }
 
+function getResultText(m: MatchDisplay): string {
+  if (m.placement) {
+    return `第 ${m.placement} 名`;
+  }
+  if ([2400, 1700, 1710].includes(m.queueId)) {
+    return m.win ? "第 1 名" : "8人对局";
+  }
+  return m.win ? t("career.victory") : t("career.defeat");
+}
+
+function getResultClass(m: MatchDisplay): string {
+  if (m.placement) {
+    if (m.placement === 1) return "win-text gold-text";
+    if (m.placement <= 4) return "win-text";
+    return "lose-text";
+  }
+  return m.win ? "win-text" : "lose-text";
+}
+
 function getKdaClass(kda: string): string {
   const val = parseFloat(kda);
   if (isNaN(val)) return "kda-perfect";
@@ -542,12 +561,15 @@ watch(
             </div>
           </div>
 
-          <!-- 2. 胜负状态与游戏模式 -->
+          <!-- 2. 胜负状态与游戏模式/时长 -->
           <div class="result-panel">
-            <span :class="['result-text', m.win ? 'win-text' : 'lose-text']">
-              {{ m.win ? $t("career.victory") : $t("career.defeat") }}
+            <span :class="['result-text', getResultClass(m)]">
+              {{ getResultText(m) }}
             </span>
-            <span class="queue-mode">{{ getQueueName(m) }}</span>
+            <div class="result-sub-info">
+              <span class="queue-mode">{{ getQueueName(m) }}</span>
+              <span class="game-duration">{{ m.duration }}</span>
+            </div>
           </div>
 
           <!-- 3. KDA 数字与文字 -->
@@ -627,12 +649,10 @@ watch(
             </svg>
           </div>
 
-          <!-- 7. 地图模式与时长/日期 -->
+          <!-- 7. 地图模式与日期 -->
           <div class="time-panel">
             <span class="game-map">{{ translateMapName(m.map) }}</span>
-            <span class="match-time"
-              >{{ m.duration }} · {{ formatTime(m.timeStamp) }}</span
-            >
+            <span class="match-time">{{ formatTime(m.timeStamp) }}</span>
           </div>
         </div>
       </div>
@@ -1029,7 +1049,7 @@ watch(
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-width: 100px;
+  min-width: 110px;
 }
 
 .result-text {
@@ -1041,14 +1061,30 @@ watch(
   color: var(--win-color);
 }
 
+.win-text.gold-text {
+  color: #f59e0b;
+}
+
 .lose-text {
   color: var(--loss-color);
+}
+
+.result-sub-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
 }
 
 .queue-mode {
   font-size: 0.8rem;
   color: var(--text-muted);
-  margin-top: 2px;
+}
+
+.game-duration {
+  font-size: 0.76rem;
+  color: var(--text-dimmed);
+  font-weight: 600;
 }
 
 /* 3. KDA面板 */
