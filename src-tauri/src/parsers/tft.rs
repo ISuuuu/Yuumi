@@ -7,8 +7,20 @@ use tokio::sync::RwLock;
 use crate::{build_auth_header, AppState};
 
 static CACHED_TFT_DATA: RwLock<Option<TftDataMapping>> = RwLock::const_new(None);
+static CACHED_AUGMENTS: RwLock<Option<Vec<TftAugmentInfo>>> = RwLock::const_new(None);
 
 // ─── TFT 数据结构 ───
+
+/// TFT 海克斯强化信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TftAugmentInfo {
+    pub api_name: String,
+    pub name: String,
+    pub desc: String,
+    pub icon_path: String,
+    pub tier: i32, // 1-银，2-金，3-彩/棱彩
+}
 
 /// TFT 解析后的资源映射
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,7 +129,7 @@ pub struct TftMatchSummary {
 
 // ─── LCU 原始 JSON 结构 ───
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct TftJsonRoot {
     #[serde(rename = "setData")]
     set_data: Option<Vec<TftSet>>,
@@ -126,13 +138,13 @@ struct TftJsonRoot {
     augments: Option<Vec<TftGenericItem>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct TftSet {
     champions: Option<Vec<TftChampion>>,
     traits: Option<Vec<TftTrait>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct TftChampion {
     #[serde(rename = "apiName")]
     api_name: Option<String>,
@@ -142,7 +154,7 @@ struct TftChampion {
     icon: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct TftTrait {
     #[serde(rename = "apiName")]
     api_name: Option<String>,
@@ -150,12 +162,14 @@ struct TftTrait {
     icon: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct TftGenericItem {
     #[serde(rename = "apiName")]
     api_name: Option<String>,
     name: Option<String>,
     icon: Option<String>,
+    desc: Option<String>,
+    description: Option<String>,
 }
 
 // ─── 辅助函数 ───
@@ -477,8 +491,8 @@ fn parse_single_tft_participant(
 
 // ─── 解析逻辑 ───
 
-/// 从 TFT JSON 内容解析资源映射（对应 Python `parseData`）
-fn parse_tft_data(content: &TftJsonRoot) -> TftDataMapping {
+/// 从 TFT JSON 内容解析资源映射
+fn parse_tft_data_from_value(root: &serde_json::Value) -> TftDataMapping {
     let mut mapping = TftDataMapping {
         champions: HashMap::new(),
         traits: HashMap::new(),
@@ -488,125 +502,118 @@ fn parse_tft_data(content: &TftJsonRoot) -> TftDataMapping {
         item_names: HashMap::new(),
     };
 
-    if let Some(set_data_list) = &content.set_data {
-        for set_data in set_data_list {
-            if let Some(champs) = &set_data.champions {
-                for champ in champs {
-                    if let Some(ref api_name) = champ.api_name {
-                        let name = champ.name.clone().unwrap_or_default();
-                        let icon = champ
-                            .square_icon
-                            .clone()
-                            .or_else(|| champ.icon.clone())
-                            .unwrap_or_default();
-                        let api_lower = api_name.to_lowercase();
-                        mapping.champions.insert(api_name.clone(), name.clone());
-                        mapping.champions.insert(api_lower.clone(), name);
+    let mut process_set_obj = |set_obj: &serde_json::Value| {
+        if let Some(champs) = set_obj.get("champions").and_then(|v| v.as_array()) {
+            for c in champs {
+                if let Some(api_name) = c.get("apiName").and_then(|v| v.as_str()) {
+                    let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let icon = c
+                        .get("squareIcon")
+                        .or_else(|| c.get("icon"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let api_lower = api_name.to_lowercase();
+                    mapping
+                        .champions
+                        .insert(api_name.to_string(), name.to_string());
+                    mapping
+                        .champions
+                        .insert(api_lower.clone(), name.to_string());
 
-                        if !icon.is_empty() {
-                            mapping
-                                .champion_icons
-                                .insert(api_name.clone(), icon.clone());
-                            mapping.champion_icons.insert(api_lower, icon);
-                        }
-                    }
-                }
-            }
-            if let Some(traits) = &set_data.traits {
-                for trait_data in traits {
-                    if let Some(ref api_name) = trait_data.api_name {
-                        let name = trait_data.name.clone().unwrap_or_default();
-                        let icon = trait_data.icon.clone().unwrap_or_default();
-                        let api_lower = api_name.to_lowercase();
-                        mapping.traits.insert(api_name.clone(), name.clone());
-                        mapping.traits.insert(api_lower.clone(), name);
-
-                        if !icon.is_empty() {
-                            mapping.trait_icons.insert(api_name.clone(), icon.clone());
-                            mapping.trait_icons.insert(api_lower, icon);
-                        }
+                    if !icon.is_empty() {
+                        let icon_converted = convert_seraphine_lcu_icon_path(icon);
+                        mapping
+                            .champion_icons
+                            .insert(api_name.to_string(), icon_converted.clone());
+                        mapping.champion_icons.insert(api_lower, icon_converted);
                     }
                 }
             }
         }
-    }
+        if let Some(traits) = set_obj.get("traits").and_then(|v| v.as_array()) {
+            for t in traits {
+                if let Some(api_name) = t.get("apiName").and_then(|v| v.as_str()) {
+                    let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let icon = t.get("icon").and_then(|v| v.as_str()).unwrap_or("");
+                    let api_lower = api_name.to_lowercase();
+                    mapping
+                        .traits
+                        .insert(api_name.to_string(), name.to_string());
+                    mapping.traits.insert(api_lower.clone(), name.to_string());
 
-    if let Some(sets) = &content.sets {
-        for set_data in sets.values() {
-            if let Some(champs) = &set_data.champions {
-                for champ in champs {
-                    if let Some(ref api_name) = champ.api_name {
-                        let name = champ.name.clone().unwrap_or_default();
-                        let icon = champ
-                            .square_icon
-                            .clone()
-                            .or_else(|| champ.icon.clone())
-                            .unwrap_or_default();
-                        let api_lower = api_name.to_lowercase();
-                        mapping.champions.insert(api_name.clone(), name.clone());
-                        mapping.champions.insert(api_lower.clone(), name);
-
-                        if !icon.is_empty() {
-                            mapping
-                                .champion_icons
-                                .insert(api_name.clone(), icon.clone());
-                            mapping.champion_icons.insert(api_lower, icon);
-                        }
-                    }
-                }
-            }
-            if let Some(traits) = &set_data.traits {
-                for trait_data in traits {
-                    if let Some(ref api_name) = trait_data.api_name {
-                        let name = trait_data.name.clone().unwrap_or_default();
-                        let icon = trait_data.icon.clone().unwrap_or_default();
-                        let api_lower = api_name.to_lowercase();
-                        mapping.traits.insert(api_name.clone(), name.clone());
-                        mapping.traits.insert(api_lower.clone(), name);
-
-                        if !icon.is_empty() {
-                            mapping.trait_icons.insert(api_name.clone(), icon.clone());
-                            mapping.trait_icons.insert(api_lower, icon);
-                        }
+                    if !icon.is_empty() {
+                        let icon_converted = convert_seraphine_lcu_icon_path(icon);
+                        mapping
+                            .trait_icons
+                            .insert(api_name.to_string(), icon_converted.clone());
+                        mapping.trait_icons.insert(api_lower, icon_converted);
                     }
                 }
             }
         }
+    };
+
+    if let Some(set_data) = root.get("setData").and_then(|v| v.as_array()) {
+        for set_obj in set_data {
+            process_set_obj(set_obj);
+        }
     }
 
-    if let Some(items) = &content.items {
+    if let Some(sets) = root.get("sets").and_then(|v| v.as_object()) {
+        for (_k, set_obj) in sets {
+            process_set_obj(set_obj);
+        }
+    }
+
+    let mut process_item = |item: &serde_json::Value| {
+        if let Some(api_name) = item.get("apiName").and_then(|v| v.as_str()) {
+            let api_lower = api_name.to_lowercase();
+            if let Some(name) = item.get("name").and_then(|v| v.as_str()) {
+                mapping
+                    .item_names
+                    .insert(api_name.to_string(), name.to_string());
+                mapping
+                    .item_names
+                    .insert(api_lower.clone(), name.to_string());
+            }
+            if let Some(icon) = item.get("icon").and_then(|v| v.as_str()) {
+                let icon_converted = convert_seraphine_lcu_icon_path(icon);
+                mapping
+                    .item_icons
+                    .insert(api_name.to_string(), icon_converted.clone());
+                mapping.item_icons.insert(api_lower, icon_converted);
+            }
+        }
+    };
+
+    if let Some(items) = root.get("items").and_then(|v| v.as_array()) {
         for item in items {
-            if let Some(ref api_name) = item.api_name {
-                let api_lower = api_name.to_lowercase();
-                if let Some(ref name) = item.name {
-                    mapping.item_names.insert(api_name.clone(), name.clone());
-                    mapping.item_names.insert(api_lower.clone(), name.clone());
-                }
-                if let Some(ref icon) = item.icon {
-                    mapping.item_icons.insert(api_name.clone(), icon.clone());
-                    mapping.item_icons.insert(api_lower, icon.clone());
-                }
-            }
+            process_item(item);
         }
     }
 
-    if let Some(augments) = &content.augments {
+    if let Some(augments) = root.get("augments").and_then(|v| v.as_array()) {
         for aug in augments {
-            if let Some(ref api_name) = aug.api_name {
-                let api_lower = api_name.to_lowercase();
-                if let Some(ref name) = aug.name {
-                    mapping.item_names.insert(api_name.clone(), name.clone());
-                    mapping.item_names.insert(api_lower.clone(), name.clone());
-                }
-                if let Some(ref icon) = aug.icon {
-                    mapping.item_icons.insert(api_name.clone(), icon.clone());
-                    mapping.item_icons.insert(api_lower, icon.clone());
-                }
-            }
+            process_item(aug);
         }
     }
 
     mapping
+}
+
+fn parse_tft_data(content: &TftJsonRoot) -> TftDataMapping {
+    if let Ok(val) = serde_json::to_value(content) {
+        parse_tft_data_from_value(&val)
+    } else {
+        TftDataMapping {
+            champions: HashMap::new(),
+            traits: HashMap::new(),
+            champion_icons: HashMap::new(),
+            trait_icons: HashMap::new(),
+            item_icons: HashMap::new(),
+            item_names: HashMap::new(),
+        }
+    }
 }
 
 fn get_tft_data_cache_path() -> Option<std::path::PathBuf> {
@@ -615,9 +622,224 @@ fn get_tft_data_cache_path() -> Option<std::path::PathBuf> {
     Some(dir.join("tft_data.json"))
 }
 
+fn get_tft_augments_cache_path() -> Option<std::path::PathBuf> {
+    let dir = dirs::config_dir()?.join("Yuumi").join("cache");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("tft_augments.json"))
+}
+
+fn clean_tft_desc(desc_raw: &str) -> String {
+    if desc_raw.is_empty() {
+        return String::new();
+    }
+    let text = desc_raw
+        .replace("<br>", "\n")
+        .replace("<br/>", "\n")
+        .replace("<br />", "\n")
+        .replace("</p>", "\n")
+        .replace("</div>", "\n");
+
+    let mut result = String::with_capacity(text.len());
+    let mut in_tag = false;
+    for ch in text.chars() {
+        if ch == '<' {
+            in_tag = true;
+        } else if ch == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            result.push(ch);
+        }
+    }
+    result.trim().to_string()
+}
+
+fn extract_augment_tier(api_name: &str, icon: &str, name: &str) -> i32 {
+    let lower_api = api_name.to_lowercase();
+    let lower_icon = icon.to_lowercase();
+
+    if lower_api.contains("prismatic")
+        || lower_icon.contains("prismatic")
+        || lower_api.contains("tier3")
+        || lower_icon.contains("tier3")
+        || lower_api.contains("hr_t3")
+    {
+        return 3;
+    }
+    if lower_api.contains("gold")
+        || lower_icon.contains("gold")
+        || lower_api.contains("tier2")
+        || lower_icon.contains("tier2")
+        || lower_api.contains("hr_t2")
+    {
+        return 2;
+    }
+    if lower_api.contains("silver")
+        || lower_icon.contains("silver")
+        || lower_api.contains("tier1")
+        || lower_icon.contains("tier1")
+        || lower_api.contains("hr_t1")
+    {
+        return 1;
+    }
+
+    if name.ends_with(" III") || name.contains(" III ") {
+        return 3;
+    }
+    if name.ends_with(" II") || name.contains(" II ") {
+        return 2;
+    }
+    if name.ends_with(" I") || name.contains(" I ") {
+        return 1;
+    }
+
+    2
+}
+
+fn extract_augments_from_value(root: &serde_json::Value) -> Vec<TftAugmentInfo> {
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    let mut process_item_val = |item: &serde_json::Value, force_augment: bool| {
+        let name = item
+            .get("name")
+            .or_else(|| item.get("displayName"))
+            .or_else(|| item.get("title"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if name.is_empty() {
+            return;
+        }
+
+        let api_name = item
+            .get("apiName")
+            .or_else(|| item.get("api_name"))
+            .or_else(|| item.get("hexId"))
+            .and_then(|v| v.as_str())
+            .unwrap_or(name);
+        if seen.contains(api_name) {
+            return;
+        }
+
+        let icon = item
+            .get("icon")
+            .or_else(|| item.get("squareIcon"))
+            .or_else(|| item.get("imgUrl"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let lower_api = api_name.to_lowercase();
+        let lower_icon = icon.to_lowercase();
+
+        let is_aug = force_augment
+            || lower_api.contains("augment")
+            || lower_icon.contains("augment")
+            || (lower_api.starts_with("tft")
+                && (lower_api.contains("aug")
+                    || lower_api.contains("superrune")
+                    || lower_api.contains("hextech")));
+
+        if !is_aug {
+            return;
+        }
+
+        seen.insert(api_name.to_string());
+
+        let raw_desc = item
+            .get("desc")
+            .or_else(|| item.get("description"))
+            .or_else(|| item.get("descClean"))
+            .or_else(|| item.get("tooltip"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let desc = clean_tft_desc(raw_desc);
+        let icon_path = convert_seraphine_lcu_icon_path(icon);
+        let tier = extract_augment_tier(api_name, icon, name);
+
+        result.push(TftAugmentInfo {
+            api_name: api_name.to_string(),
+            name: name.to_string(),
+            desc,
+            icon_path,
+            tier,
+        });
+    };
+
+    let root_keys: Vec<&str> = root
+        .as_object()
+        .map(|m| m.keys().map(|k| k.as_str()).collect())
+        .unwrap_or_default();
+
+    // 1. 根节点自身为 Array（某些 LCU 端点的裸数组结构）
+    if let Some(arr) = root.as_array() {
+        log::info!("[Extract] 根节点为 Array，共 {} 个元素", arr.len());
+        for item in arr {
+            process_item_val(item, false);
+        }
+    }
+
+    // 2. 根节点为 Object — 从各字段提取
+    let has_augments_field = root_keys.contains(&"augments");
+    let has_set_data = root_keys.contains(&"setData");
+    let has_sets = root_keys.contains(&"sets");
+    let has_items = root_keys.contains(&"items");
+    log::info!(
+        "[Extract] Object 字段: augments={}, setData={}, sets={}, items={}",
+        has_augments_field,
+        has_set_data,
+        has_sets,
+        has_items
+    );
+
+    if let Some(arr) = root.get("augments").and_then(|v| v.as_array()) {
+        log::info!("[Extract] 根节点 augments[] = {} 项", arr.len());
+        for item in arr {
+            process_item_val(item, true);
+        }
+    }
+
+    if let Some(arr) = root.get("items").and_then(|v| v.as_array()) {
+        for item in arr {
+            process_item_val(item, false);
+        }
+    }
+
+    if let Some(set_data) = root.get("setData").and_then(|v| v.as_array()) {
+        for set_obj in set_data {
+            if let Some(items) = set_obj.get("items").and_then(|v| v.as_array()) {
+                for item in items {
+                    process_item_val(item, false);
+                }
+            }
+            if let Some(augments) = set_obj.get("augments").and_then(|v| v.as_array()) {
+                for item in augments {
+                    process_item_val(item, true);
+                }
+            }
+        }
+    }
+
+    if let Some(sets) = root.get("sets").and_then(|v| v.as_object()) {
+        for (_k, set_obj) in sets {
+            if let Some(items) = set_obj.get("items").and_then(|v| v.as_array()) {
+                for item in items {
+                    process_item_val(item, false);
+                }
+            }
+            if let Some(augments) = set_obj.get("augments").and_then(|v| v.as_array()) {
+                for item in augments {
+                    process_item_val(item, true);
+                }
+            }
+        }
+    }
+
+    result
+}
+
 /// 抓取 TFT 基础数据字典（优先 LCU，备用 CDragon，带内存与磁盘缓存）
 /// 参照 Seraphine：LCU → CDragon（一次，无重试，无代理）
-async fn fetch_tft_data_mapping(lcu: &crate::LcuClient) -> TftDataMapping {
+async fn fetch_tft_data_mapping(lcu: Option<&crate::LcuClient>) -> TftDataMapping {
     let mut cache = CACHED_TFT_DATA.write().await;
     if let Some(ref mapping) = *cache {
         if !mapping.champions.is_empty() {
@@ -639,46 +861,61 @@ async fn fetch_tft_data_mapping(lcu: &crate::LcuClient) -> TftDataMapping {
         }
     }
 
-    let auth = build_auth_header(&lcu.token);
-    let lcu_url = format!(
-        "https://127.0.0.1:{}/lol-game-data/assets/v1/tft.json",
-        lcu.port
-    );
+    // 2. 仅当 LCU 已开启且连接时，优先向本地 LCU 请求
+    if let Some(lcu_client_ref) = lcu {
+        let auth = build_auth_header(&lcu_client_ref.token);
+        let lcu_url = format!(
+            "https://127.0.0.1:{}/lol-game-data/assets/v1/tft.json",
+            lcu_client_ref.port
+        );
 
-    // 参照 Seraphine checkAndUpdate：先尝试 LCU
-    let lcu_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .no_proxy()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+        let lcu_client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
 
-    if let Ok(resp) = lcu_client
-        .get(&lcu_url)
-        .header("Authorization", &auth)
-        .send()
-        .await
-    {
-        if resp.status().is_success() {
-            if let Ok(content) = resp.json::<TftJsonRoot>().await {
-                let m = parse_tft_data(&content);
-                if !m.champions.is_empty() {
-                    *cache = Some(m.clone());
-                    let m_clone = m.clone();
-                    tokio::spawn(async move {
-                        if let Some(cache_path) = get_tft_data_cache_path() {
-                            if let Ok(json_str) = serde_json::to_string(&m_clone) {
-                                let _ = std::fs::write(cache_path, json_str);
-                            }
+        if let Ok(resp) = lcu_client
+            .get(&lcu_url)
+            .header("Authorization", &auth)
+            .send()
+            .await
+        {
+            if resp.status().is_success() {
+                if let Ok(root_val) = resp.json::<serde_json::Value>().await {
+                    let m = parse_tft_data_from_value(&root_val);
+                    if !m.champions.is_empty() {
+                        *cache = Some(m.clone());
+                        let m_clone = m.clone();
+                        let aug_list = extract_augments_from_value(&root_val);
+                        log::info!("从 LCU 成功提取到 {} 个 TFT 海克斯强化", aug_list.len());
+                        if !aug_list.is_empty() {
+                            let mut aug_cache = CACHED_AUGMENTS.write().await;
+                            *aug_cache = Some(aug_list.clone());
+                            tokio::spawn(async move {
+                                if let Some(aug_path) = get_tft_augments_cache_path() {
+                                    if let Ok(json_str) = serde_json::to_string(&aug_list) {
+                                        let _ = std::fs::write(aug_path, json_str);
+                                    }
+                                }
+                            });
                         }
-                    });
-                    return m;
+                        tokio::spawn(async move {
+                            if let Some(cache_path) = get_tft_data_cache_path() {
+                                if let Ok(json_str) = serde_json::to_string(&m_clone) {
+                                    let _ = std::fs::write(cache_path, json_str);
+                                }
+                            }
+                        });
+                        return m;
+                    }
                 }
             }
         }
     }
 
-    // 2. 参照 Seraphine update 方法：LCU 失败后降级 CDragon，一次请求不重试
+    // 3. 参照 Seraphine update 方法：LCU 失败或未开时降级 CDragon，一次请求不重试
     let cdn_url = "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json";
     let cdn_client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -687,11 +924,24 @@ async fn fetch_tft_data_mapping(lcu: &crate::LcuClient) -> TftDataMapping {
 
     if let Ok(resp) = cdn_client.get(cdn_url).send().await {
         if resp.status().is_success() {
-            if let Ok(content) = resp.json::<TftJsonRoot>().await {
-                let m = parse_tft_data(&content);
+            if let Ok(root_val) = resp.json::<serde_json::Value>().await {
+                let m = parse_tft_data_from_value(&root_val);
                 if !m.champions.is_empty() {
                     *cache = Some(m.clone());
                     let m_clone = m.clone();
+                    let aug_list = extract_augments_from_value(&root_val);
+                    log::info!("从 CDragon 成功提取到 {} 个 TFT 海克斯强化", aug_list.len());
+                    if !aug_list.is_empty() {
+                        let mut aug_cache = CACHED_AUGMENTS.write().await;
+                        *aug_cache = Some(aug_list.clone());
+                        tokio::spawn(async move {
+                            if let Some(aug_path) = get_tft_augments_cache_path() {
+                                if let Ok(json_str) = serde_json::to_string(&aug_list) {
+                                    let _ = std::fs::write(aug_path, json_str);
+                                }
+                            }
+                        });
+                    }
                     tokio::spawn(async move {
                         if let Some(cache_path) = get_tft_data_cache_path() {
                             if let Ok(json_str) = serde_json::to_string(&m_clone) {
@@ -715,6 +965,104 @@ async fn fetch_tft_data_mapping(lcu: &crate::LcuClient) -> TftDataMapping {
     }
 }
 
+async fn fetch_tft_augments_raw(lcu: Option<&crate::LcuClient>) -> Vec<TftAugmentInfo> {
+    log::info!("[TFT Augments Backend] 准备抓取海克斯强化");
+
+    // 1. 优先使用本地 LCU API
+    if let Some(lcu_client) = lcu {
+        let auth = build_auth_header(&lcu_client.token);
+        let lcu_url = format!(
+            "https://127.0.0.1:{}/lol-game-data/assets/v1/tft.json",
+            lcu_client.port
+        );
+
+        match lcu_client
+            .http_client
+            .get(&lcu_url)
+            .header("Authorization", &auth)
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                if !status.is_success() {
+                    let body = resp.text().await.unwrap_or_default();
+                    log::warn!("LCU tft.json HTTP {} (body: {})", status, body);
+                } else {
+                    match resp.json::<serde_json::Value>().await {
+                        Ok(root_val) => {
+                            let aug_list = extract_augments_from_value(&root_val);
+                            if !aug_list.is_empty() {
+                                log::info!("从 LCU 成功提取 {} 个海克斯强化", aug_list.len());
+                                return aug_list;
+                            }
+                            log::warn!("LCU tft.json 中未找到海克斯强化数据 (extract 返回空列表)");
+                        }
+                        Err(e) => log::warn!("LCU tft.json JSON 解析失败: {}", e),
+                    }
+                }
+            }
+            Err(e) => log::warn!("LCU tft.json 网络请求失败: {}", e),
+        }
+        log::info!("LCU 获取海克斯强化失败，降级至 CDragon");
+    }
+
+    // 2. LCU 不可用或失败时降级 CDragon 镜像
+    let cdn_urls = [
+        "https://raw.gitmirror.com/CommunityDragon/CDragonStatic/master/plugins/rcp-be-lol-game-data/global/zh_cn/v1/tft.json",
+        "https://cdn.jsdelivr.net/gh/CommunityDragon/CDragonStatic@latest/plugins/rcp-be-lol-game-data/global/zh_cn/v1/tft.json",
+        "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/zh_cn/v1/tft.json",
+        "https://raw.gitmirror.com/CommunityDragon/CDragonStatic/master/cdragon/tft/zh_cn.json",
+        "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json",
+    ];
+
+    let cdn_client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    for cdn_url in cdn_urls {
+        log::info!("[TFT CDN] 尝试: {}", cdn_url);
+
+        match cdn_client.get(cdn_url).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                log::info!("[TFT CDN] HTTP {}", status);
+
+                if status.is_success() {
+                    match resp.bytes().await {
+                        Ok(bytes) => {
+                            log::info!("[TFT CDN] 下载 {} bytes", bytes.len());
+                            match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                                Ok(root_val) => {
+                                    let aug_list = extract_augments_from_value(&root_val);
+                                    log::info!("[TFT CDN] 提取到 {} 个海克斯强化", aug_list.len());
+                                    if !aug_list.is_empty() {
+                                        return aug_list;
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!("[TFT CDN] JSON 解析失败: {:?}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("[TFT CDN] Body 读取失败: {:?}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("[TFT CDN] 请求失败: {:?}", e);
+            }
+        }
+    }
+
+    Vec::new()
+}
+
 // ─── Tauri 命令 ───
 
 /// 从 LCU 获取 TFT 数据资源
@@ -723,7 +1071,63 @@ pub async fn get_tft_data(app_state: State<'_, AppState>) -> Result<TftDataMappi
     let lock = app_state.lcu().await?;
     let lcu = lock.as_ref().unwrap();
 
-    Ok(fetch_tft_data_mapping(lcu).await)
+    Ok(fetch_tft_data_mapping(Some(lcu)).await)
+}
+
+/// 从已解析的 tft.json 缓存中提取所有海克斯强化信息
+#[tauri::command]
+pub async fn get_tft_augments(
+    app_state: State<'_, AppState>,
+) -> Result<Vec<TftAugmentInfo>, String> {
+    log::info!("[Tauri Cmd] >>> get_tft_augments 命令被触发！");
+
+    // 1. 尝试读取内存缓存
+    {
+        let cache = CACHED_AUGMENTS.read().await;
+        if let Some(ref list) = *cache {
+            if !list.is_empty() {
+                return Ok(list.clone());
+            }
+        }
+    }
+
+    // 2. 尝试读取本地磁盘缓存
+    if let Some(path) = get_tft_augments_cache_path() {
+        if path.exists() {
+            if let Ok(file_content) = std::fs::read_to_string(&path) {
+                if let Ok(list) = serde_json::from_str::<Vec<TftAugmentInfo>>(&file_content) {
+                    if !list.is_empty() {
+                        let mut cache = CACHED_AUGMENTS.write().await;
+                        *cache = Some(list.clone());
+                        return Ok(list);
+                    } else {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. LCU 在线获取
+    let lcu_guard = app_state.lcu().await.ok();
+    let lcu_ref = lcu_guard.as_ref().and_then(|g| g.as_ref());
+
+    let list = fetch_tft_augments_raw(lcu_ref).await;
+
+    if !list.is_empty() {
+        let mut cache = CACHED_AUGMENTS.write().await;
+        *cache = Some(list.clone());
+        let list_for_cache = list.clone();
+        tokio::spawn(async move {
+            if let Some(aug_path) = get_tft_augments_cache_path() {
+                if let Ok(json_str) = serde_json::to_string(&list_for_cache) {
+                    let _ = std::fs::write(aug_path, json_str);
+                }
+            }
+        });
+    }
+
+    Ok(list)
 }
 
 /// 获取当前召唤师的云顶之弈段位数据
@@ -843,7 +1247,7 @@ pub async fn get_tft_match_history(
     let lcu = lock.as_ref().unwrap();
 
     // 预先拉取/建立 TFT 资源与图标映射字典
-    let tft_data = fetch_tft_data_mapping(lcu).await;
+    let tft_data = fetch_tft_data_mapping(Some(lcu)).await;
 
     let auth = build_auth_header(&lcu.token);
 

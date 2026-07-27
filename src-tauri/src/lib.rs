@@ -297,6 +297,7 @@ pub fn run() {
             parsers::tft::get_tft_data,
             parsers::tft::get_tft_ranked_stats,
             parsers::tft::get_tft_match_history,
+            parsers::tft::get_tft_augments,
             tools::create_5v5_practice_lobby,
             tools::aram_reroll_and_swap_back,
             tools::apply_rune_page,

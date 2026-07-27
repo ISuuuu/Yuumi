@@ -149,3 +149,49 @@ export function useTftData() {
     refresh,
   };
 }
+
+export interface TftAugmentInfo {
+  apiName: string;
+  name: string;
+  desc: string;
+  iconPath: string;
+  tier: number; // 1-银，2-金，3-彩/棱彩
+}
+
+let cachedAugments: TftAugmentInfo[] | null = null;
+
+export function useTftAugments() {
+  const loading = ref(false);
+  const error = ref("");
+  const augments = ref<TftAugmentInfo[]>(cachedAugments || []);
+
+  async function loadAugments(forceRefresh = false) {
+    if (!forceRefresh && cachedAugments && cachedAugments.length > 0) {
+      augments.value = cachedAugments;
+      return;
+    }
+
+    loading.value = true;
+    error.value = "";
+
+    try {
+      console.log("[TftAugments] 开始发起 get_tft_augments 命令请求...");
+      const data = await invoke<TftAugmentInfo[]>("get_tft_augments");
+      console.log("[TftAugments] 成功获得海克斯数据数量:", data?.length);
+      cachedAugments = data || [];
+      augments.value = cachedAugments;
+    } catch (e: any) {
+      console.error("[TftAugments] 加载海克斯强化数据异常失败:", e);
+      error.value = e?.toString() || "加载海克斯强化数据失败";
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  return {
+    loading,
+    error,
+    augments,
+    loadAugments,
+  };
+}

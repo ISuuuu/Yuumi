@@ -78,19 +78,14 @@ onMounted(() => {
 
 <template>
   <div class="tft-view">
-    <!-- 离线提示 -->
-    <div v-if="!store.isConnected" class="tip-container">
-      <div class="offline-logo">🎮</div>
-      <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
-    </div>
-
-    <div v-else class="tft-content">
+    <div class="tft-content">
       <div class="header-title-bar">
         <div class="title-wrap">
           <h2>{{ t("tftPage.title") }}</h2>
           <span v-if="clientVersion" class="client-ver-badge">v{{ clientVersion }}</span>
         </div>
         <n-button
+          v-if="store.isConnected"
           size="small"
           quaternary
           :loading="loading"
@@ -100,14 +95,19 @@ onMounted(() => {
         </n-button>
       </div>
 
-      <!-- 顶部 TFT 段位与数据统计汇总 Header -->
-      <TftRankHeader :rankedStats="rankedStats" :summary="summary" />
+      <!-- 顶部 TFT 段位与数据统计汇总 Header（有连接时显示） -->
+      <TftRankHeader v-if="store.isConnected" :rankedStats="rankedStats" :summary="summary" />
 
       <!-- 主视图 Tabs -->
       <n-tabs v-model:value="activeTab" type="line" animated class="tft-tabs">
         <!-- Tab 1: 云顶战绩 -->
         <n-tab-pane name="career" :tab="t('tftPage.tabs.career')">
-          <div v-if="loading" class="loading-box">
+          <div v-if="!store.isConnected" class="tip-container">
+            <div class="offline-logo">🎮</div>
+            <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
+          </div>
+
+          <div v-else-if="loading" class="loading-box">
             <n-spin size="medium" />
           </div>
 
