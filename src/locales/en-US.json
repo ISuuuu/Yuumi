@@ -707,15 +707,12 @@
       "traits": "Traits: "
     },
     "recommendTitle": "Recommended Compositions",
-    "recommendDesc": "Top meta comps for current season",
+    "recommendDesc": "Top meta comps for current season (data from OP.GG)",
     "core": "Core",
     "detail": "Detailed Guide",
     "earlyGame": "Early Transitions",
-    "earlyGamePlaceholder": "(Champion recommendations pending)",
     "items": "Core Items",
-    "itemsPlaceholder": "(Item builds pending)",
     "position": "Board Setup",
-    "positionPlaceholder": "(Board placement recommendations pending)",
     "augments": "Recommended Augments",
     "augmentsDesc": "Top augments choices for the current game",
     "bag": "Component Grab Bag",
@@ -726,27 +723,17 @@
     "interestDesc": "Gain 1 extra gold interest per round",
     "gold": "Gold",
     "silver": "Silver",
-    "comps": {
-      "c1": "Level 9 Legendary",
-      "c2": "Vanguard Ahri",
-      "c3": "Duelist Masters",
-      "c4": "Keeper Keepers",
-      "c5": "Invoker Spellcasters"
-    },
-    "cores": {
-      "c1": "Sett + Ashe + Kayle",
-      "c2": "Ahri + Morgana + Lissandra",
-      "c3": "Yasuo + Fiora + Yone",
-      "c4": "Jax + Lee Sin + Sett",
-      "c5": "Syndra + Viktor + Neeko"
-    },
-    "traits": {
-      "c1": "8 Brawlers / 4 Rangers",
-      "c2": "4 Vanguards / 3 Mystics",
-      "c3": "6 Duelists / 2 Exiles",
-      "c4": "6 Keepers / 3 Ironclads",
-      "c5": "4 Invokers / 2 Mages"
-    }
+    "noMetaDecks": "No meta deck data available",
+    "winRate": "Win Rate",
+    "avgPlace": "Avg Place",
+    "pickRate": "Pick Rate",
+    "coreChampions": "Core Champions",
+    "playStyle": "Play Style",
+    "coreItems": "Core Items",
+    "costUnit": "cost",
+    "traits": "Traits",
+    "earlyLevel": "Level",
+    "midGame": "Mid Game"
   },
   "spells": {
     "1": "Cleanse",

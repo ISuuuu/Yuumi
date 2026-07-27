@@ -305,6 +305,7 @@ pub fn run() {
             tools::clear_game_cache,
             tools::open_log_folder,
             tools::fetch_opgg_data,
+            tools::fetch_tft_meta_decks,
             tools::get_champion_skins,
             tools::get_game_settings_readonly,
             tools::set_game_settings_readonly,

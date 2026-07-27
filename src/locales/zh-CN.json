@@ -708,15 +708,12 @@
       "traits": "激活羁绊: "
     },
     "recommendTitle": "上分阵容推荐",
-    "recommendDesc": "当前赛季强势热门阵容推荐",
+    "recommendDesc": "当前赛季强势热门阵容推荐（数据来自 OP.GG）",
     "core": "核心",
     "detail": "详细攻略",
     "earlyGame": "前期过渡",
-    "earlyGamePlaceholder": "（英雄推荐待接入）",
     "items": "核心装备",
-    "itemsPlaceholder": "（装备推荐待接入）",
     "position": "站位图",
-    "positionPlaceholder": "（站位推荐待接入）",
     "augments": "海克斯强化推荐",
     "augmentsDesc": "当前对局最佳海克斯选择",
     "bag": "组件百宝袋",
@@ -727,27 +724,17 @@
     "interestDesc": "每回合多获得 1 金币利息",
     "gold": "金",
     "silver": "银",
-    "comps": {
-      "c1": "九五至尊",
-      "c2": "重秘狐狸",
-      "c3": "决斗大师",
-      "c4": "神盾战士",
-      "c5": "魔导法师"
-    },
-    "cores": {
-      "c1": "瑟提 + 艾希 + 凯尔",
-      "c2": "阿狸 + 莫甘娜 + 丽桑卓",
-      "c3": "亚索 + 菲奥娜 + 永恩",
-      "c4": "贾克斯 + 盲僧 + 瑟提",
-      "c5": "辛德拉 + 维克托 + 妮蔻"
-    },
-    "traits": {
-      "c1": "8斗士 / 4射手",
-      "c2": "4重装 / 3秘术",
-      "c3": "6决斗 / 2浪人",
-      "c4": "6神盾 / 3铁甲",
-      "c5": "4魔导 / 2法师"
-    }
+    "noMetaDecks": "暂无热门阵容数据",
+    "winRate": "胜率",
+    "avgPlace": "平均排名",
+    "pickRate": "选取率",
+    "coreChampions": "核心棋子",
+    "playStyle": "运营思路",
+    "coreItems": "核心装备推荐",
+    "costUnit": "费",
+    "traits": "激活羁绊",
+    "earlyLevel": "等级",
+    "midGame": "中期过渡"
   },
   "spells": {
     "1": "净化",

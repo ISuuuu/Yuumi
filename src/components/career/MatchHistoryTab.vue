@@ -155,18 +155,17 @@ function getQueueName(m: MatchDisplay): string {
   return m.name;
 }
 
+const TFT_QUEUES = [1090, 1100, 1130, 1160];
+
 function getResultText(m: MatchDisplay): string {
-  if (m.placement) {
+  if (m.placement && TFT_QUEUES.includes(m.queueId)) {
     return `第 ${m.placement} 名`;
-  }
-  if ([2400, 1700, 1710].includes(m.queueId)) {
-    return m.win ? "第 1 名" : "8人对局";
   }
   return m.win ? t("career.victory") : t("career.defeat");
 }
 
 function getResultClass(m: MatchDisplay): string {
-  if (m.placement) {
+  if (m.placement && TFT_QUEUES.includes(m.queueId)) {
     if (m.placement === 1) return "win-text gold-text";
     if (m.placement <= 4) return "win-text";
     return "lose-text";

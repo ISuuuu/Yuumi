@@ -708,15 +708,12 @@
       "traits": "激活羈絆: "
     },
     "recommendTitle": "上分陣容推薦",
-    "recommendDesc": "當前賽季強勢熱門陣容推薦",
+    "recommendDesc": "當前賽季強勢熱門陣容推薦（數據來自 OP.GG）",
     "core": "核心",
     "detail": "詳細攻略",
     "earlyGame": "前期過渡",
-    "earlyGamePlaceholder": "（英雄推薦待接入）",
     "items": "核心裝備",
-    "itemsPlaceholder": "（裝備推薦待接入）",
     "position": "站位圖",
-    "positionPlaceholder": "（站位推薦待接入）",
     "augments": "海克斯強化推薦",
     "augmentsDesc": "當前對局最佳海克斯選擇",
     "bag": "組件百寶袋",
@@ -727,27 +724,17 @@
     "interestDesc": "每回合多獲得 1 金幣利息",
     "gold": "金",
     "silver": "銀",
-    "comps": {
-      "c1": "九五至尊",
-      "c2": "重秘狐狸",
-      "c3": "決鬥大師",
-      "c4": "神盾戰士",
-      "c5": "魔導法師"
-    },
-    "cores": {
-      "c1": "瑟提 + 艾希 + 凱爾",
-      "c2": "阿狸 + 莫甘娜 + 麗桑卓",
-      "c3": "亞索 + 菲奧娜 + 永恩",
-      "c4": "賈克斯 + 盲僧 + 瑟提",
-      "c5": "辛德拉 + 維克托 + 妮蔻"
-    },
-    "traits": {
-      "c1": "8鬥士 / 4射手",
-      "c2": "4重裝 / 3秘術",
-      "c3": "6決鬥 / 2浪人",
-      "c4": "6神盾 / 3鐵甲",
-      "c5": "4魔導 / 2法師"
-    }
+    "noMetaDecks": "暫無熱門陣容數據",
+    "winRate": "勝率",
+    "avgPlace": "平均排名",
+    "pickRate": "選取率",
+    "coreChampions": "核心棋子",
+    "playStyle": "運營思路",
+    "coreItems": "核心裝備推薦",
+    "costUnit": "費",
+    "traits": "激活羈絆",
+    "earlyLevel": "等級",
+    "midGame": "中期過渡"
   },
   "spells": {
     "1": "淨化",

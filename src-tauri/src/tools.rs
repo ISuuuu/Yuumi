@@ -666,6 +666,162 @@ pub async fn set_game_settings_readonly(
     }
 }
 
+// ─── OP.GG MCP API - 云顶之弈热门阵容 ───
+
+static OPGG_MCP_CACHE: OnceLock<Mutex<HashMap<String, OpggCacheEntry>>> = OnceLock::new();
+
+fn get_opgg_mcp_cache() -> &'static Mutex<HashMap<String, OpggCacheEntry>> {
+    OPGG_MCP_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 附加羁绊/英雄名称/图标映射到 MCP 阵容数据（每次都重新构建，避免缓存里残留错误 URL）
+async fn attach_tft_meta_maps(app_state: &State<'_, AppState>, parsed: &mut serde_json::Value) {
+    let lcu_guard = app_state.lcu_client.read().await;
+    let lcu = lcu_guard.as_ref();
+    let meta_maps = crate::parsers::tft::fetch_tft_meta_maps(lcu).await;
+    drop(lcu_guard);
+    if let Some(obj) = parsed.as_object_mut() {
+        if let Some(trait_map) = meta_maps.get("trait_name_map") {
+            obj.insert("trait_name_map".to_string(), trait_map.clone());
+        }
+        if let Some(champ_icon_map) = meta_maps.get("champion_icon_map") {
+            obj.insert("champion_icon_map".to_string(), champ_icon_map.clone());
+        }
+        if let Some(champ_name_map) = meta_maps.get("champion_name_map") {
+            obj.insert("champion_name_map".to_string(), champ_name_map.clone());
+        }
+        if let Some(item_name_map) = meta_maps.get("item_name_map") {
+            obj.insert("item_name_map".to_string(), item_name_map.clone());
+        }
+        if let Some(item_icon_map) = meta_maps.get("item_icon_map") {
+            obj.insert("item_icon_map".to_string(), item_icon_map.clone());
+        }
+    }
+}
+
+/// 从 OP.GG MCP API 获取云顶之弈当前版本热门强势阵容
+#[tauri::command]
+pub async fn fetch_tft_meta_decks(
+    app_state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let cache_key = "tft_meta_decks".to_string();
+
+    // 尝试内存缓存（阵容本体可复用，但图标映射每次重新附加）
+    let cached_decks = {
+        if let Ok(cache) = get_opgg_mcp_cache().lock() {
+            if let Some(entry) = cache.get(&cache_key) {
+                if entry.inserted_at.elapsed() < OPGG_CACHE_TTL {
+                    log::info!("OP.GG MCP 缓存命中: tft_meta_decks");
+                    Some(entry.data.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    if let Some(mut parsed) = cached_decks {
+        attach_tft_meta_maps(&app_state, &mut parsed).await;
+        return Ok(parsed);
+    }
+
+    let (enable_proxy, proxy_addr) = {
+        let cfg = app_state.config.read().await;
+        (
+            cfg.general.enable_opgg_proxy,
+            cfg.general.opgg_proxy_addr.clone(),
+        )
+    };
+
+    let client = build_opgg_client(enable_proxy, &proxy_addr);
+
+    let request_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "tft_list_meta_decks",
+            "arguments": {
+                "desired_output_fields": [
+                    "id",
+                    "name",
+                    "cost",
+                    "teamCode",
+                    "badge",
+                    "stat",
+                    "traits",
+                    "units",
+                    "early",
+                    "middle"
+                ]
+            }
+        }
+    });
+
+    let resp = client
+        .post("https://mcp-api.op.gg/mcp")
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("OP.GG MCP 请求失败: {}", e))?;
+
+    let raw: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析 OP.GG MCP 响应失败: {}", e))?;
+
+    // MCP 错误检查
+    if let Some(err) = raw.get("error") {
+        let msg = err["message"].as_str().unwrap_or("未知 MCP 错误");
+        return Err(format!("OP.GG MCP 返回错误: {}", msg));
+    }
+
+    // 提取 content[].text 中的 JSON 字符串
+    let content_text = raw["result"]["content"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|first| first["text"].as_str())
+        .ok_or_else(|| "OP.GG MCP 响应格式异常: 缺少 result.content[].text".to_string())?;
+
+    log::debug!(
+        "OP.GG MCP TFT 原始响应: {}",
+        &content_text[..content_text.len().min(500)]
+    );
+
+    let mut parsed: serde_json::Value = serde_json::from_str(content_text)
+        .map_err(|e| format!("解析 OP.GG MCP 数据失败: {}", e))?;
+
+    // 附加 TFT 羁绊中文名称映射 + 英雄图标映射 + 英雄中文名称映射（LCU 优先，CDragon 兜底）
+    attach_tft_meta_maps(&app_state, &mut parsed).await;
+
+    // 写入内存缓存（缓存的是含映射的完整 payload；命中时仍会再刷新一次映射）
+    if let Ok(mut cache) = get_opgg_mcp_cache().lock() {
+        if cache.len() >= OPGG_CACHE_MAX_ENTRIES {
+            if let Some(oldest_key) = cache
+                .iter()
+                .min_by_key(|(_, e)| e.inserted_at)
+                .map(|(k, _)| k.clone())
+            {
+                cache.remove(&oldest_key);
+            }
+        }
+        log::info!("OP.GG MCP 缓存写入: tft_meta_decks");
+        cache.insert(
+            cache_key,
+            OpggCacheEntry {
+                data: parsed.clone(),
+                inserted_at: std::time::Instant::now(),
+            },
+        );
+    }
+
+    Ok(parsed)
+}
+
 // ─── CMD 方式观战（绕开 Already in gameflow）───
 
 /// 腾讯大区白名单（SGP 仅在这些大区可用）

@@ -46,7 +46,7 @@ const fullTraitsTooltip = computed(() => {
         <div class="placement-badge">
           <span class="placement-num">#{{ match.placement }}</span>
           <span class="placement-text">
-            {{ isFirst ? t("tftPage.match.firstPlace") : isTop4 ? t("tftPage.match.top4") : t("tftPage.match.rank", { n: match.placement }) }}
+            {{ `第 ${match.placement} 名` }}
           </span>
         </div>
         <span class="duration-badge">{{ match.durationStr }}</span>

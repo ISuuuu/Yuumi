@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { NTabs, NTabPane, NSpin, NEmpty, NButton } from "naive-ui";
 import { useLcuStore } from "../store/lcuStore";
 import { useTftData, type TftMatchDisplay } from "../composables/useTftData";
+
+import { lcuRequest } from "../api/lcu";
 
 import TftRankHeader from "../components/tft/TftRankHeader.vue";
 import TftMatchCard from "../components/tft/TftMatchCard.vue";
@@ -15,6 +17,7 @@ const store = useLcuStore();
 const { t } = useI18n();
 
 const activeTab = ref("career");
+const clientVersion = ref("");
 
 const selectedMatch = ref<TftMatchDisplay | null>(null);
 const showDetailModal = ref(false);
@@ -34,9 +37,41 @@ const {
   refresh,
 } = useTftData();
 
+async function fetchClientVersion() {
+  try {
+    let res = await lcuRequest<string>("GET", "/lol-patch/v1/game-version");
+    if (!res.success || !res.data) {
+      res = await lcuRequest<string>("GET", "/lol-game-data/assets/v1/game-version.json");
+    }
+    if (res.success && res.data) {
+      const raw = typeof res.data === "string" ? res.data : String(res.data);
+      const parts = raw.replace(/^v/i, "").split(".");
+      if (parts.length >= 2) {
+        clientVersion.value = `${parts[0]}.${parts[1]}`;
+      } else {
+        clientVersion.value = raw;
+      }
+    }
+  } catch (e) {
+    console.warn("读取客户端版本失败:", e);
+  }
+}
+
+watch(
+  () => store.isConnected,
+  (connected) => {
+    if (connected) {
+      loadTftData();
+      fetchClientVersion();
+    }
+  },
+  { immediate: true }
+);
+
 onMounted(() => {
   if (store.isConnected) {
     loadTftData();
+    fetchClientVersion();
   }
 });
 </script>
@@ -51,7 +86,10 @@ onMounted(() => {
 
     <div v-else class="tft-content">
       <div class="header-title-bar">
-        <h2>{{ t("tftPage.title") }}</h2>
+        <div class="title-wrap">
+          <h2>{{ t("tftPage.title") }}</h2>
+          <span v-if="clientVersion" class="client-ver-badge">v{{ clientVersion }}</span>
+        </div>
         <n-button
           size="small"
           quaternary
@@ -135,6 +173,22 @@ onMounted(() => {
   font-size: 1.3rem;
   font-weight: 800;
   color: var(--text-color);
+}
+
+.title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.client-ver-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  background: var(--primary-color-alpha-15);
+  border: 1px solid var(--primary-color-alpha-20);
+  padding: 2px 8px;
+  border-radius: 12px;
 }
 
 .tip-container {
