@@ -28,8 +28,8 @@ serde_json = "1"
 # 异步运行时
 tokio = { version = "1", features = ["full"] }
 
-# HTTP 客户端（忽略 SSL）
-reqwest = { version = "0.12", features = ["json"] }
+# HTTP 客户端（忽略 SSL，支持 Gzip 压缩传输）
+reqwest = { version = "0.12", features = ["json", "gzip"] }
 http = "1"
 
 # WebSocket

@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
 use tauri::State;
 use tokio::sync::RwLock;
 
@@ -127,60 +126,16 @@ pub struct TftMatchSummary {
     pub matches: Vec<TftMatchDisplay>,
 }
 
-// ─── LCU 原始 JSON 结构 ───
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct TftJsonRoot {
-    #[serde(rename = "setData")]
-    set_data: Option<Vec<TftSet>>,
-    sets: Option<HashMap<String, TftSet>>,
-    items: Option<Vec<TftGenericItem>>,
-    augments: Option<Vec<TftGenericItem>>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct TftSet {
-    champions: Option<Vec<TftChampion>>,
-    traits: Option<Vec<TftTrait>>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct TftChampion {
-    #[serde(rename = "apiName")]
-    api_name: Option<String>,
-    name: Option<String>,
-    #[serde(rename = "squareIcon")]
-    square_icon: Option<String>,
-    icon: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct TftTrait {
-    #[serde(rename = "apiName")]
-    api_name: Option<String>,
-    name: Option<String>,
-    icon: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct TftGenericItem {
-    #[serde(rename = "apiName")]
-    api_name: Option<String>,
-    name: Option<String>,
-    icon: Option<String>,
-    desc: Option<String>,
-    description: Option<String>,
-}
 
 // ─── 辅助函数 ───
 
 /// 参照 Seraphine 的 LCU 路径转换：把 .tex 换成 .png，低写处理并拼接 /lol-game-data/assets/
 fn convert_seraphine_lcu_icon_path(raw_icon: &str) -> String {
     if raw_icon.is_empty() {
-        return "".to_string();
+        return String::new();
     }
-    let mut path = raw_icon.replace(".tex", ".png").replace(".TEX", ".png");
-    path = path.to_lowercase();
+    let mut path = raw_icon.to_lowercase().replace(".tex", ".png");
 
     if path.starts_with("/lol-game-data/") {
         // 已经包含 /lol-game-data/ 前缀
@@ -601,21 +556,6 @@ fn parse_tft_data_from_value(root: &serde_json::Value) -> TftDataMapping {
     mapping
 }
 
-fn parse_tft_data(content: &TftJsonRoot) -> TftDataMapping {
-    if let Ok(val) = serde_json::to_value(content) {
-        parse_tft_data_from_value(&val)
-    } else {
-        TftDataMapping {
-            champions: HashMap::new(),
-            traits: HashMap::new(),
-            champion_icons: HashMap::new(),
-            trait_icons: HashMap::new(),
-            item_icons: HashMap::new(),
-            item_names: HashMap::new(),
-        }
-    }
-}
-
 fn get_tft_data_cache_path() -> Option<std::path::PathBuf> {
     let dir = dirs::config_dir()?.join("Yuumi").join("cache");
     std::fs::create_dir_all(&dir).ok()?;
@@ -632,16 +572,9 @@ fn clean_tft_desc(desc_raw: &str) -> String {
     if desc_raw.is_empty() {
         return String::new();
     }
-    let text = desc_raw
-        .replace("<br>", "\n")
-        .replace("<br/>", "\n")
-        .replace("<br />", "\n")
-        .replace("</p>", "\n")
-        .replace("</div>", "\n");
-
-    let mut result = String::with_capacity(text.len());
+    let mut result = String::with_capacity(desc_raw.len());
     let mut in_tag = false;
-    for ch in text.chars() {
+    for ch in desc_raw.chars() {
         if ch == '<' {
             in_tag = true;
         } else if ch == '>' {
@@ -650,7 +583,14 @@ fn clean_tft_desc(desc_raw: &str) -> String {
             result.push(ch);
         }
     }
-    result.trim().to_string()
+    result
+        .replace("<br>", "\n")
+        .replace("<br/>", "\n")
+        .replace("<br />", "\n")
+        .replace("</p>", "\n")
+        .replace("</div>", "\n")
+        .trim()
+        .to_string()
 }
 
 fn extract_augment_tier(api_name: &str, icon: &str, name: &str) -> i32 {
@@ -839,7 +779,7 @@ fn extract_augments_from_value(root: &serde_json::Value) -> Vec<TftAugmentInfo> 
 
 /// 抓取 TFT 基础数据字典（优先 LCU，备用 CDragon，带内存与磁盘缓存）
 /// 参照 Seraphine：LCU → CDragon（一次，无重试，无代理）
-async fn fetch_tft_data_mapping(lcu: Option<&crate::LcuClient>) -> TftDataMapping {
+async fn fetch_tft_data_mapping(_lcu: Option<&crate::LcuClient>) -> TftDataMapping {
     let mut cache = CACHED_TFT_DATA.write().await;
     if let Some(ref mapping) = *cache {
         if !mapping.champions.is_empty() {
@@ -861,61 +801,7 @@ async fn fetch_tft_data_mapping(lcu: Option<&crate::LcuClient>) -> TftDataMappin
         }
     }
 
-    // 2. 仅当 LCU 已开启且连接时，优先向本地 LCU 请求
-    if let Some(lcu_client_ref) = lcu {
-        let auth = build_auth_header(&lcu_client_ref.token);
-        let lcu_url = format!(
-            "https://127.0.0.1:{}/lol-game-data/assets/v1/tft.json",
-            lcu_client_ref.port
-        );
-
-        let lcu_client = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            .no_proxy()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-
-        if let Ok(resp) = lcu_client
-            .get(&lcu_url)
-            .header("Authorization", &auth)
-            .send()
-            .await
-        {
-            if resp.status().is_success() {
-                if let Ok(root_val) = resp.json::<serde_json::Value>().await {
-                    let m = parse_tft_data_from_value(&root_val);
-                    if !m.champions.is_empty() {
-                        *cache = Some(m.clone());
-                        let m_clone = m.clone();
-                        let aug_list = extract_augments_from_value(&root_val);
-                        log::info!("从 LCU 成功提取到 {} 个 TFT 海克斯强化", aug_list.len());
-                        if !aug_list.is_empty() {
-                            let mut aug_cache = CACHED_AUGMENTS.write().await;
-                            *aug_cache = Some(aug_list.clone());
-                            tokio::spawn(async move {
-                                if let Some(aug_path) = get_tft_augments_cache_path() {
-                                    if let Ok(json_str) = serde_json::to_string(&aug_list) {
-                                        let _ = std::fs::write(aug_path, json_str);
-                                    }
-                                }
-                            });
-                        }
-                        tokio::spawn(async move {
-                            if let Some(cache_path) = get_tft_data_cache_path() {
-                                if let Ok(json_str) = serde_json::to_string(&m_clone) {
-                                    let _ = std::fs::write(cache_path, json_str);
-                                }
-                            }
-                        });
-                        return m;
-                    }
-                }
-            }
-        }
-    }
-
-    // 3. 参照 Seraphine update 方法：LCU 失败或未开时降级 CDragon，一次请求不重试
+    // 2. 参照 Seraphine update 方法：CDragon CDN 一次请求不重试
     let cdn_url = "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json";
     let cdn_client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -965,63 +851,46 @@ async fn fetch_tft_data_mapping(lcu: Option<&crate::LcuClient>) -> TftDataMappin
     }
 }
 
-async fn fetch_tft_augments_raw(lcu: Option<&crate::LcuClient>) -> Vec<TftAugmentInfo> {
-    log::info!("[TFT Augments Backend] 准备抓取海克斯强化");
+async fn fetch_tft_augments_raw(app_state: &AppState) -> Vec<TftAugmentInfo> {
+    log::info!("[TFT Augments Backend] 准备抓取海克斯强化 (CDragon CDN)");
 
-    // 1. 优先使用本地 LCU API
-    if let Some(lcu_client) = lcu {
-        let auth = build_auth_header(&lcu_client.token);
-        let lcu_url = format!(
-            "https://127.0.0.1:{}/lol-game-data/assets/v1/tft.json",
-            lcu_client.port
-        );
-
-        match lcu_client
-            .http_client
-            .get(&lcu_url)
-            .header("Authorization", &auth)
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                let status = resp.status();
-                if !status.is_success() {
-                    let body = resp.text().await.unwrap_or_default();
-                    log::warn!("LCU tft.json HTTP {} (body: {})", status, body);
-                } else {
-                    match resp.json::<serde_json::Value>().await {
-                        Ok(root_val) => {
-                            let aug_list = extract_augments_from_value(&root_val);
-                            if !aug_list.is_empty() {
-                                log::info!("从 LCU 成功提取 {} 个海克斯强化", aug_list.len());
-                                return aug_list;
-                            }
-                            log::warn!("LCU tft.json 中未找到海克斯强化数据 (extract 返回空列表)");
-                        }
-                        Err(e) => log::warn!("LCU tft.json JSON 解析失败: {}", e),
-                    }
-                }
-            }
-            Err(e) => log::warn!("LCU tft.json 网络请求失败: {}", e),
-        }
-        log::info!("LCU 获取海克斯强化失败，降级至 CDragon");
-    }
-
-    // 2. LCU 不可用或失败时降级 CDragon 镜像
+    // 确切有效的 CDN 路径
     let cdn_urls = [
-        "https://raw.gitmirror.com/CommunityDragon/CDragonStatic/master/plugins/rcp-be-lol-game-data/global/zh_cn/v1/tft.json",
-        "https://cdn.jsdelivr.net/gh/CommunityDragon/CDragonStatic@latest/plugins/rcp-be-lol-game-data/global/zh_cn/v1/tft.json",
-        "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/zh_cn/v1/tft.json",
-        "https://raw.gitmirror.com/CommunityDragon/CDragonStatic/master/cdragon/tft/zh_cn.json",
         "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json",
     ];
 
-    let cdn_client = reqwest::Client::builder()
+    let (enable_proxy, proxy_addr) = {
+        let cfg = app_state.config.read().await;
+        (
+            cfg.general.enable_opgg_proxy,
+            cfg.general.opgg_proxy_addr.trim().to_string(),
+        )
+    };
+
+    let mut builder = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+        .timeout(std::time::Duration::from_secs(60));
+
+    if enable_proxy && !proxy_addr.is_empty() {
+        let formatted_proxy = if !proxy_addr.starts_with("http://")
+            && !proxy_addr.starts_with("https://")
+            && !proxy_addr.starts_with("socks5://")
+        {
+            format!("http://{}", proxy_addr)
+        } else {
+            proxy_addr.clone()
+        };
+
+        if let Ok(p) = reqwest::Proxy::all(&formatted_proxy) {
+            log::info!("[TFT CDN] CDragon 请求已成功配置代理: {}", formatted_proxy);
+            builder = builder.proxy(p);
+        } else {
+            log::warn!("[TFT CDN] 代理地址解析失败: {}", formatted_proxy);
+        }
+    }
+
+    let cdn_client = builder.build().unwrap_or_else(|_| reqwest::Client::new());
 
     for cdn_url in cdn_urls {
         log::info!("[TFT CDN] 尝试: {}", cdn_url);
@@ -1074,45 +943,49 @@ pub async fn get_tft_data(app_state: State<'_, AppState>) -> Result<TftDataMappi
     Ok(fetch_tft_data_mapping(Some(lcu)).await)
 }
 
-/// 从已解析的 tft.json 缓存中提取所有海克斯强化信息
+/// 从已解析的 tft.json 缓存中提取所有海克斯强化信息（支持强制跳过缓存刷新）
 #[tauri::command]
 pub async fn get_tft_augments(
+    force_refresh: Option<bool>,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<TftAugmentInfo>, String> {
-    log::info!("[Tauri Cmd] >>> get_tft_augments 命令被触发！");
+    let force = force_refresh.unwrap_or(false);
+    log::info!(
+        "[Tauri Cmd] >>> get_tft_augments 命令被触发！(force_refresh={})",
+        force
+    );
 
-    // 1. 尝试读取内存缓存
-    {
-        let cache = CACHED_AUGMENTS.read().await;
-        if let Some(ref list) = *cache {
-            if !list.is_empty() {
-                return Ok(list.clone());
+    if !force {
+        // 1. 尝试读取内存缓存
+        {
+            let cache = CACHED_AUGMENTS.read().await;
+            if let Some(ref list) = *cache {
+                if !list.is_empty() {
+                    return Ok(list.clone());
+                }
             }
         }
-    }
 
-    // 2. 尝试读取本地磁盘缓存
-    if let Some(path) = get_tft_augments_cache_path() {
-        if path.exists() {
-            if let Ok(file_content) = std::fs::read_to_string(&path) {
-                if let Ok(list) = serde_json::from_str::<Vec<TftAugmentInfo>>(&file_content) {
-                    if !list.is_empty() {
-                        let mut cache = CACHED_AUGMENTS.write().await;
-                        *cache = Some(list.clone());
-                        return Ok(list);
-                    } else {
-                        let _ = std::fs::remove_file(&path);
+        // 2. 尝试读取本地磁盘缓存
+        if let Some(path) = get_tft_augments_cache_path() {
+            if path.exists() {
+                if let Ok(file_content) = std::fs::read_to_string(&path) {
+                    if let Ok(list) = serde_json::from_str::<Vec<TftAugmentInfo>>(&file_content) {
+                        if !list.is_empty() {
+                            let mut cache = CACHED_AUGMENTS.write().await;
+                            *cache = Some(list.clone());
+                            return Ok(list);
+                        } else {
+                            let _ = std::fs::remove_file(&path);
+                        }
                     }
                 }
             }
         }
     }
 
-    // 3. LCU 在线获取
-    let lcu_guard = app_state.lcu().await.ok();
-    let lcu_ref = lcu_guard.as_ref().and_then(|g| g.as_ref());
-
-    let list = fetch_tft_augments_raw(lcu_ref).await;
+    // 3. CDragon CDN 抓取（支持系统/用户代理）
+    let list = fetch_tft_augments_raw(&app_state).await;
 
     if !list.is_empty() {
         let mut cache = CACHED_AUGMENTS.write().await;
@@ -1125,9 +998,32 @@ pub async fn get_tft_augments(
                 }
             }
         });
+        return Ok(list);
     }
 
-    Ok(list)
+    // 4. 若网络重新抓取失败或超时，安全回滚：优先使用现有的本地磁盘或内存缓存，避免清空界面数据
+    log::warn!("TFT 海克斯网络抓取失败或超时，尝试安全回滚使用本地缓存");
+    {
+        let cache = CACHED_AUGMENTS.read().await;
+        if let Some(ref old_list) = *cache {
+            if !old_list.is_empty() {
+                return Ok(old_list.clone());
+            }
+        }
+    }
+    if let Some(path) = get_tft_augments_cache_path() {
+        if path.exists() {
+            if let Ok(file_content) = std::fs::read_to_string(&path) {
+                if let Ok(old_list) = serde_json::from_str::<Vec<TftAugmentInfo>>(&file_content) {
+                    if !old_list.is_empty() {
+                        return Ok(old_list);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Vec::new())
 }
 
 /// 获取当前召唤师的云顶之弈段位数据
@@ -1627,101 +1523,7 @@ fn build_trait_name_map_from_mapping(mapping: &TftDataMapping) -> HashMap<String
 
 /// 尝试获取 TFT 数据映射填充缓存（LCU 优先，CDragon 兜底）
 async fn ensure_tft_data_mapping(lcu: Option<&crate::LcuClient>) {
-    // 缓存已有效则跳过
-    {
-        let cached = CACHED_TFT_DATA.read().await;
-        if let Some(ref mapping) = *cached {
-            if !mapping.traits.is_empty() {
-                return;
-            }
-        }
-    }
-
-    // 磁盘缓存
-    if let Some(cache_path) = get_tft_data_cache_path() {
-        if cache_path.exists() {
-            if let Ok(file_content) = std::fs::read_to_string(&cache_path) {
-                if let Ok(m) = serde_json::from_str::<TftDataMapping>(&file_content) {
-                    if !m.traits.is_empty() {
-                        log::info!(
-                            "TFT 磁盘缓存加载: {} champions, {} traits",
-                            m.champions.len(),
-                            m.traits.len()
-                        );
-                        let mut cache = CACHED_TFT_DATA.write().await;
-                        *cache = Some(m);
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    // 尝试 LCU（失败时自然降级到 CDragon，不提前 return）
-    if let Some(lcu_client) = lcu {
-        let lcu_url = format!(
-            "https://127.0.0.1:{}/lol-game-data/assets/v1/tft.json",
-            lcu_client.port
-        );
-        let auth = build_auth_header(&lcu_client.token);
-        if let Ok(resp) = lcu_client
-            .http_client
-            .get(&lcu_url)
-            .header("Authorization", &auth)
-            .send()
-            .await
-        {
-            if resp.status().is_success() {
-                match resp.json::<TftJsonRoot>().await {
-                    Ok(content) => {
-                        let mapping = parse_tft_data(&content);
-                        if !mapping.traits.is_empty() {
-                            log::info!(
-                                "LCU TFT 数据映射: {} champions, {} traits",
-                                mapping.champions.len(),
-                                mapping.traits.len()
-                            );
-                            let mut cache = CACHED_TFT_DATA.write().await;
-                            *cache = Some(mapping);
-                            return;
-                        }
-                    }
-                    Err(e) => log::warn!("LCU TFT JSON 解析失败: {}", e),
-                }
-            }
-        } else {
-            log::warn!("LCU TFT 数据获取失败");
-        }
-    }
-
-    // CDragon 兜底
-    let cdn_url = "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json";
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .timeout(Duration::from_secs(10))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-    if let Ok(resp) = client.get(cdn_url).send().await {
-        if resp.status().is_success() {
-            match resp.json::<TftJsonRoot>().await {
-                Ok(content) => {
-                    let mapping = parse_tft_data(&content);
-                    if !mapping.traits.is_empty() {
-                        log::info!(
-                            "CDragon TFT 数据映射: {} champions, {} traits",
-                            mapping.champions.len(),
-                            mapping.traits.len()
-                        );
-                        let mut cache = CACHED_TFT_DATA.write().await;
-                        *cache = Some(mapping);
-                    }
-                }
-                Err(e) => log::warn!("CDragon TFT JSON 解析失败: {}", e),
-            }
-        }
-    } else {
-        log::warn!("CDragon TFT 数据获取失败");
-    }
+    fetch_tft_data_mapping(lcu).await;
 }
 
 /// 从内存缓存或 LCU/CDragon 获取 TFT 羁绊中文名称映射

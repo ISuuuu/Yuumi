@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from "vue";
+import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { NTabs, NTabPane, NSpin, NEmpty, NButton } from "naive-ui";
 import { useLcuStore } from "../store/lcuStore";
@@ -67,13 +67,6 @@ watch(
   },
   { immediate: true }
 );
-
-onMounted(() => {
-  if (store.isConnected) {
-    loadTftData();
-    fetchClientVersion();
-  }
-});
 </script>
 
 <template>
@@ -99,7 +92,7 @@ onMounted(() => {
       <TftRankHeader v-if="store.isConnected" :rankedStats="rankedStats" :summary="summary" />
 
       <!-- 主视图 Tabs -->
-      <n-tabs v-model:value="activeTab" type="line" animated class="tft-tabs">
+      <n-tabs v-model:value="activeTab" type="line" class="tft-tabs">
         <!-- Tab 1: 云顶战绩 -->
         <n-tab-pane name="career" :tab="t('tftPage.tabs.career')">
           <div v-if="!store.isConnected" class="tip-container">
@@ -223,6 +216,11 @@ onMounted(() => {
 
 .tft-tabs {
   margin-top: 4px;
+}
+
+.tft-tabs :deep(.n-tabs-pane-wrapper),
+.tft-tabs :deep(.n-tab-pane) {
+  overflow: visible !important;
 }
 
 .loading-box,

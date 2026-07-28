@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { NInput, NRadioGroup, NRadioButton, NSpin, NEmpty, NButton } from "naive-ui";
 import { useTftAugments } from "../../composables/useTftData";
 import LcuImage from "../LcuImage.vue";
@@ -8,12 +8,36 @@ const { loading, error, augments, loadAugments } = useTftAugments();
 
 const searchQuery = ref("");
 const selectedTier = ref<number | "all">("all");
+const displayLimit = ref(40);
 
 onMounted(() => {
-  console.log("[TftAugmentsTab] 组件挂载，准备加载海克斯强化数据...", augments.value.length);
   if (augments.value.length === 0) {
     loadAugments();
   }
+  const viewEl = document.querySelector(".tft-view");
+  if (viewEl) {
+    viewEl.addEventListener("scroll", handleScroll);
+  }
+});
+
+onUnmounted(() => {
+  const viewEl = document.querySelector(".tft-view");
+  if (viewEl) {
+    viewEl.removeEventListener("scroll", handleScroll);
+  }
+});
+
+function handleScroll(e: Event) {
+  const target = e.target as HTMLElement;
+  if (target && hasMore.value) {
+    if (target.scrollTop + target.clientHeight >= target.scrollHeight - 300) {
+      displayLimit.value += 40;
+    }
+  }
+}
+
+watch([searchQuery, selectedTier], () => {
+  displayLimit.value = 40;
 });
 
 const tierCounts = computed(() => {
@@ -42,6 +66,18 @@ const filteredAugments = computed(() => {
   });
 });
 
+const displayedAugments = computed(() => {
+  return filteredAugments.value.slice(0, displayLimit.value);
+});
+
+const hasMore = computed(() => {
+  return displayLimit.value < filteredAugments.value.length;
+});
+
+function loadMore() {
+  displayLimit.value += 40;
+}
+
 function getTierLabel(tier: number) {
   if (tier === 1) return "银色";
   if (tier === 2) return "金色";
@@ -59,7 +95,7 @@ function getTierClass(tier: number) {
 
 <template>
   <div class="augments-tab">
-    <!-- 顶部过滤与搜索栏 -->
+    <!-- 顶部过滤与搜索栏 (Sticky 吸顶) -->
     <div class="filter-header">
       <div class="search-box">
         <n-input
@@ -130,38 +166,47 @@ function getTierClass(tier: number) {
       <n-empty description="没有找到匹配的海克斯强化" />
     </div>
 
-    <!-- 海克斯强化网格/列表 -->
-    <div v-else class="augment-grid">
-      <div
-        v-for="a in filteredAugments"
-        :key="a.apiName"
-        :class="['augment-card', getTierClass(a.tier)]"
-      >
-        <div class="card-left">
-          <div class="icon-wrapper">
-            <LcuImage
-              v-if="a.iconPath"
-              :src="a.iconPath"
-              class="augment-icon"
-              alt="augment"
-            />
-            <div v-else class="fallback-icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                <path d="M7 2v11h3v9l7-12h-4l4-8z" />
-              </svg>
+    <!-- 海克斯强化网格/列表 (按需增量加载) -->
+    <div v-else class="augment-container">
+      <div class="augment-grid">
+        <div
+          v-for="a in displayedAugments"
+          :key="a.apiName"
+          :class="['augment-card', getTierClass(a.tier)]"
+        >
+          <div class="card-left">
+            <div class="icon-wrapper">
+              <LcuImage
+                v-if="a.iconPath"
+                :src="a.iconPath"
+                class="augment-icon"
+                alt="augment"
+              />
+              <div v-else class="fallback-icon">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                  <path d="M7 2v11h3v9l7-12h-4l4-8z" />
+                </svg>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="card-body">
-          <div class="title-row">
-            <span class="augment-name">{{ a.name }}</span>
-            <span :class="['tier-badge', getTierClass(a.tier)]">
-              {{ getTierLabel(a.tier) }}
-            </span>
+          <div class="card-body">
+            <div class="title-row">
+              <span class="augment-name">{{ a.name }}</span>
+              <span :class="['tier-badge', getTierClass(a.tier)]">
+                {{ getTierLabel(a.tier) }}
+              </span>
+            </div>
+            <p class="augment-desc">{{ a.desc || "暂无效果描述" }}</p>
           </div>
-          <p class="augment-desc">{{ a.desc || "暂无效果描述" }}</p>
         </div>
+      </div>
+
+      <!-- 加载更多提示 -->
+      <div v-if="hasMore" class="load-more-box">
+        <n-button size="small" secondary @click="loadMore">
+          已展示 {{ displayedAugments.length }} / {{ filteredAugments.length }} 项 (向下滚动自动加载更多)
+        </n-button>
       </div>
     </div>
   </div>
@@ -176,17 +221,24 @@ function getTierClass(tier: number) {
 }
 
 .filter-header {
+  position: sticky;
+  top: -1rem;
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 12px 16px;
+  padding: 10px 14px;
+  margin-top: -6px;
   background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
+  border: none;
+  border-bottom: 1px solid var(--primary-color-alpha-15);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  backdrop-filter: var(--glass-filter, blur(20px));
+  -webkit-backdrop-filter: var(--glass-filter, blur(20px));
+  box-shadow: 0 6px 16px -4px var(--primary-color-alpha-15);
+  transition: all 0.2s ease;
 }
 
 .search-box {
@@ -366,5 +418,12 @@ function getTierClass(tier: number) {
   white-space: pre-line;
   word-break: break-word;
   margin: 0;
+}
+
+.load-more-box {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+  padding: 8px 0;
 }
 </style>

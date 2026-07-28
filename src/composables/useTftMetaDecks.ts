@@ -98,12 +98,6 @@ export function getChampionIconUrl(
     if (found) return found[1];
   }
 
-  console.log(
-    "[TFT Meta] 未找到图标:",
-    characterId,
-    "映射键样例:",
-    Object.keys(championIconMap).slice(0, 5),
-  );
   return undefined;
 }
 
@@ -162,14 +156,6 @@ export function getTraitDisplayName(key: string): string {
   const result =
     traitNameMap[normalized] ?? traitNameMap[key.toLowerCase()] ?? null;
   if (result) return result;
-  console.log(
-    "[TFT Traits] 未命中映射 → key:",
-    key,
-    "| normalized:",
-    normalized,
-    "| 映射键样例:",
-    Object.keys(traitNameMap).slice(0, 15),
-  );
   return formatTraitName(key);
 }
 
@@ -224,63 +210,24 @@ export function useTftMetaDecks() {
         raw?.data ?? raw?.decks ?? (Array.isArray(raw) ? raw : []);
       if (raw?.trait_name_map && Object.keys(raw.trait_name_map).length > 0) {
         traitNameMap = raw.trait_name_map;
-        console.log(
-          "[TFT Meta] 羁绊名称映射:",
-          Object.keys(traitNameMap).length,
-          "条",
-        );
-      } else {
-        console.warn("[TFT Meta] trait_name_map 为空");
       }
       if (
         raw?.champion_icon_map &&
         Object.keys(raw.champion_icon_map).length > 0
       ) {
         championIconMap = raw.champion_icon_map;
-        console.log(
-          "[TFT Meta] 英雄图标映射:",
-          Object.keys(championIconMap).length,
-          "条, 样例:",
-          Object.entries(championIconMap).slice(0, 3),
-        );
-      } else {
-        console.warn("[TFT Meta] champion_icon_map 为空");
       }
       if (
         raw?.champion_name_map &&
         Object.keys(raw.champion_name_map).length > 0
       ) {
         championNameMap = raw.champion_name_map;
-        console.log(
-          "[TFT Meta] 英雄名称映射:",
-          Object.keys(championNameMap).length,
-          "条, 样例:",
-          Object.entries(championNameMap).slice(0, 3),
-        );
-      } else {
-        console.warn("[TFT Meta] champion_name_map 为空");
       }
       if (raw?.item_name_map && Object.keys(raw.item_name_map).length > 0) {
         itemNameMap = raw.item_name_map;
-        console.log(
-          "[TFT Meta] 物品名称映射:",
-          Object.keys(itemNameMap).length,
-          "条, 样例:",
-          Object.entries(itemNameMap).slice(0, 3),
-        );
-      } else {
-        console.warn("[TFT Meta] item_name_map 为空");
       }
       if (raw?.item_icon_map && Object.keys(raw.item_icon_map).length > 0) {
         itemIconMap = raw.item_icon_map;
-        console.log(
-          "[TFT Meta] 物品图标映射:",
-          Object.keys(itemIconMap).length,
-          "条, 样例:",
-          Object.entries(itemIconMap).slice(0, 3),
-        );
-      } else {
-        console.warn("[TFT Meta] item_icon_map 为空");
       }
       // 归一化 unit：OP.GG MCP 用 key 表示棋子 ID，不是 characterId
       const normalizeUnit = (unit: TftMetaUnit) => {
@@ -298,15 +245,6 @@ export function useTftMetaDecks() {
             normalizeUnit(unit);
           }
         }
-      }
-      // 打印第一个 deck 的 unit sample 用于调试
-      if (list.length > 0) {
-        const sample = list[0];
-        console.log(
-          "[TFT Meta] 首个 deck 样例:",
-          sample.id,
-          sample.units?.slice(0, 2),
-        );
       }
       cachedDecks = list;
       decks.value = list;

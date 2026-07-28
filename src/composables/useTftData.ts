@@ -175,9 +175,9 @@ export function useTftAugments() {
     error.value = "";
 
     try {
-      console.log("[TftAugments] 开始发起 get_tft_augments 命令请求...");
-      const data = await invoke<TftAugmentInfo[]>("get_tft_augments");
-      console.log("[TftAugments] 成功获得海克斯数据数量:", data?.length);
+      const data = await invoke<TftAugmentInfo[]>("get_tft_augments", {
+        forceRefresh,
+      });
       cachedAugments = data || [];
       augments.value = cachedAugments;
     } catch (e: any) {

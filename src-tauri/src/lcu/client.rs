@@ -341,27 +341,7 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
                         .unwrap_or_else(|| guess_content_type(&path));
 
                     if let Ok(bytes) = resp.bytes().await {
-                        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                        let data_url = format!("data:{};base64,{}", content_type, b64);
-
-                        let cache_path = path.clone();
-                        let cache_data = data_url.clone();
-                        tokio::spawn(async move {
-                            write_asset_cache(&cache_path, &cache_data);
-                        });
-
-                        // 异步写入 TFT 本地持久化缓存
-                        if let Some(tft_local_path) = get_tft_local_cache_path(&path) {
-                            let bytes_vec = bytes.to_vec();
-                            tokio::spawn(async move {
-                                if let Some(parent) = tft_local_path.parent() {
-                                    let _ = std::fs::create_dir_all(parent);
-                                }
-                                let _ = std::fs::write(&tft_local_path, &bytes_vec);
-                            });
-                        }
-
-                        return Ok(data_url);
+                        return Ok(save_asset_and_build_url(&path, &content_type, &bytes));
                     }
                 } else if resp.status().as_u16() == 404 && clean_path.contains("/assets/assets/") {
                     // 如果双重 assets/assets/ 404，尝试降级为单重 assets/ 再发一次请求
@@ -385,26 +365,7 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
                                 .unwrap_or_else(|| guess_content_type(&path));
 
                             if let Ok(bytes) = retry_resp.bytes().await {
-                                let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                let data_url = format!("data:{};base64,{}", content_type, b64);
-
-                                let cache_path = path.clone();
-                                let cache_data = data_url.clone();
-                                tokio::spawn(async move {
-                                    write_asset_cache(&cache_path, &cache_data);
-                                });
-
-                                // 异步写入 TFT 本地持久化缓存
-                                if let Some(tft_local_path) = get_tft_local_cache_path(&path) {
-                                    let bytes_vec = bytes.to_vec();
-                                    tokio::spawn(async move {
-                                        if let Some(parent) = tft_local_path.parent() {
-                                            let _ = std::fs::create_dir_all(parent);
-                                        }
-                                        let _ = std::fs::write(&tft_local_path, &bytes_vec);
-                                    });
-                                }
-                                return Ok(data_url);
+                                return Ok(save_asset_and_build_url(&path, &content_type, &bytes));
                             }
                         }
                     }
@@ -466,19 +427,22 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
         .unwrap_or_else(|| guess_content_type(&path));
 
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    let data_url = format!("data:{};base64,{}", content_type, b64);
     log::debug!("资源从 CDN 加载成功: {} ({} bytes)", path, bytes.len());
 
-    // 异步写入缓存（不阻塞返回）
-    let cache_path = path.clone();
+    Ok(save_asset_and_build_url(&path, &content_type, &bytes))
+}
+
+fn save_asset_and_build_url(path: &str, content_type: &str, bytes: &[u8]) -> String {
+    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let data_url = format!("data:{};base64,{}", content_type, b64);
+
+    let cache_path = path.to_string();
     let cache_data = data_url.clone();
     tokio::spawn(async move {
         write_asset_cache(&cache_path, &cache_data);
     });
 
-    // 异步写入 TFT 本地持久化缓存
-    if let Some(tft_local_path) = get_tft_local_cache_path(&path) {
+    if let Some(tft_local_path) = get_tft_local_cache_path(path) {
         let bytes_vec = bytes.to_vec();
         tokio::spawn(async move {
             if let Some(parent) = tft_local_path.parent() {
@@ -488,5 +452,5 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
         });
     }
 
-    Ok(data_url)
+    data_url
 }

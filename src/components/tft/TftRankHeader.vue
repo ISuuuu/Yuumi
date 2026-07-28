@@ -142,6 +142,8 @@ function formatTier(tier: string, division: string): string {
 
 .rank-card,
 .summary-tile {
+  position: relative;
+  overflow: hidden;
   padding: 14px 16px;
   border-radius: var(--radius-md);
   background: var(--card-bg);
@@ -152,6 +154,24 @@ function formatTier(tier: string, division: string): string {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.rank-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--primary-color-alpha-30), transparent);
+}
+
+.rank-card:hover,
+.summary-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary-color-alpha-40);
+  box-shadow: 0 8px 20px -6px var(--primary-color-alpha-15), var(--shadow-md);
 }
 
 .card-title-row {
@@ -161,20 +181,26 @@ function formatTier(tier: string, division: string): string {
 }
 
 .card-badge {
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 0.7rem;
-  font-weight: bold;
-  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
 }
 .card-badge.solo {
-  background: #3b82f6;
+  background: var(--primary-color-alpha-15);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color-alpha-30);
 }
 .card-badge.turbo {
-  background: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
 }
 .card-badge.double {
-  background: #10b981;
+  background: var(--win-bg);
+  color: var(--win-color);
+  border: 1px solid var(--win-color);
 }
 
 .mode-name {
@@ -187,19 +213,23 @@ function formatTier(tier: string, division: string): string {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin: 8px 0;
+  margin: 10px 0 6px;
 }
 
 .tier-text {
-  font-size: 1.05rem;
+  font-size: 1.08rem;
   font-weight: 800;
   color: var(--text-color);
+  letter-spacing: -0.2px;
 }
 
 .lp-text {
   font-size: 0.82rem;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--primary-color);
+  background: var(--primary-color-alpha-15);
+  padding: 1px 6px;
+  border-radius: 8px;
 }
 
 .rank-sub {
@@ -227,7 +257,7 @@ function formatTier(tier: string, division: string): string {
 }
 
 .summary-val {
-  font-size: 0.95rem;
+  font-size: 1.02rem;
   font-weight: 800;
   color: var(--text-color);
 }

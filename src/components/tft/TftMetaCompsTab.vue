@@ -26,21 +26,20 @@ function calcScore(d: TftMetaDeck): number {
   return wr * 100 + pr * 5;
 }
 
-function assignTier(d: TftMetaDeck, all: TftMetaDeck[]): string {
-  const score = calcScore(d);
-  const sorted = [...all].map(calcScore).sort((a, b) => b - a);
-  const idx = sorted.indexOf(score);
-  const pct = idx / sorted.length;
-  if (pct < 0.2) return "S";
-  if (pct < 0.4) return "A";
-  if (pct < 0.6) return "B";
-  if (pct < 0.8) return "C";
-  return "D";
-}
-
 const sortedDecks = computed(() => {
-  const sorted = [...decks.value].sort((a, b) => calcScore(b) - calcScore(a));
-  return sorted.map((d) => ({ deck: d, tier: assignTier(d, sorted) }));
+  const list = decks.value;
+  if (!list.length) return [];
+  const sorted = [...list].sort((a, b) => calcScore(b) - calcScore(a));
+  const total = sorted.length;
+  return sorted.map((deck, idx) => {
+    const pct = idx / total;
+    let tier = "D";
+    if (pct < 0.2) tier = "S";
+    else if (pct < 0.4) tier = "A";
+    else if (pct < 0.6) tier = "B";
+    else if (pct < 0.8) tier = "C";
+    return { deck, tier };
+  });
 });
 
 const tftVersion = computed(() => {

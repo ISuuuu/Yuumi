@@ -150,14 +150,29 @@ const fullTraitsTooltip = computed(() => {
   background: linear-gradient(90deg, rgba(245, 158, 11, 0.08) 0%, var(--card-bg) 40%);
 }
 
+.rank-first:hover {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.18) 0%, var(--card-bg-hover) 40%);
+  border-color: #f59e0b;
+}
+
 .rank-top4 {
   border-left: 4px solid var(--win-color);
   background: linear-gradient(90deg, var(--win-bg) 0%, var(--card-bg) 40%);
 }
 
+.rank-top4:hover {
+  background: linear-gradient(90deg, var(--win-bg-hover) 0%, var(--card-bg-hover) 40%);
+  border-color: var(--win-color);
+}
+
 .rank-bottom {
   border-left: 4px solid var(--loss-color);
-  opacity: 0.88;
+  background: linear-gradient(90deg, var(--loss-bg) 0%, var(--card-bg) 40%);
+}
+
+.rank-bottom:hover {
+  background: linear-gradient(90deg, var(--loss-bg-hover) 0%, var(--card-bg-hover) 40%);
+  border-color: var(--loss-color);
 }
 
 .match-left {
@@ -200,6 +215,10 @@ const fullTraitsTooltip = computed(() => {
   color: var(--win-color);
 }
 
+.rank-bottom .placement-num {
+  color: var(--loss-color);
+}
+
 .placement-text {
   font-size: 0.78rem;
   font-weight: bold;
@@ -222,11 +241,12 @@ const fullTraitsTooltip = computed(() => {
 .level-badge,
 .gold-badge {
   font-size: 0.72rem;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.05);
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--primary-color-alpha-15);
   color: var(--text-color);
   font-weight: 600;
+  border: 1px solid var(--primary-color-alpha-30);
 }
 
 .match-center {
@@ -282,14 +302,15 @@ const fullTraitsTooltip = computed(() => {
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--border-color);
-  background: #000;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-  transition: transform 0.15s ease;
+  background: rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), border-color 0.2s;
 }
 
 .unit-item:hover .unit-avatar-box {
   transform: translateY(-2px);
   border-color: var(--primary-color);
+  box-shadow: 0 4px 10px var(--primary-color-alpha-30);
 }
 
 .unit-avatar {
@@ -313,8 +334,8 @@ const fullTraitsTooltip = computed(() => {
   height: 16px;
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  background: #000;
+  border: 1px solid var(--primary-color-alpha-30);
+  background: rgba(0, 0, 0, 0.3);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
@@ -328,7 +349,7 @@ const fullTraitsTooltip = computed(() => {
   position: absolute;
   bottom: -3px;
   right: -3px;
-  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  background: var(--primary-color);
   color: white;
   font-size: 0.65rem;
   font-weight: bold;
@@ -356,19 +377,20 @@ const fullTraitsTooltip = computed(() => {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 3px;
+  gap: 4px;
 }
 
 .trait-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: rgba(0, 0, 0, 0.04);
-  border: 1px solid var(--border-color);
-  font-size: 0.65rem;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--primary-color-alpha-15);
+  border: 1px solid var(--primary-color-alpha-30);
+  font-size: 0.68rem;
   color: var(--text-color);
+  font-weight: 600;
 }
 
 .trait-icon {
