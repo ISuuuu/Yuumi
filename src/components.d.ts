@@ -40,6 +40,7 @@ declare module 'vue' {
     NSpace: typeof import('naive-ui')['NSpace']
     NSpin: typeof import('naive-ui')['NSpin']
     NSwitch: typeof import('naive-ui')['NSwitch']
+    NTooltip: typeof import('naive-ui')['NTooltip']
     OpggModal: typeof import('./components/OpggModal.vue')['default']
     OpggWindow: typeof import('./components/OpggWindow.vue')['default']
     PlayerCard: typeof import('./components/gameinfo/PlayerCard.vue')['default']

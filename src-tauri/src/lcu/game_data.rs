@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
+use serde_json::Value;
 use tokio::time::{sleep, Duration};
 
 use crate::{build_auth_header, LcuClient};
@@ -8,6 +9,16 @@ use crate::{build_auth_header, LcuClient};
 /// 游戏资源加载重试次数和间隔
 const GAME_DATA_RETRIES: u32 = 3;
 const GAME_DATA_RETRY_DELAY: Duration = Duration::from_secs(2);
+
+/// 海克斯强化详情（来自 LCU cherry-augments.json）
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CherryAugmentDetail {
+    pub id: i32,
+    pub name: String,
+    pub icon_path: String,
+    pub description: String,
+}
 
 /// LCU 连接后预加载的游戏资源路径映射（ID → iconPath / name）。
 #[derive(Debug, Clone, Default)]
@@ -20,6 +31,8 @@ pub struct GameDataAssets {
     pub runes: HashMap<i32, String>,
     /// 英雄 ID → 英雄名称
     pub champions: HashMap<i32, String>,
+    /// 海克斯强化 ID → 详情（名称、描述、图标路径）
+    pub augments: HashMap<i32, CherryAugmentDetail>,
 }
 
 #[derive(Deserialize)]
@@ -30,6 +43,18 @@ struct IdEntry {
     icon_path: Option<String>,
     #[serde(default)]
     name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct CherryAugmentEntry {
+    id: Option<i32>,
+    #[serde(rename = "augmentSmallIconPath")]
+    augment_small_icon_path: Option<String>,
+    #[serde(alias = "displayName")]
+    name: Option<String>,
+    #[serde(alias = "desc", alias = "tooltip")]
+    description: Option<String>,
 }
 
 /// 从 LCU 预加载所有游戏资源路径（带重试）。
@@ -70,7 +95,7 @@ async fn fetch_game_data_assets_inner(lcu: &LcuClient) -> GameDataAssets {
     let base = format!("https://127.0.0.1:{}", lcu.port);
 
     // 先尝试标准数组解析
-    let (items, spells, runes, champions) = tokio::join!(
+    let (items, spells, runes, champions, augments, cdragon_augments) = tokio::join!(
         fetch_id_map(
             &lcu.http_client,
             &base,
@@ -90,7 +115,17 @@ async fn fetch_game_data_assets_inner(lcu: &LcuClient) -> GameDataAssets {
             "/lol-game-data/assets/v1/perks.json"
         ),
         fetch_champion_map(&lcu.http_client, &base, &auth),
+        fetch_cherry_augment_map(
+            &lcu.http_client,
+            &base,
+            &auth,
+            "/lol-game-data/assets/v1/cherry-augments.json",
+        ),
+        fetch_cdragon_augment_details(),
     );
+
+    // 用 CDragon 数据补充 LCU 缺失的名称和描述
+    let augments = merge_augment_data(augments, cdragon_augments);
 
     // 对任何为空的资源，用灵活解析器重试
     let items = if items.is_empty() {
@@ -133,11 +168,12 @@ async fn fetch_game_data_assets_inner(lcu: &LcuClient) -> GameDataAssets {
     };
 
     log::info!(
-        "游戏资源加载完成: 物品={}, 技能={}, 符文={}, 英雄={}",
+        "游戏资源加载完成: 物品={}, 技能={}, 符文={}, 英雄={}, 海克斯强化={}",
         items.len(),
         spells.len(),
         runes.len(),
         champions.len(),
+        augments.len(),
     );
     if champions.is_empty() {
         log::warn!("英雄名称映射为空！上传时 championName 将为 Unknown");
@@ -148,6 +184,7 @@ async fn fetch_game_data_assets_inner(lcu: &LcuClient) -> GameDataAssets {
         spells,
         runes,
         champions,
+        augments,
     }
 }
 
@@ -223,6 +260,156 @@ async fn fetch_champion_map(
     }
 
     HashMap::new()
+}
+
+/// 从 LCU 获取海克斯强化 ID → 详情映射。
+async fn fetch_cherry_augment_map(
+    http: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    path: &str,
+) -> HashMap<i32, CherryAugmentDetail> {
+    let url = format!("{}{}", base, path);
+    let resp = match http.get(&url).header("Authorization", auth).send().await {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => {
+            log::warn!("获取 {} 失败: HTTP {}", path, r.status());
+            return HashMap::new();
+        }
+        Err(e) => {
+            log::warn!("请求 {} 失败: {}", path, e);
+            return HashMap::new();
+        }
+    };
+
+    let text = match resp.text().await {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!("读取 {} 响应体失败: {}", path, e);
+            return HashMap::new();
+        }
+    };
+
+    let arr: Vec<Value> = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("解析 {} JSON 失败: {}", path, e);
+            return HashMap::new();
+        }
+    };
+
+    fn extract_str(val: &Value) -> String {
+        val.as_str().unwrap_or_default().to_string()
+    }
+
+    arr.into_iter()
+        .filter_map(|entry| {
+            let obj = entry.as_object()?;
+            let id = obj.get("id")?.as_i64()? as i32;
+
+            let icon_path = obj
+                .get("augmentSmallIconPath")
+                .or_else(|| obj.get("iconPath"))
+                .or_else(|| obj.get("icon"))
+                .map(extract_str)?;
+            if icon_path.is_empty() {
+                return None;
+            }
+
+            let name = obj
+                .get("nameTRA")
+                .or_else(|| obj.get("simpleNameTRA"))
+                .or_else(|| obj.get("name"))
+                .map(extract_str)
+                .unwrap_or_default();
+
+            Some((
+                id,
+                CherryAugmentDetail {
+                    id,
+                    name,
+                    icon_path,
+                    description: String::new(),
+                },
+            ))
+        })
+        .collect()
+}
+
+/// 从 CDragon 获取海克斯强化名称和描述（zh_CN）。
+/// 返回 id → (name, desc) 映射。
+async fn fetch_cdragon_augment_details() -> HashMap<i32, (String, String)> {
+    let url = "https://raw.communitydragon.org/latest/cdragon/arena/zh_cn.json";
+    match reqwest::Client::new()
+        .get(url)
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => match resp.json::<Value>().await {
+            Ok(val) => {
+                let arr = match val.get("augments").and_then(|v| v.as_array()) {
+                    Some(a) => a,
+                    None => {
+                        log::warn!("CDragon arena JSON 缺少 augments 字段");
+                        return HashMap::new();
+                    }
+                };
+                let map: HashMap<i32, (String, String)> = arr
+                    .iter()
+                    .filter_map(|entry| {
+                        let obj = entry.as_object()?;
+                        let id = obj.get("id")?.as_i64()? as i32;
+                        let name = obj
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let desc = obj
+                            .get("desc")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        Some((id, (name, desc)))
+                    })
+                    .collect();
+                log::info!("CDragon 海克斯强化详情加载成功: {} 条", map.len());
+                map
+            }
+            Err(e) => {
+                log::warn!("解析 CDragon arena JSON 失败: {}", e);
+                HashMap::new()
+            }
+        },
+        Ok(resp) => {
+            log::warn!("获取 CDragon arena 数据失败: HTTP {}", resp.status());
+            HashMap::new()
+        }
+        Err(e) => {
+            log::warn!("请求 CDragon arena 数据失败: {}", e);
+            HashMap::new()
+        }
+    }
+}
+
+/// 将 CDragon 的 name/desc 合并到 LCU 的 augment 数据中。
+/// CDragon 数据具有更完整的名称（中文）和描述，LCU 数据有正确的图标路径。
+fn merge_augment_data(
+    mut lcu: HashMap<i32, CherryAugmentDetail>,
+    cdragon: HashMap<i32, (String, String)>,
+) -> HashMap<i32, CherryAugmentDetail> {
+    for (id, (cd_name, cd_desc)) in cdragon {
+        if let Some(entry) = lcu.get_mut(&id) {
+            // CDragon 中文名称优先（比 LCU 的 nameTRA 更准确）
+            if !cd_name.is_empty() {
+                entry.name = cd_name;
+            }
+            entry.description = cd_desc;
+        } else {
+            // LCU 没有的条目，跳过（没有图标路径）
+        }
+    }
+    lcu
 }
 
 /// 灵活解析：先尝试数组格式，失败则解析为 JSON Value 处理对象/嵌套格式。

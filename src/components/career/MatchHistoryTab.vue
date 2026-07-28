@@ -181,6 +181,14 @@ function getKdaClass(kda: string): string {
   return "kda-normal";
 }
 
+function cleanAugmentDesc(desc: string): string {
+  if (!desc) return "";
+  return desc
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+}
+
 async function calculateRecentTeammates() {
   if (!summoner.value?.puuid || recentMatches.value.length === 0) {
     recentTeammates.value = [];
@@ -585,26 +593,35 @@ watch(
             </div>
           </div>
 
-          <!-- 4. 补刀补兵数 -->
-          <div class="cs-panel">
-            <span class="cs-count">{{ m.cs }}</span>
-            <svg
-              class="cs-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path
-                d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
+          <!-- 4. 补刀数 (靠左) -->
+          <div class="cs-panel" :title="'补刀: ' + m.cs">
+            <svg class="cs-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2a7 7 0 0 0-7 7v4.5c0 1.2.6 2.3 1.6 3l1.9 1.3v2.2a1 1 0 0 0 1.5.8l2-1.3 2 1.3a1 1 0 0 0 1.5-.8v-2.2l1.9-1.3c1-.7 1.6-1.8 1.6-3V9a7 7 0 0 0-7-7zm-3.5 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm7 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" />
             </svg>
+            <span class="cs-count">{{ m.cs }}</span>
           </div>
 
-          <!-- 5. 装备栏 (前 6 件常规装备 + 第 7 件饰品) -->
+          <!-- 5. 装备栏 (海克斯强化 + 前 6 件常规装备 + 第 7 件饰品) -->
           <div class="items-panel">
+            <!-- 海克斯强化（仅海克斯大乱斗） -->
+            <div v-if="m.queueId === 2400 && Boolean(m.augmentIconUrls?.length)" class="augment-grid">
+              <n-tooltip
+                v-for="(url, idx) in m.augmentIconUrls"
+                :key="'aug-' + idx"
+                trigger="hover"
+                placement="top"
+              >
+                <template #trigger>
+                  <div class="augment-slot">
+                    <LcuImage :src="url" class="augment-img" alt="augment" />
+                  </div>
+                </template>
+                <div class="career-aug-tooltip">
+                  <div class="career-aug-tooltip-name">{{ m.augmentNames?.[idx] || "海克斯强化" }}</div>
+                  <div v-if="m.augmentDescs?.[idx]" class="career-aug-tooltip-desc">{{ cleanAugmentDesc(m.augmentDescs[idx]) }}</div>
+                </div>
+              </n-tooltip>
+            </div>
             <div class="items-grid">
               <div v-for="idx in 6" :key="idx" class="item-slot">
                 <LcuImage
@@ -626,23 +643,24 @@ watch(
             </div>
           </div>
 
-          <!-- 6. 获得金币 -->
-          <div class="gold-panel">
+          <!-- 6. 还原经济面板 (位于装备栏右侧) -->
+          <div class="gold-panel" :title="'经济: ' + m.gold.toLocaleString() + ' 金币'">
             <span class="gold-count">{{ m.gold.toLocaleString() }}</span>
             <svg class="gold-icon" viewBox="0 0 24 24" fill="currentColor">
               <circle
                 cx="12"
                 cy="12"
-                r="10"
+                r="9"
                 stroke="currentColor"
-                stroke-width="2"
+                stroke-width="1.8"
                 fill="none"
               />
               <path
-                d="M12 6v12M15 9H11.5a1.5 1.5 0 0 0 0 3h1a1.5 1.5 0 0 1 0 3H9"
+                d="M12 6.5v11M14.5 9.5H11.5a1.5 1.5 0 0 0 0 3h1a1.5 1.5 0 0 1 0 3H9.5"
                 stroke="currentColor"
-                stroke-width="2"
+                stroke-width="1.8"
                 stroke-linecap="round"
+                stroke-linejoin="round"
                 fill="none"
               />
             </svg>
@@ -909,6 +927,7 @@ watch(
 .career-scroll-area {
   flex: 1;
   overflow-y: auto;
+
   padding-right: 4px;
   margin-top: 1rem;
   scroll-behavior: smooth;
@@ -972,8 +991,8 @@ watch(
 .champ-panel {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-width: 120px;
+  gap: 10px;
+  min-width: 100px;
 }
 
 .champ-avatar-box {
@@ -1048,7 +1067,7 @@ watch(
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-width: 110px;
+  min-width: 90px;
 }
 
 .result-text {
@@ -1091,7 +1110,7 @@ watch(
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-width: 130px;
+  min-width: 105px;
 }
 
 .kda-numbers {
@@ -1127,24 +1146,50 @@ watch(
   color: var(--text-dimmed);
 }
 
-/* 4. 补刀面板 */
+/* 4. 补刀与经济统计列 */
+/* 4. 补刀面板 (靠左) */
 .cs-panel {
   display: flex;
   align-items: center;
-  gap: 5px;
-  min-width: 75px;
+  gap: 4px;
+  min-width: 44px;
+  margin-right: 6px;
 }
 
 .cs-count {
-  font-size: 0.9rem;
-  font-weight: 700;
+  font-size: 0.85rem;
+  font-weight: 600;
   color: var(--text-muted);
 }
 
 .cs-icon {
-  width: 16px;
-  height: 16px;
-  color: var(--text-dimmed);
+  width: 14px;
+  height: 14px;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+/* 6. 金币面板 (固定右侧，与最右侧时间面板保持固定 24px 间距) */
+.gold-panel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 62px;
+  margin-left: auto;
+  margin-right: 24px;
+}
+
+.gold-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.gold-icon {
+  width: 14px;
+  height: 14px;
+  color: #d97706;
+  flex-shrink: 0;
 }
 
 /* 5. 装备面板 */
@@ -1152,7 +1197,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 1;
+  min-width: 0;
 }
 
 .items-grid {
@@ -1182,25 +1227,31 @@ watch(
   margin-left: 2px;
 }
 
-/* 6. 金币面板 */
-.gold-panel {
+/* 海克斯强化图标 */
+.augment-grid {
   display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 85px;
-  justify-content: flex-end;
+  gap: 2px;
+  margin-right: 4px;
 }
-
-.gold-count {
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: var(--text-muted);
+.augment-slot {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  background-color: rgba(147, 51, 234, 0.12);
+  transition: all 0.2s ease;
+  cursor: pointer;
 }
-
-.gold-icon {
-  width: 14px;
-  height: 14px;
-  color: #fbbf24;
+.augment-slot:hover {
+  border-color: #c084fc;
+  box-shadow: 0 0 6px rgba(192, 132, 252, 0.6);
+  transform: translateY(-1px) scale(1.05);
+}
+.augment-img {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 /* 7. 时间面板 */
@@ -1208,9 +1259,16 @@ watch(
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  min-width: 170px;
+  min-width: 80px;
   font-size: 0.82rem;
   color: var(--text-dimmed);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.game-map,
+.match-time {
+  white-space: nowrap;
 }
 
 .map-name {
@@ -1316,6 +1374,34 @@ watch(
 
 .stat-value.lose {
   color: var(--loss-color);
+}
+
+/* 海克斯强化悬浮提示 */
+.career-aug-tooltip {
+  max-width: 280px;
+  padding: 8px 10px;
+  text-align: left;
+  border-radius: 6px;
+  background: rgba(20, 15, 32, 0.95);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 12px rgba(147, 51, 234, 0.3);
+}
+
+.career-aug-tooltip-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #fde047;
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+.career-aug-tooltip-desc {
+  font-size: 0.82rem;
+  color: #e2e8f0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @keyframes fadeIn {

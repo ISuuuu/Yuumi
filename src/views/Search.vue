@@ -601,6 +601,41 @@ function getItemUrl(itemId: number) {
   return `/lol-game-data/assets/v1/items/icons2d/${itemId}.png`;
 }
 
+function getAugmentUrl(augmentId: number) {
+  if (!augmentId) return "";
+  const detail = gameDataAssets.value?.augments?.[augmentId];
+  if (detail?.iconPath) {
+    return detail.iconPath.startsWith("/") ? detail.iconPath : "/" + detail.iconPath;
+  }
+  return "";
+}
+
+function cleanAugmentDesc(desc: string): string {
+  if (!desc) return "";
+  return desc
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+}
+
+/** 从 stats 和 participant 中提取海克斯强化 ID（去重，最多 5 个） */
+function extractAugmentIds(stats: any, participant?: any): number[] {
+  const seen = new Set<number>();
+  const ids: number[] = [];
+  for (const source of [stats, participant].filter(Boolean)) {
+    if (Array.isArray(source.augments)) {
+      for (const id of source.augments) {
+        if (id && !seen.has(id)) { seen.add(id); ids.push(id); }
+      }
+    }
+    for (let i = 1; i <= 5; i++) {
+      const id = source[`playerAugment${i}`];
+      if (id && !seen.has(id)) { seen.add(id); ids.push(id); }
+    }
+  }
+  return ids.slice(0, 5);
+}
+
 function copyGameId(gameId: number) {
   navigator.clipboard.writeText(String(gameId));
   showToast(`游戏 ID: ${gameId} 已复制到剪贴板`);
@@ -652,6 +687,22 @@ const gameDetails = computed(() => {
         getItemUrl(stats.item6),
       ];
 
+      const augmentIds = extractAugmentIds(stats, p);
+      const augmentIconUrls: string[] = [];
+      const augmentNames: string[] = [];
+      const augmentDescs: string[] = [];
+
+      for (const id of augmentIds) {
+        const url = getAugmentUrl(id);
+        if (url) {
+          augmentIconUrls.push(url);
+          const detail = gameDataAssets.value?.augments?.[id];
+          const name = detail?.name?.trim() ? detail.name : "海克斯强化";
+          augmentNames.push(name);
+          augmentDescs.push(cleanAugmentDesc(detail?.description ?? ""));
+        }
+      }
+
       const pData = {
         participantId: pId,
         teamId: p.teamId,
@@ -673,6 +724,9 @@ const gameDetails = computed(() => {
         items: itemUrls.slice(0, 6),
         ward: itemUrls[6],
         win: stats.win,
+        augmentIconUrls,
+        augmentNames,
+        augmentDescs,
       };
 
       if (p.teamId === 100) {
@@ -1197,27 +1251,38 @@ function getQueueName(queueId: number, backendName: string): string {
 
                       <!-- 装备栏 -->
                       <div class="player-items-col">
-                        <div class="row-items-grid">
+                        <div class="player-items-wrap">
                           <div
-                            v-for="idx in 6"
-                            :key="idx"
-                            class="row-item-slot"
+                            v-if="selectedGame?.queueId === 2400 && Boolean(p.augmentIconUrls?.length)"
+                            class="row-augment-grid"
                           >
-                            <LcuImage
-                              v-if="p.items[idx - 1]"
-                              :src="p.items[idx - 1]"
-                              class="row-item-img"
-                              alt="item"
-                            />
+                            <n-tooltip
+                              v-for="(url, idx) in p.augmentIconUrls"
+                              :key="'aug-' + idx"
+                              trigger="hover"
+                              placement="top"
+                            >
+                              <template #trigger>
+                                <div class="row-augment-slot">
+                                  <LcuImage :src="url" class="row-item-img" alt="aug" />
+                                </div>
+                              </template>
+                              <div class="augment-tooltip">
+                                <div class="augment-tooltip-name">{{ p.augmentNames?.[idx] || "海克斯强化" }}</div>
+                                <div v-if="p.augmentDescs?.[idx]" class="augment-tooltip-desc">{{ cleanAugmentDesc(p.augmentDescs[idx]) }}</div>
+                              </div>
+                            </n-tooltip>
                           </div>
-                        </div>
-                        <div class="row-ward-slot">
-                          <LcuImage
-                            v-if="p.ward"
-                            :src="p.ward"
-                            class="row-item-img"
-                            alt="ward"
-                          />
+                          <div class="row-items-row">
+                            <div class="row-items-grid">
+                              <div v-for="idx in 6" :key="idx" class="row-item-slot">
+                                <LcuImage v-if="p.items[idx - 1]" :src="p.items[idx - 1]" class="row-item-img" alt="item" />
+                              </div>
+                            </div>
+                            <div class="row-ward-slot">
+                              <LcuImage v-if="p.ward" :src="p.ward" class="row-item-img" alt="ward" />
+                            </div>
+                          </div>
                         </div>
                       </div>
 
@@ -2171,8 +2236,69 @@ function getQueueName(queueId: number, backendName: string): string {
   display: flex;
   align-items: center;
   gap: 3px;
-  width: 210px;
+  min-width: 210px;
   flex-shrink: 0;
+}
+
+.player-items-wrap {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
+}
+.row-items-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* 海克斯强化网格 */
+.row-augment-grid {
+  display: flex;
+  gap: 2px;
+  margin-right: 4px;
+}
+.row-augment-slot {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  background-color: rgba(147, 51, 234, 0.12);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.row-augment-slot:hover {
+  border-color: #c084fc;
+  box-shadow: 0 0 8px rgba(192, 132, 252, 0.6);
+  transform: translateY(-1px) scale(1.05);
+}
+
+.augment-tooltip {
+  max-width: 280px;
+  padding: 8px 10px;
+  text-align: left;
+  border-radius: 6px;
+  background: rgba(20, 15, 32, 0.95);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 12px rgba(147, 51, 234, 0.3);
+}
+
+.augment-tooltip-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #fde047;
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+.augment-tooltip-desc {
+  font-size: 0.82rem;
+  color: #e2e8f0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .row-items-grid {
@@ -2268,7 +2394,7 @@ function getQueueName(queueId: number, backendName: string): string {
 }
 
 .header-items {
-  width: 190px;
+  min-width: 190px;
   text-align: center;
 }
 

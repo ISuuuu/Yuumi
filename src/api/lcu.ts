@@ -100,6 +100,13 @@ export interface SummonerDisplay {
   profileIconUrl: string;
 }
 
+export interface CherryAugmentDetail {
+  id: number;
+  name: string;
+  iconPath: string;
+  description: string;
+}
+
 export interface MatchDisplay {
   queueId: number;
   gameId: number;
@@ -131,6 +138,10 @@ export interface MatchDisplay {
   spell2IconUrl: string;
   runeIconUrl: string;
   itemIconUrls: string[];
+  augmentIds: number[];
+  augmentIconUrls: string[];
+  augmentNames: string[];
+  augmentDescs: string[];
 }
 
 /** 获取当前召唤师信息（Rust 解析层清洗后，404 时自动重试） */

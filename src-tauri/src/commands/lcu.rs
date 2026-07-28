@@ -1,3 +1,4 @@
+use crate::lcu::game_data::CherryAugmentDetail;
 use crate::AppState;
 
 #[derive(serde::Serialize)]
@@ -122,6 +123,7 @@ pub struct GameDataAssetsDisplay {
     pub items: std::collections::HashMap<i32, String>,
     pub spells: std::collections::HashMap<i32, String>,
     pub runes: std::collections::HashMap<i32, String>,
+    pub augments: std::collections::HashMap<i32, CherryAugmentDetail>,
 }
 
 /// 获取 LCU 预加载的静态资源映射 (ID -> iconPath)
@@ -134,5 +136,6 @@ pub async fn get_game_data_assets(
         items: gd.items.clone(),
         spells: gd.spells.clone(),
         runes: gd.runes.clone(),
+        augments: gd.augments.clone(),
     })
 }
