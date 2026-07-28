@@ -99,6 +99,14 @@ function getDeckBadges(deck: TftMetaDeck): string[] {
   return badges;
 }
 
+function getBadgeClass(badge: string): string {
+  if (badge.includes("D牌")) return "badge-reroll";
+  if (badge.includes("简单") || badge.includes("普通")) return "badge-easy";
+  if (badge.includes("困难")) return "badge-hard";
+  if (badge.includes("黑马")) return "badge-honey";
+  return "badge-default";
+}
+
 async function copyTeamCode(code: string | undefined) {
   if (!code) return;
   try {
@@ -347,7 +355,11 @@ onUnmounted(() => {
           </div>
 
           <div class="badges-row" v-if="getDeckBadges(item.deck).length">
-            <span v-for="(badge, bIdx) in getDeckBadges(item.deck)" :key="bIdx" class="badge-tag">
+            <span
+              v-for="(badge, bIdx) in getDeckBadges(item.deck)"
+              :key="bIdx"
+              :class="['badge-tag', getBadgeClass(badge)]"
+            >
               {{ badge }}
             </span>
           </div>
@@ -382,6 +394,13 @@ onUnmounted(() => {
           <span class="modal-deck-name">{{ getDeckDisplayName(selectedDeck) }}</span>
           <span v-if="selectedDeck.cost != null" class="cost-badge">
             {{ selectedDeck.cost }}费
+          </span>
+          <span
+            v-for="(badge, bIdx) in getDeckBadges(selectedDeck)"
+            :key="bIdx"
+            :class="['badge-tag', getBadgeClass(badge)]"
+          >
+            {{ badge }}
           </span>
         </div>
       </template>
@@ -563,13 +582,13 @@ onUnmounted(() => {
 .version-badge {
   font-size: 0.72rem;
   font-weight: 700;
-  color: var(--primary-color);
-  background: var(--primary-color-alpha-15);
-  border: 1px solid var(--primary-color-alpha-25);
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
   padding: 2px 10px;
   border-radius: 14px;
   backdrop-filter: blur(4px);
-  box-shadow: 0 2px 8px var(--primary-color-alpha-10);
+  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.15);
 }
 
 .loading-box,
@@ -714,9 +733,38 @@ onUnmounted(() => {
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.badge-tag.badge-reroll {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.badge-tag.badge-easy {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.badge-tag.badge-hard {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+  border: 1px solid rgba(249, 115, 22, 0.35);
+}
+
+.badge-tag.badge-honey {
+  background: rgba(236, 72, 153, 0.15);
+  color: #ec4899;
+  border: 1px solid rgba(236, 72, 153, 0.35);
+}
+
+.badge-tag.badge-default {
   background: var(--primary-color-alpha-15);
-  color: var(--primary-color);
-  border: 1px solid var(--primary-color-alpha-25);
+  color: var(--text-color);
+  border: 1px solid var(--primary-color-alpha-30);
 }
 
 .traits-row {
@@ -945,12 +993,13 @@ onUnmounted(() => {
 }
 .mini-unit {
   font-size: 0.72rem;
-  background: var(--primary-color-alpha-15);
-  color: var(--primary-color);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-color);
   padding: 3px 8px;
   border-radius: 4px;
-  border: 1px solid var(--primary-color-alpha-30);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   font-weight: 600;
+  line-height: 1.4;
 }
 
 /* 阵容详情弹窗 header */

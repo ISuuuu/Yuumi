@@ -126,8 +126,6 @@ pub struct TftMatchSummary {
     pub matches: Vec<TftMatchDisplay>,
 }
 
-
-
 // ─── 辅助函数 ───
 
 /// 参照 Seraphine 的 LCU 路径转换：把 .tex 换成 .png，低写处理并拼接 /lol-game-data/assets/
@@ -855,9 +853,7 @@ async fn fetch_tft_augments_raw(app_state: &AppState) -> Vec<TftAugmentInfo> {
     log::info!("[TFT Augments Backend] 准备抓取海克斯强化 (CDragon CDN)");
 
     // 确切有效的 CDN 路径
-    let cdn_urls = [
-        "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json",
-    ];
+    let cdn_urls = ["https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json"];
 
     let (enable_proxy, proxy_addr) = {
         let cfg = app_state.config.read().await;
