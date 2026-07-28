@@ -6,16 +6,17 @@ Yuumi 是一款轻量的英雄联盟客户端辅助工具，通过 LCU API 实�
 
 ## 功能
 
-- **战绩查询** — 搜索任意召唤师，查看对局历史与详情（10 人数据）
+- **战绩查询** — 搜索任意召唤师，查看对局历史与详情（10 人数据，支持点击召唤师名称快捷跳转）
 - **生涯** — 当前召唤师的近期战绩概览
-- **对局信息** — 实时显示当前对局 10 人段位与近期 KDA
-- **TFT** — 云顶之弈数据查看（暂无）
+- **对局信息** — 实时显示当前对局 10 人段位与近期 KDA、阵营组队信息
+- **TFT (云顶之弈)** — 云顶之弈战绩解析与详情弹窗、段位近况、OP.GG 热门阵容推荐与 4x7 大网格站位图（核心 C 位/装备优先级/代码一键复制）、海克斯强化百科（LCU 本地 API + CDragon 兜底 + 代理/Gzip 压缩）
+- **战利品管理** — 战利品库存查看、一键智能批量开箱、碎片分解、皮肤/英雄重铸与精粹资源统筹
 - **自动选人/禁人** — 支持按分路配置候选英雄与召唤师技能
 - **自动接受匹配** — 可设置延迟
 - **自动重连** — 游戏断线自动重连
 - **自动创建大厅** — 空闲时自动创建指定模式房间
-- **OP.GG** — 内置 OP.GG 数据查询
-- **对局上传** — 游戏结束后自动批量上传战绩（需接口支持）
+- **OP.GG** — 内置 OP.GG 英雄/云顶数据查询
+- **对局上传** — 游戏结束后自动批量上传战绩（支持智能拆分、上传失败落盘暂存与触发式重试）
 
 ## 技术栈
 
@@ -53,8 +54,13 @@ pnpm run check-all  # 执行完整自测（包含类型检查、格式校验及 
 Yuumi/
 ├── src/                  # Vue 前端
 │   ├── views/            # 页面组件（Home/Career/Search/GameInfo/TFT/Tools/Settings/Notice/BenchOverlay）
-│   ├── components/       # 通用组件（LcuImage/OpggModal/OpggWindow/ChampionPicker/SpellPicker/NaiveUIBridge）
-│   ├── composables/      # 组合式 hooks（useLcuAsset/useToast）
+│   ├── components/       # 通用与功能子组件
+│   │   ├── tft/          # 云顶之弈模块（段位卡片/战绩卡片/详情弹窗/OP.GG阵容推荐/海克斯百科）
+│   │   ├── gameinfo/     # 对局信息模块（玩家卡片/战绩列/对局阶段）
+│   │   ├── career/       # 生涯战绩模块（召唤师信息/战绩页签）
+│   │   ├── tools/        # 工具箱模块（自定义房间/符文配置/战利品批量处理）
+│   │   └── layout/       # 布局与自定义标题栏
+│   ├── composables/      # 组合式 hooks（useLcuAsset/useToast/usePlayerSearch/useTftData/useLoot 等）
 │   ├── api/              # LCU API 封装 + Tauri IPC 调用
 │   ├── store/            # Pinia 全局状态
 │   ├── utils/            # 工具函数（主题色等）
@@ -66,10 +72,13 @@ Yuumi/
 │   │   ├── lib.rs        # 入口：AppState、命令注册、系统托盘
 │   │   ├── config.rs     # 配置读写
 │   │   ├── lcu/          # LCU 连接（进程检测、HTTPS 代理、WebSocket、资源预加载）
-│   │   ├── parsers/      # 数据清洗（召唤师/战绩/对局信息/TFT）
+│   │   ├── parsers/      # 数据清洗（召唤师/战绩/对局信息/TFT云顶之弈）
 │   │   ├── agents/       # 自动化任务（BP/匹配/重连）
-│   │   ├── upload.rs     # 对局上传队列
-│   │   ├── tools.rs      # 杂项工具
+│   │   ├── commands/     # Tauri 命令实现（配置、LCU、工具等）
+│   │   ├── loot.rs       # 战利品系统（智能批量开箱、分解、重铸、解锁）
+│   │   ├── upload.rs     # 对局上传队列（包含失败暂存与对局触发式重试）
+│   │   ├── updater.rs    # 自动更新模块
+│   │   ├── tools.rs      # 杂项工具（自定义房间/符文/OP.GG数据抓取）
 │   │   └── signalr.rs    # SignalR Hub 远程反代
 │   └── tauri.conf.json   # Tauri 配置
 └── File/                 # 重构参考文档（不入库）

@@ -117,19 +117,31 @@ Yuumi/
 │   │   └── theme.ts                # 主题色动态更新
 │   ├── composables/
 │   │   ├── useLcuAsset.ts          # LCU 资源路径 → data URL（缓存 + 去重）
-│   │   └── useToast.ts             # Naive UI 消息提示 Hook (多窗口安全降级)
+│   │   ├── useToast.ts             # Naive UI 消息提示 Hook (多窗口安全降级)
+│   │   ├── usePlayerSearch.ts      # 召唤师名称点击跳转搜索
+│   │   ├── useTftData.ts           # 云顶之弈 API & 数据处理
+│   │   ├── useTftMetaDecks.ts      # 云顶 OP.GG 热门阵容解析
+│   │   ├── useLoot.ts              # 战利品智能开箱/分解/重铸
+│   │   ├── useMatchHistory.ts      # 战绩历史 Hook
+│   │   ├── usePremadeGroup.ts      # 组队分析 Hook
+│   │   └── useGamePlayerData.ts   # 对局玩家数据集中管理
 │   ├── assets/                     # 静态资源（图片等）
 │   ├── views/
 │   │   ├── Home.vue                # 首页（LCU 状态 + 快捷导航）
 │   │   ├── Career.vue              # 生涯战绩（召唤师 + 对局历史）
 │   │   ├── Search.vue              # 战绩查询（玩家搜索 + 对局列表）
 │   │   ├── GameInfo.vue            # 对局信息（10 人段位 + KDA）
-│   │   ├── TFT.vue                 # TFT 数据
+│   │   ├── TFT.vue                 # 云顶之弈（段位/战绩/阵容推荐/海克斯）
 │   │   ├── Settings.vue            # 设置（头像/签名/在线状态/配置）
-│   │   ├── Tools.vue               # 工具箱（创建房间/ARAM 摇号/符文/皮肤等）
+│   │   ├── Tools.vue               # 工具箱（创建房间/ARAM 摇号/战利品/符文/皮肤等）
 │   │   ├── Notice.vue              # 更新日志
 │   │   └── BenchOverlay.vue        # 大乱斗板凳席悬浮窗
 │   └── components/
+│       ├── tft/                    # 云顶之弈子组件（TftRankHeader/TftMatchCard/TftMatchDetailModal/TftMetaCompsTab/TftAugmentsTab）
+│       ├── gameinfo/               # 对局信息子组件（PlayerCard/PlayerMatchColumn/TeamComposition/PhaseBadge 等）
+│       ├── career/                 # 生涯子组件（SummonerHeader/MatchHistoryTab）
+│       ├── tools/                  # 工具箱子组件（LootTab 等）
+│       ├── layout/                 # 布局与自定义标题栏
 │       ├── OpggModal.vue           # OP.GG 数据弹窗
 │       ├── OpggWindow.vue          # OP.GG 独立窗口组件
 │       ├── LcuImage.vue            # LCU 资源图片组件（loading/error 状态）
@@ -141,22 +153,25 @@ Yuumi/
 │   │   ├── main.rs                 # Rust 入口
 │   │   ├── lib.rs                  # AppState、命令注册、agent 启动、系统托盘
 │   │   ├── config.rs               # 配置读写（%APPDATA%/Yuumi/config.json）
-│   │   ├── tools.rs                # 杂项工具（创建房间/ARAM 摇号/符文/皮肤等）
+│   │   ├── commands/               # Tauri 拆分命令 (config.rs, lcu.rs, tools.rs)
+│   │   ├── loot.rs                 # 战利品管理系统 (开箱/分解/重铸/精粹查询)
+│   │   ├── updater.rs              # 自动更新机制
+│   │   ├── tools.rs                # 杂项工具（创建房间/ARAM 摇号/符文/皮肤/OP.GG抓取）
 │   │   ├── logging.rs              # 日志系统（flexi_logger，日志写入 exe 同级 log/ 目录）
 │   │   ├── signalr.rs              # SignalR Hub 远程反代（条件启动）
-│   │   ├── upload.rs               # 对局上传队列（单场/批量，Smart Split payload）
+│   │   ├── upload.rs               # 对局上传队列（包含落盘暂存与重试逻辑）
 │   │   ├── lcu/
 │   │   │   ├── mod.rs
 │   │   │   ├── monitor.rs          # LCU 进程轮询（sysinfo + lockfile + WMIC 兜底）
-│   │   │   ├── client.rs           # HTTPS 代理（忽略 SSL + Basic Auth）
+│   │   │   ├── client.rs           # HTTPS 代理（忽略 SSL + Basic Auth + CDragon/OP.GG代理请求）
 │   │   │   ├── ws.rs               # WebSocket 事件订阅 → 广播前端 + 分发 agents（带取消机制）
 │   │   │   └── game_data.rs        # 游戏资源预加载（物品/技能/符文/英雄 ID→名称/iconPath）
 │   │   ├── parsers/
 │   │   │   ├── mod.rs
 │   │   │   ├── summoner.rs         # 召唤师数据清洗
-│   │   │   ├── match_parser.rs     # 战绩数据清洗（parseGameData）
-│   │   │   ├── game_info.rs        # 对局信息（10 人段位 + 近期 KDA）
-│   │   │   └── tft.rs              # TFT 数据解析
+│   │   │   ├── match_parser.rs     # 战绩数据清洗（parseGameData/get_recent_teammates）
+│   │   │   ├── game_info.rs        # 对局信息（10 人段位 + 近期 KDA + 宿命对局分析）
+│   │   │   └── tft.rs              # TFT 云顶之弈数据解析 (战绩/段位/海克斯/阵容)
 │   │   └── agents/
 │   │       ├── mod.rs
 │   │       ├── auto_bp.rs          # 自动选人/禁人/召唤师技能
@@ -197,46 +212,62 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 
 ## Rust Tauri 命令清单
 
-| 命令                         | 来源                    | 说明                               |
-| :--------------------------- | :---------------------- | :--------------------------------- |
-| `greet`                      | lib.rs                  | 测试命令                           |
-| `get_config`                 | lib.rs                  | 读取完整 AppConfig                 |
-| `update_config`              | lib.rs                  | 写入完整 AppConfig                 |
-| `get_config_load_error`      | lib.rs                  | 读取配置文件加载错误信息           |
-| `get_close_to_tray`          | lib.rs                  | 读取关闭到托盘设置                 |
-| `get_lcu_connection_info`    | lib.rs                  | 获取 LCU PID/port/token            |
-| `get_game_data_assets`       | lib.rs                  | 获取预加载的游戏资源映射           |
-| `get_map_side`               | lib.rs                  | 获取当前对局的游戏阵营 (蓝方/红方) |
-| `detect_lol_path`            | lib.rs                  | 自动检测 LOL 客户端路径            |
-| `select_lol_folder`          | lib.rs                  | 打开原生文件夹选择对话框           |
-| `set_mica_effect`            | lib.rs                  | 设置窗口 Mica (云母) 毛玻璃特效    |
-| `launch_lol_client`          | lib.rs                  | 自动启动 LOL 客户端                |
-| `show_bench_overlay_window`  | lib.rs                  | 控制并显示大乱斗板凳席悬浮窗       |
-| `call_lcu_api`               | lcu/client.rs           | 通用 LCU API 转发                  |
-| `get_lcu_asset`              | lcu/client.rs           | 获取单个 LCU 图片资源              |
-| `get_current_summoner`       | parsers/summoner.rs     | 获取召唤师信息                     |
-| `get_match_history`          | parsers/match_parser.rs | 获取战绩列表 (LCU 本地接口)        |
-| `get_match_history_sgp`      | parsers/match_parser.rs | 获取战绩列表 (SGP 远程接口)        |
-| `get_game_player_summaries`  | parsers/game_info.rs    | 获取对局 10 人段位 + KDA           |
-| `get_tft_data`               | parsers/tft.rs          | 获取 TFT 数据                      |
-| `create_5v5_practice_lobby`  | tools.rs                | 创建自定义房间                     |
-| `aram_reroll_and_swap_back`  | tools.rs                | 大乱斗摇号换回                     |
-| `apply_rune_page`            | tools.rs                | 应用符文页                         |
-| `get_lcu_zoom`               | tools.rs                | 获取 LCU 窗口缩放                  |
-| `fix_lcu_window`             | tools.rs                | 修复 LCU 窗口位置                  |
-| `clear_game_cache`           | tools.rs                | 清除游戏缓存                       |
-| `open_log_folder`            | tools.rs                | 打开日志目录                       |
-| `fetch_opgg_data`            | tools.rs                | 获取 OP.GG 数据                    |
-| `get_champion_skins`         | tools.rs                | 获取英雄皮肤列表                   |
-| `get_game_settings_readonly` | tools.rs                | 读取游戏设置                       |
-| `set_game_settings_readonly` | tools.rs                | 写入游戏设置                       |
-| `spectate_directly`          | tools.rs                | 直接观战指定玩家                   |
-| `upload_single_match`        | upload.rs               | 单场对局上传                       |
-| `batch_upload_matches`       | upload.rs               | 批量对局上传                       |
-| `get_signalr_status`         | signalr.rs              | 获取 SignalR 远程连接状态          |
-| `check_update`               | updater.rs              | 检查软件更新                       |
-| `install_update`             | updater.rs              | 开始安装最新软件更新               |
-| `install_pending_update`     | updater.rs              | 安装已下载且挂起的更新             |
+| 命令                         | 来源                    | 说明                                      |
+| :--------------------------- | :---------------------- | :---------------------------------------- |
+| `greet`                      | lib.rs                  | 测试命令                                  |
+| `get_config`                 | commands/config.rs      | 读取完整 AppConfig                        |
+| `update_config`              | commands/config.rs      | 写入完整 AppConfig                        |
+| `get_config_load_error`      | commands/config.rs      | 读取配置文件加载错误信息                  |
+| `get_close_to_tray`          | commands/config.rs      | 读取关闭到托盘设置                        |
+| `get_lcu_connection_info`    | commands/lcu.rs         | 获取 LCU PID/port/token                   |
+| `get_game_data_assets`       | commands/lcu.rs         | 获取预加载的游戏资源映射                  |
+| `get_map_side`               | commands/lcu.rs         | 获取当前对局的游戏阵营 (蓝方/红方)        |
+| `detect_lol_path`            | commands/tools.rs       | 自动检测 LOL 客户端路径                   |
+| `select_lol_folder`          | commands/tools.rs       | 打开 LOL 客户端文件夹选择框               |
+| `select_folder`              | commands/tools.rs       | 打开通用原生文件夹选择对话框              |
+| `open_screenshot_folder`     | commands/tools.rs       | 打开游戏截图目录                          |
+| `set_mica_effect`            | commands/tools.rs       | 设置窗口 Mica (云母) 毛玻璃特效           |
+| `launch_lol_client`          | commands/tools.rs       | 自动启动 LOL 客户端                       |
+| `show_bench_overlay_window`  | commands/tools.rs       | 控制并显示大乱斗板凳席悬浮窗              |
+| `call_lcu_api`               | lcu/client.rs           | 通用 LCU API 转发                         |
+| `get_lcu_asset`              | lcu/client.rs           | 获取单个 LCU 图片资源                     |
+| `get_current_summoner`       | parsers/summoner.rs     | 获取召唤师信息                            |
+| `get_match_history`          | parsers/match_parser.rs | 获取战绩列表 (LCU 本地接口)               |
+| `get_match_history_sgp`      | parsers/match_parser.rs | 获取战绩列表 (SGP 远程接口)               |
+| `get_recent_teammates`       | parsers/match_parser.rs | 获取近期组队队友数据分析                  |
+| `get_game_player_summaries`  | parsers/game_info.rs    | 获取对局 10 人段位 + KDA                  |
+| `get_player_fate_info`       | parsers/game_info.rs    | 获取同场玩家历史交手/宿命战绩统计        |
+| `get_tft_data`               | parsers/tft.rs          | 获取云顶之弈基础数据                      |
+| `get_tft_ranked_stats`       | parsers/tft.rs          | 获取云顶之弈段位与近期胜率统计            |
+| `get_tft_match_history`      | parsers/tft.rs          | 获取云顶之弈对局历史与详情                |
+| `get_tft_augments`           | parsers/tft.rs          | 获取海克斯强化百科（LCU优先，CDragon兜底）|
+| `create_5v5_practice_lobby`  | tools.rs                | 创建自定义房间                            |
+| `aram_reroll_and_swap_back`  | tools.rs                | 大乱斗摇号换回                            |
+| `apply_rune_page`            | tools.rs                | 应用符文页                                |
+| `get_lcu_zoom`               | tools.rs                | 获取 LCU 窗口缩放                         |
+| `fix_lcu_window`             | tools.rs                | 修复 LCU 窗口位置                         |
+| `clear_game_cache`           | tools.rs                | 清除游戏缓存                              |
+| `open_log_folder`            | tools.rs                | 打开日志目录                              |
+| `fetch_opgg_data`            | tools.rs                | 获取 OP.GG 召唤师/英雄数据                |
+| `fetch_tft_meta_decks`       | tools.rs                | 获取 OP.GG 云顶之弈热门阵容数据           |
+| `get_champion_skins`         | tools.rs                | 获取英雄皮肤列表                          |
+| `get_game_settings_readonly` | tools.rs                | 读取游戏设置                              |
+| `set_game_settings_readonly` | tools.rs                | 写入游戏设置                              |
+| `spectate_directly`          | tools.rs                | 直接观战指定玩家                          |
+| `get_openable_loots`         | loot.rs                 | 获取可打开的战利品列表                    |
+| `batch_open_loots`           | loot.rs                 | 批量打开指定战利品                        |
+| `smart_open_all_loots`       | loot.rs                 | 一键智能全自动批量开箱                    |
+| `get_loot_inventory`         | loot.rs                 | 获取当前全部战利品库存                    |
+| `disenchant_loot`            | loot.rs                 | 分解指定战利品（蓝色/橙色精粹）          |
+| `reroll_loot`                | loot.rs                 | 重铸战利品（三合一英雄/皮肤）             |
+| `upgrade_loot`               | loot.rs                 | 升级/解锁战利品                            |
+| `get_essence_balances`       | loot.rs                 | 查询精粹余额                              |
+| `upload_single_match`        | upload.rs               | 单场对局上传                              |
+| `batch_upload_matches`       | upload.rs               | 批量对局上传                              |
+| `get_signalr_status`         | signalr.rs              | 获取 SignalR 远程连接状态                 |
+| `check_update`               | updater.rs              | 检查软件更新                              |
+| `install_update`             | updater.rs              | 开始安装最新软件更新                      |
+| `install_pending_update`     | updater.rs              | 安装已下载且挂起的更新                    |
 
 新命令需在 `lib.rs` 的 `invoke_handler` 中注册。
 
@@ -247,12 +278,22 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 | auto_bp    | `/lol-champ-select/v1/session` | 自动选人/禁人/设置召唤师技能             |
 | auto_match | gameflow-phase + ready-check   | 自动接受匹配/自动重连 + 游戏结束触发上传 |
 
+## 云顶之弈模块 (parsers/tft.rs & src/components/tft)
+
+- **数据源回落 (Fallback)**: 强化符文百科优先请求 LCU 本地 API，不可用时自动降级拉取 CDragon 镜像；支持 `force_refresh` 强刷新与 Gzip 压缩代理传输。
+- **阵容推荐**: 集成 OP.GG 热门阵容，支持前中期打工过渡、激活羁绊解析、一键复制阵容代码以及 4x7 大网格站位图（含核心 C 位、星级与装备优先级图标）。
+
+## 战利品系统 (loot.rs)
+
+- **批量与智能开箱**: 支持遍历并自动解包传送门、法球、杰作宝箱与法球，后台线程并发安全处理。
+- **精粹统筹与重铸**: 提供战利品碎片一键分解为精粹、合成重铸以及永久解锁功能。
+
 ## 上传系统 (upload.rs)
 
-- **UploadQueue**: 去重异步队列，后台 Worker 串行上传，每局 30 秒超时
-- **UploadTrigger**: 监听游戏阶段转换（InProgress → EndOfGame/Lobby），延迟 2 秒后自动上传
-- **Smart Split**: 当前玩家数据放入 `matchInfo.participants`，其余 9 人放入外层 `participants`
-- **批量上传**: 每批 10 场，连接失败时停止后续批次
+- **UploadQueue**: 去重异步队列，后台 Worker 串行上传，每局 30 秒超时。
+- **UploadTrigger**: 监听游戏阶段转换（InProgress → EndOfGame/Lobby），延迟 2 秒后自动上传。
+- **Smart Split**: 当前玩家数据放入 `matchInfo.participants`，其余 9 人放入外层 `participants`。
+- **失败落盘与重试**: 当网络异常或服务端报错时，数据自动落盘为 `.tmp` 暂存文件，后续在对局结束或状态更新时触发重试。
 
 ## 配置文件
 
