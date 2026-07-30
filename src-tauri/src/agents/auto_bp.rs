@@ -230,7 +230,7 @@ async fn do_auto_show(
         "[autoShow] called, enable_auto_hover_champion={}",
         cfg.enable_auto_hover_champion
     );
-    if !cfg.enable_auto_hover_champion {
+    if !cfg.enable_auto_hover_champion || session.bench_enabled {
         return;
     }
 
@@ -559,7 +559,7 @@ async fn do_auto_pick(
     cfg: &FunctionsConfig,
     _selection: &mut ChampionSelection,
 ) {
-    if !cfg.enable_auto_select_champion {
+    if !cfg.enable_auto_select_champion || session.bench_enabled {
         return;
     }
 

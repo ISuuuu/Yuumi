@@ -1,16 +1,69 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import { lcuRequest, fetchConfig } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "../composables/useToast";
 
 const store = useLcuStore();
+const toast = useToast();
 const pickableIds = ref<number[]>([]);
 
 // 大乱斗选人初始时间戳与英雄加入板凳席的时间映射
 const sessionStartTimestamp = ref<number>(Date.now());
-const benchChampionsAddedTime = ref<Record<number, number>>({});
+
+// 本局我曾拥有过的英雄ID（由Rust通过bench-my-champion事件直接推送，绕过webview隔离）
+const myHistoricalChampions = ref<number[]>([]);
+const previousMyChampionId = ref<number>(0);
+let unlistenMyChampion: (() => void) | undefined;
+
+// 响应式当前时间，用于毫秒级平滑解冻保护期
+const currentNow = ref<number>(Date.now());
+let timeTicker: number | undefined;
+
+onMounted(async () => {
+  timeTicker = window.setInterval(() => {
+    currentNow.value = Date.now();
+  }, 100);
+
+  // 监听Rust直接推送的"我的英雄"事件（跨Webview通信，处理未来的英雄变化）
+  unlistenMyChampion = await listen<number>("bench-my-champion", (event) => {
+    const cid = Number(event.payload);
+    if (cid > 0 && !myHistoricalChampions.value.includes(cid)) {
+      myHistoricalChampions.value = [...myHistoricalChampions.value, cid];
+      console.log(`[BenchOverlay] Rust推送英雄到本地记录: ${cid}`, myHistoricalChampions.value);
+    }
+  });
+
+  // 主动从Rust AppState拉取本局历史英雄（核心兜底：即使事件在mounted前已发出也不会丢失）
+  try {
+    const cached = await invoke<number[]>("get_bench_my_champions");
+    if (cached && cached.length > 0) {
+      const next = [...myHistoricalChampions.value];
+      let updated = false;
+      cached.forEach(cid => {
+        if (cid > 0 && !next.includes(cid)) {
+          next.push(cid);
+          updated = true;
+        }
+      });
+      if (updated) {
+        myHistoricalChampions.value = next;
+        console.log(`[BenchOverlay] 从Rust缓存恢复历史英雄:`, myHistoricalChampions.value);
+      }
+    }
+  } catch (e) {
+    console.warn("[BenchOverlay] get_bench_my_champions 调用失败:", e);
+  }
+});
+
+onUnmounted(() => {
+  if (timeTicker) window.clearInterval(timeTicker);
+  unlistenMyChampion?.();
+});
 
 // 获取当前大乱斗板凳席的英雄
 const benchChampions = computed(() => {
@@ -78,71 +131,87 @@ const isPickable = (championId: number) => {
   return pickableIds.value.includes(championId);
 };
 
-// 保护期时长常量（毫秒）
-const OPENING_PROTECT_MS = 5000; // 开局前 5 秒，大家英雄还在加载/随机，非本人英雄禁点
-const BENCH_PROTECT_MS = 3500; // 新入席英雄的队友优先保护期
+// 经由官方 API 验证成功属于本人的动态点亮英雄 ID 集合
+const unlockedMyBenchChampions = ref<Set<number>>(new Set());
 
-// 计算板凳英雄的保护期状态，供 UI 置灰、tooltip 提示、点击拦截三处统一使用
+// 前 15 秒准备阶段保护期时长（毫秒）
+const FIRST_STAGE_PROTECT_MS = 15000;
+
+// 计算板凳英雄的状态，供 UI 置灰与 tooltip 提示使用
 const getProtectionState = (champ: any): { clickable: boolean; reason: string } => {
-  if (!isPickable(champ.championId)) {
+  const cid = Number(champ.championId);
+
+  if (!isPickable(cid)) {
     return { clickable: false, reason: "未拥有/不可用" };
   }
 
-  // 自己的随时可以点回，不作保护期限制
-  if (champ.isMine === true) {
+  // 经由官方 API 置换成功验证属于本人的专属英雄，在前 15 秒内保持动态点亮高亮
+  if (unlockedMyBenchChampions.value.has(cid)) {
     return { clickable: true, reason: "点击秒抢" };
   }
 
-  // 倒计时 timer.phase === "FINALIZATION" 是最后的全面开放阶段，肯定是可以选的
-  if (store.champSelectSession?.timer?.phase === "FINALIZATION") {
+  const timer = store.champSelectSession?.timer as any;
+  const phase = timer?.phase || "";
+
+  // 使用官方 session.timer 精准计算已过去的时间
+  let isFirst15Seconds = true;
+  if (timer && typeof timer.totalTimeInPhase === "number" && timer.totalTimeInPhase > 0) {
+    const totalTime = timer.totalTimeInPhase;
+    const timeLeft = timer.adjustedTimeLeftInPhase || 0;
+    const elapsedInPhase = totalTime - timeLeft;
+    if (elapsedInPhase >= FIRST_STAGE_PROTECT_MS) {
+      isFirst15Seconds = false;
+    }
+  } else {
+    const elapsedFromStart = currentNow.value - sessionStartTimestamp.value;
+    if (elapsedFromStart >= FIRST_STAGE_PROTECT_MS) {
+      isFirst15Seconds = false;
+    }
+  }
+
+  // 1. 倒计时 timer.phase === "FINALIZATION" 或已满 15 秒：
+  //    全面开放阶段，板凳席英雄全部高亮显示
+  if (phase === "FINALIZATION" || !isFirst15Seconds) {
     return { clickable: true, reason: "点击秒抢" };
   }
 
-  const addedTime = benchChampionsAddedTime.value[champ.championId] || sessionStartTimestamp.value;
-  const now = Date.now();
-  const elapsed = now - addedTime;
-  const elapsedFromStart = now - sessionStartTimestamp.value;
-
-  // 1. 刚开局前 5 秒内，大家的英雄都还在加载或随机，非本人的英雄直接禁用
-  if (elapsedFromStart < OPENING_PROTECT_MS) {
-    return { clickable: false, reason: "开局准备中，请稍候" };
-  }
-
-  // 2. 新放到板凳席不足 3.5 秒的，还在队友保护冷却期内，不能选择
-  if (elapsed < BENCH_PROTECT_MS) {
-    return { clickable: false, reason: "保护期内 (队友优先)" };
-  }
-
-  // 其它情况（过了保护期），所有人均可自由交换
-  return { clickable: true, reason: "点击秒抢" };
+  // 2. 前 15 秒准备阶段：初始置灰提示，点击校验成功后动态点亮
+  return { clickable: false, reason: "前 15 秒准备阶段 (队友保护期中)" };
 };
 
-// 判断板凳英雄是否可点击
+// 判断板凳英雄是否可点击（满 15 秒后或动态点亮后高亮）
 const isBenchChampionClickable = (champ: any) => getProtectionState(champ).clickable;
 
-// 获取不可选原因的提示文案
+// 获取提示文案
 const getDisabledReason = (champ: any) => getProtectionState(champ).reason;
 
 // 点击选择/抢下板凳席英雄
 async function swapChampion(champ: any) {
-  const { clickable, reason } = getProtectionState(champ);
-  if (!clickable) {
-    console.warn(`[BenchOverlay] 拦截点击：英雄 ${champ.championId} - ${reason}`);
+  const cid = Number(champ.championId);
+  
+  if (!isPickable(cid)) {
+    toast.showToast("未拥有/不可用该英雄", "warning");
     return;
   }
 
-  console.log(
-    `[BenchOverlay] 请求交换: championId=${champ.championId} isMine=${champ.isMine} phase=${store.champSelectSession?.timer?.phase}`,
-  );
+  console.log(`[BenchOverlay] 发送交换请求 ID: ${cid}`);
+
   const resp = await lcuRequest(
     "POST",
-    `/lol-champ-select/v1/session/bench/swap/${champ.championId}`,
+    `/lol-champ-select/v1/session/bench/swap/${cid}`,
     {},
   );
+
   if (resp.success) {
-    console.log(`[BenchOverlay] 抢英雄成功: ${champ.championId}`);
+    console.log(`[BenchOverlay] 抢/换英雄成功: ${cid}`);
+    // 验证成功，将该英雄及换下的旧英雄强行加入动态点亮集合
+    unlockedMyBenchChampions.value.add(cid);
+    if (previousMyChampionId.value > 0) {
+      unlockedMyBenchChampions.value.add(previousMyChampionId.value);
+    }
   } else {
-    console.error(`[BenchOverlay] 抢英雄失败: ${champ.championId}, 错误:`, resp.error);
+    console.error(`[BenchOverlay] 抢/换英雄失败: ${cid}, 错误:`, resp.error);
+    toast.showToast("前 15 秒队友保护期中，无法选择该英雄", "warning");
   }
 }
 
@@ -163,112 +232,66 @@ function startDrag() {
 // 监听对局阶段变化，重置开始时间戳与板凳席时间映射
 watch(
   () => store.gamePhase,
-  (phase) => {
-    if (phase === "ChampSelect") {
+  (phase, prevPhase) => {
+    // 只有当确切的上一个阶段存在且不是 ChampSelect 时（即跨阶段跃迁），才重置
+    if (phase === "ChampSelect" && prevPhase && prevPhase !== "ChampSelect") {
       sessionStartTimestamp.value = Date.now();
-      benchChampionsAddedTime.value = {};
-      console.log("[BenchOverlay] 进入选人阶段，初始化开始时间戳和板凳席时间映射");
+      myHistoricalChampions.value = [];
+      previousMyChampionId.value = 0;
+      unlockedMyBenchChampions.value.clear();
+      console.log("[BenchOverlay] 跨阶段进入选人阶段，初始化开始时间戳与动态点亮库");
     }
   },
   { immediate: true }
 );
 
-let isRefreshingIsMine = false;
-
 watch(
   () => store.champSelectSession,
   async (session) => {
     console.log("[BenchOverlay] LCU Session 改变:", session);
-    if (session) {
-      // 智能初始化 sessionStartTimestamp，防止中途打开悬浮窗时误判为“刚开局”
-      const timeLeft = session.timer?.adjustedTimeLeftInPhase ?? 0;
-      if (timeLeft > 0 && timeLeft < 53000 && session.timer?.phase === "PLANNING") {
-        if (Date.now() - sessionStartTimestamp.value < OPENING_PROTECT_MS) {
-          sessionStartTimestamp.value = Date.now() - 10000;
-          console.log("[BenchOverlay] 检测到中途打开悬浮窗，已跳过开局保护时间");
-        }
-      }
+    if (!session) {
+      return;
+    }
+    console.log("[BenchOverlay Session Dump] Raw Session Object:", JSON.parse(JSON.stringify(session)));
+    
+    // 从session持续更新我的历史英雄（含换下退至板凳席的旧英雄追踪）
+    const myPlayer = session.myTeam?.find(
+      (p: any) => Number(p.cellId) === Number(session.localPlayerCellId)
+    );
+    const myCid = Number(myPlayer?.championId || myPlayer?.championPickIntent || 0);
 
-      console.log(
-        "[BenchOverlay] 板凳席状态: benchEnabled =",
-        session.benchEnabled,
-        "benchChampions =",
-        session.benchChampions,
-        "phase =",
-        session.timer?.phase,
-      );
-      if (pickableIds.value.length === 0) {
-        console.log("[BenchOverlay] 选人会话更新且可用列表为空，补充拉取...");
-        fetchPickableIds();
+    // 如果之前有手持英雄，且与当前 myCid 不同，说明旧英雄已经退回到板凳席或被替换
+    if (previousMyChampionId.value > 0 && previousMyChampionId.value !== myCid) {
+      if (!myHistoricalChampions.value.includes(previousMyChampionId.value)) {
+        myHistoricalChampions.value = [...myHistoricalChampions.value, previousMyChampionId.value];
+        console.log(`[BenchOverlay] 录入被替换放回板凳席的旧英雄: ${previousMyChampionId.value}`, myHistoricalChampions.value);
       }
+    }
 
-      const hasMissingIsMine = session.benchChampions?.some(
-        (c: any) => c && c.isMine === undefined,
-      );
-      if (hasMissingIsMine && !isRefreshingIsMine) {
-        console.log("[BenchOverlay] 检测到 isMine 缺失，开启 REST API 补充拉取锁，执行重试...");
-        isRefreshingIsMine = true;
-        refreshSessionIsMine().finally(() => {
-          isRefreshingIsMine = false;
-        });
+    if (myCid > 0) {
+      previousMyChampionId.value = myCid;
+      if (!myHistoricalChampions.value.includes(myCid)) {
+        myHistoricalChampions.value = [...myHistoricalChampions.value, myCid];
+        console.log(`[BenchOverlay] session更新，录入我的当前英雄: ${myCid}`, myHistoricalChampions.value);
       }
+    }
 
-      // 更新板凳席英雄加入的时间戳
-      const now = Date.now();
-      const newChampions = session.benchChampions || [];
-      const currentIds = newChampions.map((c: any) => c?.championId).filter(Boolean);
-
-      // 移除已经不在板凳席的英雄
-      for (const id of Object.keys(benchChampionsAddedTime.value)) {
-        if (!currentIds.includes(Number(id))) {
-          delete benchChampionsAddedTime.value[Number(id)];
-        }
-      }
-
-      // 添加新加入板凳席的英雄
-      for (const c of newChampions) {
-        if (c && c.championId) {
-          if (benchChampionsAddedTime.value[c.championId] === undefined) {
-            const isFreshSession = now - sessionStartTimestamp.value < OPENING_PROTECT_MS;
-            benchChampionsAddedTime.value[c.championId] = isFreshSession ? sessionStartTimestamp.value : now;
-            console.log(`[BenchOverlay] 英雄 ${c.championId} 录入板凳席，设定加入时间为: ${benchChampionsAddedTime.value[c.championId]}`);
-          }
-        }
-      }
+    console.log(
+      "[BenchOverlay] 板凳席状态: benchEnabled =",
+      session.benchEnabled,
+      "benchChampions =",
+      session.benchChampions,
+      "phase =",
+      session.timer?.phase,
+    );
+    if (pickableIds.value.length === 0) {
+      console.log("[BenchOverlay] 选人会话更新且可用列表为空，补充拉取...");
+      fetchPickableIds();
     }
   },
   { immediate: true },
 );
 
-/** 当 WS 推送数据缺少 isMine 时，从 REST API 重试拉取完整 session（延迟递增） */
-async function refreshSessionIsMine(maxRetries = 8) {
-  for (let i = 0; i < maxRetries; i++) {
-    if (!store.champSelectSession?.benchChampions?.some(
-      (c: any) => c && c.isMine === undefined,
-    )) {
-      console.log("[BenchOverlay] isMine 已由后续 WS 推送补全，不再重试");
-      return;
-    }
-    const resp = await lcuRequest<any>(
-      "GET",
-      "/lol-champ-select/v1/session",
-    );
-    if (resp.success && resp.data?.benchChampions?.length) {
-      const restHasMine = resp.data.benchChampions.some(
-        (c: any) => c && c.isMine !== undefined,
-      );
-      if (restHasMine) {
-        console.log(`[BenchOverlay] REST 数据包含 isMine，覆盖 store（重试 #${i + 1}）`);
-        store.setChampSelectSession(resp.data);
-        return;
-      }
-    }
-    const delay = Math.min(500 + i * 500, 3000);
-    console.log(`[BenchOverlay] REST 也没有 isMine，${delay}ms 后重试...`);
-    await new Promise((r) => setTimeout(r, delay));
-  }
-  console.warn("[BenchOverlay] 重试结束，仍未获取到 isMine，可能 LCU 接口暂无此字段");
-}
 </script>
 
 <template>

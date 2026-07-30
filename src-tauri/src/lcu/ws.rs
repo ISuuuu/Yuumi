@@ -309,6 +309,73 @@ fn process_event(text: &str, app_handle: &AppHandle) {
         }
     }
 
+    // 向悬浮窗直接推送"我的当前英雄ID"，解决多窗口localStorage隔离问题
+    if uri.starts_with("/lol-champ-select/v1/current-champion") {
+        if let Some(cid) = event_data.get("data").and_then(|v| v.as_i64()) {
+            if cid > 0 {
+                log::info!("[WS] 推送我的英雄到悬浮窗: {}", cid);
+                // 写入 AppState 缓存（悬浮窗挂载时可主动拉取）
+                {
+                    let state = app_handle.state::<crate::AppState>();
+                    if let Ok(mut list) = state.bench_my_champions.lock() {
+                        if !list.contains(&cid) {
+                            list.push(cid);
+                        }
+                    };
+                }
+                let _ = app_handle.emit_to(
+                    tauri::EventTarget::WebviewWindow {
+                        label: "bench-overlay".to_string(),
+                    },
+                    "bench-my-champion",
+                    cid,
+                );
+            }
+        }
+    }
+
+    if uri.starts_with("/lol-champ-select/v1/session") {
+        if let Some(data) = event_data.get("data") {
+            if let (Some(my_team), Some(local_cell_id)) = (
+                data.get("myTeam").and_then(|v| v.as_array()),
+                data.get("localPlayerCellId").and_then(|v| v.as_i64()),
+            ) {
+                for player in my_team {
+                    if player.get("cellId").and_then(|v| v.as_i64()) == Some(local_cell_id) {
+                        let cid = player
+                            .get("championId")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0)
+                            .max(
+                                player
+                                    .get("championPickIntent")
+                                    .and_then(|v| v.as_i64())
+                                    .unwrap_or(0),
+                            );
+                        if cid > 0 {
+                            // 写入 Rust AppState 历史缓存
+                            let state = app_handle.state::<crate::AppState>();
+                            if let Ok(mut list) = state.bench_my_champions.lock() {
+                                if !list.contains(&cid) {
+                                    list.push(cid);
+                                    log::info!("[WS] 从 session 记录我的英雄到缓存: {}", cid);
+                                }
+                            }
+                            let _ = app_handle.emit_to(
+                                tauri::EventTarget::WebviewWindow {
+                                    label: "bench-overlay".to_string(),
+                                },
+                                "bench-my-champion",
+                                cid,
+                            );
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     if uri.starts_with("/lol-gameflow/v1/gameflow-phase") {
         if let Some(phase) = event_data.get("data").and_then(|v| v.as_str()) {
             if let Err(e) =
@@ -320,6 +387,15 @@ fn process_event(text: &str, app_handle: &AppHandle) {
             {
                 log::warn!("[WS] 推送 Gameflow PhaseChanged 失败: {}", e);
             }
+            // 只有当真正从非 ChampSelect 阶段跨阶段进入 ChampSelect 时，才清空上局历史英雄缓存
+            let mut last_phase = state.last_gameflow_phase.lock().unwrap();
+            if *last_phase != "ChampSelect" && phase == "ChampSelect" {
+                if let Ok(mut list) = state.bench_my_champions.lock() {
+                    list.clear();
+                    log::info!("[WS] 跨阶段进入选人阶段，已清空板凳席历史英雄缓存");
+                }
+            }
+            *last_phase = phase.to_string();
         }
     }
 

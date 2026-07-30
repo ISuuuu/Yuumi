@@ -139,3 +139,13 @@ pub async fn get_game_data_assets(
         augments: gd.augments.clone(),
     })
 }
+
+/// 获取本局大乱斗板凳席我曾拥有过的英雄列表（由 ws.rs 持续写入，悬浮窗挂载时主动拉取）
+#[tauri::command]
+pub fn get_bench_my_champions(app_state: tauri::State<'_, AppState>) -> Vec<i64> {
+    app_state
+        .bench_my_champions
+        .lock()
+        .map(|list| list.clone())
+        .unwrap_or_default()
+}

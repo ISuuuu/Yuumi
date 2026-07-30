@@ -72,6 +72,10 @@ pub struct AppState {
     pub downloading_update: Mutex<Option<UpdateInfo>>,
     /// 后台已下载完成的待安装更新
     pub pending_update: Mutex<Option<PendingUpdate>>,
+    /// 大乱斗板凳席：本局当前玩家拥有过的英雄列表（用于悬浮窗挂载时主动拉取）
+    pub bench_my_champions: Mutex<Vec<i64>>,
+    /// 记录上一次的 gameflow 阶段，避免阶段重复事件造成重复清空历史英雄缓存
+    pub last_gameflow_phase: Mutex<String>,
 }
 
 impl AppState {
@@ -143,6 +147,8 @@ pub fn run() {
                 is_downloading: AtomicBool::new(false),
                 downloading_update: Mutex::new(None),
                 pending_update: Mutex::new(None),
+                bench_my_champions: Mutex::new(Vec::new()),
+                last_gameflow_phase: Mutex::new(String::new()),
             };
             app.manage(state);
 
@@ -332,6 +338,7 @@ pub fn run() {
             commands::tools::set_mica_effect,
             commands::tools::launch_lol_client,
             commands::lcu::get_game_data_assets,
+            commands::lcu::get_bench_my_champions,
             upload::upload_single_match,
             upload::batch_upload_matches,
             signalr::get_signalr_status,

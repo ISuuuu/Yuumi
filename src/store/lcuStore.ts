@@ -97,6 +97,55 @@ export const useLcuStore = defineStore("lcu", () => {
   const searchQuery = ref("");
   const selectedGameId = ref<number | null>(null);
 
+  // 跨窗口同步的历史拥有英雄记录
+  const myHistoricalChampions = ref<number[]>([]);
+
+  // 从 localStorage 恢复（用于晚启动的悬浮窗子窗口）
+  function syncFromStorage(val: string | null) {
+    if (val) {
+      try {
+        const arr = JSON.parse(val);
+        if (Array.isArray(arr)) {
+          let updated = false;
+          const next = [...myHistoricalChampions.value];
+          arr.forEach(id => {
+            const numId = Number(id);
+            if (numId > 0 && !next.includes(numId)) {
+              next.push(numId);
+              updated = true;
+            }
+          });
+          if (updated) {
+            myHistoricalChampions.value = next;
+          }
+        }
+      } catch (e) {}
+    }
+  }
+  syncFromStorage(localStorage.getItem("myHistoricalChampions"));
+
+  // 监听其他窗口的更新（主窗口写入，悬浮窗实时同步）
+  window.addEventListener("storage", (e) => {
+    if (e.key === "myHistoricalChampions") {
+      syncFromStorage(e.newValue);
+    }
+  });
+
+  function addHistoricalChampion(championId: number) {
+    const numId = Number(championId);
+    if (!numId || numId <= 0) return;
+    if (!myHistoricalChampions.value.includes(numId)) {
+      myHistoricalChampions.value = [...myHistoricalChampions.value, numId];
+      localStorage.setItem("myHistoricalChampions", JSON.stringify(myHistoricalChampions.value));
+      console.log(`[lcuStore] 历史拥有英雄更新:`, myHistoricalChampions.value);
+    }
+  }
+
+  function clearHistoricalChampions() {
+    myHistoricalChampions.value = [];
+    localStorage.removeItem("myHistoricalChampions");
+  }
+
   function setConnected(v: boolean) {
     isConnected.value = v;
   }
@@ -105,13 +154,29 @@ export const useLcuStore = defineStore("lcu", () => {
   }
   function setGamePhase(v: GamePhase) {
     console.log("[lcuStore] setGamePhase:", v, "prev:", gamePhase.value);
+    const prev = gamePhase.value;
     gamePhase.value = v;
-    if (v !== "ChampSelect") {
+    if (v === "ChampSelect" && prev !== "ChampSelect") {
+      // 刚进入新的选人阶段，清空上一局的历史记录
+      clearHistoricalChampions();
+    } else if (v === "InProgress" || v === "EndOfGame" || v === "Lobby" || v === "None") {
       champSelectSession.value = null;
+      clearHistoricalChampions();
     }
   }
   function setChampSelectSession(v: ChampSelectSession | null) {
     champSelectSession.value = v;
+    if (v) {
+      const myPlayer = v.myTeam?.find(
+        (p: any) => Number(p.cellId) === Number(v.localPlayerCellId)
+      );
+      if (myPlayer) {
+        const cid = Number(myPlayer.championId || myPlayer.championPickIntent || 0);
+        if (cid > 0) {
+          addHistoricalChampion(cid);
+        }
+      }
+    }
   }
   function setReadyCheck(v: ReadyCheckSession | null) {
     readyCheck.value = v;
@@ -136,6 +201,8 @@ export const useLcuStore = defineStore("lcu", () => {
     currentPage,
     searchQuery,
     selectedGameId,
+    myHistoricalChampions,
+    addHistoricalChampion,
     setConnected,
     setWsConnected,
     setGamePhase,
@@ -205,6 +272,12 @@ export async function initLcuListeners() {
       store.setGamePhase(data);
     } else if (uri.startsWith("/lol-champ-select/v1/session")) {
       store.setChampSelectSession(data);
+    } else if (uri.startsWith("/lol-champ-select/v1/current-champion")) {
+      const cid = Number(typeof data === "object" ? data?.championId || data?.id : data);
+      if (cid > 0) {
+        store.addHistoricalChampion(cid);
+        console.log(`[lcuStore] 收到 current-champion 事件，录入历史拥有英雄: ${cid}`);
+      }
     } else if (uri.startsWith("/lol-matchmaking/v1/ready-check")) {
       store.setReadyCheck(data);
     }
