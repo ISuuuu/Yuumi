@@ -534,6 +534,8 @@
     "1820": "Ghost Mode",
     "1830": "Ghost Mode",
     "1840": "Ghost Mode",
+    "4300": "League Classic",
+    "4310": "League Classic",
     "0": "Custom Game",
     "3100": "TFT (Normal)",
     "3140": "TFT (Ranked)"
@@ -543,6 +545,7 @@
     "12": "Howling Abyss",
     "21": "Nexus Blitz",
     "22": "Lobby",
+    "453": "Classic Rift",
     "unknown": "Unknown Map"
   },
   "tools_extra": {

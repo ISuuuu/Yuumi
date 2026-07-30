@@ -374,6 +374,15 @@ fn get_queue_info(queue_id: i32) -> QueueInfo {
             name: "捉鬼模式",
             map: "捉鬼模式",
         },
+        // 经典模式 (League Classic)
+        4300 => QueueInfo {
+            name: "经典模式",
+            map: "召唤师峡谷",
+        },
+        4310 => QueueInfo {
+            name: "经典模式",
+            map: "召唤师峡谷",
+        },
         // 自定义
         0 => QueueInfo {
             name: "自定义模式",

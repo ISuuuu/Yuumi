@@ -766,14 +766,17 @@ const gameDetails = computed(() => {
     1820: "捉鬼模式",
     1830: "捉鬼模式",
     1840: "捉鬼模式",
-    0: "自定义模式",
-  };
+  4300: "经典模式",
+  4310: "经典模式",
+  0: "自定义模式",
+};
 
   const mapNames: Record<number, string> = {
     11: "召唤师峡谷",
     12: "嚎哭深渊",
     21: "极限闪击",
     22: "对战大厅",
+  453: "经典峡谷",
   };
 
   const mins = Math.floor(g.gameDuration / 60);

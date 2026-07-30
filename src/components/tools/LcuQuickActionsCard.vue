@@ -195,6 +195,7 @@ const GAME_MODES: { id: number; name: string }[] = [
   { id: 1020, name: "克隆模式" },
   { id: 1300, name: "极限闪击" },
   { id: 1700, name: "斗魂竞技场" },
+  { id: 4300, name: "经典模式" },
 ];
 
 onMounted(async () => {
