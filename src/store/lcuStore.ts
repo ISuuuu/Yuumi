@@ -119,7 +119,9 @@ export const useLcuStore = defineStore("lcu", () => {
             myHistoricalChampions.value = next;
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn("[lcuStore] 恢复 myHistoricalChampions 失败:", e);
+      }
     }
   }
   syncFromStorage(localStorage.getItem("myHistoricalChampions"));

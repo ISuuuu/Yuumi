@@ -618,18 +618,28 @@ function cleanAugmentDesc(desc: string): string {
     .trim();
 }
 
+/** 海克斯强化数据来源（stats 或 participant 上均可能携带） */
+interface AugmentSource {
+  augments?: number[];
+  playerAugment1?: number;
+  playerAugment2?: number;
+  playerAugment3?: number;
+  playerAugment4?: number;
+  playerAugment5?: number;
+}
+
 /** 从 stats 和 participant 中提取海克斯强化 ID（去重，最多 5 个） */
-function extractAugmentIds(stats: any, participant?: any): number[] {
+function extractAugmentIds(stats: AugmentSource, participant?: AugmentSource): number[] {
   const seen = new Set<number>();
   const ids: number[] = [];
-  for (const source of [stats, participant].filter(Boolean)) {
+  for (const source of [stats, participant].filter(Boolean) as AugmentSource[]) {
     if (Array.isArray(source.augments)) {
       for (const id of source.augments) {
         if (id && !seen.has(id)) { seen.add(id); ids.push(id); }
       }
     }
     for (let i = 1; i <= 5; i++) {
-      const id = source[`playerAugment${i}`];
+      const id = source[`playerAugment${i}` as keyof AugmentSource] as number | undefined;
       if (id && !seen.has(id)) { seen.add(id); ids.push(id); }
     }
   }
@@ -766,17 +776,17 @@ const gameDetails = computed(() => {
     1820: "捉鬼模式",
     1830: "捉鬼模式",
     1840: "捉鬼模式",
-  4300: "经典模式",
-  4310: "经典模式",
-  0: "自定义模式",
-};
+    4300: "经典模式",
+    4310: "经典模式",
+    0: "自定义模式",
+  };
 
   const mapNames: Record<number, string> = {
     11: "召唤师峡谷",
     12: "嚎哭深渊",
     21: "极限闪击",
     22: "对战大厅",
-  453: "经典峡谷",
+    453: "经典峡谷",
   };
 
   const mins = Math.floor(g.gameDuration / 60);

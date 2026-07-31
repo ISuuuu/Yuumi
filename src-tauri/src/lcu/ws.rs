@@ -388,14 +388,17 @@ fn process_event(text: &str, app_handle: &AppHandle) {
                 log::warn!("[WS] 推送 Gameflow PhaseChanged 失败: {}", e);
             }
             // 只有当真正从非 ChampSelect 阶段跨阶段进入 ChampSelect 时，才清空上局历史英雄缓存
-            let mut last_phase = state.last_gameflow_phase.lock().unwrap();
-            if *last_phase != "ChampSelect" && phase == "ChampSelect" {
-                if let Ok(mut list) = state.bench_my_champions.lock() {
-                    list.clear();
-                    log::info!("[WS] 跨阶段进入选人阶段，已清空板凳席历史英雄缓存");
+            if let Ok(mut last_phase) = state.last_gameflow_phase.lock() {
+                if *last_phase != "ChampSelect" && phase == "ChampSelect" {
+                    if let Ok(mut list) = state.bench_my_champions.lock() {
+                        list.clear();
+                        log::info!("[WS] 跨阶段进入选人阶段，已清空板凳席历史英雄缓存");
+                    }
                 }
+                *last_phase = phase.to_string();
+            } else {
+                log::warn!("[WS] last_gameflow_phase 锁中毒，跳过板凳席缓存清空");
             }
-            *last_phase = phase.to_string();
         }
     }
 

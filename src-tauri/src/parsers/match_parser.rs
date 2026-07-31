@@ -126,29 +126,51 @@ pub struct MatchDisplay {
 // ─── 数据清洗 ───
 
 /// 从 stats 中提取海克斯强化 ID，去重后最多返回 5 个。
-fn extract_augment_ids(stats: &LcuMatchStats) -> Vec<i32> {
+/// 将候选海克斯强化 ID 去重、过滤 0、最多保留 5 个
+fn dedupe_augment_ids<I: IntoIterator<Item = i32>>(ids: I) -> Vec<i32> {
     let mut seen = std::collections::HashSet::new();
     let mut ordered = Vec::new();
-
-    for &id in &stats.augments {
+    for id in ids {
         if id != 0 && seen.insert(id) {
             ordered.push(id);
         }
     }
-    for id in [
+    ordered.truncate(5);
+    ordered
+}
+
+/// 从 stats 中提取海克斯强化 ID（去重，最多 5 个）
+fn extract_augment_ids(stats: &LcuMatchStats) -> Vec<i32> {
+    dedupe_augment_ids(stats.augments.iter().copied().chain([
         stats.player_augment1,
         stats.player_augment2,
         stats.player_augment3,
         stats.player_augment4,
         stats.player_augment5,
-    ] {
-        if id != 0 && seen.insert(id) {
-            ordered.push(id);
+    ]))
+}
+
+/// 根据 ID 列表从资源表解析海克斯图标/名称/描述（名称为空时兜底"海克斯强化"）
+fn resolve_augment_details(
+    ids: &[i32],
+    assets: &crate::lcu::game_data::GameDataAssets,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let mut icon_urls = Vec::new();
+    let mut names = Vec::new();
+    let mut descs = Vec::new();
+    for &id in ids {
+        if let Some(detail) = assets.augments.get(&id) {
+            icon_urls.push(detail.icon_path.clone());
+            let name = if detail.name.trim().is_empty() {
+                "海克斯强化".to_string()
+            } else {
+                detail.name.clone()
+            };
+            names.push(name);
+            descs.push(detail.description.clone());
         }
     }
-
-    ordered.truncate(5);
-    ordered
+    (icon_urls, names, descs)
 }
 
 impl LcuMatchGame {
@@ -209,21 +231,8 @@ impl LcuMatchGame {
             .collect();
 
         let augment_ids = extract_augment_ids(stats);
-        let mut augment_icon_urls = Vec::new();
-        let mut augment_names = Vec::new();
-        let mut augment_descs = Vec::new();
-        for &id in &augment_ids {
-            if let Some(detail) = assets.augments.get(&id) {
-                augment_icon_urls.push(detail.icon_path.clone());
-                let name = if detail.name.trim().is_empty() {
-                    "海克斯强化".to_string()
-                } else {
-                    detail.name.clone()
-                };
-                augment_names.push(name);
-                augment_descs.push(detail.description.clone());
-            }
-        }
+        let (augment_icon_urls, augment_names, augment_descs) =
+            resolve_augment_details(&augment_ids, assets);
 
         MatchDisplay {
             queue_id: self.queue_id,
@@ -730,50 +739,27 @@ pub async fn get_match_history_sgp(
         let duration = secs_to_str(game_duration);
 
         // 从 stats 中提取海克斯强化 ID
-        let mut augment_ids = Vec::new();
-        {
-            let mut seen = std::collections::HashSet::new();
-            if let Some(arr) = stats.get("augments").and_then(|v| v.as_array()) {
-                for v in arr {
-                    if let Some(id) = v.as_i64() {
-                        let id = id as i32;
-                        if id != 0 && seen.insert(id) {
-                            augment_ids.push(id);
-                        }
-                    }
-                }
-            }
-            for key in &[
-                "playerAugment1",
-                "playerAugment2",
-                "playerAugment3",
-                "playerAugment4",
-                "playerAugment5",
-            ] {
-                if let Some(id) = stats.get(*key).and_then(|v| v.as_i64()) {
-                    let id = id as i32;
-                    if id != 0 && seen.insert(id) {
-                        augment_ids.push(id);
-                    }
-                }
-            }
-            augment_ids.truncate(5);
-        }
-        let mut augment_icon_urls = Vec::new();
-        let mut augment_names = Vec::new();
-        let mut augment_descs = Vec::new();
-        for &id in &augment_ids {
-            if let Some(detail) = assets.augments.get(&id) {
-                augment_icon_urls.push(detail.icon_path.clone());
-                let name = if detail.name.trim().is_empty() {
-                    "海克斯强化".to_string()
-                } else {
-                    detail.name.clone()
-                };
-                augment_names.push(name);
-                augment_descs.push(detail.description.clone());
-            }
-        }
+        let augment_ids = dedupe_augment_ids(
+            stats
+                .get("augments")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_i64().map(|id| id as i32))
+                .chain(
+                    [
+                        "playerAugment1",
+                        "playerAugment2",
+                        "playerAugment3",
+                        "playerAugment4",
+                        "playerAugment5",
+                    ]
+                    .into_iter()
+                    .filter_map(|key| stats.get(key).and_then(|v| v.as_i64()).map(|id| id as i32)),
+                ),
+        );
+        let (augment_icon_urls, augment_names, augment_descs) =
+            resolve_augment_details(&augment_ids, &assets);
 
         let kda = if deaths == 0 {
             "Perfect".to_string()
