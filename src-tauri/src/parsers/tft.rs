@@ -563,7 +563,13 @@ fn get_tft_data_cache_path() -> Option<std::path::PathBuf> {
 fn get_tft_augments_cache_path() -> Option<std::path::PathBuf> {
     let dir = dirs::config_dir()?.join("Yuumi").join("cache");
     std::fs::create_dir_all(&dir).ok()?;
-    Some(dir.join("tft_augments.json"))
+    // 缓存版本号 +1：旧版缓存含未解析的 @占位符@，需要强制重新生成
+    let v2_path = dir.join("tft_augments_v2.json");
+    let legacy_path = dir.join("tft_augments.json");
+    if legacy_path.exists() {
+        let _ = std::fs::remove_file(&legacy_path);
+    }
+    Some(v2_path)
 }
 
 fn clean_tft_desc(desc_raw: &str) -> String {
@@ -589,6 +595,80 @@ fn clean_tft_desc(desc_raw: &str) -> String {
         .replace("</div>", "\n")
         .trim()
         .to_string()
+}
+
+/// 将海克斯描述中的 @变量@ 占位符解析为实际数值。
+/// 数据来源：CDragon 中每个强化对象自带的 effects 字段（变量名 → 数值），
+/// 支持 `@Var*100@`、`@AttackSpeed*100*MaxStacks@` 这类算术表达式。
+/// 无法静态解析的动态占位符（TFTTrait/TFTUnitProperty 等运行期值）直接移除。
+fn resolve_tft_desc_tokens(
+    desc: &str,
+    effects: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    let mut out = String::with_capacity(desc.len());
+    let mut rest = desc;
+
+    while let Some(start) = rest.find('@') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('@') {
+            Some(inner) => {
+                let token = &after[..inner];
+                if let Some(value) = eval_tft_token(token, effects) {
+                    out.push_str(&format_tft_number(value));
+                }
+                rest = &after[inner + 1..];
+            }
+            None => {
+                out.push_str(rest);
+                break;
+            }
+        }
+    }
+
+    out.push_str(rest);
+    out
+}
+
+/// 计算单个 @...@ 占位符表达式（形如 `VarName` 或 `VarName*100*MaxStacks`），
+/// 变量名查找大小写不敏感。
+fn eval_tft_token(
+    token: &str,
+    effects: &serde_json::Map<String, serde_json::Value>,
+) -> Option<f64> {
+    if token.contains(':') || token.contains("TFTTrait") || token.contains("TFTUnitProperty") {
+        return None;
+    }
+    let mut acc = 1.0_f64;
+    for factor in token.split('*') {
+        let factor = factor.trim().trim_end_matches('%').trim();
+        if factor.is_empty() {
+            continue;
+        }
+        if let Ok(num) = factor.parse::<f64>() {
+            acc *= num;
+            continue;
+        }
+        let value = effects
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(factor))
+            .and_then(|(_, v)| v.as_f64())?;
+        acc *= value;
+    }
+    Some(acc)
+}
+
+/// 格式化数值：整数不带小数点，小数最多保留两位并去掉多余的 0
+fn format_tft_number(value: f64) -> String {
+    let rounded = (value * 100.0).round() / 100.0;
+    if (rounded - rounded.trunc()).abs() < 1e-9 {
+        format!("{}", rounded as i64)
+    } else {
+        format!("{:.2}", rounded)
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    }
 }
 
 fn extract_augment_tier(api_name: &str, icon: &str, name: &str) -> i32 {
@@ -690,7 +770,12 @@ fn extract_augments_from_value(root: &serde_json::Value) -> Vec<TftAugmentInfo> 
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let desc = clean_tft_desc(raw_desc);
+        let effects = item
+            .get("effects")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+        let desc = resolve_tft_desc_tokens(&clean_tft_desc(raw_desc), &effects);
         let icon_path = convert_seraphine_lcu_icon_path(icon);
         let tier = extract_augment_tier(api_name, icon, name);
 

@@ -71,36 +71,24 @@ watch(
 
 <template>
   <div class="tft-view">
-    <div class="tft-content">
-      <div class="header-title-bar">
-        <div class="title-wrap">
-          <h2>{{ t("tftPage.title") }}</h2>
-          <span v-if="clientVersion" class="client-ver-badge">v{{ clientVersion }}</span>
-        </div>
-        <n-button
-          v-if="store.isConnected"
-          size="small"
-          quaternary
-          :loading="loading"
-          @click="refresh"
-        >
-          刷新
-        </n-button>
-      </div>
+    <!-- 未连接 LCU：整页启动提示，高度与其他页面保持一致 -->
+    <div v-if="!store.isConnected" class="tip-container">
+      <div class="offline-logo">🎮</div>
+      <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
+    </div>
 
-      <!-- 顶部 TFT 段位与数据统计汇总 Header（有连接时显示） -->
-      <TftRankHeader v-if="store.isConnected" :rankedStats="rankedStats" :summary="summary" />
-
-      <!-- 主视图 Tabs -->
+    <div v-else class="tft-content">
+      <!-- 主视图 Tabs（版本号与页签同一行，靠右） -->
       <n-tabs v-model:value="activeTab" type="line" class="tft-tabs">
+        <template #suffix>
+          <span v-if="clientVersion" class="client-ver-badge">v{{ clientVersion }}</span>
+        </template>
         <!-- Tab 1: 云顶战绩 -->
         <n-tab-pane name="career" :tab="t('tftPage.tabs.career')">
-          <div v-if="!store.isConnected" class="tip-container">
-            <div class="offline-logo">🎮</div>
-            <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
-          </div>
+          <!-- 段位与数据统计汇总（单排/狂暴/双人/胜利） -->
+          <TftRankHeader :rankedStats="rankedStats" :summary="summary" />
 
-          <div v-else-if="loading" class="loading-box">
+          <div v-if="loading" class="loading-box">
             <n-spin size="medium" />
           </div>
 
@@ -154,26 +142,6 @@ watch(
   overflow-y: auto;
 }
 
-.header-title-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.header-title-bar h2 {
-  margin: 0;
-  font-size: 1.3rem;
-  font-weight: 800;
-  color: var(--text-color);
-}
-
-.title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
 .client-ver-badge {
   font-size: 0.72rem;
   font-weight: 700;
@@ -216,6 +184,48 @@ watch(
 
 .tft-tabs {
   margin-top: 4px;
+}
+
+/* 毛玻璃容器式页签栏 */
+.tft-tabs :deep(.n-tabs-nav) {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+}
+
+.tft-tabs :deep(.n-tabs-nav-scroll-wrapper) {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.tft-tabs :deep(.n-tabs-bar) {
+  display: none;
+}
+
+.tft-tabs :deep(.n-tabs-tab) {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 8px 18px;
+  margin: 0 4px;
+  border-radius: 9px;
+  background: transparent;
+  transition: all 0.25s ease;
+}
+
+.tft-tabs :deep(.n-tabs-tab:hover) {
+  color: var(--primary-color);
+  background: var(--card-bg-hover);
+}
+
+.tft-tabs :deep(.n-tabs-tab--active) {
+  color: var(--primary-color);
+  background: var(--primary-color-alpha-10);
+  box-shadow: inset 0 0 0 1px var(--primary-color-alpha-20);
 }
 
 .tft-tabs :deep(.n-tabs-pane-wrapper),
