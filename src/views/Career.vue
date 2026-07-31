@@ -11,14 +11,14 @@ const currentTab = ref("matches");
 
 const {
   summoner, matches, recentMatches, rankedQueues, loading, copied,
-  loadSummoner, loadMatches, loadRecentMatches, loadRankedStats,
+  loadSummoner, loadCareerData, loadRankedStats,
   copyRiotId, clearCache, fetchMatchHistoryWithFallback,
 } = useMatchHistory();
 
 // 向子组件 provide 共享的 composable 状态（避免重复实例化）
 provide("matchHistoryState", {
   summoner, matches, recentMatches, rankedQueues, loading,
-  loadSummoner, loadMatches, loadRecentMatches, loadRankedStats,
+  loadSummoner, loadCareerData, loadRankedStats,
   clearCache, fetchMatchHistoryWithFallback,
 });
 
@@ -157,6 +157,7 @@ function refreshSummoner() {
         />
         <LootManagerTab
           v-show="currentTab === 'loot'"
+          :active="currentTab === 'loot'"
           :refresh-summoner="refreshSummoner"
         />
       </template>

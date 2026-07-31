@@ -135,6 +135,7 @@ pub fn start(
                             match reqwest::Client::builder()
                                 .danger_accept_invalid_certs(true)
                                 .no_proxy()
+                                .timeout(Duration::from_secs(10))
                                 .build()
                             {
                                 Ok(http_client) => {

@@ -4,10 +4,9 @@ import {
   fetchCurrentSummoner,
   fetchMatchHistory,
   fetchMatchHistorySgp,
-  fetchRecentTeammates,
   lcuRequest,
 } from "../api/lcu";
-import type { SummonerDisplay, MatchDisplay, RecentTeammate } from "../api/lcu";
+import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 
 // 模块作用域内存缓存单例
 let cachedSummoner: SummonerDisplay | null = null;
@@ -106,11 +105,6 @@ export function useMatchHistory() {
     return { wins, losses, kills, deaths, assists, kda: kdaRatio, topChamps };
   });
 
-  // 最近队友
-  const loadingTeammates = ref(false);
-  const recentTeammates = ref<RecentTeammate[]>([]);
-  let currentTeammatePuuid = "";
-
   // ─── 数据加载 ───
 
   const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_matches_cache_${puuid}`;
@@ -161,8 +155,7 @@ export function useMatchHistory() {
       if (summoner.value?.puuid) {
         await Promise.all([
           loadRankedStats(summoner.value.puuid),
-          loadMatches(summoner.value.puuid),
-          loadRecentMatches(summoner.value.puuid),
+          loadCareerData(summoner.value.puuid),
         ]);
 
         cachedSummoner = summoner.value;
@@ -193,30 +186,18 @@ export function useMatchHistory() {
     }
   }
 
-  async function loadMatches(puuid: string, isGameEndSync = false) {
-    try {
-      loading.value = true;
-      const targetCount = careerGamesNumber.value;
-      matches.value = await fetchMatchHistoryWithFallback(
-        puuid, 0, targetCount - 1, isGameEndSync,
-      );
-      cachedMatches = matches.value;
-    } catch (e) {
-      console.error("获取战绩历史失败:", e);
-    } finally {
-      loading.value = false;
-    }
-  }
-
-  async function loadRecentMatches(puuid: string, isGameEndSync = false) {
+  // 一次拉取战绩：matches 与 recentMatches 共用同一份数据，避免重复请求同一接口
+  async function loadCareerData(puuid: string, isGameEndSync = false) {
     try {
       const targetCount = careerGamesNumber.value;
-      const fresh = await fetchMatchHistoryWithFallback(
+      const raw = await fetchMatchHistoryWithFallback(
         puuid, 0, targetCount, isGameEndSync,
       );
-      updateRecentMatchesCache(puuid, fresh);
+      matches.value = raw.slice(0, targetCount);
+      cachedMatches = matches.value;
+      updateRecentMatchesCache(puuid, raw);
     } catch (e) {
-      console.error("获取近期战绩统计失败:", e);
+      console.error("获取战绩历史失败:", e);
     }
   }
 
@@ -243,35 +224,6 @@ export function useMatchHistory() {
     try {
       localStorage.setItem(MATCHES_CACHE_KEY(puuid), JSON.stringify(merged));
     } catch { /* ignore */ }
-
-    calculateRecentTeammates();
-  }
-
-  async function calculateRecentTeammates() {
-    if (!summoner.value?.puuid || recentMatches.value.length === 0) {
-      recentTeammates.value = [];
-      return;
-    }
-
-    const targetPuuid = summoner.value.puuid;
-    currentTeammatePuuid = targetPuuid;
-    loadingTeammates.value = true;
-    try {
-      const gameIds = recentMatches.value.map((m) => m.gameId);
-      const resp = await fetchRecentTeammates(gameIds, targetPuuid);
-      if (currentTeammatePuuid === targetPuuid) {
-        recentTeammates.value = resp.summoners || [];
-      }
-    } catch (err) {
-      console.error("计算最近队友失败:", err);
-      if (currentTeammatePuuid === targetPuuid) {
-        recentTeammates.value = [];
-      }
-    } finally {
-      if (currentTeammatePuuid === targetPuuid) {
-        loadingTeammates.value = false;
-      }
-    }
   }
 
   // ─── 辅助函数 ───
@@ -385,13 +337,10 @@ export function useMatchHistory() {
     soloQueue,
     flexQueue,
     statsSummary,
-    loadingTeammates,
-    recentTeammates,
 
     // 方法
     loadSummoner,
-    loadMatches,
-    loadRecentMatches,
+    loadCareerData,
     loadRankedStats,
     selectQueue,
     formatRank,
@@ -404,7 +353,6 @@ export function useMatchHistory() {
     getQueueName,
     getKdaClass,
     clearCache,
-    calculateRecentTeammates,
     fetchMatchHistoryWithFallback,
   };
 }

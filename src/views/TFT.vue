@@ -124,12 +124,12 @@ watch(
         </n-tab-pane>
 
         <!-- Tab 2: 阵容推荐 -->
-        <n-tab-pane name="recommend" :tab="t('tftPage.tabs.recommend')">
+        <n-tab-pane name="recommend" :tab="t('tftPage.tabs.recommend')" lazy>
           <TftMetaCompsTab />
         </n-tab-pane>
 
         <!-- Tab 3: 海克斯强化 -->
-        <n-tab-pane name="augments" :tab="t('tftPage.tabs.augments')">
+        <n-tab-pane name="augments" :tab="t('tftPage.tabs.augments')" lazy>
           <TftAugmentsTab />
         </n-tab-pane>
       </n-tabs>

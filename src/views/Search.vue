@@ -108,6 +108,35 @@ const TIER_MAP: Record<string, string> = {
 };
 const gameDataAssets = ref<any>(null);
 
+// ─── 对局详情 + 段位内存缓存（避免翻页/重复搜索/重复点选时重复请求）───
+const GAME_DETAIL_TTL = 10 * 60 * 1000;
+const RANK_TTL = 5 * 60 * 1000;
+const CACHE_LIMIT = 200;
+interface CacheEntry<T> {
+  value: T;
+  ts: number;
+}
+const gameDetailCache = new Map<number, CacheEntry<any>>();
+const rankCache = new Map<string, CacheEntry<string>>();
+
+function cacheGet<T>(cache: Map<any, CacheEntry<T>>, key: any, ttl: number): T | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts >= ttl) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function cacheSet<T>(cache: Map<any, CacheEntry<T>>, key: any, value: T) {
+  if (cache.size >= CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(key, { value, ts: Date.now() });
+}
+
 // 分页相关
 const currentPageNum = ref(1);
 const matchesPerPage = 10;
@@ -489,17 +518,23 @@ async function selectMatch(gameId: number) {
   selectedGameId.value = gameId;
   gameLoading.value = true;
   try {
-    const resp = await lcuRequest<any>(
-      "GET",
-      `/lol-match-history/v1/games/${gameId}`,
-    );
-    if (resp.success && resp.data) {
-      selectedGame.value = resp.data;
+    let g = cacheGet(gameDetailCache, gameId, GAME_DETAIL_TTL);
+    if (!g) {
+      const resp = await lcuRequest<any>(
+        "GET",
+        `/lol-match-history/v1/games/${gameId}`,
+      );
+      if (resp.success && resp.data) {
+        g = resp.data;
+        cacheSet(gameDetailCache, gameId, g);
+      }
+    }
+    if (g) {
+      selectedGame.value = g;
 
       // 清空上次对局玩家的段位缓存
       participantRanks.value = {};
 
-      const g = resp.data;
       const participants = g.participants || [];
       const identities = g.participantIdentities || [];
 
@@ -514,8 +549,12 @@ async function selectMatch(gameId: number) {
           }
         }
 
-        // 并发拉取段位数据
+        // 并发拉取段位数据（命中缓存则直接复用）
         const rankPromises = playerPuuids.map(async (puuid) => {
+          const cachedRank = cacheGet(rankCache, puuid, RANK_TTL);
+          if (cachedRank !== null) {
+            return { puuid, rankStr: cachedRank };
+          }
           try {
             const rResp = await lcuRequest<any>(
               "GET",
@@ -541,7 +580,9 @@ async function selectMatch(gameId: number) {
                   activeQueue.rank && activeQueue.rank !== "NA"
                     ? activeQueue.rank
                     : "";
-                return { puuid, rankStr: `${tier}${div}` };
+                const rankStr = `${tier}${div}`;
+                cacheSet(rankCache, puuid, rankStr);
+                return { puuid, rankStr };
               }
             }
           } catch (e) {

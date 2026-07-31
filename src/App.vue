@@ -438,12 +438,16 @@ watch(navigateSearchPayload, (payload) => {
 });
 
 const hasVisitedSearch = ref(false);
+const hasVisitedGameInfo = ref(false);
 
 // 监听本地路由变化并同步到 Pinia 状态库，确保其他子组件可按需刷新
 watch(currentPage, (val) => {
   store.setCurrentPage(val);
   if (val === "search") {
     hasVisitedSearch.value = true;
+  }
+  if (val === "gameinfo") {
+    hasVisitedGameInfo.value = true;
   }
 }, { immediate: true });
 
@@ -708,7 +712,7 @@ async function handleClose() {
 
             <!-- 右侧内容区域 -->
             <main class="content-wrapper">
-              <!-- GameInfo 用 v-show 保持状态，切页面不清空数据 -->
+              <!-- GameInfo 用 v-show 保持状态，配合 hasVisitedGameInfo 延迟挂载，避免应用启动即加载对局数据 -->
               <div
                 v-show="currentPage === 'gameinfo'"
                 style="
@@ -719,7 +723,7 @@ async function handleClose() {
                   min-height: 0;
                 "
               >
-                <GameInfo />
+                <GameInfo v-if="hasVisitedGameInfo || currentPage === 'gameinfo'" />
               </div>
 
               <!-- Search 用 v-show 保持状态，配合 hasVisitedSearch 延迟挂载 -->

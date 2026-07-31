@@ -18,8 +18,7 @@ const mh = inject<{
   rankedQueues: Ref<any[]>;
   loading: Ref<boolean>;
   loadSummoner: (force?: boolean) => Promise<void>;
-  loadMatches: (puuid: string, sync?: boolean) => Promise<void>;
-  loadRecentMatches: (puuid: string, sync?: boolean) => Promise<void>;
+  loadCareerData: (puuid: string, sync?: boolean) => Promise<void>;
   loadRankedStats: (puuid: string) => Promise<void>;
   clearCache: () => void;
   fetchMatchHistoryWithFallback: (puuid: string, beg: number, end: number, sync?: boolean) => Promise<MatchDisplay[]>;
@@ -287,8 +286,7 @@ watch(
           await new Promise((r) => setTimeout(r, 3000));
         }
         try {
-          await mh.loadMatches(puuid, true);
-          mh.loadRecentMatches(puuid, true);
+          await mh.loadCareerData(puuid, true);
           const latestId = matches.value[0]?.gameId ?? null;
           if (latestId && latestId !== prevLatestId) {
             console.log(

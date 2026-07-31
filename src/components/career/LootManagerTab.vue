@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import { useLoot } from '../../composables/useLoot'
 import { useLcuStore } from '../../store/lcuStore'
 import LcuImage from '../LcuImage.vue'
@@ -7,10 +7,27 @@ import { NSelect, NInputGroup, NInputNumber, NProgress } from 'naive-ui'
 
 const props = defineProps<{
   refreshSummoner?: () => void
+  active?: boolean
 }>()
 
 const store = useLcuStore()
 const loot = useLoot()
+
+// 惰性加载：仅当战利品 tab 首次激活时才拉取数据，避免应用启动即触发请求
+let lootLoadedOnce = false
+
+watch(
+  () => props.active,
+  (active) => {
+    if (active && !lootLoadedOnce) {
+      lootLoadedOnce = true
+      if (store.isConnected) {
+        loot.loadAllData()
+      }
+    }
+  },
+  { immediate: true },
+)
 
 // Alias for template: original Career.vue used "loadOpenableLoots"
 const loadOpenableLoots = loot.loadLootData
@@ -77,9 +94,6 @@ function handleBatchOpenWithRefresh() {
 
 onMounted(() => {
   loot.setRefreshCallback(() => props.refreshSummoner?.())
-  if (store.isConnected) {
-    loot.loadAllData()
-  }
 })
 
 onUnmounted(() => {

@@ -1,6 +1,7 @@
 use base64::Engine;
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::State;
 use tokio::time::sleep;
@@ -14,6 +15,18 @@ const RETRY_DELAY: Duration = Duration::from_millis(500);
 
 /// 资源缓存有效期：7 天
 const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// CDN 兜底下载共用的 HTTP 客户端（进程级复用，避免每次请求重建 TLS 连接）
+fn cdn_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
 
 /// 返回资源缓存目录，不存在时自动创建
 fn get_asset_cache_dir() -> Option<PathBuf> {
@@ -375,11 +388,7 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
     }
 
     // 2. 备用：LCU 不可用、未连上或返回 404 时，向 CDragon CDN 发起请求（参照 Seraphine 逻辑）
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .timeout(Duration::from_secs(10))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    let client = cdn_client();
 
     let url = if is_http_cdn {
         path.clone()

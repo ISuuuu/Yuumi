@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -9,6 +10,17 @@ use crate::{build_auth_header, LcuClient};
 /// 游戏资源加载重试次数和间隔
 const GAME_DATA_RETRIES: u32 = 3;
 const GAME_DATA_RETRY_DELAY: Duration = Duration::from_secs(2);
+
+/// CDragon 海克斯详情下载共用的 HTTP 客户端（进程级复用，避免每次调用重建连接）
+fn cdragon_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(8))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
 
 /// 海克斯强化详情（来自 LCU cherry-augments.json）
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -340,12 +352,7 @@ async fn fetch_cherry_augment_map(
 /// 返回 id → (name, desc) 映射。
 async fn fetch_cdragon_augment_details() -> HashMap<i32, (String, String)> {
     let url = "https://raw.communitydragon.org/latest/cdragon/arena/zh_cn.json";
-    match reqwest::Client::new()
-        .get(url)
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-    {
+    match cdragon_client().get(url).send().await {
         Ok(resp) if resp.status().is_success() => match resp.json::<Value>().await {
             Ok(val) => {
                 let arr = match val.get("augments").and_then(|v| v.as_array()) {
