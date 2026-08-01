@@ -283,6 +283,17 @@
       "statusDisabled": "Disabled",
       "label": "Auto-write configured spells on lock-in:"
     },
+    "autoGameflow": {
+      "title": "Auto Game Flow",
+      "desc": "Auto-handle invitations, honors, play again and ARAM team side",
+      "statusEnabled": "Enabled",
+      "statusDisabled": "Disabled",
+      "inviteLabel": "Auto accept friend invitations:",
+      "honorLabel": "Auto honor players after game:",
+      "playAgainLabel": "Auto play again after game:",
+      "aramSideLabel": "Report ARAM team side in champ select:",
+      "aramSideVisibleLabel": "Make team side message visible to teammates:"
+    },
     "benchOverlay": {
       "title": "ARAM Bench Overlay",
       "desc": "Semi-transparent overlay window during ARAM champ select for bench swaps"

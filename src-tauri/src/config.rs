@@ -1,12 +1,20 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// 当前配置版本号。配置结构发生破坏性变更（字段重命名/移动/类型变化）时递增，
+/// 并在 [`AppConfig::migrate`] 中实现从旧版本到新版本的幂等迁移。
+pub const CONFIG_VERSION: u32 = 1;
+
 /// 获取配置文件路径: %APPDATA%/Yuumi/config.json
 fn config_path() -> PathBuf {
     let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
     path.push("Yuumi");
     path.push("config.json");
     path
+}
+
+fn default_config_version() -> u32 {
+    CONFIG_VERSION
 }
 
 // ─── 通用设置 ───
@@ -185,6 +193,18 @@ pub struct FunctionsConfig {
     pub screenshot_on_multikill_levels: Vec<u32>,
     #[serde(default)]
     pub screenshot_save_path: String,
+
+    // 自动游戏流程
+    #[serde(default)]
+    pub enable_auto_handle_invite: bool,
+    #[serde(default)]
+    pub enable_auto_honor: bool,
+    #[serde(default)]
+    pub enable_auto_play_again: bool,
+    #[serde(default)]
+    pub enable_auto_aram_team_side: bool,
+    #[serde(default)]
+    pub aram_team_side_visible_to_team: bool,
 }
 
 impl Default for FunctionsConfig {
@@ -238,6 +258,11 @@ impl Default for FunctionsConfig {
             enable_screenshot_on_multikill: false,
             screenshot_on_multikill_levels: vec![3, 4, 5, 8],
             screenshot_save_path: String::new(),
+            enable_auto_handle_invite: false,
+            enable_auto_honor: false,
+            enable_auto_play_again: false,
+            enable_auto_aram_team_side: false,
+            aram_team_side_visible_to_team: false,
         }
     }
 }
@@ -256,8 +281,10 @@ pub struct OtherConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-#[derive(Default)]
 pub struct AppConfig {
+    /// 配置版本号，用于配置结构迁移
+    #[serde(default = "default_config_version")]
+    pub version: u32,
     #[serde(default)]
     pub general: GeneralConfig,
     #[serde(default)]
@@ -268,7 +295,64 @@ pub struct AppConfig {
     pub other: OtherConfig,
 }
 
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            version: CONFIG_VERSION,
+            general: GeneralConfig::default(),
+            personalization: PersonalizationConfig::default(),
+            functions: FunctionsConfig::default(),
+            other: OtherConfig::default(),
+        }
+    }
+}
+
 impl AppConfig {
+    /// 将配置迁移到当前版本。从旧版本读取到的配置在解析成功后调用，
+    /// 保证新增字段的默认值、字段重命名等破坏性变更能够平滑升级。
+    /// 返回是否发生了迁移（由调用方决定是否需要落盘）。
+    pub fn migrate(&mut self) -> bool {
+        if self.version >= CONFIG_VERSION {
+            return false;
+        }
+        // 版本升级脚本：从低版本逐级迁移，每一步幂等。
+        // 例如 future 版本：
+        // while self.version < 2 { ...自 v1 升级到 v2... }
+        log::info!("配置版本 {} → {}，已应用迁移", self.version, CONFIG_VERSION);
+        self.version = CONFIG_VERSION;
+        true
+    }
+
+    /// 解析 SignalR 使用的用户 ID（general.signalr_user_id 优先，其次 functions.lcu_user_id）
+    pub fn signalr_user_id(&self) -> String {
+        if !self.general.signalr_user_id.is_empty() {
+            self.general.signalr_user_id.clone()
+        } else if !self.functions.lcu_user_id.is_empty() {
+            self.functions.lcu_user_id.clone()
+        } else {
+            "lcu_user_001".to_string()
+        }
+    }
+
+    /// 校验关键配置字段，防止非法值（如 0 并发、缺少协议前缀的 URL）写入。
+    pub fn validate(&self) -> Result<(), String> {
+        let url = &self.general.upload_api_url;
+        if !url.is_empty() && !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err("upload_api_url 必须以 http:// 或 https:// 开头".to_string());
+        }
+        let srv = &self.general.signalr_server_url;
+        if !srv.is_empty() && !srv.starts_with("http://") && !srv.starts_with("https://") {
+            return Err("signalr_server_url 必须以 http:// 或 https:// 开头".to_string());
+        }
+        if !self.personalization.theme_color.starts_with('#') {
+            return Err("theme_color 必须是以 # 开头的颜色值".to_string());
+        }
+        if !(1..=32).contains(&self.functions.api_concurrency_number) {
+            return Err("api_concurrency_number 必须在 1 到 32 之间".to_string());
+        }
+        Ok(())
+    }
+
     /// 从磁盘加载配置，文件不存在返回默认值并保存；
     /// 解析失败时备份损坏文件并写入错误信息，再返回默认值。
     pub fn load() -> Self {
@@ -286,7 +370,12 @@ impl AppConfig {
             }
         };
         match serde_json::from_str::<Self>(&text) {
-            Ok(cfg) => cfg,
+            Ok(mut cfg) => {
+                if cfg.migrate() {
+                    cfg.save();
+                }
+                cfg
+            }
             Err(e) => {
                 // 备份损坏的配置文件
                 if let Some(parent) = path.parent() {

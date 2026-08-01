@@ -168,13 +168,7 @@ pub fn run() {
                 let functions = &cfg_snapshot.functions;
                 if functions.lcu_realtime_enabled && !general.upload_api_url.is_empty() {
                     let server_url = general.upload_api_url.clone();
-                    let user_id = if !general.signalr_user_id.is_empty() {
-                        general.signalr_user_id.clone()
-                    } else if !functions.lcu_user_id.is_empty() {
-                        functions.lcu_user_id.clone()
-                    } else {
-                        "lcu_user_001".to_string()
-                    };
+                    let user_id = cfg_snapshot.signalr_user_id();
                     log::info!("启动 SignalR Hub 远程反代");
                     signalr::start(app.handle().clone(), server_url, user_id);
                 }

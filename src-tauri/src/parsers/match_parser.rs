@@ -275,6 +275,17 @@ impl LcuMatchGame {
 
 // ─── 队列 ID 映射 ───
 
+/// 将 queueId 映射为 OP.GG 使用的游戏模式标识（供自动选人与其他调用方复用）
+pub fn queue_id_to_opgg_mode(queue_id: i32) -> &'static str {
+    match queue_id {
+        450 => "aram",
+        1700 | 1710 => "arena",
+        1300 => "nexus_blitz",
+        900 | 1900 => "urf",
+        _ => "ranked",
+    }
+}
+
 struct QueueInfo {
     name: &'static str,
     map: &'static str,
@@ -476,20 +487,7 @@ pub async fn get_match_history(
     let history: LcuMatchHistoryResponse = resp.json().await.map_err(|e| e.to_string())?;
 
     // 如果资源尚未加载完成，且 LCU 已连接，进行等待以防止解析出来的图片/装备路径为空（最多等 5 秒）
-    let mut check_count = 0;
-    while check_count < 50 {
-        {
-            let assets = app_state.game_data.read().await;
-            if !assets.spells.is_empty() {
-                break;
-            }
-        }
-        if app_state.lcu().await.is_err() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        check_count += 1;
-    }
+    crate::lcu::client::wait_for_game_data(app_state.inner()).await;
 
     let assets = app_state.game_data.read().await;
     let displays: Vec<MatchDisplay> = history
@@ -516,9 +514,6 @@ pub async fn get_match_history_sgp(
     let lcu = lock.as_ref().unwrap();
 
     // 仅腾讯国服支持 SGP
-    const TENCENT_SERVERS: &[&str] = &[
-        "hn1", "hn10", "bgp2", "tj100", "cq100", "gz100", "nj100", "tj101",
-    ];
     let server = match &lcu.server {
         Some(s) => s,
         None => {
@@ -527,7 +522,7 @@ pub async fn get_match_history_sgp(
         }
     };
     let server_lower = server.to_lowercase();
-    if !TENCENT_SERVERS.contains(&server_lower.as_str()) {
+    if !crate::lcu::sgp::is_tencent_server(&server_lower) {
         log::info!("非腾讯国服 ({})，跳过 SGP 战绩获取", server);
         return Ok(Vec::new());
     }
@@ -561,19 +556,9 @@ pub async fn get_match_history_sgp(
         .ok_or_else(|| "SGP token 数据中缺少 accessToken".to_string())?
         .to_string();
 
-    // ── 2. 构建 SGP base URL ──
-    const K8S_SGP_SERVERS: &[&str] = &["hn1", "hn10", "bgp2"];
-    let sgp_base = if K8S_SGP_SERVERS.contains(&server_lower.as_str()) {
-        format!("https://{}-k8s-sgp.lol.qq.com:21019", server_lower)
-    } else {
-        format!("https://{}-sgp.lol.qq.com:21019", server_lower)
-    };
-
-    let sgp_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .no_proxy()
-        .build()
-        .map_err(|e| format!("创建 SGP HTTP 客户端失败: {}", e))?;
+    // ── 2. 构建 SGP base URL 与客户端 ──
+    let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
+    let sgp_client = crate::lcu::sgp::build_sgp_client()?;
 
     // ── 3. 请求 SGP 战绩接口 ──
     if end_index < beg_index {
@@ -629,20 +614,7 @@ pub async fn get_match_history_sgp(
     }
 
     // 等待游戏资源加载完成
-    let mut check_count = 0;
-    while check_count < 50 {
-        {
-            let assets = app_state.game_data.read().await;
-            if !assets.spells.is_empty() {
-                break;
-            }
-        }
-        if app_state.lcu().await.is_err() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        check_count += 1;
-    }
+    crate::lcu::client::wait_for_game_data(app_state.inner()).await;
 
     let assets = app_state.game_data.read().await;
     let mut displays = Vec::new();
@@ -1037,13 +1009,24 @@ pub async fn get_recent_teammates(
     let base = format!("https://127.0.0.1:{}", lcu.port);
     let http = lcu.http_client.clone();
 
+    // 复用 LCU 并发信号量，限制同时查询的对局数量，避免打满 LCU
+    let semaphore = {
+        let lock = app_state.api_semaphore.read().await;
+        lock.clone()
+    };
+
     let mut handles = Vec::new();
     for game_id in game_ids {
         let auth = auth.clone();
         let base = base.clone();
         let http = http.clone();
         let target_puuid = puuid.clone();
+        let semaphore = semaphore.clone();
         handles.push(tokio::spawn(async move {
+            let _permit = match semaphore.acquire().await {
+                Ok(p) => p,
+                Err(_) => return None,
+            };
             fetch_game_teammates(&http, &base, &auth, game_id, &target_puuid).await
         }));
     }

@@ -283,6 +283,17 @@
       "statusDisabled": "未啟用",
       "label": "鎖定英雄後自動寫入配置好的技能組:"
     },
+    "autoGameflow": {
+      "title": "自動遊戲流程",
+      "desc": "自動處理邀請、點讚、再來一局與 ARAM 報邊",
+      "statusEnabled": "已啟用",
+      "statusDisabled": "未啟用",
+      "inviteLabel": "自動接受好友邀請:",
+      "honorLabel": "對局結束後自動點讚:",
+      "playAgainLabel": "對局結束後自動再來一局:",
+      "aramSideLabel": "ARAM 選人時自動報邊:",
+      "aramSideVisibleLabel": "報邊訊息對隊友可見:"
+    },
     "benchOverlay": {
       "title": "大亂斗板凳席懸浮窗",
       "desc": "在大亂斗選人階段顯示半透明置頂懸浮窗，可無 CD 搶板凳席英雄"

@@ -18,113 +18,82 @@ pub fn get_config_load_error() -> Option<String> {
     crate::config::AppConfig::take_load_error()
 }
 
-/// 校验关键配置字段，防止恶意篡改
-fn validate_config(cfg: &crate::config::AppConfig) -> Result<(), String> {
-    let url = &cfg.general.upload_api_url;
-    if !url.is_empty() && !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("upload_api_url 必须以 http:// 或 https:// 开头".to_string());
-    }
-    let srv = &cfg.general.signalr_server_url;
-    if !srv.is_empty() && !srv.starts_with("http://") && !srv.starts_with("https://") {
-        return Err("signalr_server_url 必须以 http:// 或 https:// 开头".to_string());
-    }
-    if !cfg.personalization.theme_color.starts_with('#') {
-        return Err("theme_color 必须是以 # 开头的颜色值".to_string());
-    }
-    if !(1..=32).contains(&cfg.functions.api_concurrency_number) {
-        return Err("api_concurrency_number 必须在 1 到 32 之间".to_string());
-    }
-    Ok(())
+/// 配置变更集合：记录 `old → new` 之间哪些字段发生了影响运行时的变化，
+/// 副作用层据此决定要执行哪些运行时操作。
+#[derive(Debug, Default)]
+struct ConfigChanges {
+    /// hide_tft 变更 → 重建托盘菜单
+    rebuild_tray: bool,
+    /// 自动建厅开关/默认模式变更 → 重置大厅状态
+    reset_lobby: bool,
+    /// SignalR 反代相关变更 → 重启/停止 Hub
+    signalr_restart: bool,
+    /// 上传 API 地址变更 → 触发挂起队列重试
+    trigger_upload_retry: bool,
+    /// API 并发数变更 → 重建信号量
+    api_concurrency_changed: bool,
 }
 
-/// 更新配置（接收完整 AppConfig JSON，写入内存并持久化）
-#[tauri::command]
-pub async fn update_config(
-    new_config: crate::config::AppConfig,
-    app_state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle,
-) -> Result<(), String> {
-    validate_config(&new_config)?;
+/// 检测 old → new 之间影响运行时的配置变更
+fn detect_changes(old: &crate::config::AppConfig, new: &crate::config::AppConfig) -> ConfigChanges {
+    let signalr_restart = new.functions.lcu_realtime_enabled != old.functions.lcu_realtime_enabled
+        || new.general.upload_api_url != old.general.upload_api_url
+        || new.signalr_user_id() != old.signalr_user_id();
 
-    let (old_enable, old_mode, old_realtime, old_api_url, old_user_id, old_api_concurrency) = {
-        let lock = app_state.config.read().await;
-        (
-            lock.functions.enable_auto_create_lobby,
-            lock.functions.default_game_mode,
-            lock.functions.lcu_realtime_enabled,
-            lock.general.upload_api_url.clone(),
-            if !lock.general.signalr_user_id.is_empty() {
-                lock.general.signalr_user_id.clone()
-            } else if !lock.functions.lcu_user_id.is_empty() {
-                lock.functions.lcu_user_id.clone()
-            } else {
-                "lcu_user_001".to_string()
-            },
-            lock.functions.api_concurrency_number,
-        )
-    };
-
-    let enable_changed = new_config.functions.enable_auto_create_lobby != old_enable;
-    let mode_changed = new_config.functions.default_game_mode != old_mode;
-
-    let new_user_id = if !new_config.general.signalr_user_id.is_empty() {
-        new_config.general.signalr_user_id.clone()
-    } else if !new_config.functions.lcu_user_id.is_empty() {
-        new_config.functions.lcu_user_id.clone()
-    } else {
-        "lcu_user_001".to_string()
-    };
-
-    let signalr_changed = new_config.functions.lcu_realtime_enabled != old_realtime
-        || new_config.general.upload_api_url != old_api_url
-        || new_user_id != old_user_id;
-
-    let hide_tft_changed = {
-        let lock = app_state.config.read().await;
-        lock.functions.hide_tft != new_config.functions.hide_tft
-    };
-
-    {
-        let mut cfg = app_state.config.write().await;
-        *cfg = new_config.clone();
-        cfg.save();
+    ConfigChanges {
+        rebuild_tray: new.functions.hide_tft != old.functions.hide_tft,
+        reset_lobby: new.functions.enable_auto_create_lobby
+            != old.functions.enable_auto_create_lobby
+            || new.functions.default_game_mode != old.functions.default_game_mode,
+        signalr_restart,
+        trigger_upload_retry: new.general.upload_api_url != old.general.upload_api_url
+            && !new.general.upload_api_url.is_empty(),
+        api_concurrency_changed: new.functions.api_concurrency_number
+            != old.functions.api_concurrency_number,
     }
+}
 
-    if hide_tft_changed {
+/// 应用配置变更带来的运行时副作用
+async fn apply_side_effects(
+    app_state: &tauri::State<'_, AppState>,
+    app_handle: &tauri::AppHandle,
+    new_config: &crate::config::AppConfig,
+    changes: ConfigChanges,
+) {
+    if changes.rebuild_tray {
         if let Some(tray) = app_handle.tray_by_id("main_tray") {
-            if let Ok(new_menu) = build_tray_menu(&app_handle, new_config.functions.hide_tft) {
+            if let Ok(new_menu) = build_tray_menu(app_handle, new_config.functions.hide_tft) {
                 let _ = tray.set_menu(Some(new_menu));
             }
         }
     }
 
-    if enable_changed || mode_changed {
+    if changes.reset_lobby {
         let _ = app_state
             .gameflow_tx
             .try_send(crate::agents::auto_match::GameflowEvent::ResetLobbyState);
     }
 
-    if signalr_changed {
+    if changes.signalr_restart {
         if new_config.functions.lcu_realtime_enabled
             && !new_config.general.upload_api_url.is_empty()
         {
             log::info!("配置更新，重新启动 SignalR Hub 远程反代");
             let server_url = new_config.general.upload_api_url.clone();
-            crate::signalr::start(app_handle, server_url, new_user_id);
+            let user_id = new_config.signalr_user_id();
+            crate::signalr::start(app_handle.clone(), server_url, user_id);
         } else {
             log::info!("配置更新，停止 SignalR Hub 远程反代");
             crate::signalr::stop().await;
         }
     }
 
-    if new_config.general.upload_api_url != old_api_url
-        && !new_config.general.upload_api_url.is_empty()
-    {
+    if changes.trigger_upload_retry {
         log::info!("上传 API 地址发生变更，正在触发挂起战绩队列重试...");
         app_state.upload_queue.trigger_pending_retry().await;
     }
 
-    if new_config.functions.api_concurrency_number != old_api_concurrency {
+    if changes.api_concurrency_changed {
         let mut sem_lock = app_state.api_semaphore.write().await;
         *sem_lock = Arc::new(Semaphore::new(
             new_config.functions.api_concurrency_number as usize,
@@ -134,6 +103,28 @@ pub async fn update_config(
             new_config.functions.api_concurrency_number
         );
     }
+}
+
+/// 更新配置（接收完整 AppConfig JSON，写入内存并持久化）
+#[tauri::command]
+pub async fn update_config(
+    new_config: crate::config::AppConfig,
+    app_state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    new_config.validate()?;
+
+    let old_config = app_state.config.read().await;
+    let changes = detect_changes(&old_config, &new_config);
+    drop(old_config);
+
+    {
+        let mut cfg = app_state.config.write().await;
+        *cfg = new_config.clone();
+        cfg.save();
+    }
+
+    apply_side_effects(&app_state, &app_handle, &new_config, changes).await;
 
     Ok(())
 }

@@ -12,6 +12,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AutoAcceptCard: typeof import('./components/tools/AutoAcceptCard.vue')['default']
+    AutoGameflowCard: typeof import('./components/tools/AutoGameflowCard.vue')['default']
     AutoHoverCard: typeof import('./components/tools/AutoHoverCard.vue')['default']
     AutoSwapCard: typeof import('./components/tools/AutoSwapCard.vue')['default']
     ChampionPicker: typeof import('./components/ChampionPicker.vue')['default']

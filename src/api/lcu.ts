@@ -364,6 +364,11 @@ export interface FunctionsConfig {
   EnableScreenshotOnMultikill: boolean;
   ScreenshotOnMultikillLevels: number[];
   ScreenshotSavePath: string;
+  EnableAutoHandleInvite: boolean;
+  EnableAutoHonor: boolean;
+  EnableAutoPlayAgain: boolean;
+  EnableAutoAramTeamSide: boolean;
+  AramTeamSideVisibleToTeam: boolean;
 }
 
 export interface OtherConfig {
@@ -372,6 +377,7 @@ export interface OtherConfig {
 }
 
 export interface AppConfig {
+  Version?: number;
   General: GeneralConfig;
   Personalization: PersonalizationConfig;
   Functions: FunctionsConfig;

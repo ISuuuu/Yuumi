@@ -180,6 +180,9 @@ const ALLOWED_API_PREFIXES: &[&str] = &[
     "/lol-perks/",
     "/lol-ranked/",
     "/lol-match-history/",
+    "/lol-honor-v2/",
+    "/lol-honor/",
+    "/lol-pre-end-of-game/",
     "/lol-spectator/",
     "/lol-patch/",
     "/riotclient/",
@@ -187,14 +190,14 @@ const ALLOWED_API_PREFIXES: &[&str] = &[
     "/system/",
 ];
 
-/// 统一的 LCU API 调用命令。
-/// 前端通过 invoke("call_lcu_api", { method, path, body }) 调用。
-#[tauri::command]
-pub async fn call_lcu_api(
-    method: String,
-    path: String,
+/// 统一的 LCU API 请求入口（带并发信号量、传输层重试与路径白名单）。
+/// 供 Tauri command `call_lcu_api` 与内部 agent（auto_bp/auto_match）复用，
+/// 避免各模块各写一套 HTTP 调用。
+pub async fn lcu_request(
+    app_state: &AppState,
+    method: &str,
+    path: &str,
     body: Option<Value>,
-    app_state: State<'_, AppState>,
 ) -> Result<Value, String> {
     // 路径前缀白名单校验
     let path_allowed = ALLOWED_API_PREFIXES.iter().any(|p| path.starts_with(p));
@@ -288,6 +291,38 @@ pub async fn call_lcu_api(
     }
 
     Err(last_err)
+}
+
+/// 等待游戏静态资源（技能/符文/装备图标等）加载完成。
+/// 战绩解析依赖资源表拼接图标 URL，资源未就绪时最多轮询等待 5 秒，
+/// 供战绩查询、对局分析等解析命令复用。
+pub async fn wait_for_game_data(app_state: &AppState) {
+    let mut check_count = 0;
+    while check_count < 50 {
+        {
+            let assets = app_state.game_data.read().await;
+            if !assets.spells.is_empty() {
+                break;
+            }
+        }
+        if app_state.lcu().await.is_err() {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+        check_count += 1;
+    }
+}
+
+/// 统一的 LCU API 调用命令。
+/// 前端通过 invoke("call_lcu_api", { method, path, body }) 调用。
+#[tauri::command]
+pub async fn call_lcu_api(
+    method: String,
+    path: String,
+    body: Option<Value>,
+    app_state: State<'_, AppState>,
+) -> Result<Value, String> {
+    lcu_request(app_state.inner(), &method, &path, body).await
 }
 
 /// 获取 LCU 静态资源（图片等），返回 data URL。

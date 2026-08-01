@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
 use crate::config::FunctionsConfig;
+use crate::lcu::client::lcu_request;
 
 // ─── 选人会话数据结构体 ───
 
@@ -52,6 +53,9 @@ pub struct ChampSelectPlayer {
     pub champion_pick_intent: i32,
     #[serde(default)]
     pub assigned_position: String,
+    /// 队伍编号（1 / 2），ARAM 报边使用
+    #[serde(default)]
+    pub team: i32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -447,13 +451,9 @@ async fn do_show_opgg_build(
         _ => "",
     };
 
-    // 模式判定
+    // 模式判定（与战绩页共用同一份 queueId→模式映射）
     let mode = match session.queue_id {
-        Some(450) => "aram",
-        Some(1700) | Some(1710) => "arena",
-        Some(1300) => "nexus_blitz",
-        Some(900) | Some(1900) => "urf",
-        Some(_) => "ranked",
+        Some(q) => crate::parsers::match_parser::queue_id_to_opgg_mode(q),
         None => {
             if session.bench_enabled {
                 "aram"
@@ -664,7 +664,7 @@ async fn do_auto_spell(
     }
 }
 
-// ─── LCU API 调用 ───
+// ─── LCU API 调用（统一走 client::lcu_request，复用信号量/重试/白名单） ───
 
 /// PATCH action（选人/禁人/亮英雄）
 async fn lcu_patch_action(
@@ -678,100 +678,33 @@ async fn lcu_patch_action(
         "championId": champion_id,
         "completed": completed,
     });
-    lcu_patch_session(app_handle, &url, &body).await
+    let state = app_handle.state::<crate::AppState>();
+    lcu_request(state.inner(), "PATCH", &url, Some(body))
+        .await
+        .is_ok()
 }
 
 /// 通用 PATCH 请求到 LCU
 async fn lcu_patch_session(app_handle: &AppHandle, path: &str, body: &Value) -> bool {
-    let app_state = app_handle.state::<crate::AppState>();
-    let lock = app_state.lcu_client.read().await;
-    let lcu = match lock.as_ref() {
-        Some(c) => c,
-        None => {
-            log::warn!("LCU 未连接");
-            return false;
-        }
-    };
-
-    let url = format!("https://127.0.0.1:{}{}", lcu.port, path);
-    let auth = crate::build_auth_header(&lcu.token);
-
-    match lcu
-        .http_client
-        .patch(&url)
-        .header("Authorization", auth)
-        .json(body)
-        .send()
+    let state = app_handle.state::<crate::AppState>();
+    lcu_request(state.inner(), "PATCH", path, Some(body.clone()))
         .await
-    {
-        Ok(resp) if resp.status().is_success() => {
-            log::debug!("LCU PATCH {} 成功", path);
-            true
-        }
-        Ok(resp) => {
-            log::warn!("LCU PATCH {} 失败: HTTP {}", path, resp.status());
-            false
-        }
-        Err(e) => {
-            log::error!("LCU PATCH {} 请求失败: {}", path, e);
-            false
-        }
-    }
+        .is_ok()
 }
 
 /// 通用 POST 请求到 LCU
 async fn lcu_post(app_handle: &AppHandle, path: &str) -> bool {
-    let app_state = app_handle.state::<crate::AppState>();
-    let lock = app_state.lcu_client.read().await;
-    let lcu = match lock.as_ref() {
-        Some(c) => c,
-        None => return false,
-    };
-
-    let url = format!("https://127.0.0.1:{}{}", lcu.port, path);
-    let auth = crate::build_auth_header(&lcu.token);
-
-    match lcu
-        .http_client
-        .post(&url)
-        .header("Authorization", auth)
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => true,
-        Ok(resp) => {
-            log::warn!("LCU POST {} 失败: HTTP {}", path, resp.status());
-            false
-        }
-        Err(e) => {
-            log::error!("LCU POST {} 请求失败: {}", path, e);
-            false
-        }
-    }
+    let state = app_handle.state::<crate::AppState>();
+    lcu_request(state.inner(), "POST", path, None).await.is_ok()
 }
 
 /// GET 当前选人会话（autoComplete 重取数据用）
 async fn lcu_get_session(app_handle: &AppHandle) -> Option<ChampSelectSession> {
-    let app_state = app_handle.state::<crate::AppState>();
-    let lock = app_state.lcu_client.read().await;
-    let lcu = lock.as_ref()?;
-
-    let url = format!("https://127.0.0.1:{}/lol-champ-select/v1/session", lcu.port);
-    let auth = crate::build_auth_header(&lcu.token);
-
-    let resp = lcu
-        .http_client
-        .get(&url)
-        .header("Authorization", auth)
-        .send()
+    let state = app_handle.state::<crate::AppState>();
+    let value = lcu_request(state.inner(), "GET", "/lol-champ-select/v1/session", None)
         .await
         .ok()?;
-
-    if !resp.status().is_success() {
-        return None;
-    }
-
-    resp.json::<ChampSelectSession>().await.ok()
+    serde_json::from_value(value).ok()
 }
 
 // ─── 候选列表工具函数 ───

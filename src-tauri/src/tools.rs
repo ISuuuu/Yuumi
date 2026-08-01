@@ -1,46 +1,10 @@
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
-use crate::{build_auth_header, AppState};
-
-static OPGG_CACHE: OnceLock<Mutex<HashMap<String, OpggCacheEntry>>> = OnceLock::new();
-const OPGG_CACHE_MAX_ENTRIES: usize = 100;
-const OPGG_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(600); // 10 分钟
-
-struct OpggCacheEntry {
-    data: serde_json::Value,
-    inserted_at: std::time::Instant,
-}
-
-fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
-    let mut builder = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-
-    if enable_proxy && !proxy_addr.is_empty() {
-        let proxy_url = if proxy_addr.contains("://") {
-            proxy_addr.to_string()
-        } else {
-            format!("http://{}", proxy_addr)
-        };
-        if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
-            builder = builder.proxy(proxy);
-            log::info!("OP.GG 请求已配置代理: {}", proxy_url);
-        } else {
-            log::warn!("无效的 OP.GG 代理地址: {}", proxy_addr);
-        }
-    }
-
-    builder.build().unwrap_or_else(|_| reqwest::Client::new())
-}
-
-fn get_opgg_cache() -> &'static Mutex<HashMap<String, OpggCacheEntry>> {
-    OPGG_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
+use crate::{build_auth_header, lcu::client::lcu_request, AppState};
 
 // ─── 创建 5v5 训练营 ───
 
@@ -177,66 +141,56 @@ pub async fn apply_rune_page(
     params: RunePageParams,
     app_state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
+    apply_rune_page_core(
+        app_state.inner(),
+        &params.name,
+        params.primary_style_id,
+        params.sub_style_id,
+        &params.selected_perk_ids,
+    )
+    .await?;
+    Ok("符文页已应用".to_string())
+}
 
-    let auth = build_auth_header(&lcu.token);
-    let base = format!("https://127.0.0.1:{}", lcu.port);
-
-    // 第一步：获取当前符文页
-    let get_url = format!("{}/lol-perks/v1/currentpage", base);
-    let get_resp = lcu
-        .http_client
-        .get(&get_url)
-        .header("Authorization", &auth)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if get_resp.status().is_success() {
-        let page: serde_json::Value = get_resp.json().await.map_err(|e| e.to_string())?;
+/// 应用符文页核心逻辑（供 command 与自动选人共用）
+pub(crate) async fn apply_rune_page_core(
+    app_state: &AppState,
+    name: &str,
+    primary_style_id: i32,
+    sub_style_id: i32,
+    selected_perk_ids: &[i32],
+) -> Result<(), String> {
+    // 第一步：获取当前符文页，若可删除则删除
+    if let Ok(page) = lcu_request(app_state, "GET", "/lol-perks/v1/currentpage", None).await {
         if page
             .get("isDeletable")
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
         {
-            let page_id = page.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-            if page_id > 0 {
-                let del_url = format!("{}/lol-perks/v1/pages/{}", base, page_id);
-                let _ = lcu
-                    .http_client
-                    .delete(&del_url)
-                    .header("Authorization", &auth)
-                    .send()
+            if let Some(page_id) = page.get("id").and_then(|v| v.as_i64()) {
+                if page_id > 0 {
+                    let _ = lcu_request(
+                        app_state,
+                        "DELETE",
+                        &format!("/lol-perks/v1/pages/{}", page_id),
+                        None,
+                    )
                     .await;
+                }
             }
         }
     }
 
     // 第二步：创建新符文页
-    let create_url = format!("{}/lol-perks/v1/pages", base);
     let body = serde_json::json!({
-        "name": params.name,
-        "primaryStyleId": params.primary_style_id,
-        "subStyleId": params.sub_style_id,
-        "selectedPerkIds": params.selected_perk_ids,
+        "name": name,
+        "primaryStyleId": primary_style_id,
+        "subStyleId": sub_style_id,
+        "selectedPerkIds": selected_perk_ids,
         "current": true,
     });
-
-    let create_resp = lcu
-        .http_client
-        .post(&create_url)
-        .header("Authorization", &auth)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if create_resp.status().is_success() {
-        Ok("符文页已应用".to_string())
-    } else {
-        Err(format!("创建符文页失败: HTTP {}", create_resp.status()))
-    }
+    lcu_request(app_state, "POST", "/lol-perks/v1/pages", Some(body)).await?;
+    Ok(())
 }
 
 // ─── 英雄皮肤数据 ───
@@ -313,7 +267,7 @@ pub async fn get_champion_skins(
 
 // ─── OP.GG 数据代理 ───
 
-/// 从 OP.GG API 获取英雄梯队/出装数据（代理请求，避免前端 CORS，使用内存缓存和复用客户端）
+/// 从 OP.GG API 获取英雄梯队/出装数据（代理请求，避免前端 CORS，缓存与客户端复用见 lcu::opgg）
 #[tauri::command]
 pub async fn fetch_opgg_data(
     region: String,
@@ -327,16 +281,6 @@ pub async fn fetch_opgg_data(
         "{}_{}_{}_{:?}_{:?}",
         region, mode, tier, champion_id, position
     );
-
-    // 尝试从内存缓存中读取（检查 TTL）
-    if let Ok(cache) = get_opgg_cache().lock() {
-        if let Some(entry) = cache.get(&cache_key) {
-            if entry.inserted_at.elapsed() < OPGG_CACHE_TTL {
-                log::info!("OP.GG 缓存命中: {}", cache_key);
-                return Ok(entry.data.clone());
-            }
-        }
-    }
 
     let url = match champion_id {
         Some(id) => {
@@ -359,46 +303,13 @@ pub async fn fetch_opgg_data(
         ),
     };
 
-    let (enable_proxy, proxy_addr) = {
-        let cfg = app_state.config.read().await;
-        (
-            cfg.general.enable_opgg_proxy,
-            cfg.general.opgg_proxy_addr.clone(),
-        )
-    };
-
-    let client = build_opgg_client(enable_proxy, &proxy_addr);
-    let resp = client
-        .get(&url)
-        .query(&[("tier", tier.as_str())])
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-
-    // 写入内存缓存（超限时淘汰最旧条目）
-    if let Ok(mut cache) = get_opgg_cache().lock() {
-        if cache.len() >= OPGG_CACHE_MAX_ENTRIES {
-            if let Some(oldest_key) = cache
-                .iter()
-                .min_by_key(|(_, e)| e.inserted_at)
-                .map(|(k, _)| k.clone())
-            {
-                cache.remove(&oldest_key);
-            }
-        }
-        log::info!("OP.GG 缓存写入: {}", cache_key);
-        cache.insert(
-            cache_key,
-            OpggCacheEntry {
-                data: data.clone(),
-                inserted_at: std::time::Instant::now(),
-            },
-        );
-    }
-
-    Ok(data)
+    crate::lcu::opgg::get_json(
+        app_state.inner(),
+        &url,
+        &[("tier", tier.as_str())],
+        &cache_key,
+    )
+    .await
 }
 
 // ─── 修复 LCU 客户端窗口 ───
@@ -668,14 +579,8 @@ pub async fn set_game_settings_readonly(
 
 // ─── OP.GG MCP API - 云顶之弈热门阵容 ───
 
-static OPGG_MCP_CACHE: OnceLock<Mutex<HashMap<String, OpggCacheEntry>>> = OnceLock::new();
-
-fn get_opgg_mcp_cache() -> &'static Mutex<HashMap<String, OpggCacheEntry>> {
-    OPGG_MCP_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
 /// 附加羁绊/英雄名称/图标映射到 MCP 阵容数据（每次都重新构建，避免缓存里残留错误 URL）
-async fn attach_tft_meta_maps(app_state: &State<'_, AppState>, parsed: &mut serde_json::Value) {
+async fn attach_tft_meta_maps(app_state: &AppState, parsed: &mut serde_json::Value) {
     let lcu_guard = app_state.lcu_client.read().await;
     let lcu = lcu_guard.as_ref();
     let meta_maps = crate::parsers::tft::fetch_tft_meta_maps(lcu).await;
@@ -707,37 +612,10 @@ pub async fn fetch_tft_meta_decks(
     let cache_key = "tft_meta_decks".to_string();
 
     // 尝试内存缓存（阵容本体可复用，但图标映射每次重新附加）
-    let cached_decks = {
-        if let Ok(cache) = get_opgg_mcp_cache().lock() {
-            if let Some(entry) = cache.get(&cache_key) {
-                if entry.inserted_at.elapsed() < OPGG_CACHE_TTL {
-                    log::info!("OP.GG MCP 缓存命中: tft_meta_decks");
-                    Some(entry.data.clone())
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    if let Some(mut parsed) = cached_decks {
-        attach_tft_meta_maps(&app_state, &mut parsed).await;
+    if let Some(mut parsed) = crate::lcu::opgg::get_cached(&cache_key) {
+        attach_tft_meta_maps(app_state.inner(), &mut parsed).await;
         return Ok(parsed);
     }
-
-    let (enable_proxy, proxy_addr) = {
-        let cfg = app_state.config.read().await;
-        (
-            cfg.general.enable_opgg_proxy,
-            cfg.general.opgg_proxy_addr.clone(),
-        )
-    };
-
-    let client = build_opgg_client(enable_proxy, &proxy_addr);
 
     let request_body = serde_json::json!({
         "jsonrpc": "2.0",
@@ -762,17 +640,12 @@ pub async fn fetch_tft_meta_decks(
         }
     });
 
-    let resp = client
-        .post("https://mcp-api.op.gg/mcp")
-        .json(&request_body)
-        .send()
-        .await
-        .map_err(|e| format!("OP.GG MCP 请求失败: {}", e))?;
-
-    let raw: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("解析 OP.GG MCP 响应失败: {}", e))?;
+    let raw = crate::lcu::opgg::post_json(
+        app_state.inner(),
+        "https://mcp-api.op.gg/mcp",
+        &request_body,
+    )
+    .await?;
 
     // MCP 错误检查
     if let Some(err) = raw.get("error") {
@@ -796,41 +669,15 @@ pub async fn fetch_tft_meta_decks(
         .map_err(|e| format!("解析 OP.GG MCP 数据失败: {}", e))?;
 
     // 附加 TFT 羁绊中文名称映射 + 英雄图标映射 + 英雄中文名称映射（LCU 优先，CDragon 兜底）
-    attach_tft_meta_maps(&app_state, &mut parsed).await;
+    attach_tft_meta_maps(app_state.inner(), &mut parsed).await;
 
     // 写入内存缓存（缓存的是含映射的完整 payload；命中时仍会再刷新一次映射）
-    if let Ok(mut cache) = get_opgg_mcp_cache().lock() {
-        if cache.len() >= OPGG_CACHE_MAX_ENTRIES {
-            if let Some(oldest_key) = cache
-                .iter()
-                .min_by_key(|(_, e)| e.inserted_at)
-                .map(|(k, _)| k.clone())
-            {
-                cache.remove(&oldest_key);
-            }
-        }
-        log::info!("OP.GG MCP 缓存写入: tft_meta_decks");
-        cache.insert(
-            cache_key,
-            OpggCacheEntry {
-                data: parsed.clone(),
-                inserted_at: std::time::Instant::now(),
-            },
-        );
-    }
+    crate::lcu::opgg::put_cached(cache_key, parsed.clone());
 
     Ok(parsed)
 }
 
 // ─── CMD 方式观战（绕开 Already in gameflow）───
-
-/// 腾讯大区白名单（SGP 仅在这些大区可用）
-const TENCENT_SERVERS: &[&str] = &[
-    "tj100", "hn1", "cq100", "gz100", "nj100", "hn10", "tj101", "bgp2",
-];
-
-/// 需要 k8s-sgp 子域名的特殊大区
-const K8S_SGP_SERVERS: &[&str] = &["hn1", "hn10", "bgp2"];
 
 #[derive(Deserialize)]
 pub struct SpectateDirectlyParams {
@@ -862,7 +709,7 @@ pub async fn spectate_directly(
         .ok_or_else(|| "无法获取大区信息（--rso_platform_id），请重启客户端后重试".to_string())?;
     let server_lower = server.to_lowercase();
 
-    if !TENCENT_SERVERS.contains(&server_lower.as_str()) {
+    if !crate::lcu::sgp::is_tencent_server(&server_lower) {
         return Err(format!(
             "CMD 观战仅支持腾讯大区，当前大区 {} 不支持",
             server
@@ -926,11 +773,7 @@ pub async fn spectate_directly(
         .to_string();
 
     // ── 4. 构建 SGP base URL 并请求观战凭据 ──
-    let sgp_base = if K8S_SGP_SERVERS.contains(&server_lower.as_str()) {
-        format!("https://{}-k8s-sgp.lol.qq.com:21019", server_lower)
-    } else {
-        format!("https://{}-sgp.lol.qq.com:21019", server_lower)
-    };
+    let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
 
     let sgp_client = reqwest::Client::builder()
         .no_proxy()

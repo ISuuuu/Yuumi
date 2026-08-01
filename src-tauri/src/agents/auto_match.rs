@@ -3,6 +3,7 @@ use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
 use crate::config::FunctionsConfig;
+use crate::lcu::client::lcu_request;
 
 // ─── 游戏流程事件 ───
 
@@ -11,6 +12,10 @@ pub enum GameflowEvent {
     PhaseChanged(String),
     ReadyCheck(ReadyCheckData),
     ResetLobbyState,
+    /// 对局结束荣誉投票（/lol-honor-v2/v1/ballot）
+    HonorBallot(HonorBallot),
+    /// 收到的游戏邀请列表（/lol-lobby/v2/received-invitations）
+    ReceivedInvitations(Vec<ReceivedInvitation>),
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -18,6 +23,43 @@ pub enum GameflowEvent {
 pub struct ReadyCheckData {
     pub state: Option<String>,
     pub player_response: Option<String>,
+}
+
+/// 荣誉投票信息
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HonorBallot {
+    pub eligible_allies: Vec<HonorEligiblePlayer>,
+    pub eligible_opponents: Vec<HonorEligiblePlayer>,
+    pub vote_pool: Option<HonorVotePool>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HonorEligiblePlayer {
+    #[serde(default)]
+    pub bot_player: bool,
+    #[serde(default)]
+    pub puuid: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HonorVotePool {
+    #[serde(default)]
+    pub votes: i32,
+}
+
+/// 收到的游戏邀请
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceivedInvitation {
+    #[serde(default)]
+    pub invitation_id: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub can_accept_invitation: Option<bool>,
 }
 
 /// 启动游戏流程自动化后台任务。
@@ -91,6 +133,16 @@ pub fn start(
                         try_create_default_lobby(&app_handle, &cfg, &mut lobby_created).await;
                     }
                 }
+                GameflowEvent::HonorBallot(ballot) => {
+                    if cfg.enable_auto_honor {
+                        spawn_auto_honor(app_handle.clone(), ballot);
+                    }
+                }
+                GameflowEvent::ReceivedInvitations(invitations) => {
+                    if cfg.enable_auto_handle_invite {
+                        spawn_handle_invitations(app_handle.clone(), invitations);
+                    }
+                }
             }
         }
     });
@@ -154,6 +206,30 @@ async fn handle_phase_change(
         }
     }
 
+    // 再来一局：进入结算相关阶段后，延迟触发"再来一局"
+    if cfg.enable_auto_play_again {
+        match phase {
+            // 等待结算数据：10 秒后仍停留则返回大厅
+            "WaitingForStats" => {
+                spawn_auto_play_again(app_handle.clone(), Duration::from_millis(10000));
+            }
+            // 部分模式只有 PreEndOfGame 而无 EndOfGame，等投票出现后执行
+            "PreEndOfGame" => {
+                spawn_auto_play_again(app_handle.clone(), Duration::from_millis(3250));
+            }
+            // 正常结算：短缓冲后执行
+            "EndOfGame" => {
+                spawn_auto_play_again(app_handle.clone(), Duration::from_millis(1575));
+            }
+            _ => {}
+        }
+    }
+
+    // ARAM 换边报边：进入选人阶段后检测并播报我方队伍边
+    if phase == "ChampSelect" && cfg.enable_auto_aram_team_side {
+        spawn_aram_team_side(app_handle.clone(), cfg.aram_team_side_visible_to_team);
+    }
+
     // 状态转换检测 → 上传队列（包含延迟 2 秒 + 去重）
     upload_trigger.on_phase_change(phase, app_handle).await;
 }
@@ -171,79 +247,45 @@ async fn try_create_default_lobby(
     let queue_id = cfg.default_game_mode;
     log::info!("自动创建预设大厅: queueId={}", queue_id);
 
+    let state = app_handle.state::<crate::AppState>();
+    let app_state = state.inner();
+
     for attempt in 0..30 {
         // 检查 LCU 是否仍然连接
-        {
-            let state = app_handle.state::<crate::AppState>();
-            let lock = state.lcu_client.read().await;
-            if lock.is_none() {
-                log::info!("LCU 已断开，停止创建大厅");
-                return;
-            }
+        if app_state.lcu_client.read().await.as_ref().is_none() {
+            log::info!("LCU 已断开，停止创建大厅");
+            return;
         }
 
         // 检查当前阶段是否仍为 None
+        if let Ok(serde_json::Value::String(phase)) =
+            lcu_request(app_state, "GET", "/lol-gameflow/v1/gameflow-phase", None).await
         {
-            let state = app_handle.state::<crate::AppState>();
-            let lock = state.lcu_client.read().await;
-            if let Some(lcu) = lock.as_ref() {
-                let url = format!(
-                    "https://127.0.0.1:{}/lol-gameflow/v1/gameflow-phase",
-                    lcu.port
-                );
-                let auth = crate::build_auth_header(&lcu.token);
-                if let Ok(resp) = lcu
-                    .http_client
-                    .get(&url)
-                    .header("Authorization", auth)
-                    .send()
-                    .await
-                {
-                    if let Ok(phase) = resp.text().await {
-                        let phase = phase.trim_matches('"');
-                        if !matches!(phase, "None" | "" | "WaitingForStats" | "PreEndOfGame") {
-                            log::info!("当前阶段为 {}，跳过创建大厅", phase);
-                            *lobby_created = true;
-                            return;
-                        }
-                    }
-                }
+            if !matches!(
+                phase.as_str(),
+                "None" | "" | "WaitingForStats" | "PreEndOfGame"
+            ) {
+                log::info!("当前阶段为 {}，跳过创建大厅", phase);
+                *lobby_created = true;
+                return;
             }
         }
 
         // 尝试创建大厅
         let body = serde_json::json!({ "queueId": queue_id });
-        let state = app_handle.state::<crate::AppState>();
-        let lock = state.lcu_client.read().await;
-        if let Some(lcu) = lock.as_ref() {
-            let url = format!("https://127.0.0.1:{}/lol-lobby/v2/lobby", lcu.port);
-            let auth = crate::build_auth_header(&lcu.token);
-
-            match lcu
-                .http_client
-                .post(&url)
-                .header("Authorization", auth)
-                .json(&body)
-                .send()
-                .await
-            {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        log::info!("预设大厅创建成功 (尝试 {})", attempt + 1);
-                        *lobby_created = true;
-                        return;
-                    }
-                    let status = resp.status().as_u16();
-                    if status == 409 {
-                        log::info!("创建大厅返回 409 (Conflict)，可能已在房间中，停止重试");
-                        *lobby_created = true;
-                        return;
-                    }
-                    log::warn!("创建大厅失败 (HTTP {})，重试中...", status);
+        match lcu_request(app_state, "POST", "/lol-lobby/v2/lobby", Some(body)).await {
+            Ok(_) => {
+                log::info!("预设大厅创建成功 (尝试 {})", attempt + 1);
+                *lobby_created = true;
+                return;
+            }
+            Err(e) => {
+                if e.contains("409") {
+                    log::info!("创建大厅返回 409 (Conflict)，可能已在房间中，停止重试");
+                    *lobby_created = true;
+                    return;
                 }
-                Err(e) => {
-                    log::warn!("创建大厅请求失败: {}，重试中...", e);
-                }
+                log::warn!("创建大厅失败: {}，重试中...", e);
             }
         }
 
@@ -311,52 +353,32 @@ fn spawn_auto_accept(app_handle: AppHandle, delay_secs: u32) {
 /// 获取当前 ready check 状态
 async fn get_ready_check_status(app_handle: &AppHandle) -> Option<ReadyCheckStatus> {
     let state = app_handle.state::<crate::AppState>();
-    let lock = state.lcu_client.read().await;
-    let lcu = lock.as_ref()?;
-
-    let url = format!(
-        "https://127.0.0.1:{}/lol-matchmaking/v1/ready-check",
-        lcu.port
-    );
-    let auth = crate::build_auth_header(&lcu.token);
-
-    let resp = lcu
-        .http_client
-        .get(&url)
-        .header("Authorization", auth)
-        .send()
-        .await
-        .ok()?;
-
-    if !resp.status().is_success() {
-        return None;
-    }
-
-    resp.json::<ReadyCheckStatus>().await.ok()
+    let value = lcu_request(
+        state.inner(),
+        "GET",
+        "/lol-matchmaking/v1/ready-check",
+        None,
+    )
+    .await
+    .ok()?;
+    serde_json::from_value(value).ok()
 }
 
 /// 获取当前游戏阶段
 async fn get_current_phase(app_handle: &AppHandle) -> Option<String> {
     let state = app_handle.state::<crate::AppState>();
-    let lock = state.lcu_client.read().await;
-    let lcu = lock.as_ref()?;
-
-    let url = format!(
-        "https://127.0.0.1:{}/lol-gameflow/v1/gameflow-phase",
-        lcu.port
-    );
-    let auth = crate::build_auth_header(&lcu.token);
-
-    let resp = lcu
-        .http_client
-        .get(&url)
-        .header("Authorization", auth)
-        .send()
-        .await
-        .ok()?;
-
-    let text = resp.text().await.ok()?;
-    Some(text.trim_matches('"').to_string())
+    let value = lcu_request(
+        state.inner(),
+        "GET",
+        "/lol-gameflow/v1/gameflow-phase",
+        None,
+    )
+    .await
+    .ok()?;
+    match value {
+        serde_json::Value::String(s) => Some(s),
+        _ => None,
+    }
 }
 
 /// Ready check 状态响应
@@ -367,33 +389,170 @@ struct ReadyCheckStatus {
     error_code: Option<String>,
 }
 
-/// 通用 LCU POST 请求
+/// 通用 LCU POST 请求（统一走 lcu_request，复用信号量/重试/白名单）
 pub async fn lcu_post(app_handle: &AppHandle, path: &str) -> bool {
     let state = app_handle.state::<crate::AppState>();
-    let lock = state.lcu_client.read().await;
-    let lcu = match lock.as_ref() {
-        Some(c) => c,
-        None => return false,
-    };
+    lcu_request(state.inner(), "POST", path, None).await.is_ok()
+}
 
-    let url = format!("https://127.0.0.1:{}{}", lcu.port, path);
-    let auth = crate::build_auth_header(&lcu.token);
+// ─── 自动荣誉点赞 ───
 
-    match lcu
-        .http_client
-        .post(&url)
-        .header("Authorization", auth)
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => true,
-        Ok(resp) => {
-            log::warn!("LCU POST {} 失败: HTTP {}", path, resp.status());
-            false
+/// 收到荣誉投票后异步执行点赞，不阻塞主事件循环。
+fn spawn_auto_honor(app_handle: AppHandle, ballot: HonorBallot) {
+    tokio::spawn(async move {
+        // 过滤掉人机
+        let allies: Vec<&HonorEligiblePlayer> = ballot
+            .eligible_allies
+            .iter()
+            .filter(|p| !p.bot_player && p.puuid.is_some())
+            .collect();
+
+        if allies.is_empty() {
+            log::debug!("荣誉投票：没有可点赞的队友，跳过");
+            return;
         }
-        Err(e) => {
-            log::error!("LCU POST {} 请求失败: {}", path, e);
-            false
+
+        // 最多投 votePool.votes 票（默认 1）
+        let votes = ballot.vote_pool.map(|p| p.votes).unwrap_or(1).max(1) as usize;
+        let count = allies.len().min(votes);
+
+        let state = app_handle.state::<crate::AppState>();
+        let app_state = state.inner();
+
+        for p in allies.iter().take(count) {
+            let body = serde_json::json!({
+                "honorType": "HEART",
+                "recipientPuuid": p.puuid.as_ref().unwrap(),
+            });
+            if let Err(e) = lcu_request(app_state, "POST", "/lol-honor/v1/honor", Some(body)).await
+            {
+                log::warn!("自动点赞失败: {}", e);
+            }
         }
-    }
+
+        // 提交投票
+        if let Err(e) = lcu_request(app_state, "POST", "/lol-honor/v1/ballot", None).await {
+            log::warn!("提交荣誉投票失败: {}", e);
+        }
+        log::info!("自动荣誉点赞完成，共 {} 票", count);
+    });
+}
+
+// ─── 自动处理邀请 ───
+
+/// 收到邀请列表后异步处理，不阻塞主事件循环。
+fn spawn_handle_invitations(app_handle: AppHandle, invitations: Vec<ReceivedInvitation>) {
+    tokio::spawn(async move {
+        let state = app_handle.state::<crate::AppState>();
+        let app_state = state.inner();
+
+        for inv in invitations {
+            // 只处理待处理的邀请
+            let pending = inv.state.as_deref() == Some("Pending");
+            let can_accept = inv.can_accept_invitation.unwrap_or(false);
+            let Some(invitation_id) = inv.invitation_id.as_deref() else {
+                continue;
+            };
+
+            if !pending || !can_accept {
+                continue;
+            }
+
+            let path = format!(
+                "/lol-lobby/v2/received-invitations/{}/accept",
+                invitation_id
+            );
+            match lcu_request(app_state, "POST", &path, None).await {
+                Ok(_) => log::info!("已自动接受邀请 {}", invitation_id),
+                Err(e) => log::warn!("自动接受邀请 {} 失败: {}", invitation_id, e),
+            }
+        }
+    });
+}
+
+// ─── 自动再来一局 ───
+
+/// 延迟后执行"再来一局"，不阻塞主事件循环。
+fn spawn_auto_play_again(app_handle: AppHandle, delay: Duration) {
+    tokio::spawn(async move {
+        sleep(delay).await;
+        log::info!("自动再来一局");
+        lcu_post(&app_handle, "/lol-lobby/v2/play-again").await;
+    });
+}
+
+// ─── ARAM 自动报边 ───
+
+/// 进入选人阶段后检测 ARAM 并播报我方队伍边，不阻塞主事件循环。
+fn spawn_aram_team_side(app_handle: AppHandle, visible_to_team: bool) {
+    tokio::spawn(async move {
+        // 等待选人会话就绪
+        sleep(Duration::from_millis(1500)).await;
+
+        let state = app_handle.state::<crate::AppState>();
+        let app_state = state.inner();
+
+        // 获取选人会话，确认是大乱斗（bench_enabled 为 ARAM 特有）
+        let session =
+            match lcu_request(app_state, "GET", "/lol-champ-select/v1/session", None).await {
+                Ok(v) => {
+                    match serde_json::from_value::<crate::agents::auto_bp::ChampSelectSession>(v) {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    }
+                }
+                Err(_) => return,
+            };
+
+        if !session.bench_enabled {
+            return;
+        }
+
+        // 找到本地玩家所在队伍（1 / 2）
+        let local_player_team = session
+            .my_team
+            .iter()
+            .find(|p| p.cell_id == session.local_player_cell_id)
+            .map(|p| p.team);
+        let Some(team) = local_player_team else {
+            return;
+        };
+        if team != 1 && team != 2 {
+            return;
+        }
+
+        // 获取选人聊天会话 id
+        let conv_id = match lcu_request(app_state, "GET", "/lol-chat/v1/conversations", None).await
+        {
+            Ok(v) => v
+                .as_array()
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|c| c.get("type").and_then(|t| t.as_str()) == Some("championSelect"))
+                })
+                .and_then(|c| c.get("id").and_then(|i| i.as_str()))
+                .map(str::to_string),
+            Err(_) => None,
+        };
+        let Some(conv_id) = conv_id else {
+            log::warn!("ARAM 报边：未找到选人聊天会话");
+            return;
+        };
+
+        // 发送报边消息；visible_to_team 为 false 时使用 celebration 类型（仅自己可见）
+        let side_name = if team == 1 { "蓝色方" } else { "红色方" };
+        let message = if visible_to_team {
+            serde_json::json!({ "body": format!("本局我方在{}", side_name) })
+        } else {
+            serde_json::json!({
+                "body": format!("本局我方在{}", side_name),
+                "type": "celebration"
+            })
+        };
+        let path = format!("/lol-chat/v1/conversations/{}/messages", conv_id);
+        match lcu_request(app_state, "POST", &path, Some(message)).await {
+            Ok(_) => log::info!("ARAM 报边成功：我方在{}", side_name),
+            Err(e) => log::warn!("ARAM 报边失败: {}", e),
+        }
+    });
 }

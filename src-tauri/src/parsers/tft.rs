@@ -1270,10 +1270,7 @@ pub async fn get_tft_match_history(
     if raw_json.is_none() {
         if let Some(server) = &lcu.server {
             let server_lower = server.to_lowercase();
-            const TENCENT_SERVERS: &[&str] = &[
-                "hn1", "hn10", "bgp2", "tj100", "cq100", "gz100", "nj100", "tj101",
-            ];
-            if TENCENT_SERVERS.contains(&server_lower.as_str()) {
+            if crate::lcu::sgp::is_tencent_server(&server_lower) {
                 let token_url = format!("https://127.0.0.1:{}/entitlements/v1/token", lcu.port);
                 if let Ok(token_resp) = lcu
                     .http_client
@@ -1287,21 +1284,12 @@ pub async fn get_tft_match_history(
                             if let Some(sgp_token) =
                                 token_data.get("accessToken").and_then(|v| v.as_str())
                             {
-                                const K8S_SGP_SERVERS: &[&str] = &["hn1", "hn10", "bgp2"];
-                                let sgp_base = if K8S_SGP_SERVERS.contains(&server_lower.as_str()) {
-                                    format!("https://{}-k8s-sgp.lol.qq.com:21019", server_lower)
-                                } else {
-                                    format!("https://{}-sgp.lol.qq.com:21019", server_lower)
-                                };
+                                let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
                                 let sgp_url = format!(
                                     "{}/match-history-query/v1/products/tft/player/{}/SUMMARY",
                                     sgp_base, puuid
                                 );
-                                if let Ok(sgp_client) = reqwest::Client::builder()
-                                    .danger_accept_invalid_certs(true)
-                                    .no_proxy()
-                                    .build()
-                                {
+                                if let Ok(sgp_client) = crate::lcu::sgp::build_sgp_client() {
                                     if let Ok(sgp_resp) = sgp_client
                                         .get(&sgp_url)
                                         .header("Authorization", format!("Bearer {}", sgp_token))

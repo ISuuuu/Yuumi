@@ -416,6 +416,35 @@ fn process_event(text: &str, app_handle: &AppHandle) {
         }
     }
 
+    if uri.starts_with("/lol-honor-v2/v1/ballot") {
+        if let Some(data) = event_data.get("data") {
+            if let Ok(ballot) =
+                serde_json::from_value::<crate::agents::auto_match::HonorBallot>(data.clone())
+            {
+                if let Err(e) = state.gameflow_tx.try_send(
+                    crate::agents::auto_match::GameflowEvent::HonorBallot(ballot),
+                ) {
+                    log::warn!("[WS] 推送 Gameflow HonorBallot 失败: {}", e);
+                }
+            }
+        }
+    }
+
+    if uri.starts_with("/lol-lobby/v2/received-invitations") {
+        if let Some(data) = event_data.get("data") {
+            if let Ok(invitations) = serde_json::from_value::<
+                Vec<crate::agents::auto_match::ReceivedInvitation>,
+            >(data.clone())
+            {
+                if let Err(e) = state.gameflow_tx.try_send(
+                    crate::agents::auto_match::GameflowEvent::ReceivedInvitations(invitations),
+                ) {
+                    log::warn!("[WS] 推送 Gameflow ReceivedInvitations 失败: {}", e);
+                }
+            }
+        }
+    }
+
     // ── SignalR 转发 ──
     if uri == "/lol-gameflow/v1/gameflow-phase"
         || uri == "/lol-gameflow/v1/session"

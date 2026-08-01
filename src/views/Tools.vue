@@ -7,6 +7,7 @@ import { useLcuStore } from "../store/lcuStore";
 import AutoAcceptCard from "../components/tools/AutoAcceptCard.vue";
 import AutoSwapCard from "../components/tools/AutoSwapCard.vue";
 import AutoHoverCard from "../components/tools/AutoHoverCard.vue";
+import AutoGameflowCard from "../components/tools/AutoGameflowCard.vue";
 import SpectateCard from "../components/tools/SpectateCard.vue";
 import LcuQuickActionsCard from "../components/tools/LcuQuickActionsCard.vue";
 
@@ -40,6 +41,7 @@ provide("updateConfig", updateConfig);
 
       <!-- 2. 游戏组 -->
       <div class="group-header">{{ $t("tools.groupGame") }}</div>
+      <AutoGameflowCard />
       <SpectateCard />
       <LcuQuickActionsCard />
     </div>
