@@ -9,7 +9,8 @@
     "reconnect": "修復無限加載",
     "notice": "更新日誌",
     "settings": "設置",
-    "opgg": "OP.GG"
+    "opgg": "OP.GG",
+    "savedPlayers": "曾同局玩家"
   },
   "noticePage": {
     "title": "更新日誌",
@@ -292,7 +293,8 @@
       "honorLabel": "對局結束後自動點讚:",
       "playAgainLabel": "對局結束後自動再來一局:",
       "aramSideLabel": "ARAM 選人時自動報邊:",
-      "aramSideVisibleLabel": "報邊訊息對隊友可見:"
+      "aramSideVisibleLabel": "報邊訊息對隊友可見:",
+      "tagReminderLabel": "選人階段自動提醒標記玩家:"
     },
     "benchOverlay": {
       "title": "大亂斗板凳席懸浮窗",
@@ -763,5 +765,29 @@
     "21": "光盾",
     "30": "魄羅投擲",
     "32": "標記"
+  },
+  "savedPlayersPage": {
+    "title": "曾同局玩家",
+    "desc": "對局結束後自動記錄同局的隊友與對手，可添加標記以便選人階段提醒",
+    "empty": "暫無玩家記錄",
+    "emptyHint": "對局結束後同局的隊友與對手會自動出現在這裡",
+    "tagPlaceholder": "添加標記...",
+    "tagEdit": "編輯標記",
+    "tagSave": "保存",
+    "tagCancel": "取消",
+    "loadMore": "加載更多",
+    "lastMet": "上次相遇: {time}",
+    "noLastMet": "尚未相遇",
+    "encounteredGames": "相遇記錄",
+    "noEncounteredGames": "暫無相遇記錄",
+    "deleteConfirm": "確定要刪除該玩家嗎？",
+    "delete": "刪除",
+    "export": "導出標記",
+    "import": "導入標記",
+    "importSuccess": "成功導入 {count} 名玩家",
+    "exportSuccess": "已導出到 {path}",
+    "encounterCount": "相遇 {count} 次",
+    "loadFailed": "加載失敗",
+    "connectedRequired": "需要連接英雄聯盟客戶端後使用"
   }
 }

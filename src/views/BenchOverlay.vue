@@ -6,10 +6,8 @@ import LcuImage from "../components/LcuImage.vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useToast } from "../composables/useToast";
 
 const store = useLcuStore();
-const toast = useToast();
 const pickableIds = ref<number[]>([]);
 
 // 大乱斗选人初始时间戳与英雄加入板凳席的时间映射
@@ -185,12 +183,24 @@ const isBenchChampionClickable = (champ: any) => getProtectionState(champ).click
 // 获取提示文案
 const getDisabledReason = (champ: any) => getProtectionState(champ).reason;
 
+// 底部迷你提示（小窗口内替代 Naive UI 居中大 toast，避免遮挡英雄）
+const hintText = ref("");
+let hintTimer: number | undefined;
+function showHint(msg: string) {
+  hintText.value = msg;
+  if (hintTimer) window.clearTimeout(hintTimer);
+  hintTimer = window.setTimeout(() => {
+    hintText.value = "";
+  }, 1500);
+}
+
 // 点击选择/抢下板凳席英雄
 async function swapChampion(champ: any) {
   const cid = Number(champ.championId);
   
   if (!isPickable(cid)) {
-    toast.showToast("未拥有/不可用该英雄", "warning");
+    console.warn(`[BenchOverlay] 未拥有/不可用该英雄，跳过: ${cid}`);
+    showHint("未拥有/不可用");
     return;
   }
 
@@ -210,8 +220,8 @@ async function swapChampion(champ: any) {
       unlockedMyBenchChampions.value.add(previousMyChampionId.value);
     }
   } else {
-    console.error(`[BenchOverlay] 抢/换英雄失败: ${cid}, 错误:`, resp.error);
-    toast.showToast("前 15 秒队友保护期中，无法选择该英雄", "warning");
+    console.warn(`[BenchOverlay] 抢/换英雄失败: ${cid}, 错误:`, resp.error);
+    showHint("前 15 秒保护期");
   }
 }
 
@@ -352,11 +362,17 @@ watch(
         <line x1="6" y1="6" x2="18" y2="18" />
       </svg>
     </div>
+
+    <!-- 底部迷你提示条（不遮挡英雄） -->
+    <transition name="hint-fade">
+      <div v-if="hintText" class="bench-hint">{{ hintText }}</div>
+    </transition>
   </div>
 </template>
 
 <style scoped>
 .bench-overlay-wrapper {
+  position: relative;
   display: flex;
   align-items: center;
   width: 100vw;
@@ -469,5 +485,34 @@ watch(
 .close-btn svg {
   width: 16px;
   height: 16px;
+}
+
+/* 底部迷你提示条 */
+.bench-hint {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 90%;
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.hint-fade-enter-active,
+.hint-fade-leave-active {
+  transition: opacity 0.25s;
+}
+.hint-fade-enter-from,
+.hint-fade-leave-to {
+  opacity: 0;
 }
 </style>

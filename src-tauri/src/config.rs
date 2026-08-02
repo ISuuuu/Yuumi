@@ -205,6 +205,9 @@ pub struct FunctionsConfig {
     pub enable_auto_aram_team_side: bool,
     #[serde(default)]
     pub aram_team_side_visible_to_team: bool,
+    /// 选人阶段对带标记的玩家发送聊天提醒（默认关闭）
+    #[serde(default)]
+    pub enable_auto_tag_reminder: bool,
 }
 
 impl Default for FunctionsConfig {
@@ -263,6 +266,7 @@ impl Default for FunctionsConfig {
             enable_auto_play_again: false,
             enable_auto_aram_team_side: false,
             aram_team_side_visible_to_team: false,
+            enable_auto_tag_reminder: false,
         }
     }
 }

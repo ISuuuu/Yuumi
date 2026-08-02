@@ -5,9 +5,14 @@ import { useLcuAsset } from "../composables/useLcuAsset";
 const props = defineProps<{
   src?: string;
   alt?: string;
+  /** LCU 资源加载失败（如已被移除的旧图标）时的兜底图片路径 */
+  fallbackSrc?: string;
 }>();
 
-const { src: resolvedSrc, loading } = useLcuAsset(toRef(props, "src"));
+const { src: resolvedSrc, loading } = useLcuAsset(
+  toRef(props, "src"),
+  toRef(props, "fallbackSrc"),
+);
 </script>
 
 <template>

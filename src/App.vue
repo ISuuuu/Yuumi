@@ -27,6 +27,7 @@ import BenchOverlay from "./views/BenchOverlay.vue";
 const TFT = defineAsyncComponent(() => import("./views/TFT.vue"));
 const Settings = defineAsyncComponent(() => import("./views/Settings.vue"));
 const Tools = defineAsyncComponent(() => import("./views/Tools.vue"));
+const SavedPlayers = defineAsyncComponent(() => import("./views/SavedPlayers.vue"));
 const Notice = defineAsyncComponent(() => import("./views/Notice.vue"));
 import UpdateDialog, { type UpdateInfo } from "./components/UpdateDialog.vue";
 import CustomTitleBar from "./components/layout/CustomTitleBar.vue";
@@ -750,6 +751,7 @@ async function handleClose() {
                 />
                 <Settings v-else-if="currentPage === 'settings'" />
                 <Tools v-else-if="currentPage === 'tools'" />
+                <SavedPlayers v-else-if="currentPage === 'savedplayers'" />
 
                 <!-- 内建 OP.GG 占位页面 -->
                 <div

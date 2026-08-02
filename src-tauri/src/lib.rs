@@ -5,6 +5,7 @@ pub mod lcu;
 pub mod logging;
 pub mod loot;
 pub mod parsers;
+pub mod saved_players;
 pub mod signalr;
 pub mod tools;
 pub mod updater;
@@ -76,6 +77,10 @@ pub struct AppState {
     pub bench_my_champions: Mutex<Vec<i64>>,
     /// 记录上一次的 gameflow 阶段，避免阶段重复事件造成重复清空历史英雄缓存
     pub last_gameflow_phase: Mutex<String>,
+    /// SQLite 连接（保存的玩家）
+    pub saved_db: Arc<Mutex<rusqlite::Connection>>,
+    /// 当前对局信息缓存（对局结束记录相遇时使用）
+    pub current_game_cache: Mutex<Option<saved_players::CurrentGameCache>>,
 }
 
 impl AppState {
@@ -133,6 +138,18 @@ pub fn run() {
             let lcu_state: Arc<RwLock<Option<LcuClient>>> = Arc::new(RwLock::new(None));
             let game_data: Arc<RwLock<lcu::game_data::GameDataAssets>> =
                 Arc::new(RwLock::new(lcu::game_data::GameDataAssets::default()));
+            let saved_db = match saved_players::init_db() {
+                Ok(conn) => {
+                    log::info!("SQLite 数据库已就绪");
+                    Arc::new(Mutex::new(conn))
+                }
+                Err(e) => {
+                    log::error!("打开 SQLite 数据库失败，保存的玩家功能不可用: {}", e);
+                    Arc::new(Mutex::new(
+                        rusqlite::Connection::open_in_memory().expect("内存库创建失败"),
+                    ))
+                }
+            };
             let state = AppState {
                 lcu_client: lcu_state.clone(),
                 config: app_config_arc.clone(),
@@ -149,6 +166,8 @@ pub fn run() {
                 pending_update: Mutex::new(None),
                 bench_my_champions: Mutex::new(Vec::new()),
                 last_gameflow_phase: Mutex::new(String::new()),
+                saved_db,
+                current_game_cache: Mutex::new(None),
             };
             app.manage(state);
 
@@ -340,6 +359,13 @@ pub fn run() {
             updater::install_update,
             updater::install_pending_update,
             commands::tools::show_bench_overlay_window,
+            saved_players::save_saved_player,
+            saved_players::query_all_saved_players,
+            saved_players::query_encountered_games,
+            saved_players::delete_saved_player,
+            saved_players::export_tagged_players_to_json_file,
+            saved_players::import_tagged_players_from_json_file,
+            saved_players::backfill_saved_player_identity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -9,7 +9,8 @@
     "reconnect": "Fix Load Loop",
     "notice": "Changelog",
     "settings": "Settings",
-    "opgg": "OP.GG"
+    "opgg": "OP.GG",
+    "savedPlayers": "Players Met"
   },
   "noticePage": {
     "title": "Changelog",
@@ -292,7 +293,8 @@
       "honorLabel": "Auto honor players after game:",
       "playAgainLabel": "Auto play again after game:",
       "aramSideLabel": "Report ARAM team side in champ select:",
-      "aramSideVisibleLabel": "Make team side message visible to teammates:"
+      "aramSideVisibleLabel": "Make team side message visible to teammates:",
+      "tagReminderLabel": "Auto-remind tagged players in champ select:"
     },
     "benchOverlay": {
       "title": "ARAM Bench Overlay",
@@ -762,5 +764,29 @@
     "21": "Barrier",
     "30": "Poro Toss",
     "32": "Mark"
+  },
+  "savedPlayersPage": {
+    "title": "Players Met",
+    "desc": "Teammates and opponents you played with are recorded automatically. Add tags to get reminded during champ select",
+    "empty": "No players met yet",
+    "emptyHint": "Teammates and opponents you play with will appear here automatically",
+    "tagPlaceholder": "Add a tag...",
+    "tagEdit": "Edit Tag",
+    "tagSave": "Save",
+    "tagCancel": "Cancel",
+    "loadMore": "Load more",
+    "lastMet": "Last met: {time}",
+    "noLastMet": "Not met yet",
+    "encounteredGames": "Encountered Games",
+    "noEncounteredGames": "No encountered games",
+    "deleteConfirm": "Delete this player?",
+    "delete": "Delete",
+    "export": "Export Tags",
+    "import": "Import Tags",
+    "importSuccess": "Imported {count} players",
+    "exportSuccess": "Exported to {path}",
+    "encounterCount": "Met {count} times",
+    "loadFailed": "Failed to load",
+    "connectedRequired": "Connect to the League client to use this"
   }
 }

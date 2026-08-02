@@ -369,6 +369,7 @@ export interface FunctionsConfig {
   EnableAutoPlayAgain: boolean;
   EnableAutoAramTeamSide: boolean;
   AramTeamSideVisibleToTeam: boolean;
+  EnableAutoTagReminder: boolean;
 }
 
 export interface OtherConfig {
@@ -384,8 +385,27 @@ export interface AppConfig {
   Other: OtherConfig;
 }
 
-/** 获取完整应用配置 */
-export const fetchConfig = () => invoke<AppConfig>("get_config");
+/**
+ * 获取完整应用配置。
+ * 启动早期窗口 JS 可能抢在 Rust 侧 app.manage(AppState) 之前调用，
+ * 此时后端会报 "state not managed"，这里做短暂自愈重试，其余错误直接抛出。
+ */
+export const fetchConfig = () => {
+  const attempt = (left: number): Promise<AppConfig> =>
+    invoke<AppConfig>("get_config").catch((err) => {
+      const errStr = String(err || "");
+      const isStateNotReady =
+        errStr.includes("state not managed") || errStr.includes("must call .manage()");
+      if (isStateNotReady && left > 0) {
+        const delay = 200 * (5 - left + 1);
+        return new Promise<void>((resolve) => setTimeout(resolve, delay)).then(() =>
+          attempt(left - 1),
+        );
+      }
+      throw err;
+    });
+  return attempt(5);
+};
 
 /** 更新完整应用配置 */
 export const updateConfig = (config: AppConfig) =>
@@ -406,3 +426,98 @@ export const uploadSingleMatch = (gameId: number) =>
 /** 批量上传对局（直接 POST 到外部 API） */
 export const batchUploadMatches = (gameIds: number[]) =>
   invoke<BatchUploadResult>("batch_upload_matches", { gameIds });
+
+// ─── 保存的玩家 ───
+
+export interface SavedPlayer {
+  puuid: string;
+  selfPuuid: string;
+  region: string;
+  rsoPlatformId: string;
+  tag: string | null;
+  summonerName: string;
+  profileIconId: number;
+  /** Riot ID 的 tagLine（如 NA1），自动相遇记录时采集 */
+  tagLine: string | null;
+  /** 上次相遇对局使用的英雄 id，0 表示未知 */
+  championId: number;
+  updateAt: number;
+  lastMetAt: number | null;
+  lastQueueType: string | null;
+  encounterCount: number;
+}
+
+export interface EncounteredGame {
+  id: number;
+  gameId: number;
+  puuid: string;
+  selfPuuid: string;
+  region: string;
+  rsoPlatformId: string;
+  queueType: string;
+  updateAt: number;
+}
+
+export interface PageResult<T> {
+  data: T[];
+  count: number;
+}
+
+export interface SaveSavedPlayerInput {
+  puuid: string;
+  selfPuuid: string;
+  rsoPlatformId?: string;
+  region?: string;
+  tag?: string | null;
+  summonerName?: string;
+  profileIconId?: number;
+  encountered?: boolean;
+}
+
+/** 分页查询保存的玩家 */
+export const queryAllSavedPlayers = (
+  selfPuuid: string,
+  page?: number,
+  pageSize?: number
+) =>
+  invoke<PageResult<SavedPlayer>>("query_all_saved_players", {
+    selfPuuid,
+    page,
+    pageSize,
+  });
+
+/** 分页查询相遇记录 */
+export const queryEncounteredGames = (
+  selfPuuid: string,
+  puuid: string,
+  queueType?: string,
+  page?: number,
+  pageSize?: number
+) =>
+  invoke<PageResult<EncounteredGame>>("query_encountered_games", {
+    selfPuuid,
+    puuid,
+    queueType,
+    page,
+    pageSize,
+  });
+
+/** 保存玩家 / 更新 tag */
+export const saveSavedPlayer = (dto: SaveSavedPlayerInput) =>
+  invoke<void>("save_saved_player", { dto });
+
+/** 回填保存玩家的召唤师 ID（tagLine），返回更新的数量 */
+export const backfillSavedPlayerIdentity = () =>
+  invoke<number>("backfill_saved_player_identity");
+
+/** 删除保存的玩家 */
+export const deleteSavedPlayer = (puuid: string, selfPuuid: string) =>
+  invoke<void>("delete_saved_player", { puuid, selfPuuid });
+
+/** 导出带标记玩家为 JSON 文件，取消时返回 null */
+export const exportTaggedPlayersToJsonFile = () =>
+  invoke<string | null>("export_tagged_players_to_json_file");
+
+/** 从 JSON 文件导入带标记玩家，返回导入数量 */
+export const importTaggedPlayersFromJsonFile = () =>
+  invoke<number>("import_tagged_players_from_json_file");

@@ -51,8 +51,12 @@ function fetchLcuAssetWithRetry(
 /**
  * 将 LCU 资源路径转为可用的 data URL。
  * 自动缓存，相同路径只请求一次。
+ * @param fallbackSrcRef 资源永久加载失败（如 LCU 已移除旧图标）时使用的兜底路径
  */
-export function useLcuAsset(pathRef: Ref<string | undefined>) {
+export function useLcuAsset(
+  pathRef: Ref<string | undefined>,
+  fallbackSrcRef?: Ref<string | undefined>,
+) {
   const src = ref("");
   const loading = ref(false);
 
@@ -88,9 +92,12 @@ export function useLcuAsset(pathRef: Ref<string | undefined>) {
             }
           },
           (err) => {
-            console.warn("[LcuImage] 资源最终加载失败:", path, err);
+            const hasFallback = Boolean(fallbackSrcRef?.value);
+            if (!hasFallback) {
+              console.warn("[LcuImage] 资源最终加载失败:", path, err);
+            }
             if (pathRef.value === path) {
-              src.value = "";
+              src.value = fallbackSrcRef?.value ?? "";
             }
           },
         )

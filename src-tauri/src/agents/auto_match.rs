@@ -74,6 +74,7 @@ pub fn start(
         let mut last_phase = get_current_phase(&app_handle).await.unwrap_or_default();
         let mut upload_trigger = upload_trigger;
         let mut ready_check_accepted = false; // 跟踪是否已接受匹配
+        let mut honored = false; // 跟踪当前对局是否已自动荣誉点赞（防 WS 重复推送刷屏）
 
         while let Some(event) = rx.recv().await {
             let cfg = {
@@ -87,6 +88,10 @@ pub fn start(
                     // 阶段变化时重置接受标记
                     if phase != "ReadyCheck" {
                         ready_check_accepted = false;
+                    }
+                    // 进入新对局时重置荣誉点赞标记
+                    if phase == "InProgress" {
+                        honored = false;
                     }
                     handle_phase_change(
                         &app_handle,
@@ -134,7 +139,8 @@ pub fn start(
                     }
                 }
                 GameflowEvent::HonorBallot(ballot) => {
-                    if cfg.enable_auto_honor {
+                    if cfg.enable_auto_honor && !honored {
+                        honored = true;
                         spawn_auto_honor(app_handle.clone(), ballot);
                     }
                 }
@@ -162,6 +168,8 @@ async fn handle_phase_change(
     // 进入对局阶段时开启自动截图事件监听，退出对局阶段时关闭
     if phase == "InProgress" {
         super::auto_screenshot::set_in_game(true);
+        // 缓存本局信息，供对局结束自动记录相遇玩家
+        spawn_cache_current_game(app_handle.clone());
     } else {
         super::auto_screenshot::set_in_game(false);
     }
@@ -225,9 +233,19 @@ async fn handle_phase_change(
         }
     }
 
+    // 对局结束 → 自动记录相遇玩家（缓存消费一次，PreEndOfGame/EndOfGame 幂等）
+    if matches!(phase, "EndOfGame" | "PreEndOfGame") {
+        spawn_record_encountered_players(app_handle.clone());
+    }
+
     // ARAM 换边报边：进入选人阶段后检测并播报我方队伍边
     if phase == "ChampSelect" && cfg.enable_auto_aram_team_side {
         spawn_aram_team_side(app_handle.clone(), cfg.aram_team_side_visible_to_team);
+    }
+
+    // 选人阶段 → 对带标记的玩家发送聊天提醒
+    if phase == "ChampSelect" && cfg.enable_auto_tag_reminder {
+        spawn_tag_reminder(app_handle.clone());
     }
 
     // 状态转换检测 → 上传队列（包含延迟 2 秒 + 去重）
@@ -553,6 +571,272 @@ fn spawn_aram_team_side(app_handle: AppHandle, visible_to_team: bool) {
         match lcu_request(app_state, "POST", &path, Some(message)).await {
             Ok(_) => log::info!("ARAM 报边成功：我方在{}", side_name),
             Err(e) => log::warn!("ARAM 报边失败: {}", e),
+        }
+    });
+}
+
+// ─── 保存的玩家：对局相遇记录 ───
+
+/// 获取当前召唤师 puuid（失败返回空字符串）
+async fn get_self_puuid(app_state: &crate::AppState) -> String {
+    match lcu_request(app_state, "GET", "/lol-summoner/v1/current-summoner", None).await {
+        Ok(v) => v
+            .get("puuid")
+            .and_then(|p| p.as_str())
+            .unwrap_or("")
+            .to_string(),
+        Err(_) => String::new(),
+    }
+}
+
+/// 进入对局阶段后缓存本局信息（gameId/queueId/玩家列表），供对局结束记录相遇
+fn spawn_cache_current_game(app_handle: AppHandle) {
+    tokio::spawn(async move {
+        let state = app_handle.state::<crate::AppState>();
+        let app_state = state.inner();
+
+        // 等待游戏会话就绪
+        sleep(Duration::from_millis(1500)).await;
+
+        let session = match lcu_request(app_state, "GET", "/lol-gameflow/v1/session", None).await {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let Some(game_data) = session.get("gameData") else {
+            return;
+        };
+        let Some(game_id) = game_data.get("gameId").and_then(|v| v.as_i64()) else {
+            return;
+        };
+        let queue_id = game_data
+            .get("queueId")
+            .and_then(|v| v.as_i64())
+            .or_else(|| {
+                game_data
+                    .get("queue")
+                    .and_then(|q| q.get("id"))
+                    .and_then(|v| v.as_i64())
+            })
+            .map(|q| q as i32)
+            .unwrap_or(0);
+
+        let mut entries: Vec<crate::saved_players::GamePlayerEntry> = Vec::new();
+        for team in ["teamOne", "teamTwo"] {
+            let Some(arr) = game_data.get(team).and_then(|v| v.as_array()) else {
+                continue;
+            };
+            for player in arr {
+                let Some(summoner_id) = player.get("summonerId").and_then(|v| v.as_i64()) else {
+                    continue;
+                };
+                let path = format!("/lol-summoner/v1/summoners/{}", summoner_id);
+                let Ok(info) = lcu_request(app_state, "GET", &path, None).await else {
+                    continue;
+                };
+                // 国服 Riot ID 体系下 displayName 常为空字符串，需先过滤再取 gameName，
+                // 都为空时回退到选人会话内的 summonerName
+                let summoner_name = info
+                    .get("displayName")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        info.get("gameName")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                    })
+                    .or_else(|| {
+                        player
+                            .get("summonerName")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                    })
+                    .unwrap_or("")
+                    .to_string();
+                let puuid = info
+                    .get("puuid")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("")
+                    .to_string();
+                let profile_icon_id = info
+                    .get("profileIconId")
+                    .and_then(|v| v.as_i64())
+                    .filter(|n| *n > 0)
+                    .unwrap_or(0) as i32;
+                let tag_line = info
+                    .get("tagLine")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let champion_id = player
+                    .get("championId")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i32;
+                entries.push(crate::saved_players::GamePlayerEntry {
+                    puuid,
+                    summoner_name,
+                    profile_icon_id,
+                    tag_line,
+                    champion_id,
+                });
+            }
+        }
+
+        let player_count = entries.len();
+        if player_count == 0 {
+            return;
+        }
+
+        *app_state
+            .current_game_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(crate::saved_players::CurrentGameCache {
+            game_id,
+            queue_id,
+            players: entries,
+        });
+        log::info!(
+            "已缓存本局信息: gameId={}, queueId={}, 玩家数={}",
+            game_id,
+            queue_id,
+            player_count
+        );
+    });
+}
+
+/// 对局结束后记录所有相遇玩家（自动录入保存的玩家）
+fn spawn_record_encountered_players(app_handle: AppHandle) {
+    tokio::spawn(async move {
+        let state = app_handle.state::<crate::AppState>();
+        let app_state = state.inner();
+
+        // 先获取自己的 puuid，成功后再消费缓存，避免取走后因 LCU 临时不可用丢失本局记录
+        let self_puuid = get_self_puuid(app_state).await;
+        if self_puuid.is_empty() {
+            log::warn!("对局结束：无法获取自己的 puuid，跳过相遇记录");
+            return;
+        }
+
+        // 取走缓存（避免 PreEndOfGame/EndOfGame 重复记录）
+        let cache = app_state
+            .current_game_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        let Some(cache) = cache else {
+            log::debug!("对局结束：无本局信息缓存，跳过相遇记录");
+            return;
+        };
+
+        let queue_type = cache.queue_id.to_string();
+        let mut recorded = 0;
+        for player in &cache.players {
+            if player.puuid.is_empty() || player.puuid == self_puuid {
+                continue;
+            }
+            crate::saved_players::record_encounter(
+                app_state,
+                player,
+                &self_puuid,
+                cache.game_id,
+                &queue_type,
+            );
+            recorded += 1;
+        }
+        log::info!("对局结束相遇记录完成，共 {} 名玩家", recorded);
+    });
+}
+
+/// 选人阶段对带标记的玩家发送聊天提醒
+fn spawn_tag_reminder(app_handle: AppHandle) {
+    tokio::spawn(async move {
+        let state = app_handle.state::<crate::AppState>();
+        let app_state = state.inner();
+
+        // 等待选人会话就绪
+        sleep(Duration::from_millis(2000)).await;
+
+        let self_puuid = get_self_puuid(app_state).await;
+        if self_puuid.is_empty() {
+            return;
+        }
+
+        let tagged = crate::saved_players::query_tagged_for_reminder(app_state, &self_puuid);
+        if tagged.is_empty() {
+            return;
+        }
+        let tagged_map: std::collections::HashMap<String, String> = tagged.into_iter().collect();
+
+        let session =
+            match lcu_request(app_state, "GET", "/lol-champ-select/v1/session", None).await {
+                Ok(v) => v,
+                Err(_) => return,
+            };
+
+        // 获取选人聊天会话 id
+        let conv_id = match lcu_request(app_state, "GET", "/lol-chat/v1/conversations", None).await
+        {
+            Ok(v) => v
+                .as_array()
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|c| c.get("type").and_then(|t| t.as_str()) == Some("championSelect"))
+                })
+                .and_then(|c| c.get("id").and_then(|i| i.as_str()))
+                .map(str::to_string),
+            Err(_) => None,
+        };
+        let Some(conv_id) = conv_id else {
+            log::debug!("标记玩家提醒：未找到选人聊天会话");
+            return;
+        };
+
+        let mut reminded = 0;
+        // 选人聊天室只包含己方队伍，仅遍历己方即可，避免对对手做无谓查询
+        for team in ["myTeam"] {
+            let Some(arr) = session.get(team).and_then(|v| v.as_array()) else {
+                continue;
+            };
+            for player in arr {
+                let Some(summoner_id) = player.get("summonerId").and_then(|v| v.as_i64()) else {
+                    continue;
+                };
+                let path = format!("/lol-summoner/v1/summoners/{}", summoner_id);
+                let Ok(info) = lcu_request(app_state, "GET", &path, None).await else {
+                    continue;
+                };
+                let Some(puuid) = info.get("puuid").and_then(|p| p.as_str()) else {
+                    continue;
+                };
+                let Some(tag) = tagged_map.get(puuid) else {
+                    continue;
+                };
+                let name = info
+                    .get("displayName")
+                    .and_then(|n| n.as_str())
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        info.get("gameName")
+                            .and_then(|n| n.as_str())
+                            .filter(|s| !s.is_empty())
+                    })
+                    .unwrap_or(puuid)
+                    .to_string();
+                let message = serde_json::json!({
+                    "body": format!("[标记玩家: {}]: {}", name, tag),
+                    "type": "celebration"
+                });
+                let path = format!("/lol-chat/v1/conversations/{}/messages", conv_id);
+                match lcu_request(app_state, "POST", &path, Some(message)).await {
+                    Ok(_) => {
+                        log::info!("已提醒标记玩家: {} ({})", name, tag);
+                        reminded += 1;
+                    }
+                    Err(e) => log::warn!("标记玩家提醒发送失败: {}", e),
+                }
+            }
+        }
+        if reminded == 0 {
+            log::debug!("标记玩家提醒：本局没有已标记的玩家");
         }
     });
 }

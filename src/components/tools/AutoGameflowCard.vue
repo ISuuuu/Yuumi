@@ -35,6 +35,12 @@ function updateAramSideVisible(value: boolean) {
   config.value.Functions.AramTeamSideVisibleToTeam = value;
   triggerAutoSave();
 }
+
+function updateTagReminder(value: boolean) {
+  if (!config?.value) return;
+  config.value.Functions.EnableAutoTagReminder = value;
+  triggerAutoSave();
+}
 </script>
 
 <template>
@@ -68,7 +74,8 @@ function updateAramSideVisible(value: boolean) {
                 config.Functions.EnableAutoHandleInvite ||
                 config.Functions.EnableAutoHonor ||
                 config.Functions.EnableAutoPlayAgain ||
-                config.Functions.EnableAutoAramTeamSide
+                config.Functions.EnableAutoAramTeamSide ||
+                config.Functions.EnableAutoTagReminder
                   ? t("tools.autoGameflow.statusEnabled")
                   : t("tools.autoGameflow.statusDisabled")
               }}
@@ -110,6 +117,13 @@ function updateAramSideVisible(value: boolean) {
           :value="config.Functions.AramTeamSideVisibleToTeam"
           :disabled="!config.Functions.EnableAutoAramTeamSide"
           @update:value="updateAramSideVisible"
+        />
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">{{ t("tools.autoGameflow.tagReminderLabel") }}</span>
+        <n-switch
+          :value="config.Functions.EnableAutoTagReminder"
+          @update:value="updateTagReminder"
         />
       </div>
     </n-collapse-item>
