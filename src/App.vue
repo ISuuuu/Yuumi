@@ -28,7 +28,7 @@ const TFT = defineAsyncComponent(() => import("./views/TFT.vue"));
 const Settings = defineAsyncComponent(() => import("./views/Settings.vue"));
 const Tools = defineAsyncComponent(() => import("./views/Tools.vue"));
 const SavedPlayers = defineAsyncComponent(() => import("./views/SavedPlayers.vue"));
-const Notice = defineAsyncComponent(() => import("./views/Notice.vue"));
+import NoticePopup from "./components/NoticePopup.vue";
 import UpdateDialog, { type UpdateInfo } from "./components/UpdateDialog.vue";
 import CustomTitleBar from "./components/layout/CustomTitleBar.vue";
 import NavigationSidebar from "./components/layout/NavigationSidebar.vue";
@@ -97,6 +97,7 @@ const appConfig = ref<AppConfig | null>(null);
 provide("appConfig", appConfig);
 const pageHistory: string[] = [];
 const isSidebarExpanded = ref(false);
+const noticeVisible = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
 const platformId = ref("");
 const mapSideLabel = ref(""); // 蓝色方/红色方
@@ -249,6 +250,10 @@ onMounted(async () => {
 });
 
 function navigate(page: string) {
+  if (page === "notice") {
+    noticeVisible.value = true;
+    return;
+  }
   if (currentPage.value !== page) {
     pageHistory.push(currentPage.value);
   }
@@ -779,13 +784,12 @@ async function handleClose() {
                     <p class="hint">{{ $t("common.opggHint") }}</p>
                   </div>
                 </div>
-
-                <!-- 更新日志页 -->
-                <Notice v-else-if="currentPage === 'notice'" />
               </template>
             </main>
           </div>
         </div>
+
+        <NoticePopup v-if="noticeVisible" @close="noticeVisible = false" />
 
         <!-- 自动更新弹窗（在 app-layout 外部，避免 overflow:hidden 限制） -->
         <UpdateDialog :update-info="updateInfo" @dismiss="updateInfo = null" />
