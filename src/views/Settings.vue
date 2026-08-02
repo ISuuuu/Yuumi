@@ -34,6 +34,69 @@ const hideMenuActive = computed(
 // 当前版本号
 const appVersion = ref("");
 
+// ─── 版本更新历史（GitHub Releases）───
+interface VersionEntry {
+  tag: string;
+  date: string;
+  html: string;
+}
+
+const versionHistory = ref<VersionEntry[]>([]);
+const historyLoading = ref(false);
+const historyError = ref(false);
+const showChangelog = ref(false);
+
+function normalizeVersion(v: string) {
+  return (v || "").replace(/^v/i, "").trim();
+}
+
+const currentRelease = computed(() => {
+  if (!versionHistory.value.length) return null;
+  const local = normalizeVersion(appVersion.value);
+  if (local) {
+    const match = versionHistory.value.find(
+      (e) => normalizeVersion(e.tag) === local,
+    );
+    if (match) return match;
+  }
+  return versionHistory.value[0];
+});
+
+function openChangelog() {
+  showChangelog.value = true;
+  if (!versionHistory.value.length) fetchReleaseHistory();
+}
+
+function formatDate(isoStr: string) {
+  if (!isoStr) return "";
+  const d = new Date(isoStr);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+}
+
+async function fetchReleaseHistory() {
+  if (historyLoading.value) return;
+  historyLoading.value = true;
+  historyError.value = false;
+  try {
+    const releases = await invoke<
+      { tag: string; publishedAt: string; body: string }[]
+    >("get_release_changelog");
+    const { marked } = await import("marked");
+    versionHistory.value = releases.map((rel) => ({
+      tag: rel.tag,
+      date: formatDate(rel.publishedAt),
+      html: marked.parse(rel.body || "") as string,
+    }));
+    console.log("[Settings] 成功获取版本更新日志");
+  } catch (err) {
+    console.warn("[Settings] 获取版本更新日志失败:", err);
+    historyError.value = true;
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
 // 手动检查更新状态
 const checkingUpdate = ref(false);
 
@@ -94,6 +157,9 @@ onMounted(async () => {
   } catch (e) {
     console.warn("获取版本号失败:", e);
   }
+
+  // 预取版本更新历史
+  fetchReleaseHistory();
 
   if (!config.value) {
     try {
@@ -1284,15 +1350,69 @@ function applyThemeMode(mode: string) {
       <!-- 7. 关于 -->
       <div class="group-header">{{ $t("settings.aboutGroup") }}</div>
 
-      <div class="card-item">
-        <div class="card-left">
-          <h3 class="card-title">{{ $t("settings.aboutTitle") }}</h3>
-          <span class="card-desc"
-            >{{ $t("settings.aboutVersion") }}
-            {{ appVersion ? `v${appVersion}` : $t("settings.loading") }}</span
+      <div class="about-card">
+        <div class="about-brand">
+          <span class="about-logo">Y</span>
+          <span class="about-name">Yuumi</span>
+          <span class="about-version">{{
+            appVersion ? `v${appVersion}` : $t("settings.loading")
+          }}</span>
+          <n-button
+            size="tiny"
+            quaternary
+            class="about-changelog-btn"
+            @click="openChangelog"
           >
+            {{ $t("settings.aboutHistoryBtn") }}
+          </n-button>
         </div>
+        <div class="about-intro">{{ $t("settings.aboutIntro") }}</div>
       </div>
+
+      <n-modal
+        v-model:show="showChangelog"
+        preset="card"
+        class="changelog-modal"
+        :style="{ width: '640px', maxWidth: '95vw' }"
+        :auto-focus="false"
+      >
+        <template #header>
+          <div class="changelog-modal-header">
+            <span class="changelog-title">
+              {{ $t("settings.aboutHistoryTitle") }}
+            </span>
+            <span v-if="currentRelease" class="changelog-version-tag">
+              {{ currentRelease.tag }}
+            </span>
+            <span v-if="currentRelease" class="changelog-date">
+              {{ currentRelease.date }}
+            </span>
+          </div>
+        </template>
+        <div v-if="historyLoading" class="history-status">
+          <span class="history-status-text">{{
+            $t("settings.aboutHistoryLoading")
+          }}</span>
+        </div>
+        <div v-else-if="historyError" class="history-status">
+          <span class="history-status-text">{{
+            $t("settings.aboutHistoryError")
+          }}</span>
+          <n-button size="small" quaternary @click="fetchReleaseHistory">
+            {{ $t("settings.aboutHistoryRetry") }}
+          </n-button>
+        </div>
+        <div
+          v-else-if="currentRelease"
+          class="history-body markdown-body"
+          v-html="currentRelease.html"
+        />
+        <div v-else class="history-status">
+          <span class="history-status-text">{{
+            $t("settings.aboutHistoryLoading")
+          }}</span>
+        </div>
+      </n-modal>
     </div>
   </div>
 </template>
@@ -1779,5 +1899,222 @@ function applyThemeMode(mode: string) {
 
 .spin {
   animation: spin 0.9s linear infinite;
+}
+
+/* ── 关于卡片 ── */
+.about-card {
+  background: var(--settings-card-bg);
+  border: 1px solid var(--settings-card-border);
+  border-radius: 12px;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+  box-shadow: var(--shadow-sm);
+  text-align: center;
+}
+
+.about-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.about-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary-color), #8ec5ff);
+  box-shadow: 0 4px 14px var(--primary-color-alpha-30);
+}
+
+.about-name {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--text-color);
+  letter-spacing: 0.5px;
+  background: linear-gradient(135deg, var(--primary-color), #8ec5ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.about-version {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  background: var(--primary-color-alpha-15);
+  border: 1px solid var(--primary-color-alpha-30);
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.about-intro {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.7;
+  max-width: 520px;
+}
+
+.about-changelog-btn {
+  color: var(--text-dimmed) !important;
+  font-size: 0.72rem !important;
+  padding: 2px 8px !important;
+  height: auto !important;
+  border-radius: 6px !important;
+}
+
+.about-changelog-btn:hover {
+  color: var(--primary-color) !important;
+  background: var(--primary-color-alpha-15) !important;
+}
+
+/* ── 更新日志弹窗 ── */
+.changelog-modal :deep(.n-card-header) {
+  padding: 16px 20px;
+}
+
+.changelog-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.changelog-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.changelog-version-tag {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  background: var(--primary-color-alpha-15);
+  border: 1px solid var(--primary-color-alpha-30);
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.changelog-date {
+  font-size: 0.75rem;
+  color: var(--text-dimmed);
+  font-weight: 500;
+}
+
+/* ── 版本更新历史（关于） ── */
+.history-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+}
+
+.history-status-text {
+  font-size: 0.82rem;
+  color: var(--text-dimmed);
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.history-item {
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.history-item-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.history-tag {
+  display: inline-flex;
+  align-items: center;
+  background: var(--primary-color-alpha-15);
+  color: var(--primary-color);
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-weight: 800;
+  font-size: 0.76rem;
+  letter-spacing: 0.3px;
+  border: 1px solid var(--primary-color-alpha-30);
+}
+
+.history-tag.latest {
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  color: white;
+  border: none;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
+}
+
+.history-date {
+  font-size: 0.76rem;
+  color: var(--text-dimmed);
+  font-weight: 500;
+}
+
+.history-body {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.history-body :deep(h1),
+.history-body :deep(h2),
+.history-body :deep(h3) {
+  margin-top: 8px;
+  margin-bottom: 4px;
+  color: var(--text-color);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.history-body :deep(p) {
+  margin: 4px 0 8px;
+  line-height: 1.6;
+}
+
+.history-body :deep(ul),
+.history-body :deep(ol) {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+}
+
+.history-body :deep(li) {
+  margin-bottom: 3px;
+}
+
+.history-body :deep(code) {
+  background: var(--hover-bg-strong);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 0.82em;
+  color: var(--primary-color);
+}
+
+.history-body :deep(strong) {
+  color: var(--text-color);
+  font-weight: 700;
 }
 </style>

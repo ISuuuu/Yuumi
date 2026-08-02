@@ -352,6 +352,8 @@ pub fn run() {
             commands::tools::launch_lol_client,
             commands::lcu::get_game_data_assets,
             commands::lcu::get_bench_my_champions,
+            commands::tools::fetch_github_text,
+            commands::tools::get_release_changelog,
             upload::upload_single_match,
             upload::batch_upload_matches,
             signalr::get_signalr_status,

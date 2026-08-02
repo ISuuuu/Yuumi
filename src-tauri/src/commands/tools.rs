@@ -1,4 +1,6 @@
 use crate::AppState;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tauri::window::Effect;
 use tauri::Manager;
 
@@ -411,4 +413,148 @@ pub async fn show_bench_overlay_window(
         }
     }
     Ok(())
+}
+
+/// 通过配置的 GitHub HTTP 代理请求远程文本内容（仅限 GitHub 域名，用于公告/版本历史拉取）
+#[tauri::command]
+pub async fn fetch_github_text(app: tauri::AppHandle, url: String) -> Result<String, String> {
+    let parsed = url::Url::parse(&url).map_err(|e| format!("无效的 URL: {e}"))?;
+    let host = parsed.host_str().unwrap_or("").to_string();
+    if host != "github.com"
+        && host != "api.github.com"
+        && host != "raw.githubusercontent.com"
+        && !host.ends_with(".githubusercontent.com")
+    {
+        return Err(format!("仅允许访问 GitHub 域名: {host}"));
+    }
+
+    let (enable_proxy, proxy_addr) = {
+        let state = app.state::<AppState>();
+        let cfg = state.config.read().await;
+        (
+            cfg.general.enable_github_proxy,
+            cfg.general.github_proxy_addr.clone(),
+        )
+    };
+
+    let mut builder = reqwest::Client::builder();
+    if enable_proxy && !proxy_addr.is_empty() {
+        let proxy_url = if proxy_addr.contains("://") {
+            proxy_addr.clone()
+        } else {
+            format!("http://{}", proxy_addr)
+        };
+        match reqwest::Proxy::all(&proxy_url) {
+            Ok(proxy) => {
+                builder = builder.proxy(proxy);
+                log::info!("[fetch_github_text] 已启用 GitHub 代理: {proxy_url}");
+            }
+            Err(e) => log::warn!("[fetch_github_text] 代理地址解析失败，将直连: {e}"),
+        }
+    }
+
+    let client = builder
+        .build()
+        .map_err(|e| format!("HTTP 客户端初始化失败: {e}"))?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    resp.text().await.map_err(|e| format!("读取响应失败: {e}"))
+}
+
+/// 版本更新日志缓存条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseEntry {
+    pub tag: String,
+    pub published_at: String,
+    pub body: String,
+}
+
+/// 缓存文件: %APPDATA%/Yuumi/releases_cache.json
+fn releases_cache_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("Yuumi");
+    path.push("releases_cache.json");
+    path
+}
+
+/// 获取 GitHub 版本更新日志（带本地缓存，缓存有效期 24 小时，
+/// 避免频繁请求触发 GitHub API 未认证限流）。
+#[tauri::command]
+pub async fn get_release_changelog(app: tauri::AppHandle) -> Result<Vec<ReleaseEntry>, String> {
+    const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
+    let cache_path = releases_cache_path();
+
+    // 1. 尝试读缓存
+    if cache_path.exists() {
+        if let Ok(text) = std::fs::read_to_string(&cache_path) {
+            if let Ok(cache) = serde_json::from_str::<Vec<ReleaseEntry>>(&text) {
+                let is_stale = std::fs::metadata(&cache_path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|d| d.as_secs() > CACHE_TTL_SECS)
+                    .unwrap_or(true);
+                if !is_stale && !cache.is_empty() {
+                    log::info!("[get_release_changelog] 命中本地缓存，跳过 GitHub 请求");
+                    return Ok(cache);
+                }
+            }
+        }
+    }
+
+    // 2. 缓存未命中或过期，请求 GitHub
+    log::info!("[get_release_changelog] 缓存未命中，请求 GitHub Releases API");
+    let text = fetch_github_text(
+        app.clone(),
+        "https://api.github.com/repos/ISuuuu/Yuumi/releases".into(),
+    )
+    .await?;
+
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("解析版本数据失败: {e}"))?;
+    let arr = data
+        .as_array()
+        .ok_or_else(|| "版本数据格式错误".to_string())?;
+    let releases: Vec<ReleaseEntry> = arr
+        .iter()
+        .map(|rel| ReleaseEntry {
+            tag: rel
+                .get("tag_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            published_at: rel
+                .get("published_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            body: rel
+                .get("body")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect();
+
+    // 3. 写缓存
+    if let Some(parent) = cache_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string(&releases) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&cache_path, json) {
+                log::warn!("写入版本日志缓存失败: {e}");
+            }
+        }
+        Err(e) => log::warn!("序列化版本日志缓存失败: {e}"),
+    }
+
+    Ok(releases)
 }
