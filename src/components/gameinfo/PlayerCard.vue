@@ -4,18 +4,39 @@ import { useI18n } from "vue-i18n";
 import type { PlayerData } from "../../types/gameInfo";
 import { PREMADE_COLORS } from "../../types/gameInfo";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
+import type { SavedPlayerMarker } from "../../api/lcu";
 import LcuImage from "../LcuImage.vue";
 
-defineProps<{
+const props = defineProps<{
   player: any;
   playerData?: PlayerData;
   premadeIdx: number;
   activeTab: "my" | "their";
   premadeCardStyle: Record<string, string>;
+  savedMap?: Record<string, SavedPlayerMarker>;
+  displayedPuuids?: Set<string>;
 }>();
 
 const { t } = useI18n();
 const { getPlayerSearchName, handleNameClick } = usePlayerSearch();
+
+// 该玩家是否为"保存的玩家"（曾同局），取 tag 与相遇次数；
+// 本局正在显示的玩家不算"历史"，不展示徽章
+const savedInfo = computed(() => {
+  const puuid = props.playerData?.info?.puuid;
+  if (!puuid || !props.savedMap) return undefined;
+  if (props.displayedPuuids?.has(puuid)) return undefined;
+  return props.savedMap[puuid];
+});
+
+function savedBadgeTitle(info: SavedPlayerMarker): string {
+  return info.tag
+    ? t("gameInfo.savedPlayerTip", {
+        count: info.encounterCount,
+        tag: info.tag,
+      })
+    : t("gameInfo.savedPlayerTipNoTag", { count: info.encounterCount });
+}
 
 const TIER_MAP = computed<Record<string, string>>(() => ({
   NONE: "",
@@ -154,6 +175,11 @@ function formatRank(q: any): string {
                 : $t("gameInfo.fateEnemyText")
             }}</span
           >
+          <span
+            v-if="savedInfo"
+            :class="['saved-badge', { 'met-only': !savedInfo.tag }]"
+            :title="savedBadgeTitle(savedInfo)"
+          >{{ savedInfo.tag || $t("gameInfo.savedPlayerMark") }}</span>
         </span>
       </div>
 
@@ -345,6 +371,7 @@ function formatRank(q: any): string {
   font-weight: 700;
   color: var(--text-color);
   max-width: 110px;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -386,6 +413,30 @@ function formatRank(q: any): string {
   background: rgba(191, 36, 42, 0.15);
   color: #f87171;
   border: 1px solid rgba(248, 113, 113, 0.4);
+}
+.saved-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1.5;
+  background: var(--primary-color-alpha-15);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color-alpha-40);
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.saved-badge.met-only {
+  background: var(--border-color);
+  color: var(--text-muted);
+  border: none;
 }
 .pc-winrate-badge-clean {
   font-size: 0.72rem;

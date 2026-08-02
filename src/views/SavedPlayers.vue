@@ -310,7 +310,7 @@ onMounted(async () => {
               <span v-if="player.lastQueueType" class="queue-badge">
                 {{ getQueueName(player.lastQueueType) }}
               </span>
-              <span v-if="player.encounterCount" class="encounter-badge">
+              <span v-if="player.encounterCount >= 2" class="encounter-badge">
                 {{ $t("savedPlayersPage.encounterCount", { count: player.encounterCount }) }}
               </span>
             </div>

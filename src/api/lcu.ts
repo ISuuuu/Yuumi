@@ -464,6 +464,11 @@ export interface PageResult<T> {
   count: number;
 }
 
+export interface SavedPlayerMarker {
+  tag: string | null;
+  encounterCount: number;
+}
+
 export interface SaveSavedPlayerInput {
   puuid: string;
   selfPuuid: string;
@@ -485,6 +490,12 @@ export const queryAllSavedPlayers = (
     selfPuuid,
     page,
     pageSize,
+  });
+
+/** 获取全部保存玩家的精简映射：puuid → 标记信息（对局信息页徽章用） */
+export const querySavedPlayersMap = (selfPuuid: string) =>
+  invoke<Record<string, SavedPlayerMarker>>("get_saved_players_map", {
+    selfPuuid,
   });
 
 /** 分页查询相遇记录 */

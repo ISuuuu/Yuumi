@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, inject, type Ref } from "vue";
+import { ref, computed, inject, type Ref } from "vue";
+import { onMounted, watch } from "vue";
 import { useLcuStore } from "../store/lcuStore";
-import type { AppConfig } from "../api/lcu";
+import type { AppConfig, SavedPlayerMarker } from "../api/lcu";
+import { querySavedPlayersMap } from "../api/lcu";
 import { usePremadeGroup } from "../composables/usePremadeGroup";
 import { useGamePlayerData } from "../composables/useGamePlayerData";
 import PlayerCard from "../components/gameinfo/PlayerCard.vue";
@@ -27,6 +29,7 @@ const {
   theirTeam,
   currentTeam,
   shouldShowContent,
+  currentSummonerPuuid,
 } = useGamePlayerData(
   appConfig,
   premadeColorsMy,
@@ -48,6 +51,36 @@ const {
   premadeColorsMy,
   premadeColorsTheir,
 );
+
+// 保存玩家映射：puuid → { tag, encounterCount }，用于玩家卡片旁标记"曾同局"
+const savedPlayerMap = ref<Record<string, SavedPlayerMarker>>({});
+
+// 当前对局正在显示的玩家 puuid 集合（本局玩家不算"历史"）
+const displayedPuuids = computed(() => {
+  const set = new Set<string>();
+  for (const cellId in playerData.value) {
+    const puuid = playerData.value[cellId]?.info?.puuid;
+    if (puuid) set.add(puuid);
+  }
+  return set;
+});
+
+async function loadSavedPlayerMap() {
+  const puuid = currentSummonerPuuid.value;
+  if (!puuid || !store.isConnected) return;
+  try {
+    savedPlayerMap.value = await querySavedPlayersMap(puuid);
+  } catch (e) {
+    console.error("[GameInfo] 保存玩家映射加载失败:", e);
+  }
+}
+
+watch(() => store.gamePhase, (phase) => {
+  if (phase === "ChampSelect") loadSavedPlayerMap();
+});
+watch(() => store.isConnected, () => loadSavedPlayerMap());
+watch(currentSummonerPuuid, () => loadSavedPlayerMap());
+onMounted(loadSavedPlayerMap);
 </script>
 
 <template>
@@ -94,6 +127,8 @@ const {
             :premade-idx="getPremadeIdx(p.summonerId, activeTab)"
             :active-tab="activeTab"
             :premade-card-style="getPremadeCardStyle(p.summonerId, activeTab)"
+            :saved-map="savedPlayerMap"
+            :displayed-puuids="displayedPuuids"
           />
           <div v-if="currentTeam.length === 0" class="tip">
             {{ $t("gameInfo.noTeamData") }}

@@ -362,6 +362,7 @@ pub fn run() {
             saved_players::save_saved_player,
             saved_players::query_all_saved_players,
             saved_players::query_encountered_games,
+            saved_players::get_saved_players_map,
             saved_players::delete_saved_player,
             saved_players::export_tagged_players_to_json_file,
             saved_players::import_tagged_players_from_json_file,

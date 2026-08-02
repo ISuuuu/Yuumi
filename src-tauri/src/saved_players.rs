@@ -2,6 +2,7 @@ use crate::lcu::client::lcu_request;
 use crate::AppState;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::MutexGuard;
 
@@ -332,8 +333,9 @@ pub fn query_all_saved_players(
         .prepare(&format!(
             "SELECT {}, \
              (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
-             (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) \
-             FROM saved_players WHERE self_puuid = ?1 ORDER BY update_at DESC LIMIT ?2 OFFSET ?3",
+             (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
+             FROM saved_players WHERE self_puuid = ?1 \
+             ORDER BY encounter_cnt DESC, update_at DESC LIMIT ?2 OFFSET ?3",
             SAVED_PLAYER_COLS
         ))
         .map_err(|e| e.to_string())?;
@@ -346,6 +348,52 @@ pub fn query_all_saved_players(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
     Ok(PageResult { data, count })
+}
+
+/// 保存玩家的精简标记（对局信息页徽章用）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedPlayerMarker {
+    pub tag: Option<String>,
+    pub encounter_count: i32,
+}
+
+/// 获取全部保存玩家的精简映射：puuid → 标记信息（tag + 相遇次数）
+#[tauri::command]
+pub fn get_saved_players_map(
+    app_state: tauri::State<'_, AppState>,
+    self_puuid: String,
+) -> Result<HashMap<String, SavedPlayerMarker>, String> {
+    let conn = conn(&app_state);
+    if self_puuid.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT sp.puuid,
+                    sp.tag,
+                    (SELECT COUNT(*) FROM encountered_games eg
+                     WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid)
+             FROM saved_players sp WHERE sp.self_puuid = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut map = HashMap::new();
+    let rows = stmt
+        .query_map(params![self_puuid], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                SavedPlayerMarker {
+                    tag: r.get(1)?,
+                    encounter_count: r.get::<_, i32>(2).unwrap_or(1),
+                },
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (puuid, marker) = row.map_err(|e| e.to_string())?;
+        map.insert(puuid, marker);
+    }
+    Ok(map)
 }
 
 /// 分页查询与某玩家的相遇对局记录（按时间倒序）
