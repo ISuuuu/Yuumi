@@ -803,6 +803,7 @@ pub struct RecentTeammate {
     pub wins: u32,
     pub losses: u32,
     pub last_play_time: u64,
+    pub tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1038,6 +1039,12 @@ pub async fn get_recent_teammates(
         }
     }
 
+    // 查询被标记的玩家（tag 非空），标记玩家优先显示
+    let tagged_map: std::collections::HashMap<String, String> =
+        crate::saved_players::query_tagged_for_reminder(app_state.inner(), &puuid)
+            .into_iter()
+            .collect();
+
     // 统计队友
     let mut stats: std::collections::HashMap<String, RecentTeammate> =
         std::collections::HashMap::new();
@@ -1047,6 +1054,7 @@ pub async fn get_recent_teammates(
             let entry = stats.entry(p.puuid.clone()).or_insert_with(|| {
                 let icon_path = format!("/lol-game-data/assets/v1/profile-icons/{}.jpg", p.icon);
                 RecentTeammate {
+                    tag: tagged_map.get(&p.puuid).cloned(),
                     name: p.name,
                     puuid: p.puuid,
                     icon: icon_path,
@@ -1067,9 +1075,16 @@ pub async fn get_recent_teammates(
         }
     }
 
+    // 查询被标记的玩家（tag 非空），标记玩家优先显示
     let mut summoners: Vec<RecentTeammate> = stats.into_values().collect();
-    // 按照 total 降序排序，总场数相同的按胜场降序
-    summoners.sort_by(|a, b| b.total.cmp(&a.total).then_with(|| b.wins.cmp(&a.wins)));
+    // 排序：标记玩家优先，其次按 total 降序
+    summoners.sort_by(|a, b| {
+        let a_tagged = tagged_map.contains_key(&a.puuid);
+        let b_tagged = tagged_map.contains_key(&b.puuid);
+        b_tagged
+            .cmp(&a_tagged)
+            .then_with(|| b.total.cmp(&a.total))
+    });
     // 取前 5 个
     summoners.truncate(5);
 

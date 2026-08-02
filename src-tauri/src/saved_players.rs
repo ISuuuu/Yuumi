@@ -335,7 +335,7 @@ pub fn query_all_saved_players(
              (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
              (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
              FROM saved_players WHERE self_puuid = ?1 \
-             ORDER BY encounter_cnt DESC, update_at DESC LIMIT ?2 OFFSET ?3",
+             ORDER BY (tag IS NOT NULL AND tag != '') DESC, encounter_cnt DESC, update_at DESC LIMIT ?2 OFFSET ?3",
             SAVED_PLAYER_COLS
         ))
         .map_err(|e| e.to_string())?;

@@ -183,7 +183,7 @@ pub struct FunctionsConfig {
     #[serde(default = "default_true")]
     pub hide_tft: bool,
 
-    /// 隐藏侧边栏「曾同局玩家」入口（默认显示）
+    /// 隐藏侧边栏「路人集」入口（默认显示）
     #[serde(default)]
     pub hide_saved_players: bool,
 

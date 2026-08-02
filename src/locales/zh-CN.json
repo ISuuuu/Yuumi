@@ -10,7 +10,7 @@
     "notice": "更新日志",
     "settings": "设置",
     "opgg": "OP.GG",
-    "savedPlayers": "曾同局玩家"
+    "savedPlayers": "路人集"
   },
   "noticePage": {
     "title": "更新日志",
@@ -91,7 +91,7 @@
     "hideMenuTitle": "隐藏菜单",
     "hideMenuDesc": "在侧边栏中隐藏选中的菜单入口",
     "hideMenuOptionTft": "云顶之弈",
-    "hideMenuOptionSavedPlayers": "曾同局玩家",
+    "hideMenuOptionSavedPlayers": "路人集",
     "screenshotGroup": "自动截图",
     "enableScreenshotOnMultikillTitle": "多杀与超神自动截图",
     "enableScreenshotOnMultikillDesc": "多杀或超神时自动截图。游戏视频设置须为「无边框」或「窗口化」以防黑屏",
@@ -772,7 +772,7 @@
     "32": "标记"
   },
   "savedPlayersPage": {
-    "title": "曾同局玩家",
+    "title": "路人集",
     "desc": "对局结束后自动记录同局的队友与对手，可添加标记以便选人阶段提醒",
     "empty": "暂无玩家记录",
     "emptyHint": "对局结束后同局的队友与对手会自动出现在这里",

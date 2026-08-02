@@ -193,6 +193,7 @@ export interface RecentTeammate {
   wins: number;
   losses: number;
   lastPlayTime: number;
+  tag?: string | null;
 }
 
 export interface RecentTeammatesResponse {

@@ -292,6 +292,7 @@ watch(
             console.log(
               `[Career] 第 ${attempt + 1} 次重试时已发现新对局 ${latestId}`,
             );
+            await calculateRecentTeammates();
             return;
           }
           console.log(
@@ -459,6 +460,7 @@ watch(
                 <div class="teammate-info-col">
                   <div class="teammate-name">
                     {{ tm.name }}
+                    <span v-if="tm.tag" class="teammate-tag-badge">{{ tm.tag }}</span>
                   </div>
                   <div class="teammate-last-time" v-if="tm.lastPlayTime">
                     {{ formatTime(tm.lastPlayTime) }}
@@ -1338,6 +1340,19 @@ watch(
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.teammate-tag-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary-color, #6fa8ff), #9b6fff);
+  border-radius: 8px;
+  vertical-align: middle;
 }
 
 .teammate-last-time {
