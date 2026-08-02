@@ -177,6 +177,7 @@ const { t: $t } = useI18n();
       </div>
 
       <div
+        v-if="!appConfig?.Functions?.HideSavedPlayers"
         :class="['nav-item', { active: currentPage === 'savedplayers' }]"
         @click="emit('navigate', 'savedplayers')"
         :title="$t('nav.savedPlayers')"

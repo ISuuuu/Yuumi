@@ -183,6 +183,10 @@ pub struct FunctionsConfig {
     #[serde(default = "default_true")]
     pub hide_tft: bool,
 
+    /// 隐藏侧边栏「曾同局玩家」入口（默认显示）
+    #[serde(default)]
+    pub hide_saved_players: bool,
+
     /// 大乱斗板凳席悬浮窗（默认开启）
     #[serde(default = "default_true")]
     pub enable_bench_overlay: bool,
@@ -257,6 +261,7 @@ impl Default for FunctionsConfig {
             lcu_user_id: String::new(),
             upload_enabled: true,
             hide_tft: true,
+            hide_saved_players: false,
             enable_bench_overlay: true,
             enable_screenshot_on_multikill: false,
             screenshot_on_multikill_levels: vec![3, 4, 5, 8],

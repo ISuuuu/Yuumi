@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, inject, type Ref } from "vue";
+import { ref, computed, onMounted, onUnmounted, inject, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -23,6 +23,13 @@ const config =
 const applyMicaEffect = inject<(enabled: boolean) => void>("applyMicaEffect");
 const dialog = useDialog();
 const { t } = useI18n();
+
+// ─── 隐藏菜单（展开式开关组）───
+const hideMenuActive = computed(
+  () =>
+    !!config.value?.Functions.HideTft ||
+    !!config.value?.Functions.HideSavedPlayers,
+);
 
 // 当前版本号
 const appVersion = ref("");
@@ -750,19 +757,44 @@ function applyThemeMode(mode: string) {
         </n-collapse-item>
       </n-collapse>
 
-      <!-- 隐藏云顶之弈 -->
-      <div class="card-item border-bottom">
-        <div class="card-left">
-          <h3 class="card-title">{{ $t("settings.hideTftTitle") }}</h3>
-          <span class="card-desc">{{ $t("settings.hideTftDesc") }}</span>
-        </div>
-        <div class="card-right">
-          <n-switch
-            v-model:value="config.Functions.HideTft"
-            @update:value="autoSave"
-          />
-        </div>
-      </div>
+      <!-- 隐藏菜单 -->
+      <n-collapse arrow-placement="right" class="collapse-card">
+        <n-collapse-item name="hidemenu">
+          <template #header>
+            <div class="collapse-header-wrapper">
+              <div class="collapse-left-simple">
+                <span class="card-title">{{ $t("settings.hideMenuTitle") }}</span>
+                <span class="card-desc">{{ $t("settings.hideMenuDesc") }}</span>
+              </div>
+              <div class="collapse-right-status">
+                <span class="status-preview">{{
+                  hideMenuActive
+                    ? $t("settings.enabled")
+                    : $t("settings.disabled")
+                }}</span>
+              </div>
+            </div>
+          </template>
+          <div class="setting-row">
+            <span class="setting-label">{{
+              $t("settings.hideMenuOptionTft")
+            }}</span>
+            <n-switch
+              v-model:value="config.Functions.HideTft"
+              @update:value="autoSave"
+            />
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">{{
+              $t("settings.hideMenuOptionSavedPlayers")
+            }}</span>
+            <n-switch
+              v-model:value="config.Functions.HideSavedPlayers"
+              @update:value="autoSave"
+            />
+          </div>
+        </n-collapse-item>
+      </n-collapse>
 
       <!-- 自动截图设置 -->
       <div class="group-header">{{ $t("settings.screenshotGroup") }}</div>

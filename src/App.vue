@@ -751,7 +751,12 @@ async function handleClose() {
                 />
                 <Settings v-else-if="currentPage === 'settings'" />
                 <Tools v-else-if="currentPage === 'tools'" />
-                <SavedPlayers v-else-if="currentPage === 'savedplayers'" />
+                <SavedPlayers
+                  v-else-if="
+                    currentPage === 'savedplayers' &&
+                    !appConfig?.Functions?.HideSavedPlayers
+                  "
+                />
 
                 <!-- 内建 OP.GG 占位页面 -->
                 <div

@@ -360,6 +360,7 @@ export interface FunctionsConfig {
   LcuUserId: string;
   UploadEnabled: boolean;
   HideTft: boolean;
+  HideSavedPlayers: boolean;
   EnableBenchOverlay: boolean;
   EnableScreenshotOnMultikill: boolean;
   ScreenshotOnMultikillLevels: number[];
