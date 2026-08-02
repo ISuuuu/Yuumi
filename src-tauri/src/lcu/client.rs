@@ -362,13 +362,17 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
     }
 
     // 1. 尝试优先从本地 LCU 获取
-    if is_lcu_asset {
+    if is_lcu_asset || is_loot_asset {
         let lcu_guard = app_state.lcu_client.read().await;
         if let Some(lcu) = lcu_guard.as_ref() {
-            let clean_path = path
-                .strip_prefix("/lol-game-data/assets/")
-                .map(|s| format!("/lol-game-data/assets/{}", s.to_lowercase()))
-                .unwrap_or_else(|| path.clone());
+            // 战利品资源（/fe/lol-loot/...）路径区分大小写，直接透传；游戏资源则统一小写
+            let clean_path = if is_lcu_asset {
+                path.strip_prefix("/lol-game-data/assets/")
+                    .map(|s| format!("/lol-game-data/assets/{}", s.to_lowercase()))
+                    .unwrap_or_else(|| path.clone())
+            } else {
+                path.clone()
+            };
             let lcu_url = format!("https://127.0.0.1:{}{}", lcu.port, clean_path);
             let auth = build_auth_header(&lcu.token);
 
@@ -391,7 +395,10 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
                     if let Ok(bytes) = resp.bytes().await {
                         return Ok(save_asset_and_build_url(&path, &content_type, &bytes));
                     }
-                } else if resp.status().as_u16() == 404 && clean_path.contains("/assets/assets/") {
+                } else if resp.status().as_u16() == 404
+                    && is_lcu_asset
+                    && clean_path.contains("/assets/assets/")
+                {
                     // 如果双重 assets/assets/ 404，尝试降级为单重 assets/ 再发一次请求
                     let retry_path = clean_path.replace("/assets/assets/", "/assets/");
                     let retry_url = format!("https://127.0.0.1:{}{}", lcu.port, retry_path);

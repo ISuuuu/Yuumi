@@ -134,9 +134,10 @@ pub async fn get_openable_loots(
         let loot_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
         let loot_id = item.get("lootId").and_then(|v| v.as_str()).unwrap_or("");
         let name = item
-            .get("itemDesc")
+            .get("localizedName")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
+            .or_else(|| item.get("itemDesc").and_then(|v| v.as_str()).filter(|s| !s.is_empty()))
             .unwrap_or(loot_id);
         let count = item.get("count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let mut tile_path = item
@@ -966,9 +967,10 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
         );
 
         let mut item_desc = item
-            .get("itemDesc")
+            .get("localizedName")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
+            .or_else(|| item.get("itemDesc").and_then(|v| v.as_str()).filter(|s| !s.is_empty()))
             .unwrap_or(loot_id)
             .to_string();
 
