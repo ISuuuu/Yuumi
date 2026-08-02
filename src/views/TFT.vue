@@ -8,6 +8,7 @@ import { useTftData, type TftMatchDisplay } from "../composables/useTftData";
 import { lcuRequest } from "../api/lcu";
 
 import TftRankHeader from "../components/tft/TftRankHeader.vue";
+import LcuOfflineState from "../components/LcuOfflineState.vue";
 import TftMatchCard from "../components/tft/TftMatchCard.vue";
 import TftMatchDetailModal from "../components/tft/TftMatchDetailModal.vue";
 import TftMetaCompsTab from "../components/tft/TftMetaCompsTab.vue";
@@ -72,10 +73,7 @@ watch(
 <template>
   <div class="tft-view">
     <!-- 未连接 LCU：整页启动提示，高度与其他页面保持一致 -->
-    <div v-if="!store.isConnected" class="tip-container">
-      <div class="offline-logo">🎮</div>
-      <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
-    </div>
+    <LcuOfflineState v-if="!store.isConnected" />
 
     <div v-else class="tft-content">
       <!-- 主视图 Tabs（版本号与页签同一行，靠右） -->
@@ -150,27 +148,6 @@ watch(
   border: 1px solid var(--primary-color-alpha-20);
   padding: 2px 8px;
   border-radius: 12px;
-}
-
-.tip-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 6rem 2rem;
-  color: var(--text-muted);
-  flex: 1;
-}
-
-.offline-logo {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-}
-
-.tip {
-  font-size: 0.95rem;
-  color: var(--text-dimmed);
-  margin: 0;
 }
 
 .tft-content {

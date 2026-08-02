@@ -4,6 +4,7 @@ import { useLcuStore } from "../store/lcuStore";
 import MatchHistoryTab from "../components/career/MatchHistoryTab.vue";
 import LootManagerTab from "../components/career/LootManagerTab.vue";
 import LcuImage from "../components/LcuImage.vue";
+import LcuOfflineState from "../components/LcuOfflineState.vue";
 import { useMatchHistory } from "../composables/useMatchHistory";
 
 const store = useLcuStore();
@@ -75,10 +76,7 @@ function refreshSummoner() {
 <template>
   <div class="career">
     <!-- 未连接 LCU 时显示提示 -->
-    <div v-if="!store.isConnected" class="tip-container">
-      <div class="offline-logo">🎮</div>
-      <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
-    </div>
+    <LcuOfflineState v-if="!store.isConnected" />
 
     <div v-else class="career-content">
       <!-- 召唤师信息卡片 -->
@@ -419,27 +417,6 @@ function refreshSummoner() {
   opacity: 0.4;
   cursor: not-allowed;
   pointer-events: none;
-}
-
-.tip-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 6rem 2rem;
-  color: var(--text-muted);
-  flex: 1;
-}
-
-.offline-logo {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-}
-
-.tip {
-  font-size: 0.95rem;
-  color: var(--text-dimmed);
-  margin: 0;
 }
 
 @keyframes fadeIn {

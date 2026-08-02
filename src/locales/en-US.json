@@ -792,6 +792,8 @@
     "exportSuccess": "Exported to {path}",
     "encounterCount": "Met {count} times",
     "loadFailed": "Failed to load",
-    "connectedRequired": "Connect to the League client to use this"
+    "filterAll": "All",
+    "filterTagged": "Tagged",
+    "filterMultiple": "Met Multiple Times"
   }
 }

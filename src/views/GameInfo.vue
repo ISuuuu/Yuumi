@@ -7,6 +7,7 @@ import { querySavedPlayersMap } from "../api/lcu";
 import { usePremadeGroup } from "../composables/usePremadeGroup";
 import { useGamePlayerData } from "../composables/useGamePlayerData";
 import PlayerCard from "../components/gameinfo/PlayerCard.vue";
+import LcuOfflineState from "../components/LcuOfflineState.vue";
 import PremadeLegend from "../components/gameinfo/PremadeLegend.vue";
 import PlayerMatchColumn from "../components/gameinfo/PlayerMatchColumn.vue";
 
@@ -85,10 +86,7 @@ onMounted(loadSavedPlayerMap);
 
 <template>
   <div class="game-info">
-    <div v-if="!store.isConnected" class="tip-container">
-      <div class="offline-logo">🎮</div>
-      <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
-    </div>
+    <LcuOfflineState v-if="!store.isConnected" />
 
     <div v-else-if="isTftMode" class="tip-container">
       <div class="offline-logo">♟️</div>

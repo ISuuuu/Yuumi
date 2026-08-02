@@ -20,6 +20,7 @@ declare module 'vue' {
     ColorPickerWithAlpha: typeof import('./components/ColorPickerWithAlpha.vue')['default']
     CustomTitleBar: typeof import('./components/layout/CustomTitleBar.vue')['default']
     LcuImage: typeof import('./components/LcuImage.vue')['default']
+    LcuOfflineState: typeof import('./components/LcuOfflineState.vue')['default']
     LcuQuickActionsCard: typeof import('./components/tools/LcuQuickActionsCard.vue')['default']
     LootManagerTab: typeof import('./components/career/LootManagerTab.vue')['default']
     MatchHistoryTab: typeof import('./components/career/MatchHistoryTab.vue')['default']

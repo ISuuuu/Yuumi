@@ -793,6 +793,8 @@
     "exportSuccess": "已導出到 {path}",
     "encounterCount": "相遇 {count} 次",
     "loadFailed": "加載失敗",
-    "connectedRequired": "需要連接英雄聯盟客戶端後使用"
+    "filterAll": "全部",
+    "filterTagged": "標記玩家",
+    "filterMultiple": "多次相遇"
   }
 }

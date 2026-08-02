@@ -19,6 +19,7 @@ import type {
 } from "../api/lcu";
 import { useToast } from "../composables/useToast";
 import LcuImage from "../components/LcuImage.vue";
+import LcuOfflineState from "../components/LcuOfflineState.vue";
 
 const { t: $t } = useI18n();
 const { showToast } = useToast();
@@ -29,6 +30,7 @@ const players = ref<SavedPlayer[]>([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = 50;
+const filter = ref<"tagged" | "multiple" | "all">("all");
 const selfPuuid = ref("");
 const expandedPuuid = ref<string | null>(null);
 const encounteredGames = ref<EncounteredGame[]>([]);
@@ -99,6 +101,7 @@ async function loadPlayers(append = false) {
       selfPuuid.value,
       page.value,
       pageSize,
+      filter.value === "all" ? undefined : filter.value,
     );
     if (append) {
       players.value = [...players.value, ...res.data];
@@ -112,6 +115,11 @@ async function loadPlayers(append = false) {
   } finally {
     loading.value = false;
   }
+}
+
+function switchFilter(next: "tagged" | "multiple" | "all") {
+  filter.value = next;
+  loadPlayers();
 }
 
 async function loadGames(puuid: string) {
@@ -252,34 +260,56 @@ onMounted(async () => {
 
 <template>
   <div class="saved-players-view">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">{{ $t("savedPlayersPage.title") }}</h1>
-        <span class="page-desc">{{ $t("savedPlayersPage.desc") }}</span>
+    <LcuOfflineState v-if="!isConnected" />
+
+    <div v-else class="saved-players-content">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">{{ $t("savedPlayersPage.title") }}</h1>
+          <span class="page-desc">{{ $t("savedPlayersPage.desc") }}</span>
+        </div>
+        <div class="page-actions">
+          <div class="filter-group">
+            <button
+              class="filter-btn"
+              :class="{ active: filter === 'all' }"
+              @click="switchFilter('all')"
+            >
+              {{ $t("savedPlayersPage.filterAll") }}
+            </button>
+            <button
+              class="filter-btn"
+              :class="{ active: filter === 'tagged' }"
+              @click="switchFilter('tagged')"
+            >
+              {{ $t("savedPlayersPage.filterTagged") }}
+            </button>
+            <button
+              class="filter-btn"
+              :class="{ active: filter === 'multiple' }"
+              @click="switchFilter('multiple')"
+            >
+              {{ $t("savedPlayersPage.filterMultiple") }}
+            </button>
+          </div>
+          <button class="action-btn" @click="handleImport">
+            {{ $t("savedPlayersPage.import") }}
+          </button>
+          <button class="action-btn" @click="handleExport">
+            {{ $t("savedPlayersPage.export") }}
+          </button>
+        </div>
       </div>
-      <div class="page-actions">
-        <button class="action-btn" @click="handleImport" :disabled="!isConnected">
-          {{ $t("savedPlayersPage.import") }}
-        </button>
-        <button class="action-btn" @click="handleExport" :disabled="!isConnected">
-          {{ $t("savedPlayersPage.export") }}
-        </button>
+
+      <div v-if="loading" class="tip-container">
+        <div class="loading-spinner"></div>
+        <p class="tip">{{ $t("settings.loadingData") }}</p>
       </div>
-    </div>
 
-    <div v-if="!isConnected" class="empty-container">
-      <p class="empty-tip">{{ $t("savedPlayersPage.connectedRequired") }}</p>
-    </div>
-
-    <div v-else-if="loading" class="tip-container">
-      <div class="loading-spinner"></div>
-      <p class="tip">{{ $t("settings.loadingData") }}</p>
-    </div>
-
-    <div v-else-if="players.length === 0" class="empty-container">
-      <p class="empty-tip">{{ $t("savedPlayersPage.empty") }}</p>
-      <p class="empty-hint">{{ $t("savedPlayersPage.emptyHint") }}</p>
-    </div>
+      <div v-else-if="players.length === 0" class="empty-container">
+        <p class="empty-tip">{{ $t("savedPlayersPage.empty") }}</p>
+        <p class="empty-hint">{{ $t("savedPlayersPage.emptyHint") }}</p>
+      </div>
 
     <div v-else class="player-list">
       <div v-for="player in players" :key="player.puuid" class="player-card">
@@ -383,14 +413,30 @@ onMounted(async () => {
           {{ $t("savedPlayersPage.loadMore") }}
         </button>
       </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .saved-players-view {
-  padding: 24px;
-  height: 100%;
+  padding: 1rem 1.5rem 1rem 0.6rem;
+  background-color: transparent;
+  flex: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.saved-players-content {
+  max-width: 1000px;
+  width: 100%;
+  margin: 0 auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -402,10 +448,10 @@ onMounted(async () => {
 }
 
 .page-title {
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 1.4rem;
+  font-weight: 800;
   color: var(--text-color);
-  margin: 0;
+  margin: 0 0 0.4rem 0;
 }
 
 .page-desc {
@@ -436,6 +482,43 @@ onMounted(async () => {
   color: var(--primary-color);
 }
 
+.filter-group {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  align-self: center;
+}
+
+.filter-btn {
+  padding: 4px 12px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--text-dimmed);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.filter-btn:hover:not(:disabled) {
+  color: var(--text-color);
+}
+
+.filter-btn.active {
+  background: var(--primary-color);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+.filter-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -447,8 +530,12 @@ onMounted(async () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px 0;
+  padding: 6rem 2rem;
   gap: 10px;
+}
+
+.tip-container {
+  flex: 1;
 }
 
 .loading-spinner {
@@ -469,7 +556,7 @@ onMounted(async () => {
 .tip,
 .empty-tip {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 0.95rem;
   margin: 0;
 }
 

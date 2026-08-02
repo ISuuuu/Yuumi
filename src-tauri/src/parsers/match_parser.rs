@@ -1081,9 +1081,7 @@ pub async fn get_recent_teammates(
     summoners.sort_by(|a, b| {
         let a_tagged = tagged_map.contains_key(&a.puuid);
         let b_tagged = tagged_map.contains_key(&b.puuid);
-        b_tagged
-            .cmp(&a_tagged)
-            .then_with(|| b.total.cmp(&a.total))
+        b_tagged.cmp(&a_tagged).then_with(|| b.total.cmp(&a.total))
     });
     // 取前 5 个
     summoners.truncate(5);

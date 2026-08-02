@@ -20,6 +20,7 @@ import {
 } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
+import LcuOfflineState from "../components/LcuOfflineState.vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useToast } from "../composables/useToast";
@@ -919,10 +920,7 @@ function getQueueName(queueId: number, backendName: string): string {
 
 <template>
   <div class="search-view">
-    <div v-if="!store.isConnected" class="tip-container">
-      <div class="offline-logo">🎮</div>
-      <p class="tip">{{ $t("gameInfo.launchLolPrompt") }}</p>
-    </div>
+    <LcuOfflineState v-if="!store.isConnected" />
 
     <div v-else class="search-container">
       <!-- 顶部搜索工具栏 -->

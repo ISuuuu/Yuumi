@@ -312,19 +312,26 @@ pub fn save_saved_player(
 }
 
 /// 分页查询全部保存玩家（按最近相遇/更新时间倒序）
+/// filter: "tagged" 只看已标记玩家，"multiple" 只看多次相遇玩家，其他为全部
 #[tauri::command]
 pub fn query_all_saved_players(
     app_state: tauri::State<'_, AppState>,
     self_puuid: String,
     page: Option<i64>,
     page_size: Option<i64>,
+    filter: Option<String>,
 ) -> Result<PageResult<SavedPlayerDto>, String> {
     let page = page.unwrap_or(1).max(1);
     let page_size = page_size.unwrap_or(50).clamp(1, 200);
+    let where_clause = match filter.as_deref() {
+        Some("tagged") => " AND tag IS NOT NULL AND tag != ''",
+        Some("multiple") => " AND (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) >= 2",
+        _ => "",
+    };
     let conn = conn(&app_state);
     let count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1",
+            &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{where_clause}"),
             params![self_puuid],
             |r| r.get(0),
         )
@@ -334,8 +341,8 @@ pub fn query_all_saved_players(
             "SELECT {}, \
              (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
              (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
-             FROM saved_players WHERE self_puuid = ?1 \
-             ORDER BY (tag IS NOT NULL AND tag != '') DESC, encounter_cnt DESC, update_at DESC LIMIT ?2 OFFSET ?3",
+             FROM saved_players WHERE self_puuid = ?1{where_clause} \
+             ORDER BY last_met_at DESC, update_at DESC LIMIT ?2 OFFSET ?3",
             SAVED_PLAYER_COLS
         ))
         .map_err(|e| e.to_string())?;
