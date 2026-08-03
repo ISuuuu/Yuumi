@@ -458,6 +458,8 @@ pub async fn fetch_github_text(app: tauri::AppHandle, url: String) -> Result<Str
         .map_err(|e| format!("HTTP 客户端初始化失败: {e}"))?;
     let resp = client
         .get(&url)
+        .header("User-Agent", "Yuumi/1.0")
+        .header("Accept", "application/vnd.github+json")
         .send()
         .await
         .map_err(|e| format!("请求失败: {e}"))?;
