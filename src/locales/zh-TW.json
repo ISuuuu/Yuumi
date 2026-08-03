@@ -166,6 +166,7 @@
     "aboutHistoryTitle": "更新日誌",
     "aboutHistoryDesc": "查看 GitHub 上發布的版本更新日誌",
     "aboutHistoryBtn": "更新日誌",
+    "aboutRepository": "開源倉庫",
     "aboutHistoryLoading": "正在加載...",
     "aboutHistoryError": "無法獲取版本歷史",
     "aboutHistoryRetry": "重試",

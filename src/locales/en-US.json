@@ -166,6 +166,7 @@
     "aboutHistoryTitle": "Changelog",
     "aboutHistoryDesc": "View release changelogs published on GitHub",
     "aboutHistoryBtn": "Changelog",
+    "aboutRepository": "GitHub Repo",
     "aboutHistoryLoading": "Loading...",
     "aboutHistoryError": "Failed to fetch version history",
     "aboutHistoryRetry": "Retry",

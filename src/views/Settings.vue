@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, inject, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { fetchConfig, updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import {
@@ -65,6 +66,12 @@ const currentRelease = computed(() => {
 function openChangelog() {
   showChangelog.value = true;
   if (!versionHistory.value.length) fetchReleaseHistory();
+}
+
+function openRepo() {
+  openUrl("https://github.com/ISuuuu/Yuumi").catch((err) => {
+    console.warn("[Settings] 无法打开开源仓库链接:", err);
+  });
 }
 
 function formatDate(isoStr: string) {
@@ -1319,16 +1326,40 @@ function applyThemeMode(mode: string) {
           <span class="about-version">{{
             appVersion ? `v${appVersion}` : $t("settings.loading")
           }}</span>
+        </div>
+        <div class="about-intro">{{ $t("settings.aboutIntro") }}</div>
+        <div class="about-actions">
           <n-button
             size="tiny"
             quaternary
-            class="about-changelog-btn"
+            class="about-action-btn"
             @click="openChangelog"
           >
             {{ $t("settings.aboutHistoryBtn") }}
           </n-button>
+          <n-button
+            size="tiny"
+            quaternary
+            class="about-action-btn"
+            @click="openRepo"
+          >
+            <template #icon>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                width="12"
+                height="12"
+              >
+                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+              </svg>
+            </template>
+            {{ $t("settings.aboutRepository") }}
+          </n-button>
         </div>
-        <div class="about-intro">{{ $t("settings.aboutIntro") }}</div>
       </div>
 
       <n-modal
@@ -1927,7 +1958,14 @@ function applyThemeMode(mode: string) {
   max-width: 520px;
 }
 
-.about-changelog-btn {
+.about-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.about-action-btn {
   color: var(--text-dimmed) !important;
   font-size: 0.72rem !important;
   padding: 2px 8px !important;
@@ -1935,7 +1973,7 @@ function applyThemeMode(mode: string) {
   border-radius: 6px !important;
 }
 
-.about-changelog-btn:hover {
+.about-action-btn:hover {
   color: var(--primary-color) !important;
   background: var(--primary-color-alpha-15) !important;
 }
