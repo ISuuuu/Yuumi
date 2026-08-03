@@ -150,6 +150,9 @@ const INITIAL_BATCH = 20; // 首次加载 20 条（2 页）
 const LOAD_MORE_COUNT = 30; // 每次增量加载 30 条
 const PREFETCH_PAGES = 3; // 提前 3 页预拉取
 
+// 搜索代数：每次发起新搜索自增，用于丢弃旧搜索的后台预取结果，防止串号污染
+let searchGeneration = 0;
+
 // 搜索历史
 const searchHistory = ref<string[]>([]);
 const showHistory = ref(false);
@@ -307,6 +310,7 @@ async function doSearch(): Promise<boolean> {
   if (searching.value) return false; // 防重入：进行中直接忽略重复点击
   searching.value = true;
   error.value = "";
+  searchGeneration++; // 使上一次搜索的后台预取结果失效
   // 保留旧数据作为模糊背景，等拉取成功后再覆盖，防止界面生硬闪烁
 
   try {
@@ -396,6 +400,16 @@ async function doSearch(): Promise<boolean> {
   return true;
 }
 
+// 后台预取战绩：使用 setTimeout 让当前帧先渲染，避免阻塞当前交互
+let prefetchTimer: ReturnType<typeof setTimeout> | null = null;
+function schedulePrefetchMatches() {
+  if (prefetchTimer) clearTimeout(prefetchTimer);
+  prefetchTimer = setTimeout(() => {
+    prefetchTimer = null;
+    void loadMoreMatches();
+  }, 0);
+}
+
 async function loadMatchHistoryList() {
   if (!summoner.value) return;
   try {
@@ -414,14 +428,14 @@ async function loadMatchHistoryList() {
       allMatchesSearch.value = raw;
       loadedGameIndex.value = INITIAL_BATCH;
 
-      // 首次加载后立即预拉取更多
-      await loadMoreMatches();
+      // 首次加载后后台预拉取更多，不阻塞当前页渲染
+      schedulePrefetchMatches();
     } else if (
       end + matchesPerPage * PREFETCH_PAGES >=
       allMatchesSearch.value.length
     ) {
       // 提前 PREFETCH_PAGES 页预拉取
-      await loadMoreMatches();
+      schedulePrefetchMatches();
     }
 
     // 从全量数据中切片当前页
@@ -431,11 +445,6 @@ async function loadMatchHistoryList() {
     console.log(
       `[Search] 第${currentPageNum.value}页: gameId=${matches.value[0]?.gameId}, 共${matches.value.length}条, allMatches=${allMatchesSearch.value.length}, hasMore=${hasMore.value}`,
     );
-
-    // 默认载入第一局对局的详情
-    if (matches.value.length > 0) {
-      selectMatch(matches.value[0].gameId);
-    }
 
     // 自动批量上传当前页对局（去重 + fire-and-forget）
     if (uploadEnabled.value && matches.value.length > 0) {
@@ -474,6 +483,13 @@ async function loadMatchHistoryList() {
     }
   } catch (e) {
     console.error("抓取战绩列表失败:", e);
+    // 首次加载失败时清空残留的上一次查询数据，避免展示归属错误的对局
+    if (allMatchesSearch.value.length === 0) {
+      matches.value = [];
+      selectedGame.value = null;
+      selectedGameId.value = null;
+    }
+    showToast(`战绩列表获取失败: ${String(e)}`, "error");
   }
 }
 
@@ -481,12 +497,15 @@ async function loadMatchHistoryList() {
 async function loadMoreMatches() {
   if (!summoner.value || loadingMore.value) return; // 防抖：防止连续触发
   loadingMore.value = true;
+  const gen = searchGeneration; // 捕获发起时的搜索代数
+  const puuid = summoner.value.puuid;
   try {
     const fetchBeg = loadedGameIndex.value;
     const fetchEnd = fetchBeg + LOAD_MORE_COUNT - 1;
 
     // 1. 先试 LCU
-    let raw = await fetchMatchHistory(summoner.value.puuid, fetchBeg, fetchEnd);
+    let raw = await fetchMatchHistory(puuid, fetchBeg, fetchEnd);
+    if (gen !== searchGeneration) return; // 期间发起了新搜索，丢弃旧结果
     console.log(
       `[Search] loadMoreMatches(LCU): beg=${fetchBeg}, end=${fetchEnd}, raw.length=${raw.length}`,
     );
@@ -499,11 +518,8 @@ async function loadMoreMatches() {
     if (newGames.length === 0 && raw.length > 0) {
       console.log(`[Search] LCU 返回全重复，降级 SGP`);
       try {
-        raw = await fetchMatchHistorySgp(
-          summoner.value.puuid,
-          fetchBeg,
-          fetchEnd,
-        );
+        raw = await fetchMatchHistorySgp(puuid, fetchBeg, fetchEnd);
+        if (gen !== searchGeneration) return; // 期间发起了新搜索，丢弃旧结果
         console.log(
           `[Search] loadMoreMatches(SGP): beg=${fetchBeg}, end=${fetchEnd}, raw.length=${raw.length}`,
         );
@@ -529,6 +545,10 @@ async function loadMoreMatches() {
     }
 
     loadedGameIndex.value = fetchEnd;
+
+    // 后台预取完成后刷新 hasMore，避免翻页按钮状态过期
+    const currentEnd = currentPageNum.value * matchesPerPage;
+    hasMore.value = allMatchesSearch.value.length > currentEnd;
   } catch (e) {
     console.warn("[Search] 增量加载失败:", e);
   } finally {
@@ -536,7 +556,11 @@ async function loadMoreMatches() {
   }
 }
 
+// 请求序号：防止快速点击不同对局时，旧请求的结果回写新状态
+let selectMatchRequestId = 0;
+
 async function selectMatch(gameId: number) {
+  const requestId = ++selectMatchRequestId;
   selectedGameId.value = gameId;
   gameLoading.value = true;
   try {
@@ -551,80 +575,86 @@ async function selectMatch(gameId: number) {
         cacheSet(gameDetailCache, gameId, g);
       }
     }
-    if (g) {
-      selectedGame.value = g;
+    if (!g || requestId !== selectMatchRequestId) return;
+    selectedGame.value = g;
 
-      // 清空上次对局玩家的段位缓存
-      participantRanks.value = {};
+    // 清空上次对局玩家的段位缓存
+    participantRanks.value = {};
 
-      const participants = g.participants || [];
-      const identities = g.participantIdentities || [];
-
-      // 如果开启了显示段位选项，则并发拉取所有玩家的段位
-      const showTier = appConfig.value?.Functions?.ShowTierInGameInfo ?? false;
-      if (showTier && participants.length > 0) {
-        const playerPuuids: string[] = [];
-        for (const identity of identities) {
-          if (identity.player?.puuid && identity.player.summonerId) {
-            // 排除机器人
-            playerPuuids.push(identity.player.puuid);
-          }
-        }
-
-        // 并发拉取段位数据（命中缓存则直接复用）
-        const rankPromises = playerPuuids.map(async (puuid) => {
-          const cachedRank = cacheGet(rankCache, puuid, RANK_TTL);
-          if (cachedRank !== null) {
-            return { puuid, rankStr: cachedRank };
-          }
-          try {
-            const rResp = await lcuRequest<any>(
-              "GET",
-              `/lol-ranked/v1/ranked-stats/${puuid}`,
-            );
-            if (rResp.success && rResp.data?.queues) {
-              const queues = rResp.data.queues;
-              // 优先单双排，其次灵活排位
-              const solo = queues.find(
-                (q: any) => q.queueType === "RANKED_SOLO_5x5",
-              );
-              const flex = queues.find(
-                (q: any) => q.queueType === "RANKED_FLEX_SR",
-              );
-              const activeQueue = solo || flex;
-              if (
-                activeQueue &&
-                activeQueue.tier &&
-                activeQueue.tier !== "NONE"
-              ) {
-                const tier = TIER_MAP[activeQueue.tier] || activeQueue.tier;
-                const div =
-                  activeQueue.rank && activeQueue.rank !== "NA"
-                    ? activeQueue.rank
-                    : "";
-                const rankStr = `${tier}${div}`;
-                cacheSet(rankCache, puuid, rankStr);
-                return { puuid, rankStr };
-              }
-            }
-          } catch (e) {
-            console.error(`拉取 PUUID 为 ${puuid} 的段位失败:`, e);
-          }
-          return { puuid, rankStr: "" };
-        });
-
-        const rankResults = await Promise.all(rankPromises);
-        for (const res of rankResults) {
-          if (res.rankStr) {
-            participantRanks.value[res.puuid] = res.rankStr;
-          }
-        }
-      }
-    }
+    // 段位后台渐进加载，不阻塞详情主体展示
+    void loadRanksInBackground(g, requestId);
   } catch (e) {
+    if (requestId !== selectMatchRequestId) return;
     console.error("拉取对局详细信息失败:", e);
   } finally {
-    gameLoading.value = false;
+    if (requestId === selectMatchRequestId) {
+      gameLoading.value = false;
+    }
+  }
+}
+
+// 段位请求独立于详情展示，完成后一次性赋值，避免逐个写入触发多次响应式更新
+async function loadRanksInBackground(g: any, requestId: number) {
+  const participants = g.participants || [];
+  const identities = g.participantIdentities || [];
+
+  // 如果开启了显示段位选项，则后台拉取所有玩家的段位
+  const showTier = appConfig.value?.Functions?.ShowTierInGameInfo ?? false;
+  if (!showTier || participants.length === 0) return;
+
+  const playerPuuids: string[] = [];
+  for (const identity of identities) {
+    if (identity.player?.puuid && identity.player.summonerId) {
+      // 排除机器人
+      playerPuuids.push(identity.player.puuid);
+    }
+  }
+  if (playerPuuids.length === 0) return;
+
+  const rankResults: Record<string, string> = {};
+
+  // 并发拉取段位数据（命中缓存则直接复用）
+  await Promise.all(
+    playerPuuids.map(async (puuid) => {
+      const cachedRank = cacheGet(rankCache, puuid, RANK_TTL);
+      if (cachedRank !== null) {
+        rankResults[puuid] = cachedRank;
+        return;
+      }
+      try {
+        const rResp = await lcuRequest<any>(
+          "GET",
+          `/lol-ranked/v1/ranked-stats/${puuid}`,
+        );
+        if (rResp.success && rResp.data?.queues) {
+          const queues = rResp.data.queues;
+          // 优先单双排，其次灵活排位
+          const solo = queues.find(
+            (q: any) => q.queueType === "RANKED_SOLO_5x5",
+          );
+          const flex = queues.find(
+            (q: any) => q.queueType === "RANKED_FLEX_SR",
+          );
+          const activeQueue = solo || flex;
+          if (activeQueue && activeQueue.tier && activeQueue.tier !== "NONE") {
+            const tier = TIER_MAP[activeQueue.tier] || activeQueue.tier;
+            const div =
+              activeQueue.rank && activeQueue.rank !== "NA"
+                ? activeQueue.rank
+                : "";
+            const rankStr = `${tier}${div}`;
+            cacheSet(rankCache, puuid, rankStr);
+            rankResults[puuid] = rankStr;
+          }
+        }
+      } catch (e) {
+        console.error(`拉取 PUUID 为 ${puuid} 的段位失败:`, e);
+      }
+    }),
+  );
+
+  if (requestId === selectMatchRequestId) {
+    participantRanks.value = rankResults;
   }
 }
 
@@ -635,6 +665,9 @@ async function handlePrevPage() {
     try {
       currentPageNum.value--;
       await loadMatchHistoryList();
+      if (matches.value.length > 0) {
+        selectMatch(matches.value[0].gameId);
+      }
     } finally {
       pageSwitching.value = false;
     }
@@ -647,6 +680,9 @@ async function handleNextPage() {
   try {
     currentPageNum.value++;
     await loadMatchHistoryList();
+    if (matches.value.length > 0) {
+      selectMatch(matches.value[0].gameId);
+    }
   } finally {
     pageSwitching.value = false;
   }

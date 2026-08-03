@@ -268,7 +268,10 @@ export async function initLcuListeners() {
     const uri: string = payload?.uri ?? "";
     const data = payload?.data;
 
-    console.log("[lcuStore] lcu-ws-event uri:", uri, "data:", data);
+    // 高频选人事件深对象日志拖慢主线程：生产环境关闭，开发环境只打印 uri
+    if (import.meta.env.DEV) {
+      console.debug("[lcuStore] lcu-ws-event uri:", uri);
+    }
 
     if (uri.startsWith("/lol-gameflow/v1/gameflow-phase")) {
       store.setGamePhase(data);

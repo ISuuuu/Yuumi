@@ -5,6 +5,16 @@ import { fetchLcuAssets } from "../api/lcu";
 const MAX_CACHE_SIZE = 500;
 const cache = new Map<string, string>();
 
+// 与 Rust 侧白名单保持一致：仅这些路径需要走 LCU 资源加载
+function isLcuAssetPath(path: string): boolean {
+  return (
+    path.startsWith("/lol-game-data/assets/") ||
+    path.startsWith("/fe/lol-loot/assets/") ||
+    path.startsWith("http://") ||
+    path.startsWith("https://")
+  );
+}
+
 function cacheSet(key: string, value: string) {
   if (cache.has(key)) {
     cache.delete(key); // 移到最新位置
@@ -126,7 +136,8 @@ function fetchLcuAssetWithRetry(
       errStr.includes("400") ||
       errStr.includes("404") ||
       errStr.includes("Bad Request") ||
-      errStr.includes("Not Found");
+      errStr.includes("Not Found") ||
+      errStr.includes("不允许的资源路径");
 
     if (retries > 0 && !isPermanentError) {
       console.warn(
@@ -159,6 +170,12 @@ export function useLcuAsset(
     (path) => {
       if (!path) {
         src.value = "";
+        return;
+      }
+
+      // 本地静态资源（如 /images/default-avatar.svg）不走 LCU 加载，直接使用
+      if (!isLcuAssetPath(path)) {
+        src.value = path;
         return;
       }
 

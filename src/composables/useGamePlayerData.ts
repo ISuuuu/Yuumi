@@ -14,6 +14,7 @@ import {
 import type { PlayerData } from "../types/gameInfo";
 import { computePremadeColors } from "./usePremadeGroup";
 import { lazySetItem } from "../utils/lazyStorage";
+import { runWithConcurrency } from "../utils/runWithConcurrency";
 
 // ── 排位数据缓存（puuid → { data, timestamp }），带 LRU / 容量上限保护，避免内存泄露
 const rankCache = new Map<string, { data: any; timestamp: number }>();
@@ -383,12 +384,21 @@ export function useGamePlayerData(
   }
 
   async function loadAllPlayers() {
-    const team = currentTeam.value;
-    if (!team || team.length === 0) return;
+    const my = myTeam.value;
+    const their = theirTeam.value;
+    if (my.length === 0 && their.length === 0) return;
     await updateCurrentQueueId();
-    await Promise.all(
-      team.map((p: any) => loadPlayerData(p.cellId, p.summonerId)),
+
+    // 先加载当前可见队伍，再后台加载另一队，避免请求风暴
+    const visible = activeTab.value === "my" ? my : their;
+    const background = activeTab.value === "my" ? their : my;
+
+    await runWithConcurrency(visible, 3, (p) =>
+      loadPlayerData(p.cellId, p.summonerId),
     );
+    void runWithConcurrency(background, 3, (p) =>
+      loadPlayerData(p.cellId, p.summonerId),
+    ).catch(() => {});
   }
 
   async function processTeamData(teamOne: any[], teamTwo: any[]) {
@@ -427,10 +437,16 @@ export function useGamePlayerData(
     lazySetItem("yuumi_last_gameflow_my_team", gameflowMyTeam.value);
     lazySetItem("yuumi_last_gameflow_their_team", gameflowTheirTeam.value);
 
-    await Promise.all([
-      ...allyTeam.map((p: any) => loadPlayerData(p.summonerId, p.summonerId)),
-      ...enemyTeam.map((p: any) => loadPlayerData(p.summonerId, p.summonerId)),
-    ]);
+    // 先加载当前可见队伍，再后台加载另一队，避免一次性并发请求过多
+    const visible = activeTab.value === "my" ? allyTeam : enemyTeam;
+    const background = activeTab.value === "my" ? enemyTeam : allyTeam;
+
+    await runWithConcurrency(visible, 3, (p) =>
+      loadPlayerData(p.summonerId, p.summonerId),
+    );
+    void runWithConcurrency(background, 3, (p) =>
+      loadPlayerData(p.summonerId, p.summonerId),
+    ).catch(() => {});
   }
 
   async function loadFromGameflowSession() {

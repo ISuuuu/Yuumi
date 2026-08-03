@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, watch, computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useLcuStore } from "../store/lcuStore";
 import {
@@ -240,10 +240,16 @@ async function handleImport() {
   }
 }
 
-onMounted(async () => {
+let refreshing = false;
+
+async function refreshRoster() {
+  if (refreshing) return;
+  refreshing = true;
   try {
-    const me = await fetchCurrentSummoner(5);
-    selfPuuid.value = me.puuid;
+    if (!selfPuuid.value) {
+      const me = await fetchCurrentSummoner(5);
+      selfPuuid.value = me.puuid;
+    }
     if (isConnected.value) {
       try {
         await backfillSavedPlayerIdentity();
@@ -254,7 +260,21 @@ onMounted(async () => {
     await loadPlayers();
   } catch (e) {
     console.warn("[SavedPlayers] 未连接客户端:", e);
+  } finally {
+    refreshing = false;
   }
+}
+
+onMounted(() => {
+  void refreshRoster();
+});
+
+let connectedBefore = isConnected.value;
+watch(isConnected, (connected) => {
+  if (connected && !connectedBefore) {
+    void refreshRoster();
+  }
+  connectedBefore = connected;
 });
 </script>
 

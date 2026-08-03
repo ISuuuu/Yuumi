@@ -133,7 +133,7 @@ pub async fn get_openable_loots(
     for item in loots.iter() {
         let loot_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
         let loot_id = item.get("lootId").and_then(|v| v.as_str()).unwrap_or("");
-        let name = item
+        let mut name = item
             .get("localizedName")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
@@ -142,7 +142,11 @@ pub async fn get_openable_loots(
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
             })
-            .unwrap_or(loot_id);
+            .unwrap_or(loot_id)
+            .to_string();
+        if name.eq_ignore_ascii_case("chest_128") {
+            name = "英雄魔法引擎".to_string();
+        }
         let count = item.get("count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let mut tile_path = item
             .get("tilePath")
@@ -992,6 +996,8 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
             item_desc = "海克斯科技钥匙".to_string();
         } else if item_desc == "MATERIAL_key_premium" {
             item_desc = "杰作钥匙".to_string();
+        } else if item_desc.eq_ignore_ascii_case("chest_128") {
+            item_desc = "英雄魔法引擎".to_string();
         }
         let value = item.get("value").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let disenchant_value = item
