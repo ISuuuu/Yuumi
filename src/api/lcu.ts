@@ -293,10 +293,8 @@ export interface GeneralConfig {
   EnableGameStartMinimize: boolean;
   EnableCheckUpdate: boolean;
   LogLevel: number;
-  EnableGithubProxy: boolean;
-  GithubProxyAddr: string;
-  EnableOpggProxy: boolean;
-  OpggProxyAddr: string;
+  EnableHttpProxy: boolean;
+  HttpProxyAddr: string;
   EnableSignalrHub: boolean;
   SignalrServerUrl: string;
   SignalrUserId: string;

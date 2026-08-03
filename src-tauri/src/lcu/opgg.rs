@@ -83,12 +83,12 @@ pub fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Clien
     builder.build().unwrap_or_else(|_| reqwest::Client::new())
 }
 
-/// 读取 OP.GG 代理配置
-async fn opgg_proxy(app_state: &AppState) -> (bool, String) {
+/// 读取全局代理配置
+async fn proxy_config(app_state: &AppState) -> (bool, String) {
     let cfg = app_state.config.read().await;
     (
-        cfg.general.enable_opgg_proxy,
-        cfg.general.opgg_proxy_addr.clone(),
+        cfg.general.enable_http_proxy,
+        cfg.general.http_proxy_addr.clone(),
     )
 }
 
@@ -103,7 +103,7 @@ pub(crate) async fn get_json(
         return Ok(data);
     }
 
-    let (enable_proxy, proxy_addr) = opgg_proxy(app_state).await;
+    let (enable_proxy, proxy_addr) = proxy_config(app_state).await;
     let client = build_opgg_client(enable_proxy, &proxy_addr);
 
     let mut last_err = String::new();
@@ -141,7 +141,7 @@ pub(crate) async fn post_json(
     url: &str,
     body: &Value,
 ) -> Result<Value, String> {
-    let (enable_proxy, proxy_addr) = opgg_proxy(app_state).await;
+    let (enable_proxy, proxy_addr) = proxy_config(app_state).await;
     let client = build_opgg_client(enable_proxy, &proxy_addr);
 
     let mut last_err = String::new();

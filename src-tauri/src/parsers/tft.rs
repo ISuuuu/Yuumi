@@ -943,8 +943,8 @@ async fn fetch_tft_augments_raw(app_state: &AppState) -> Vec<TftAugmentInfo> {
     let (enable_proxy, proxy_addr) = {
         let cfg = app_state.config.read().await;
         (
-            cfg.general.enable_opgg_proxy,
-            cfg.general.opgg_proxy_addr.trim().to_string(),
+            cfg.general.enable_http_proxy,
+            cfg.general.http_proxy_addr.trim().to_string(),
         )
     };
 

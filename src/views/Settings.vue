@@ -570,44 +570,6 @@ function applyThemeMode(mode: string) {
         </div>
       </div>
 
-      <n-collapse arrow-placement="right" class="collapse-card">
-        <n-collapse-item name="opggproxy">
-          <template #header>
-            <div class="collapse-header-wrapper">
-              <div class="collapse-left-simple">
-                <span class="card-title">{{
-                  $t("settings.opggProxyTitle")
-                }}</span>
-                <span class="card-desc">{{
-                  $t("settings.opggProxyDesc")
-                }}</span>
-              </div>
-              <div class="collapse-right-status">
-                <span class="status-preview">{{
-                  config.General.EnableOpggProxy
-                    ? $t("settings.enabled")
-                    : $t("settings.disabled")
-                }}</span>
-              </div>
-            </div>
-          </template>
-          <div class="setting-row">
-            <n-switch
-              v-model:value="config.General.EnableOpggProxy"
-              @update:value="autoSave"
-            />
-            <n-input
-              v-model:value="config.General.OpggProxyAddr"
-              placeholder="127.0.0.1:10809"
-              :disabled="!config.General.EnableOpggProxy"
-              clearable
-              @change="autoSave"
-              style="max-width: 300px"
-            />
-          </div>
-        </n-collapse-item>
-      </n-collapse>
-
       <!-- 3. 通用 -->
       <div class="group-header">{{ $t("settings.generalGroup") }}</div>
 
@@ -1310,20 +1272,20 @@ function applyThemeMode(mode: string) {
       </div>
 
       <n-collapse arrow-placement="right" class="collapse-card">
-        <n-collapse-item name="githubproxy">
+        <n-collapse-item name="httpproxy">
           <template #header>
             <div class="collapse-header-wrapper">
               <div class="collapse-left-simple">
                 <span class="card-title">{{
-                  $t("settings.githubProxyGroup")
+                  $t("settings.httpProxyGroup")
                 }}</span>
                 <span class="card-desc">{{
-                  $t("settings.githubProxyDesc")
+                  $t("settings.httpProxyDesc")
                 }}</span>
               </div>
               <div class="collapse-right-status">
                 <span class="status-preview">{{
-                  config.General.EnableGithubProxy
+                  config.General.EnableHttpProxy
                     ? $t("settings.enabled")
                     : $t("settings.disabled")
                 }}</span>
@@ -1332,15 +1294,15 @@ function applyThemeMode(mode: string) {
           </template>
           <div class="setting-row">
             <n-input
-              v-model:value="config.General.GithubProxyAddr"
+              v-model:value="config.General.HttpProxyAddr"
               placeholder="127.0.0.1:7897"
-              :disabled="!config.General.EnableGithubProxy"
+              :disabled="!config.General.EnableHttpProxy"
               clearable
               @change="autoSave"
               style="max-width: 300px"
             />
             <n-switch
-              v-model:value="config.General.EnableGithubProxy"
+              v-model:value="config.General.EnableHttpProxy"
               @update:value="autoSave"
             />
           </div>

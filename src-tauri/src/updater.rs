@@ -32,8 +32,8 @@ async fn get_proxy_config(app: &AppHandle) -> (bool, String) {
     let state = app.state::<AppState>();
     let cfg = state.config.read().await;
     (
-        cfg.general.enable_github_proxy,
-        cfg.general.github_proxy_addr.clone(),
+        cfg.general.enable_http_proxy,
+        cfg.general.http_proxy_addr.clone(),
     )
 }
 

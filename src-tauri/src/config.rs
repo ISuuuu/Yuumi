@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 /// 当前配置版本号。配置结构发生破坏性变更（字段重命名/移动/类型变化）时递增，
 /// 并在 [`AppConfig::migrate`] 中实现从旧版本到新版本的幂等迁移。
-pub const CONFIG_VERSION: u32 = 1;
+pub const CONFIG_VERSION: u32 = 2;
 
 /// 获取配置文件路径: %APPDATA%/Yuumi/config.json
 fn config_path() -> PathBuf {
@@ -28,10 +28,10 @@ pub struct GeneralConfig {
     pub enable_game_start_minimize: bool,
     pub enable_check_update: bool,
     pub log_level: u32,
-    pub enable_github_proxy: bool,
-    pub github_proxy_addr: String,
-    pub enable_opgg_proxy: bool,
-    pub opgg_proxy_addr: String,
+    #[serde(alias = "EnableGithubProxy")]
+    pub enable_http_proxy: bool,
+    #[serde(alias = "GithubProxyAddr")]
+    pub http_proxy_addr: String,
 
     // SignalR 远程反代
     pub enable_signalr_hub: bool,
@@ -52,10 +52,8 @@ impl Default for GeneralConfig {
             enable_game_start_minimize: false,
             enable_check_update: true,
             log_level: 0,
-            enable_github_proxy: false,
-            github_proxy_addr: "127.0.0.1:7897".into(),
-            enable_opgg_proxy: false,
-            opgg_proxy_addr: "127.0.0.1:7897".into(),
+            enable_http_proxy: false,
+            http_proxy_addr: "127.0.0.1:7897".into(),
             enable_signalr_hub: false,
             signalr_server_url: String::new(),
             signalr_user_id: String::new(),
