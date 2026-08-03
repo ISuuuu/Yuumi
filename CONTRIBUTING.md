@@ -6,9 +6,9 @@
 
 本项目基于 **Tauri v2 + Vue 3 + TypeScript** 架构构建。
 
-*   **Node.js**: 推荐 v24+
+*   **Node.js**: 推荐 v18+ (或 v20+ LTS)
 *   **pnpm**: 推荐 v8+
-*   **Rust**: 安装最新的 Stable 工具链。
+*   **Rust**: 1.77+ 或最新 Stable 工具链
 *   **开发命令**:
     ```bash
     pnpm install        # 安装依赖

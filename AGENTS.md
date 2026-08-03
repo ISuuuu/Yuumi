@@ -124,27 +124,30 @@ Yuumi/
 │   │   ├── useLoot.ts              # 战利品智能开箱/分解/重铸
 │   │   ├── useMatchHistory.ts      # 战绩历史 Hook
 │   │   ├── usePremadeGroup.ts      # 组队分析 Hook
-│   │   └── useGamePlayerData.ts   # 对局玩家数据集中管理
+│   │   ├── useGamePlayerData.ts   # 对局玩家数据集中管理
+│   │   └── useAutoSaveConfig.ts    # 配置项自动保存 Hook
 │   ├── assets/                     # 静态资源（图片等）
 │   ├── views/
 │   │   ├── Home.vue                # 首页（LCU 状态 + 快捷导航）
 │   │   ├── Career.vue              # 生涯战绩（召唤师 + 对局历史）
 │   │   ├── Search.vue              # 战绩查询（玩家搜索 + 对局列表）
 │   │   ├── GameInfo.vue            # 对局信息（10 人段位 + KDA）
+│   │   ├── SavedPlayers.vue        # 路人集（曾同局玩家/标记玩家管理）
 │   │   ├── TFT.vue                 # 云顶之弈（段位/战绩/阵容推荐/海克斯）
-│   │   ├── Settings.vue            # 设置（头像/签名/在线状态/配置）
-│   │   ├── Tools.vue               # 工具箱（创建房间/ARAM 摇号/战利品/符文/皮肤等）
-│   │   ├── Notice.vue              # 更新日志
+│   │   ├── Settings.vue            # 设置（头像/签名/在线状态/配置/HTTP代理）
+│   │   ├── Tools.vue               # 工具箱（创建房间/ARAM 摇号/自动流程/战利品/符文/皮肤等）
 │   │   └── BenchOverlay.vue        # 大乱斗板凳席悬浮窗
 │   └── components/
 │       ├── tft/                    # 云顶之弈子组件（TftRankHeader/TftMatchCard/TftMatchDetailModal/TftMetaCompsTab/TftAugmentsTab）
 │       ├── gameinfo/               # 对局信息子组件（PlayerCard/PlayerMatchColumn/TeamComposition/PhaseBadge 等）
 │       ├── career/                 # 生涯子组件（SummonerHeader/MatchHistoryTab）
-│       ├── tools/                  # 工具箱子组件（LootTab 等）
+│       ├── tools/                  # 工具箱子组件（AutoGameflowCard/LootTab 等）
 │       ├── layout/                 # 布局与自定义标题栏
 │       ├── OpggModal.vue           # OP.GG 数据弹窗
 │       ├── OpggWindow.vue          # OP.GG 独立窗口组件
-│       ├── LcuImage.vue            # LCU 资源图片组件（loading/error 状态）
+│       ├── NoticePopup.vue         # 更新日志弹窗组件
+│       ├── LcuOfflineState.vue     # 统一 LCU 离线未连接状态
+│       ├── LcuImage.vue            # LCU 资源图片组件（loading/error/fallback 状态）
 │       ├── ChampionPicker.vue      # 英雄选择器（v-model: number[]）
 │       ├── SpellPicker.vue         # 召唤师技能选择器（v-model: number[]）
 │       └── NaiveUIBridge.vue       # Naive UI 全局 API 桥接组件
@@ -152,10 +155,11 @@ Yuumi/
 │   ├── src/
 │   │   ├── main.rs                 # Rust 入口
 │   │   ├── lib.rs                  # AppState、命令注册、agent 启动、系统托盘
-│   │   ├── config.rs               # 配置读写（%APPDATA%/Yuumi/config.json）
+│   │   ├── config.rs               # 配置读写与 Schema 自动迁移（%APPDATA%/Yuumi/config.json）
+│   │   ├── saved_players.rs        # 路人集系统（SQLite 持久化/标记管理/相遇历史/导入导出）
 │   │   ├── commands/               # Tauri 拆分命令 (config.rs, lcu.rs, tools.rs)
 │   │   ├── loot.rs                 # 战利品管理系统 (开箱/分解/重铸/精粹查询)
-│   │   ├── updater.rs              # 自动更新机制
+│   │   ├── updater.rs              # 自动更新机制与更新日志本地缓存
 │   │   ├── tools.rs                # 杂项工具（创建房间/ARAM 摇号/符文/皮肤/OP.GG抓取）
 │   │   ├── logging.rs              # 日志系统（flexi_logger，日志写入 exe 同级 log/ 目录）
 │   │   ├── signalr.rs              # SignalR Hub 远程反代（条件启动）
@@ -163,19 +167,21 @@ Yuumi/
 │   │   ├── lcu/
 │   │   │   ├── mod.rs
 │   │   │   ├── monitor.rs          # LCU 进程轮询（sysinfo + lockfile + WMIC 兜底）
-│   │   │   ├── client.rs           # HTTPS 代理（忽略 SSL + Basic Auth + CDragon/OP.GG代理请求）
+│   │   │   ├── client.rs           # HTTPS 代理（忽略 SSL + Basic Auth + CDragon 代理请求 + 全局超时）
+│   │   │   ├── opgg.rs             # OP.GG API 隔离层（HTTP 代理 + 内存缓存）
+│   │   │   ├── sgp.rs              # SGP 远程 API 工具（信号量限流控制）
 │   │   │   ├── ws.rs               # WebSocket 事件订阅 → 广播前端 + 分发 agents（带取消机制）
-│   │   │   └── game_data.rs        # 游戏资源预加载（物品/技能/符文/英雄 ID→名称/iconPath）
+│   │   │   └── game_data.rs        # 游戏资源预加载（物品/技能/符文/Cherry海克斯/英雄 ID→名称/iconPath）
 │   │   ├── parsers/
 │   │   │   ├── mod.rs
 │   │   │   ├── summoner.rs         # 召唤师数据清洗
-│   │   │   ├── match_parser.rs     # 战绩数据清洗（parseGameData/get_recent_teammates）
+│   │   │   ├── match_parser.rs     # 战绩数据清洗（parseGameData/get_recent_teammates/海克斯大乱斗/经典模式）
 │   │   │   ├── game_info.rs        # 对局信息（10 人段位 + 近期 KDA + 宿命对局分析）
 │   │   │   └── tft.rs              # TFT 云顶之弈数据解析 (战绩/段位/海克斯/阵容)
 │   │   └── agents/
 │   │       ├── mod.rs
-│   │       ├── auto_bp.rs          # 自动选人/禁人/召唤师技能
-│   │       └── auto_match.rs       # 自动接受匹配/自动重连/对局结束触发上传
+│   │       ├── auto_bp.rs          # 自动选人/禁人/召唤师技能/板凳席推送
+│   │       └── auto_match.rs       # 自动接受匹配/接受邀请/自动点赞/延时再来一局/自动重连/标记提醒/对局结束触发上传
 │   ├── tauri.conf.json
 │   ├── capabilities/
 │   └── Cargo.toml
@@ -268,6 +274,16 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 | `check_update`               | updater.rs              | 检查软件更新                              |
 | `install_update`             | updater.rs              | 开始安装最新软件更新                      |
 | `install_pending_update`     | updater.rs              | 安装已下载且挂起的更新                    |
+| `fetch_github_text`          | commands/tools.rs       | 代理抓取 GitHub 资源                      |
+| `get_release_changelog`      | commands/tools.rs       | 获取版本更新日志                          |
+| `save_saved_player`          | saved_players.rs        | 保存/标记同局玩家信息                    |
+| `query_all_saved_players`    | saved_players.rs        | 查询路人集列表（支持标签过滤/置顶）       |
+| `query_encountered_games`    | saved_players.rs        | 查询指定玩家相遇对局历史                  |
+| `get_saved_players_map`      | saved_players.rs        | 获取已标记玩家 HashMap                    |
+| `delete_saved_player`        | saved_players.rs        | 删除指定已保存玩家                        |
+| `export_tagged_players_to_json_file` | saved_players.rs| 导出标记玩家到 JSON                       |
+| `import_tagged_players_from_json_file` | saved_players.rs| 从 JSON 导入标记玩家                      |
+| `backfill_saved_player_identity`     | saved_players.rs| 异步补全已记录玩家的召唤师身份            |
 
 新命令需在 `lib.rs` 的 `invoke_handler` 中注册。
 
@@ -275,8 +291,8 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 
 | Agent      | 触发事件                       | 功能                                     |
 | :--------- | :----------------------------- | :--------------------------------------- |
-| auto_bp    | `/lol-champ-select/v1/session` | 自动选人/禁人/设置召唤师技能             |
-| auto_match | gameflow-phase + ready-check   | 自动接受匹配/自动重连 + 游戏结束触发上传 |
+| auto_bp    | `/lol-champ-select/v1/session` | 自动选人/禁人/设置召唤师技能/推送板凳席  |
+| auto_match | gameflow-phase + ready-check   | 自动接受匹配/自动接受邀请/自动点赞/延时再来一局/自动重连/标记提醒 + 游戏结束触发上传 |
 
 ## 云顶之弈模块 (parsers/tft.rs & src/components/tft)
 
@@ -299,9 +315,9 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 
 位于 `%APPDATA%/Yuumi/config.json`，结构：
 
-- `General` — 启动、代理、日志、上传 API 地址、SignalR Hub 配置、客户端路径
-- `Personalization` — 主题、语言、颜色
-- `Functions` — 所有自动化功能开关和候选列表
+- `General` — 启动、代理 (HTTP Proxy 与 Schema 自动迁移)、日志、上传 API 地址、SignalR Hub 配置、客户端路径
+- `Personalization` — 主题、语言、颜色、侧边栏显示/隐藏控制 (TFT/SavedPlayers)
+- `Functions` — 所有自动化功能开关和候选列表 (自动接受/邀请/点赞/再来一局/ARAM报边/标记提醒)
 - `Other` — 其他杂项
 
 ## 开发工具
