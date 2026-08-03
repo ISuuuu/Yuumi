@@ -145,6 +145,7 @@ const hasMore = ref(false); // 是否有下一页
 const allMatchesSearch = ref<MatchDisplay[]>([]); // 全量数据，本地翻页用
 const loadedGameIndex = ref(0); // 已加载到的游标
 const loadingMore = ref(false); // 防止重复触发 SGP 加载
+const pageSwitching = ref(false); // 防止翻页期间重复触发
 const INITIAL_BATCH = 20; // 首次加载 20 条（2 页）
 const LOAD_MORE_COUNT = 30; // 每次增量加载 30 条
 const PREFETCH_PAGES = 3; // 提前 3 页预拉取
@@ -272,7 +273,16 @@ watch(
   async (payload) => {
     if (!payload || !payload.name || payload.gameId === null) return;
     searchName.value = payload.name;
-    await doSearch();
+    let started = await doSearch();
+    // doSearch 因防重入被拦截（上一搜索仍在进行）：循环等待其结束再补执行本次跳转搜索，
+    // 等待超时仍进行中时保留 payload 继续等，避免新跳转被丢弃
+    while (!started) {
+      if (navigateSearchPayload.value !== payload) return; // 已被更新的跳转覆盖
+      const idle = await waitForSearchIdle();
+      if (!idle) continue; // 上一搜索超时仍未结束：保留 payload，下一轮继续等待
+      searchName.value = payload.name; // 补执行前重写跳转目标，防止等待期间被手动输入覆盖
+      started = await doSearch();
+    }
     // doSearch 完成后自动选中 Career 传来的对局（-1 表示只搜索不选中）
     if (payload.gameId > 0 && matches.value.length > 0) {
       selectMatch(payload.gameId);
@@ -283,8 +293,18 @@ watch(
   { immediate: true },
 );
 
-async function doSearch() {
-  if (!searchName.value.trim()) return;
+/** 等待当前进行中的搜索结束（轮询 searching，超时返回 false） */
+async function waitForSearchIdle(timeoutMs = 30000): Promise<boolean> {
+  const start = Date.now();
+  while (searching.value && Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return !searching.value;
+}
+
+async function doSearch(): Promise<boolean> {
+  if (!searchName.value.trim()) return false;
+  if (searching.value) return false; // 防重入：进行中直接忽略重复点击
   searching.value = true;
   error.value = "";
   // 保留旧数据作为模糊背景，等拉取成功后再覆盖，防止界面生硬闪烁
@@ -323,7 +343,7 @@ async function doSearch() {
       allMatchesSearch.value = [];
       selectedGame.value = null;
       selectedGameId.value = null;
-      return;
+      return true;
     }
 
     // 成功后，开始准备赋新值前，清空旧的分页/详情等局部变量
@@ -373,6 +393,7 @@ async function doSearch() {
   } finally {
     searching.value = false;
   }
+  return true;
 }
 
 async function loadMatchHistoryList() {
@@ -608,16 +629,27 @@ async function selectMatch(gameId: number) {
 }
 
 async function handlePrevPage() {
+  if (searching.value || pageSwitching.value) return; // 防重入
   if (currentPageNum.value > 1) {
-    currentPageNum.value--;
-    await loadMatchHistoryList();
+    pageSwitching.value = true;
+    try {
+      currentPageNum.value--;
+      await loadMatchHistoryList();
+    } finally {
+      pageSwitching.value = false;
+    }
   }
 }
 
 async function handleNextPage() {
-  if (!hasMore.value || loadingMore.value) return;
-  currentPageNum.value++;
-  await loadMatchHistoryList();
+  if (!hasMore.value || pageSwitching.value || searching.value) return;
+  pageSwitching.value = true;
+  try {
+    currentPageNum.value++;
+    await loadMatchHistoryList();
+  } finally {
+    pageSwitching.value = false;
+  }
 }
 
 // 静态映射查找

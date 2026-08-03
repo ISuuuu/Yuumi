@@ -1,4 +1,5 @@
 use base64::Engine;
+use futures_util::stream::{self, StreamExt};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -12,6 +13,9 @@ use crate::{build_auth_header, AppState};
 /// 仅对连接拒绝/超时等传输层错误重试，HTTP 状态码错误不重试。
 const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
+
+/// 批量资源请求的最大并发数（限制同时进行的 LCU/CDN 请求，避免滑枕大量慢请求）
+const ASSET_BATCH_CONCURRENCY: usize = 8;
 
 /// 资源缓存有效期：7 天
 const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -294,11 +298,11 @@ pub async fn lcu_request(
 }
 
 /// 等待游戏静态资源（技能/符文/装备图标等）加载完成。
-/// 战绩解析依赖资源表拼接图标 URL，资源未就绪时最多轮询等待 5 秒，
+/// 战绩解析依赖资源表拼接图标 URL，资源未就绪时最多轮询等待 2 秒，
 /// 供战绩查询、对局分析等解析命令复用。
 pub async fn wait_for_game_data(app_state: &AppState) {
     let mut check_count = 0;
-    while check_count < 50 {
+    while check_count < 20 {
         {
             let assets = app_state.game_data.read().await;
             if !assets.spells.is_empty() {
@@ -330,8 +334,9 @@ pub async fn call_lcu_api(
 /// 路径限制：必须以 `/lol-game-data/assets/`、`/fe/lol-loot/assets/` 或 `http(s)://` CDN 绝对路径开头。
 /// 支持 7 天文件缓存，相同资源在缓存有效期内直接返回，无需重复请求。
 /// 当 LCU 未开启或资源 404 时，参考 Seraphine 自动降级从 CommunityDragon CDN 下载。
-#[tauri::command]
-pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Result<String, String> {
+///
+/// 这也是批量命令 `get_lcu_assets` 复用的单个资源解析核心，保证取值链路完全一致。
+async fn resolve_asset(app_state: &AppState, path: &str) -> Result<String, String> {
     let is_http_cdn = path.starts_with("http://") || path.starts_with("https://");
     let is_lcu_asset = path.starts_with("/lol-game-data/assets/");
     let is_loot_asset = path.starts_with("/fe/lol-loot/assets/");
@@ -342,23 +347,36 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
         );
     }
 
-    // 优先读取 TFT 本地持久化缓存（复用 Seraphine 已缓存的图片文件）
-    if let Some(tft_local_path) = get_tft_local_cache_path(&path) {
-        if tft_local_path.exists() {
-            if let Ok(bytes) = std::fs::read(&tft_local_path) {
-                let content_type = guess_content_type(&path);
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                let data_url = format!("data:{};base64,{}", content_type, b64);
-                log::debug!("TFT 持久化缓存命中: {:?}", tft_local_path);
-                return Ok(data_url);
+    // 优先读取 TFT 本地持久化缓存（复用 Seraphine 已缓存的图片文件）。
+    // 文件读取移入 spawn_blocking，避免阻塞 tokio 工作线程。
+    if let Some(tft_local_path) = get_tft_local_cache_path(path) {
+        let tft_owned = tft_local_path.clone();
+        let content_type = guess_content_type(path);
+        if let Ok(Some(bytes)) = tokio::task::spawn_blocking(move || {
+            if tft_owned.exists() {
+                std::fs::read(&tft_owned).ok()
+            } else {
+                None
             }
+        })
+        .await
+        {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let data_url = format!("data:{};base64,{}", content_type, b64);
+            log::debug!("TFT 持久化缓存命中: {:?}", tft_local_path);
+            return Ok(data_url);
         }
     }
 
-    // 优先读取文件缓存
-    if let Some((data_url, _)) = try_read_asset_cache(&path) {
-        log::debug!("资源缓存命中: {}", path);
-        return Ok(data_url);
+    // 优先读取文件缓存（spawn_blocking 避免阻塞 tokio 工作线程）
+    {
+        let path_owned = path.to_string();
+        if let Ok(Some((data_url, _))) =
+            tokio::task::spawn_blocking(move || try_read_asset_cache(&path_owned)).await
+        {
+            log::debug!("资源缓存命中: {}", path);
+            return Ok(data_url);
+        }
     }
 
     // 1. 尝试优先从本地 LCU 获取
@@ -369,9 +387,9 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
             let clean_path = if is_lcu_asset {
                 path.strip_prefix("/lol-game-data/assets/")
                     .map(|s| format!("/lol-game-data/assets/{}", s.to_lowercase()))
-                    .unwrap_or_else(|| path.clone())
+                    .unwrap_or_else(|| path.to_string())
             } else {
-                path.clone()
+                path.to_string()
             };
             let lcu_url = format!("https://127.0.0.1:{}{}", lcu.port, clean_path);
             let auth = build_auth_header(&lcu.token);
@@ -390,10 +408,10 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string())
                         .filter(|s| s.starts_with("image/"))
-                        .unwrap_or_else(|| guess_content_type(&path));
+                        .unwrap_or_else(|| guess_content_type(path));
 
                     if let Ok(bytes) = resp.bytes().await {
-                        return Ok(save_asset_and_build_url(&path, &content_type, &bytes));
+                        return Ok(save_asset_and_build_url(path, &content_type, &bytes));
                     }
                 } else if resp.status().as_u16() == 404
                     && is_lcu_asset
@@ -417,10 +435,10 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
                                 .and_then(|v| v.to_str().ok())
                                 .map(|s| s.to_string())
                                 .filter(|s| s.starts_with("image/"))
-                                .unwrap_or_else(|| guess_content_type(&path));
+                                .unwrap_or_else(|| guess_content_type(path));
 
                             if let Ok(bytes) = retry_resp.bytes().await {
-                                return Ok(save_asset_and_build_url(&path, &content_type, &bytes));
+                                return Ok(save_asset_and_build_url(path, &content_type, &bytes));
                             }
                         }
                     }
@@ -433,11 +451,11 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
     let client = cdn_client();
 
     let url = if is_http_cdn {
-        path.clone()
+        path.to_string()
     } else if is_lcu_asset {
         let mut sub_path = path
             .strip_prefix("/lol-game-data/")
-            .unwrap_or(&path)
+            .unwrap_or(path)
             .to_lowercase();
         if sub_path.starts_with("assets/assets/") {
             sub_path = sub_path
@@ -455,7 +473,7 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
         }
     } else {
         // /fe/lol-loot/assets/... → CommunityDragon CDN
-        let sub_path = path.strip_prefix("/fe/lol-loot/").unwrap_or(&path);
+        let sub_path = path.strip_prefix("/fe/lol-loot/").unwrap_or(path);
         format!(
             "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-loot/global/default/{}",
             sub_path
@@ -475,12 +493,56 @@ pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Resu
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
         .filter(|s| s.starts_with("image/"))
-        .unwrap_or_else(|| guess_content_type(&path));
+        .unwrap_or_else(|| guess_content_type(path));
 
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     log::debug!("资源从 CDN 加载成功: {} ({} bytes)", path, bytes.len());
 
-    Ok(save_asset_and_build_url(&path, &content_type, &bytes))
+    Ok(save_asset_and_build_url(path, &content_type, &bytes))
+}
+
+/// 单个资源的 Tauri 命令：调用核心解析逻辑，保持原有取值链路不变。
+#[tauri::command]
+pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Result<String, String> {
+    resolve_asset(app_state.inner(), &path).await
+}
+
+/// 批量资源请求的单项结果
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct AssetItem {
+    pub path: String,
+    pub data_url: Option<String>,
+    pub error: Option<String>,
+}
+
+/// 批量获取 LCU 静态资源（图片等），返回每个资源对应的 data URL。
+/// 每个路径均复用 `get_lcu_asset` 相同的取值链路（TFT 缓存 → 文件缓存 → LCU → CDragon 兜底），
+/// 单个资源的失败不会影响其他资源，可显著减少前端 IPC 往返次数。
+#[tauri::command]
+pub async fn get_lcu_assets(
+    paths: Vec<String>,
+    app_state: State<'_, AppState>,
+) -> Result<Vec<AssetItem>, String> {
+    let app = app_state.inner();
+    let results: Vec<AssetItem> = stream::iter(paths)
+        .map(|path| async move {
+            match resolve_asset(app, &path).await {
+                Ok(data_url) => AssetItem {
+                    path,
+                    data_url: Some(data_url),
+                    error: None,
+                },
+                Err(e) => AssetItem {
+                    path,
+                    data_url: None,
+                    error: Some(e),
+                },
+            }
+        })
+        .buffer_unordered(ASSET_BATCH_CONCURRENCY)
+        .collect()
+        .await;
+    Ok(results)
 }
 
 fn save_asset_and_build_url(path: &str, content_type: &str, bytes: &[u8]) -> String {

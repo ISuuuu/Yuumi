@@ -445,6 +445,11 @@ watch(navigateSearchPayload, (payload) => {
 
 const hasVisitedSearch = ref(false);
 const hasVisitedGameInfo = ref(false);
+const hasVisitedCareer = ref(false);
+const hasVisitedTft = ref(false);
+const hasVisitedSettings = ref(false);
+const hasVisitedTools = ref(false);
+const hasVisitedSavedPlayers = ref(false);
 
 // 监听本地路由变化并同步到 Pinia 状态库，确保其他子组件可按需刷新
 watch(currentPage, (val) => {
@@ -454,6 +459,21 @@ watch(currentPage, (val) => {
   }
   if (val === "gameinfo") {
     hasVisitedGameInfo.value = true;
+  }
+  if (val === "career") {
+    hasVisitedCareer.value = true;
+  }
+  if (val === "tft") {
+    hasVisitedTft.value = true;
+  }
+  if (val === "settings") {
+    hasVisitedSettings.value = true;
+  }
+  if (val === "tools") {
+    hasVisitedTools.value = true;
+  }
+  if (val === "savedplayers") {
+    hasVisitedSavedPlayers.value = true;
   }
 }, { immediate: true });
 
@@ -746,45 +766,102 @@ async function handleClose() {
                 <Search v-if="hasVisitedSearch || currentPage === 'search'" />
               </div>
 
-              <template v-if="currentPage !== 'gameinfo' && currentPage !== 'search'">
-                <Home v-if="currentPage === 'home'" @navigate="navigate" />
-                <Career v-else-if="currentPage === 'career'" />
+              <div
+                v-show="currentPage === 'career'"
+                style="
+                  flex: 1;
+                  display: flex;
+                  flex-direction: column;
+                  overflow-y: auto;
+                  min-height: 0;
+                "
+              >
+                <Career v-if="hasVisitedCareer || currentPage === 'career'" />
+              </div>
+
+              <div
+                v-show="currentPage === 'tft'"
+                style="
+                  flex: 1;
+                  display: flex;
+                  flex-direction: column;
+                  overflow-y: auto;
+                  min-height: 0;
+                "
+              >
                 <TFT
-                  v-else-if="
-                    currentPage === 'tft' && !appConfig?.Functions?.HideTft
+                  v-if="
+                    (hasVisitedTft || currentPage === 'tft') &&
+                    !appConfig?.Functions?.HideTft
                   "
                 />
-                <Settings v-else-if="currentPage === 'settings'" />
-                <Tools v-else-if="currentPage === 'tools'" />
+              </div>
+
+              <div
+                v-show="currentPage === 'settings'"
+                style="
+                  flex: 1;
+                  display: flex;
+                  flex-direction: column;
+                  overflow-y: auto;
+                  min-height: 0;
+                "
+              >
+                <Settings v-if="hasVisitedSettings || currentPage === 'settings'" />
+              </div>
+
+              <div
+                v-show="currentPage === 'tools'"
+                style="
+                  flex: 1;
+                  display: flex;
+                  flex-direction: column;
+                  overflow-y: auto;
+                  min-height: 0;
+                "
+              >
+                <Tools v-if="hasVisitedTools || currentPage === 'tools'" />
+              </div>
+
+              <div
+                v-show="currentPage === 'savedplayers'"
+                style="
+                  flex: 1;
+                  display: flex;
+                  flex-direction: column;
+                  overflow-y: auto;
+                  min-height: 0;
+                "
+              >
                 <SavedPlayers
-                  v-else-if="
-                    currentPage === 'savedplayers' &&
+                  v-if="
+                    (hasVisitedSavedPlayers || currentPage === 'savedplayers') &&
                     !appConfig?.Functions?.HideSavedPlayers
                   "
                 />
+              </div>
 
-                <!-- 内建 OP.GG 占位页面 -->
-                <div
-                  v-else-if="currentPage === 'opgg'"
-                  class="placeholder-view"
-                >
-                  <div class="view-header">
-                    <h2>{{ $t("common.opgg") }}</h2>
-                  </div>
-                  <div class="view-card">
-                    <div class="avatar-circle op-icon">OP</div>
-                    <h3>{{ $t("common.opgg") }}</h3>
-                    <p>{{ $t("common.opggProxyInfo") }}</p>
-                    <div class="status-box">
-                      <span class="dot online"></span>
-                      <span
-                        >{{ $t("common.opggProxyAddress") }}127.0.0.1:7897</span
-                      >
-                    </div>
-                    <p class="hint">{{ $t("common.opggHint") }}</p>
-                  </div>
+              <!-- Home 轻量页面直接 v-if 渲染 -->
+              <Home v-if="currentPage === 'home'" @navigate="navigate" />
+
+              <!-- 内建 OP.GG 占位页面 -->
+              <div v-if="currentPage === 'opgg'" class="placeholder-view">
+                <div class="view-header">
+                  <h2>{{ $t("common.opgg") }}</h2>
                 </div>
-              </template>
+                <div class="view-card">
+                  <div class="avatar-circle op-icon">OP</div>
+                  <h3>{{ $t("common.opgg") }}</h3>
+                  <p>{{ $t("common.opggProxyInfo") }}</p>
+                  <div class="status-box">
+                    <span class="dot online"></span>
+                    <span
+                      >{{ $t("common.opggProxyAddress") }}127.0.0.1:7897</span
+                    >
+                  </div>
+                  <p class="hint">{{ $t("common.opggHint") }}</p>
+                </div>
+              </div>
             </main>
           </div>
         </div>

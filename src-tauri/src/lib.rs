@@ -307,6 +307,7 @@ pub fn run() {
             greet,
             lcu::client::call_lcu_api,
             lcu::client::get_lcu_asset,
+            lcu::client::get_lcu_assets,
             parsers::summoner::get_current_summoner,
             parsers::match_parser::get_match_history,
             parsers::match_parser::get_match_history_sgp,

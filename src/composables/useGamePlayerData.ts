@@ -13,6 +13,7 @@ import {
 } from "../api/lcu";
 import type { PlayerData } from "../types/gameInfo";
 import { computePremadeColors } from "./usePremadeGroup";
+import { lazySetItem } from "../utils/lazyStorage";
 
 // ── 排位数据缓存（puuid → { data, timestamp }），带 LRU / 容量上限保护，避免内存泄露
 const rankCache = new Map<string, { data: any; timestamp: number }>();
@@ -78,11 +79,7 @@ function mergeMatchesWithCache(
     )
     .sort((a, b) => b.timeStamp - a.timeStamp);
 
-  try {
-    localStorage.setItem(MATCHES_CACHE_KEY(puuid), JSON.stringify(merged));
-  } catch {
-    /* ignore */
-  }
+  lazySetItem(MATCHES_CACHE_KEY(puuid), merged);
 
   return merged;
 }
@@ -115,22 +112,9 @@ export function useGamePlayerData(
   function debouncedSavePlayerData() {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      try {
-        localStorage.setItem(
-          "yuumi_last_game_player_data",
-          JSON.stringify(playerData.value),
-        );
-        localStorage.setItem(
-          "yuumi_last_gameflow_my_team",
-          JSON.stringify(myTeam.value),
-        );
-        localStorage.setItem(
-          "yuumi_last_gameflow_their_team",
-          JSON.stringify(theirTeam.value),
-        );
-      } catch {
-        /* ignore */
-      }
+      lazySetItem("yuumi_last_game_player_data", playerData.value);
+      lazySetItem("yuumi_last_gameflow_my_team", myTeam.value);
+      lazySetItem("yuumi_last_gameflow_their_team", theirTeam.value);
     }, 500);
   }
 
@@ -440,18 +424,8 @@ export function useGamePlayerData(
     premadeColorsMy.value = computePremadeColors(allyTeam);
     premadeColorsTheir.value = computePremadeColors(enemyTeam);
 
-    try {
-      localStorage.setItem(
-        "yuumi_last_gameflow_my_team",
-        JSON.stringify(gameflowMyTeam.value),
-      );
-      localStorage.setItem(
-        "yuumi_last_gameflow_their_team",
-        JSON.stringify(gameflowTheirTeam.value),
-      );
-    } catch {
-      /* ignore */
-    }
+    lazySetItem("yuumi_last_gameflow_my_team", gameflowMyTeam.value);
+    lazySetItem("yuumi_last_gameflow_their_team", gameflowTheirTeam.value);
 
     await Promise.all([
       ...allyTeam.map((p: any) => loadPlayerData(p.summonerId, p.summonerId)),
@@ -616,16 +590,10 @@ export function useGamePlayerData(
 
         try {
           if (session.myTeam && session.myTeam.length > 0) {
-            localStorage.setItem(
-              "yuumi_last_gameflow_my_team",
-              JSON.stringify(session.myTeam),
-            );
+            lazySetItem("yuumi_last_gameflow_my_team", session.myTeam);
           }
           if (session.theirTeam && session.theirTeam.length > 0) {
-            localStorage.setItem(
-              "yuumi_last_gameflow_their_team",
-              JSON.stringify(session.theirTeam),
-            );
+            lazySetItem("yuumi_last_gameflow_their_team", session.theirTeam);
           }
         } catch {
           /* ignore */

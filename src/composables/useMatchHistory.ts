@@ -7,6 +7,7 @@ import {
   lcuRequest,
 } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
+import { lazySetItem } from "../utils/lazyStorage";
 
 // 模块作用域内存缓存单例
 let cachedSummoner: SummonerDisplay | null = null;
@@ -221,9 +222,7 @@ export function useMatchHistory() {
     recentMatches.value = merged;
     cachedRecentMatches = merged;
 
-    try {
-      localStorage.setItem(MATCHES_CACHE_KEY(puuid), JSON.stringify(merged));
-    } catch { /* ignore */ }
+    lazySetItem(MATCHES_CACHE_KEY(puuid), merged);
   }
 
   // ─── 辅助函数 ───

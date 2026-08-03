@@ -1,10 +1,9 @@
 import { ref, watch, type Ref } from "vue";
-import { fetchLcuAsset } from "../api/lcu";
+import { fetchLcuAssets } from "../api/lcu";
 
 // LRU 缓存：Map 保持插入顺序，超过上限时淘汰最久未使用的条目
 const MAX_CACHE_SIZE = 500;
 const cache = new Map<string, string>();
-const inflight = new Map<string, Promise<string>>();
 
 function cacheSet(key: string, value: string) {
   if (cache.has(key)) {
@@ -17,15 +16,110 @@ function cacheSet(key: string, value: string) {
   cache.set(key, value);
 }
 
+// 同一渲染批次内多个不同路径合并为一次 get_lcu_assets 调用，
+// 显著减少高频图标场景（战绩列表 / 对局详情）下的 IPC 往返次数。
+const inflight = new Map<string, Promise<string>>();
+
+interface PendingItem {
+  resolve: (dataUrl: string) => void;
+  reject: (err: unknown) => void;
+}
+
+let pendingPaths = new Map<string, PendingItem[]>();
+let flushScheduled = false;
+
+function scheduleFlush() {
+  if (flushScheduled) return;
+  flushScheduled = true;
+  setTimeout(flushPending, 0);
+}
+
+function flushPending() {
+  flushScheduled = false;
+  if (pendingPaths.size === 0) return;
+
+  const batch = pendingPaths;
+  pendingPaths = new Map();
+
+  const paths = [...batch.keys()];
+  const toFetch: string[] = [];
+
+  for (const path of paths) {
+    const items = batch.get(path)!;
+    // 已缓存 — 直接分发
+    if (cache.has(path)) {
+      const dataUrl = cache.get(path)!;
+      for (const item of items) item.resolve(dataUrl);
+      continue;
+    }
+    // 已有并发请求 — 复用同一 Promise
+    const infl = inflight.get(path);
+    if (infl) {
+      for (const item of items) infl.then(item.resolve, item.reject);
+      continue;
+    }
+    toFetch.push(path);
+  }
+
+  if (toFetch.length === 0) return;
+
+  const batchPromise = fetchLcuAssets(toFetch);
+
+  for (const path of toFetch) {
+    const items = batch.get(path)!;
+    const p = batchPromise.then((results) => {
+      const item = results.find((r) => r.path === path);
+      if (item?.data_url) return item.data_url;
+      throw new Error(item?.error ?? `资源加载失败: ${path}`);
+    });
+
+    inflight.set(path, p);
+    p.then(
+      (dataUrl) => {
+        cacheSet(path, dataUrl);
+        for (const item of items) item.resolve(dataUrl);
+      },
+      (err) => {
+        for (const item of items) item.reject(err);
+      },
+    ).finally(() => {
+      inflight.delete(path);
+    });
+  }
+}
+
 /**
- * 包装带重试机制的 LCU 资源获取方法，处理客户端初始启动时的暂时不可达问题
+ * 将 LCU 资源路径排队进入同一渲染批次的合并请求。
+ * 命中缓存时立即返回；已有并发请求时复用，不会重复发起。
+ */
+function enqueueFetch(path: string): Promise<string> {
+  const cached = cache.get(path);
+  if (cached !== undefined) return Promise.resolve(cached);
+
+  const infl = inflight.get(path);
+  if (infl) return infl;
+
+  return new Promise<string>((resolve, reject) => {
+    const items = pendingPaths.get(path);
+    if (items) {
+      items.push({ resolve, reject });
+    } else {
+      pendingPaths.set(path, [{ resolve, reject }]);
+    }
+    scheduleFlush();
+  });
+}
+
+/**
+ * 包装带重试机制的 LCU 资源获取方法，处理客户端初始启动时的暂时不可达问题。
+ * 重试单位仍是单个路径，语义与逐路径调用保持一致。
  */
 function fetchLcuAssetWithRetry(
   path: string,
   retries = 3,
   delay = 800,
 ): Promise<string> {
-  return fetchLcuAsset(path).catch((err) => {
+  return enqueueFetch(path).catch((err) => {
     const errStr = String(err || "");
     // 如果是 400 Bad Request、404 Not Found 等明确缺失资源的错误，不浪费时间重试
     const isPermanentError =
@@ -50,7 +144,7 @@ function fetchLcuAssetWithRetry(
 
 /**
  * 将 LCU 资源路径转为可用的 data URL。
- * 自动缓存，相同路径只请求一次。
+ * 自动缓存，相同路径只请求一次；同一渲染批次内的多个路径合并为一次 IPC 调用。
  * @param fallbackSrcRef 资源永久加载失败（如 LCU 已移除旧图标）时使用的兜底路径
  */
 export function useLcuAsset(
@@ -76,35 +170,25 @@ export function useLcuAsset(
 
       loading.value = true;
 
-      // 复用已有的并发请求
-      if (!inflight.has(path)) {
-        inflight.set(path, fetchLcuAssetWithRetry(path));
-      }
-
-      inflight
-        .get(path)!
-        .then(
-          (dataUrl) => {
-            cacheSet(path, dataUrl);
-            // 仅当 pathRef 未变化时才写入（防止竞态）
-            if (pathRef.value === path) {
-              src.value = dataUrl;
-            }
-          },
-          (err) => {
-            const hasFallback = Boolean(fallbackSrcRef?.value);
-            if (!hasFallback) {
-              console.warn("[LcuImage] 资源最终加载失败:", path, err);
-            }
-            if (pathRef.value === path) {
-              src.value = fallbackSrcRef?.value ?? "";
-            }
-          },
-        )
-        .finally(() => {
-          inflight.delete(path);
-          loading.value = false;
-        });
+      fetchLcuAssetWithRetry(path).then(
+        (dataUrl) => {
+          // 仅当 pathRef 未变化时才写入（防止竞态）
+          if (pathRef.value === path) {
+            src.value = dataUrl;
+          }
+        },
+        (err) => {
+          const hasFallback = Boolean(fallbackSrcRef?.value);
+          if (!hasFallback) {
+            console.warn("[LcuImage] 资源最终加载失败:", path, err);
+          }
+          if (pathRef.value === path) {
+            src.value = fallbackSrcRef?.value ?? "";
+          }
+        },
+      ).finally(() => {
+        loading.value = false;
+      });
     },
     { immediate: true },
   );
