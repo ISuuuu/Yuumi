@@ -7,7 +7,7 @@ use tokio::sync::{mpsc, Mutex};
 
 // ─── 本地暂存持久化模型 ───
 
-/// 暂存战绩条目，存储在 %APPDATA%/Yuumi/pending_uploads.json
+/// 暂存战绩条目，存储在 SQLite 数据库 pending_uploads 表中
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingUploadItem {
@@ -34,78 +34,100 @@ impl UploadTask {
     }
 }
 
-/// 获取暂存文件路径: %APPDATA%/Yuumi/pending_uploads.json
-fn pending_uploads_path() -> std::path::PathBuf {
-    let mut path = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    path.push("Yuumi");
-    path.push("pending_uploads.json");
-    path
-}
+/// 从 SQLite 数据库读取所有挂起的上传任务
+pub fn load_pending_uploads(app_handle: &AppHandle) -> Vec<PendingUploadItem> {
+    let state = app_handle.state::<crate::AppState>();
+    let conn = state.saved_db.lock().unwrap_or_else(|e| e.into_inner());
 
-/// 从本地读取所有挂起的上传任务
-pub fn load_pending_uploads_file() -> Vec<PendingUploadItem> {
-    let path = pending_uploads_path();
-    if !path.exists() {
-        return Vec::new();
-    }
-    match std::fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+    let mut stmt = match conn.prepare(
+        "SELECT game_id, payload, retry_count, last_error, created_at FROM pending_uploads ORDER BY created_at ASC",
+    ) {
+        Ok(s) => s,
         Err(e) => {
-            log::warn!("读取 pending_uploads.json 失败: {}", e);
-            Vec::new()
+            log::error!("Prepare SELECT pending_uploads 失败: {}", e);
+            return Vec::new();
         }
-    }
-}
+    };
 
-/// 将挂起的上传任务写入本地 JSON
-pub fn save_pending_uploads_file(items: &[PendingUploadItem]) {
-    let path = pending_uploads_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match serde_json::to_string_pretty(items) {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(&path, json) {
-                log::error!("写入 pending_uploads.json 失败: {}", e);
+    let rows = stmt.query_map([], |row| {
+        let game_id: i64 = row.get(0)?;
+        let payload_str: String = row.get(1)?;
+        let retry_count: u32 = row.get(2)?;
+        let last_error: String = row.get(3)?;
+        let created_at: String = row.get(4)?;
+        Ok((game_id, payload_str, retry_count, last_error, created_at))
+    });
+
+    let mut items = Vec::new();
+    if let Ok(rows) = rows {
+        for r in rows.flatten() {
+            if let Ok(payload) = serde_json::from_str::<UploadPayload>(&r.1) {
+                items.push(PendingUploadItem {
+                    game_id: r.0 as u64,
+                    payload,
+                    retry_count: r.2,
+                    last_error: r.3,
+                    created_at: r.4,
+                });
             }
         }
-        Err(e) => log::error!("序列化 pending_uploads 失败: {}", e),
     }
+    items
 }
 
-/// 添加或更新一条挂起上传记录
-pub fn add_or_update_pending_upload(payload: UploadPayload, error: String) {
-    let mut items = load_pending_uploads_file();
+/// 添加或更新一条挂起上传记录到 SQLite 数据库
+pub fn add_or_update_pending_upload(app_handle: &AppHandle, payload: UploadPayload, error: String) {
     let game_id = payload.match_info.match_id;
     let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    let payload_json = match serde_json::to_string(&payload) {
+        Ok(j) => j,
+        Err(e) => {
+            log::error!("序列化 UploadPayload 失败: {}", e);
+            return;
+        }
+    };
 
-    if let Some(existing) = items.iter_mut().find(|i| i.game_id == game_id) {
-        existing.retry_count += 1;
-        existing.last_error = error;
+    let state = app_handle.state::<crate::AppState>();
+    let conn = state.saved_db.lock().unwrap_or_else(|e| e.into_inner());
+
+    let existing_retry: Option<u32> = conn
+        .query_row(
+            "SELECT retry_count FROM pending_uploads WHERE game_id = ?1",
+            rusqlite::params![game_id as i64],
+            |r| r.get(0),
+        )
+        .ok();
+
+    if let Some(count) = existing_retry {
+        let _ = conn.execute(
+            "UPDATE pending_uploads SET retry_count = ?1, last_error = ?2, payload = ?3 WHERE game_id = ?4",
+            rusqlite::params![count + 1, error, payload_json, game_id as i64],
+        );
     } else {
-        items.push(PendingUploadItem {
-            game_id,
-            payload,
-            retry_count: 1,
-            last_error: error,
-            created_at: now,
-        });
+        let _ = conn.execute(
+            "INSERT INTO pending_uploads (game_id, payload, retry_count, last_error, created_at) VALUES (?1, ?2, 1, ?3, ?4)",
+            rusqlite::params![game_id as i64, payload_json, error, now],
+        );
     }
 
-    if items.len() > 100 {
-        items.drain(0..items.len() - 100);
-    }
-
-    save_pending_uploads_file(&items);
+    // 保留最新的 100 条，超出部分清理掉最旧的记录
+    let _ = conn.execute(
+        "DELETE FROM pending_uploads WHERE game_id NOT IN (
+            SELECT game_id FROM pending_uploads ORDER BY created_at DESC LIMIT 100
+        )",
+        [],
+    );
 }
 
-/// 上传成功后，清除该条落盘任务
-pub fn remove_pending_upload(game_id: u64) {
-    let mut items = load_pending_uploads_file();
-    let original_len = items.len();
-    items.retain(|i| i.game_id != game_id);
-    if items.len() != original_len {
-        save_pending_uploads_file(&items);
+/// 上传成功后，清除该条 SQLite 数据库记录
+pub fn remove_pending_upload(app_handle: &AppHandle, game_id: u64) {
+    let state = app_handle.state::<crate::AppState>();
+    let conn = state.saved_db.lock().unwrap_or_else(|e| e.into_inner());
+    if let Err(e) = conn.execute(
+        "DELETE FROM pending_uploads WHERE game_id = ?1",
+        rusqlite::params![game_id as i64],
+    ) {
+        log::error!("删除 pending_uploads 记录 {} 失败: {}", game_id, e);
     }
 }
 
@@ -119,6 +141,7 @@ pub struct UploadQueue {
     tx: mpsc::Sender<UploadTask>,
     /// 已入队的 gameId 集合（去重用）
     enqueued: Arc<Mutex<HashSet<u64>>>,
+    app_handle: AppHandle,
 }
 
 impl UploadQueue {
@@ -129,6 +152,7 @@ impl UploadQueue {
         let queue = Self {
             tx: tx.clone(),
             enqueued: enqueued.clone(),
+            app_handle: app_handle.clone(),
         };
 
         // 启动后台 Worker（使用 Tauri 异步运行时）
@@ -166,9 +190,9 @@ impl UploadQueue {
         }
     }
 
-    /// 读取本地 pending_uploads.json，将挂起的未完成任务全部拉起并排队重试
+    /// 读取本地 SQLite 数据库，将挂起的未完成任务全部拉起并排队重试
     pub async fn trigger_pending_retry(&self) {
-        let pending_items = load_pending_uploads_file();
+        let pending_items = load_pending_uploads(&self.app_handle);
         if pending_items.is_empty() {
             return;
         }
@@ -483,7 +507,7 @@ async fn upload_single_task(
                 Ok(p) => p,
                 Err(err_msg) => {
                     // 无法从 LCU 拉取详情时，查找是否有之前已被落盘的 pending 记录
-                    let existing = load_pending_uploads_file()
+                    let existing = load_pending_uploads(app_handle)
                         .into_iter()
                         .find(|i| i.game_id == game_id);
                     if let Some(item) = existing {
@@ -505,17 +529,17 @@ async fn upload_single_task(
     match post_payload_to_api(&payload, upload_url).await {
         Ok(status) => {
             // 上传成功，擦除磁盘落盘记录
-            remove_pending_upload(game_id);
+            remove_pending_upload(app_handle, game_id);
             Ok(status)
         }
         Err(err_msg) => {
-            // 上传失败（网络/5xx/超时），保存/更新至本地 pending_uploads.json
+            // 上传失败（网络/5xx/超时），保存/更新至本地 SQLite 数据库
             log::warn!(
-                "对局 {} API 请求失败，保存暂存数据至 pending_uploads.json: {}",
+                "对局 {} API 请求失败，保存暂存数据至 SQLite 数据库: {}",
                 game_id,
                 err_msg
             );
-            add_or_update_pending_upload(payload, err_msg.clone());
+            add_or_update_pending_upload(app_handle, payload, err_msg.clone());
             Err(err_msg)
         }
     }

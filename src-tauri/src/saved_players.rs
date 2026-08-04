@@ -45,8 +45,15 @@ pub fn init_db() -> rusqlite::Result<Connection> {
             queue_type TEXT NOT NULL DEFAULT '',
             update_at INTEGER NOT NULL
          );
-         CREATE INDEX IF NOT EXISTS idx_encountered_puuid
-             ON encountered_games (puuid, self_puuid, queue_type);",
+          CREATE INDEX IF NOT EXISTS idx_encountered_puuid
+              ON encountered_games (puuid, self_puuid, queue_type);
+          CREATE TABLE IF NOT EXISTS pending_uploads (
+             game_id INTEGER PRIMARY KEY,
+             payload TEXT NOT NULL,
+             retry_count INTEGER NOT NULL DEFAULT 1,
+             last_error TEXT NOT NULL DEFAULT '',
+             created_at TEXT NOT NULL
+          );",
     )?;
 
     // 迁移：旧数据库补充 tag_line / champion_id 列
