@@ -283,6 +283,8 @@ watch(
       if (navigateSearchPayload.value !== payload) return; // 已被更新的跳转覆盖
       const idle = await waitForSearchIdle();
       if (!idle) continue; // 上一搜索超时仍未结束：保留 payload，下一轮继续等待
+      // 等待期间可能出现了更新的跳转目标：放弃本次补执行，交由最新跳转的回调处理，避免重复搜索
+      if (navigateSearchPayload.value !== payload) return;
       searchName.value = payload.name; // 补执行前重写跳转目标，防止等待期间被手动输入覆盖
       started = await doSearch();
     }
