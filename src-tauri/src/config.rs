@@ -21,6 +21,7 @@ fn default_config_version() -> u32 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[serde(default)]
 pub struct GeneralConfig {
     pub lol_path: Vec<String>,
     pub enable_start_lol_with_app: bool,
@@ -74,6 +75,7 @@ fn default_theme_color() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[serde(default)]
 pub struct PersonalizationConfig {
     pub mica_enabled: bool,
     pub dpi_scale: String,
@@ -113,6 +115,7 @@ fn default_screenshot_levels() -> Vec<u32> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[serde(default)]
 pub struct FunctionsConfig {
     pub career_games_number: u32,
     pub api_concurrency_number: u32,
@@ -278,6 +281,7 @@ impl Default for FunctionsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[serde(default)]
 #[derive(Default)]
 pub struct OtherConfig {
     pub last_notice_sha: String,
@@ -322,11 +326,19 @@ impl AppConfig {
         if self.version >= CONFIG_VERSION {
             return false;
         }
+        let old = self.version;
         // 版本升级脚本：从低版本逐级迁移，每一步幂等。
-        // 例如 future 版本：
-        // while self.version < 2 { ...自 v1 升级到 v2... }
-        log::info!("配置版本 {} → {}，已应用迁移", self.version, CONFIG_VERSION);
-        self.version = CONFIG_VERSION;
+        // v1 → v2：HTTP 代理字段重命名（EnableGithubProxy/GithubProxyAddr
+        //   → EnableHttpProxy/HttpProxyAddr），已由 serde alias 在解析时兼容，
+        //   无需数据变换，仅递增版本号以触发配置落盘重写为新格式。
+        while self.version < CONFIG_VERSION {
+            match self.version {
+                1 => {} // v1 → v2 无数据变换
+                _ => log::warn!("未知配置版本 {}，直接升级到当前版本", self.version),
+            }
+            self.version += 1;
+        }
+        log::info!("配置版本 {} → {}，已应用迁移", old, CONFIG_VERSION);
         true
     }
 
