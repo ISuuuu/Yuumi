@@ -5,6 +5,10 @@ use tokio::time::{sleep, Duration};
 use crate::config::FunctionsConfig;
 use crate::lcu::client::lcu_request;
 
+/// 创建预设大厅后 LCU 会瞬时闪回 None（Lobby→None 抖动）的防抖窗口。
+/// 该窗口内出现的 None 视为抖动，不重置建厅状态，避免重复建厅把玩家踢出小队。
+const LOBBY_FLICKER_WINDOW: std::time::Duration = std::time::Duration::from_millis(2000);
+
 // ─── 游戏流程事件 ───
 
 #[derive(Debug, Clone)]
@@ -72,6 +76,8 @@ pub fn start(
     crate::spawn_log_panic(async move {
         let mut lobby_created = false;
         let mut last_phase = get_current_phase(&app_handle).await.unwrap_or_default();
+        // 上次成功创建预设大厅的时间（用于识别创建后的 Lobby→None 抖动）
+        let mut last_lobby_create: Option<std::time::Instant> = None;
         let mut upload_trigger = upload_trigger;
         let mut ready_check_accepted = false; // 跟踪是否已接受匹配
         let mut honored = false; // 跟踪当前对局是否已自动荣誉点赞（防 WS 重复推送刷屏）
@@ -99,6 +105,7 @@ pub fn start(
                         &cfg,
                         &mut lobby_created,
                         &mut last_phase,
+                        &mut last_lobby_create,
                         &mut upload_trigger,
                     )
                     .await;
@@ -135,7 +142,13 @@ pub fn start(
                     log::info!("收到重置大厅创建状态指令，重置为 false");
                     lobby_created = false;
                     if last_phase == "None" && cfg.enable_auto_create_lobby {
-                        try_create_default_lobby(&app_handle, &cfg, &mut lobby_created).await;
+                        try_create_default_lobby(
+                            &app_handle,
+                            &cfg,
+                            &mut lobby_created,
+                            &mut last_lobby_create,
+                        )
+                        .await;
                     }
                 }
                 GameflowEvent::HonorBallot(ballot) => {
@@ -161,6 +174,7 @@ async fn handle_phase_change(
     cfg: &FunctionsConfig,
     lobby_created: &mut bool,
     last_phase: &mut String,
+    last_lobby_create: &mut Option<std::time::Instant>,
     upload_trigger: &mut crate::upload::UploadTrigger,
 ) {
     log::info!("游戏阶段: {}", phase);
@@ -174,9 +188,19 @@ async fn handle_phase_change(
         super::auto_screenshot::set_in_game(false);
     }
 
-    // 进入 "None" 空闲状态时重置大厅创建标志（允许 WS 重连后重新创建）
+    // 进入 "None" 空闲状态时重置大厅创建标志（允许 WS 重连后重新创建）。
+    // 但创建预设大厅成功后 LCU 会在极短时间内闪回一次 None（Lobby→None 抖动），
+    // 若此时也重置标志会立刻再次建厅，重复 POST 会把玩家踢出小队（"你已被移出小队"）。
+    // 因此距上次建厅不足防抖窗口内出现的 None 视为抖动，跳过重置。
     if phase == "None" {
-        *lobby_created = false;
+        let within_flicker = last_lobby_create
+            .map(|t| t.elapsed() < LOBBY_FLICKER_WINDOW)
+            .unwrap_or(false);
+        if within_flicker {
+            log::debug!("忽略 Lobby→None 抖动（距上次建厅不足防抖窗口），保留建厅状态");
+        } else {
+            *lobby_created = false;
+        }
     }
     *last_phase = phase.to_string();
 
@@ -191,7 +215,7 @@ async fn handle_phase_change(
 
     // 空闲状态 → 自动创建预设大厅
     if phase == "None" && cfg.enable_auto_create_lobby {
-        try_create_default_lobby(app_handle, cfg, lobby_created).await;
+        try_create_default_lobby(app_handle, cfg, lobby_created, last_lobby_create).await;
     }
 
     // 游戏进行中 → 自动重连（指数退避，最多 5 次）
@@ -257,6 +281,7 @@ async fn try_create_default_lobby(
     app_handle: &AppHandle,
     cfg: &FunctionsConfig,
     lobby_created: &mut bool,
+    last_lobby_create: &mut Option<std::time::Instant>,
 ) {
     if *lobby_created {
         return;
@@ -295,12 +320,14 @@ async fn try_create_default_lobby(
             Ok(_) => {
                 log::info!("预设大厅创建成功 (尝试 {})", attempt + 1);
                 *lobby_created = true;
+                *last_lobby_create = Some(std::time::Instant::now());
                 return;
             }
             Err(e) => {
                 if e.contains("409") {
                     log::info!("创建大厅返回 409 (Conflict)，可能已在房间中，停止重试");
                     *lobby_created = true;
+                    *last_lobby_create = Some(std::time::Instant::now());
                     return;
                 }
                 log::warn!("创建大厅失败: {}，重试中...", e);
