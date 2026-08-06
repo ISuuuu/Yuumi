@@ -187,6 +187,7 @@ async function checkGameSettingsLock() {
 
 const GAME_MODES: { id: number; name: string }[] = [
   { id: 2400, name: "海克斯大乱斗" },
+  { id: 2450, name: "经典海斗" },
   { id: 450, name: "极地大乱斗" },
   { id: 430, name: "匹配模式" },
   { id: 420, name: "单双排位" },

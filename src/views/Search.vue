@@ -42,6 +42,7 @@ const selectedQueue = ref<number>(-1); // -1 = 全部
 const QUEUE_OPTIONS = [
   { id: -1, label: "全部" },
   { id: 2400, label: "海克斯大乱斗" },
+  { id: 2450, label: "经典海斗" },
   { id: 450, label: "极地大乱斗" },
   { id: 430, label: "匹配模式" },
   { id: 420, label: "单双排位" },
@@ -877,6 +878,7 @@ const gameDetails = computed(() => {
     490: "快速模式",
     450: "极地大乱斗",
     2400: "海克斯大乱斗",
+    2450: "经典海斗",
     900: "无限火力",
     1010: "随机无限火力",
     1020: "克隆模式",
@@ -1328,7 +1330,7 @@ function getQueueName(queueId: number, backendName: string): string {
                             />
                           </div>
                           <div
-                            v-if="selectedGame?.queueId !== 2400"
+                            v-if="selectedGame?.queueId !== 2400 && selectedGame?.queueId !== 2450"
                             class="row-rune"
                           >
                             <LcuImage
@@ -1374,7 +1376,7 @@ function getQueueName(queueId: number, backendName: string): string {
                       <div class="player-items-col">
                         <div class="player-items-wrap">
                           <div
-                            v-if="selectedGame?.queueId === 2400 && Boolean(p.augmentIconUrls?.length)"
+                            v-if="(selectedGame?.queueId === 2400 || selectedGame?.queueId === 2450) && Boolean(p.augmentIconUrls?.length)"
                             class="row-augment-grid"
                           >
                             <n-tooltip

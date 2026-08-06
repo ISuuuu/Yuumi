@@ -538,6 +538,7 @@
   },
   "gameModes": {
     "2400": "Hextech ARAM",
+    "2450": "Classic Hextech ARAM",
     "450": "ARAM",
     "430": "Normal",
     "420": "Ranked Solo",

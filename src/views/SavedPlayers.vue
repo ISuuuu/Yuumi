@@ -86,6 +86,7 @@ function getQueueName(queueType: string | undefined | null): string {
     "1700": "斗魂竞技场",
     "1710": "斗魂竞技场",
     "2400": "海克斯大乱斗",
+    "2450": "经典海斗",
   };
   return fallbackMap[queueType] || queueType;
 }

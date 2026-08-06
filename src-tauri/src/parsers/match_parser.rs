@@ -64,7 +64,7 @@ pub struct LcuMatchStats {
     pub game_ended_in_early_surrender: bool,
     #[serde(default)]
     pub subteam_placement: Option<u32>,
-    // 海克斯强化（海克斯大乱斗 queueId 2400）
+    // 海克斯强化（海克斯大乱斗 queueId 2400 / 经典海斗 2450）
     #[serde(default)]
     pub augments: Vec<i32>,
     #[serde(default)]
@@ -116,7 +116,7 @@ pub struct MatchDisplay {
     pub spell2_icon_url: String,
     pub rune_icon_url: String,
     pub item_icon_urls: Vec<String>,
-    // 海克斯强化（仅海克斯大乱斗 queueId 2400 有值）
+    // 海克斯强化（仅海克斯大乱斗 2400 / 经典海斗 2450 有值）
     pub augment_ids: Vec<i32>,
     pub augment_icon_urls: Vec<String>,
     pub augment_names: Vec<String>,
@@ -278,7 +278,7 @@ impl LcuMatchGame {
 /// 将 queueId 映射为 OP.GG 使用的游戏模式标识（供自动选人与其他调用方复用）
 pub fn queue_id_to_opgg_mode(queue_id: i32) -> &'static str {
     match queue_id {
-        450 => "aram",
+        450 | 2400 | 2450 => "aram",
         1700 | 1710 => "arena",
         1300 => "nexus_blitz",
         900 | 1900 => "urf",
@@ -326,6 +326,11 @@ fn get_queue_info(queue_id: i32) -> QueueInfo {
         // 海克斯大乱斗
         2400 => QueueInfo {
             name: "海克斯大乱斗",
+            map: "嚎哭深渊",
+        },
+        // 经典海斗 (Classic Hextech ARAM / KIWI_JADE)
+        2450 => QueueInfo {
+            name: "经典海斗",
             map: "嚎哭深渊",
         },
         // 限时/特殊模式

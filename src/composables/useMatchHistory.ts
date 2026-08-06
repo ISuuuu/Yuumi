@@ -33,6 +33,7 @@ export function useMatchHistory() {
   const QUEUE_OPTIONS = [
     { id: null, label: "全部" },
     { id: 2400, label: "海克斯大乱斗" },
+    { id: 2450, label: "经典海斗" },
     { id: 450, label: "极地大乱斗" },
     { id: 430, label: "匹配模式" },
     { id: 420, label: "单双排位" },

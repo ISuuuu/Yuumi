@@ -37,6 +37,7 @@ let currentTeammatePuuid = "";
 const QUEUE_OPTIONS = [
   { id: null, label: "全部" },
   { id: 2400, label: "海克斯大乱斗" },
+  { id: 2450, label: "经典海斗" },
   { id: 450, label: "极地大乱斗" },
   { id: 430, label: "匹配模式" },
   { id: 420, label: "单双排位" },
@@ -558,7 +559,7 @@ watch(
                   />
                 </div>
               </div>
-              <div v-if="m.queueId !== 2400" class="rune-slot">
+              <div v-if="m.queueId !== 2400 && m.queueId !== 2450" class="rune-slot">
                 <LcuImage
                   :src="m.runeIconUrl"
                   class="mini-icon circular"
@@ -604,7 +605,7 @@ watch(
           <!-- 5. 装备栏 (海克斯强化 + 前 6 件常规装备 + 第 7 件饰品) -->
           <div class="items-panel">
             <!-- 海克斯强化（仅海克斯大乱斗） -->
-            <div v-if="m.queueId === 2400 && Boolean(m.augmentIconUrls?.length)" class="augment-grid">
+            <div v-if="(m.queueId === 2400 || m.queueId === 2450) && Boolean(m.augmentIconUrls?.length)" class="augment-grid">
               <n-tooltip
                 v-for="(url, idx) in m.augmentIconUrls"
                 :key="'aug-' + idx"
