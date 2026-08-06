@@ -1271,44 +1271,26 @@ pub async fn get_tft_match_history(
         if let Some(server) = &lcu.server {
             let server_lower = server.to_lowercase();
             if crate::lcu::sgp::is_tencent_server(&server_lower) {
-                let token_url = format!("https://127.0.0.1:{}/entitlements/v1/token", lcu.port);
-                if let Ok(token_resp) = lcu
-                    .http_client
-                    .get(&token_url)
-                    .header("Authorization", &auth)
-                    .send()
-                    .await
-                {
-                    if token_resp.status().is_success() {
-                        if let Ok(token_data) = token_resp.json::<serde_json::Value>().await {
-                            if let Some(sgp_token) =
-                                token_data.get("accessToken").and_then(|v| v.as_str())
-                            {
-                                let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
-                                let sgp_url = format!(
-                                    "{}/match-history-query/v1/products/tft/player/{}/SUMMARY",
-                                    sgp_base, puuid
-                                );
-                                if let Ok(sgp_client) = crate::lcu::sgp::build_sgp_client() {
-                                    if let Ok(sgp_resp) = sgp_client
-                                        .get(&sgp_url)
-                                        .header("Authorization", format!("Bearer {}", sgp_token))
-                                        .query(&[
-                                            ("startIndex", &b.to_string()),
-                                            ("count", &count.to_string()),
-                                        ])
-                                        .send()
-                                        .await
-                                    {
-                                        if sgp_resp.status().is_success() {
-                                            if let Ok(sgp_json) =
-                                                sgp_resp.json::<serde_json::Value>().await
-                                            {
-                                                raw_json = Some(sgp_json);
-                                            }
-                                        }
-                                    }
-                                }
+                // SGP token 30 分钟缓存复用，共享客户端进程级复用
+                if let Ok(sgp_token) = crate::lcu::sgp::get_sgp_token(lcu.port, &auth).await {
+                    let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
+                    let sgp_url = format!(
+                        "{}/match-history-query/v1/products/tft/player/{}/SUMMARY",
+                        sgp_base, puuid
+                    );
+                    if let Ok(sgp_resp) = crate::lcu::sgp::get_sgp_client()
+                        .get(&sgp_url)
+                        .header("Authorization", format!("Bearer {}", sgp_token))
+                        .query(&[
+                            ("startIndex", &b.to_string()),
+                            ("count", &count.to_string()),
+                        ])
+                        .send()
+                        .await
+                    {
+                        if sgp_resp.status().is_success() {
+                            if let Ok(sgp_json) = sgp_resp.json::<serde_json::Value>().await {
+                                raw_json = Some(sgp_json);
                             }
                         }
                     }

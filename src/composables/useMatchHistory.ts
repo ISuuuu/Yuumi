@@ -187,6 +187,20 @@ export function useMatchHistory() {
     }
   }
 
+  // 对局结束后仅刷新召唤师头部数据（等级等），不重复拉取战绩。
+  // 战绩刷新由 MatchHistoryTab 的重试逻辑统一负责，避免双重请求。
+  async function refreshSummonerOnly() {
+    try {
+      summoner.value = await fetchCurrentSummoner();
+      if (summoner.value?.puuid) {
+        cachedSummoner = summoner.value;
+        lastFetchedTime = Date.now();
+      }
+    } catch (e) {
+      console.error("刷新召唤师数据失败:", e);
+    }
+  }
+
   // 一次拉取战绩：matches 与 recentMatches 共用同一份数据，避免重复请求同一接口
   async function loadCareerData(puuid: string, isGameEndSync = false) {
     try {
@@ -341,6 +355,7 @@ export function useMatchHistory() {
     loadSummoner,
     loadCareerData,
     loadRankedStats,
+    refreshSummonerOnly,
     selectQueue,
     formatRank,
     formatHighestRank,

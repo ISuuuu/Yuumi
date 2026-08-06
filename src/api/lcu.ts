@@ -145,8 +145,21 @@ export interface MatchDisplay {
 }
 
 /** 获取当前召唤师信息（Rust 解析层清洗后，404 时自动重试） */
-export async function fetchCurrentSummoner(
+let summonerInflight: Promise<SummonerDisplay> | null = null;
+
+export function fetchCurrentSummoner(
   maxRetries = 15,
+): Promise<SummonerDisplay> {
+  if (!summonerInflight) {
+    summonerInflight = doFetchCurrentSummoner(maxRetries).finally(() => {
+      summonerInflight = null;
+    });
+  }
+  return summonerInflight;
+}
+
+async function doFetchCurrentSummoner(
+  maxRetries: number,
 ): Promise<SummonerDisplay> {
   for (let i = 0; i <= maxRetries; i++) {
     try {

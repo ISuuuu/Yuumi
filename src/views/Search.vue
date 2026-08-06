@@ -24,6 +24,7 @@ import LcuOfflineState from "../components/LcuOfflineState.vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useToast } from "../composables/useToast";
+import { runWithConcurrency } from "../utils/runWithConcurrency";
 
 const store = useLcuStore();
 const { t, te } = useI18n();
@@ -615,45 +616,43 @@ async function loadRanksInBackground(g: any, requestId: number) {
 
   const rankResults: Record<string, string> = {};
 
-  // 并发拉取段位数据（命中缓存则直接复用）
-  await Promise.all(
-    playerPuuids.map(async (puuid) => {
-      const cachedRank = cacheGet(rankCache, puuid, RANK_TTL);
-      if (cachedRank !== null) {
-        rankResults[puuid] = cachedRank;
-        return;
-      }
-      try {
-        const rResp = await lcuRequest<any>(
-          "GET",
-          `/lol-ranked/v1/ranked-stats/${puuid}`,
+  // 并发拉取段位数据（命中缓存则直接复用），限流并发避免请求风暴
+  await runWithConcurrency(playerPuuids, 3, async (puuid) => {
+    const cachedRank = cacheGet(rankCache, puuid, RANK_TTL);
+    if (cachedRank !== null) {
+      rankResults[puuid] = cachedRank;
+      return;
+    }
+    try {
+      const rResp = await lcuRequest<any>(
+        "GET",
+        `/lol-ranked/v1/ranked-stats/${puuid}`,
+      );
+      if (rResp.success && rResp.data?.queues) {
+        const queues = rResp.data.queues;
+        // 优先单双排，其次灵活排位
+        const solo = queues.find(
+          (q: any) => q.queueType === "RANKED_SOLO_5x5",
         );
-        if (rResp.success && rResp.data?.queues) {
-          const queues = rResp.data.queues;
-          // 优先单双排，其次灵活排位
-          const solo = queues.find(
-            (q: any) => q.queueType === "RANKED_SOLO_5x5",
-          );
-          const flex = queues.find(
-            (q: any) => q.queueType === "RANKED_FLEX_SR",
-          );
-          const activeQueue = solo || flex;
-          if (activeQueue && activeQueue.tier && activeQueue.tier !== "NONE") {
-            const tier = TIER_MAP[activeQueue.tier] || activeQueue.tier;
-            const div =
-              activeQueue.rank && activeQueue.rank !== "NA"
-                ? activeQueue.rank
-                : "";
-            const rankStr = `${tier}${div}`;
-            cacheSet(rankCache, puuid, rankStr);
-            rankResults[puuid] = rankStr;
-          }
+        const flex = queues.find(
+          (q: any) => q.queueType === "RANKED_FLEX_SR",
+        );
+        const activeQueue = solo || flex;
+        if (activeQueue && activeQueue.tier && activeQueue.tier !== "NONE") {
+          const tier = TIER_MAP[activeQueue.tier] || activeQueue.tier;
+          const div =
+            activeQueue.rank && activeQueue.rank !== "NA"
+              ? activeQueue.rank
+              : "";
+          const rankStr = `${tier}${div}`;
+          cacheSet(rankCache, puuid, rankStr);
+          rankResults[puuid] = rankStr;
         }
-      } catch (e) {
-        console.error(`拉取 PUUID 为 ${puuid} 的段位失败:`, e);
       }
-    }),
-  );
+    } catch (e) {
+      console.error(`拉取 PUUID 为 ${puuid} 的段位失败:`, e);
+    }
+  });
 
   if (requestId === selectMatchRequestId) {
     participantRanks.value = rankResults;

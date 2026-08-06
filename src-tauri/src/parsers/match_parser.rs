@@ -529,36 +529,12 @@ pub async fn get_match_history_sgp(
 
     let auth = build_auth_header(&lcu.token);
 
-    // ── 1. 通过 LCU 获取 SGP token ──
-    let token_url = format!("https://127.0.0.1:{}/entitlements/v1/token", lcu.port);
-    let token_resp = lcu
-        .http_client
-        .get(&token_url)
-        .header("Authorization", &auth)
-        .send()
-        .await
-        .map_err(|e| format!("获取 SGP token 失败: {}", e))?;
-
-    if !token_resp.status().is_success() {
-        return Err(format!(
-            "获取 SGP token 失败: HTTP {}",
-            token_resp.status().as_u16()
-        ));
-    }
-
-    let token_data: serde_json::Value = token_resp
-        .json()
-        .await
-        .map_err(|e| format!("解析 SGP token 失败: {}", e))?;
-    let sgp_token = token_data
-        .get("accessToken")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "SGP token 数据中缺少 accessToken".to_string())?
-        .to_string();
+    // ── 1. 获取 SGP accessToken（30 分钟缓存复用）与共享客户端 ──
+    let sgp_token = crate::lcu::sgp::get_sgp_token(lcu.port, &auth).await?;
 
     // ── 2. 构建 SGP base URL 与客户端 ──
     let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
-    let sgp_client = crate::lcu::sgp::build_sgp_client()?;
+    let sgp_client = crate::lcu::sgp::get_sgp_client();
 
     // ── 3. 请求 SGP 战绩接口 ──
     if end_index < beg_index {

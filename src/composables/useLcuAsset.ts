@@ -161,13 +161,22 @@ function fetchLcuAssetWithRetry(
 export function useLcuAsset(
   pathRef: Ref<string | undefined>,
   fallbackSrcRef?: Ref<string | undefined>,
+  enabledRef?: Ref<boolean>,
 ) {
   const src = ref("");
   const loading = ref(false);
 
+  // 未传 enabledRef 时默认始终加载；传入时用于实现视口懒加载等延迟加载
+  const isEnabled = enabledRef ?? ref(true);
+
   watch(
-    pathRef,
-    (path) => {
+    [pathRef, isEnabled] as [Ref<string | undefined>, Ref<boolean>],
+    ([path]) => {
+      if (!isEnabled.value) {
+        src.value = "";
+        loading.value = false;
+        return;
+      }
       if (!path) {
         src.value = "";
         return;

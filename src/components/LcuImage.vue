@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { toRef } from "vue";
+import { ref, toRef } from "vue";
+import { onMounted, onBeforeUnmount } from "vue";
 import { useLcuAsset } from "../composables/useLcuAsset";
 
 const props = defineProps<{
@@ -9,16 +10,43 @@ const props = defineProps<{
   fallbackSrc?: string;
 }>();
 
+// 视口懒加载：进入视口前不触发 LCU 资源请求，减少首屏批量 IPC 与 base64 传输
+const enabled = ref(false);
 const { src: resolvedSrc, loading } = useLcuAsset(
   toRef(props, "src"),
   toRef(props, "fallbackSrc"),
+  enabled,
 );
+
+const wrapperEl = ref<HTMLElement | null>(null);
+let observer: IntersectionObserver | null = null;
+
+onMounted(() => {
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0]?.isIntersecting) {
+        enabled.value = true;
+        observer?.disconnect();
+      }
+    },
+    { rootMargin: "200px" },
+  );
+  if (wrapperEl.value) observer.observe(wrapperEl.value);
+});
+
+onBeforeUnmount(() => observer?.disconnect());
 </script>
 
 <template>
-  <div class="lcu-image-wrapper">
-    <img v-if="resolvedSrc" :src="resolvedSrc" :alt="alt" class="lcu-img" />
-    <span v-else-if="loading" class="lcu-img-placeholder" />
+  <div ref="wrapperEl" class="lcu-image-wrapper">
+    <img
+      v-if="resolvedSrc"
+      :src="resolvedSrc"
+      :alt="alt"
+      class="lcu-img"
+      loading="lazy"
+    />
+    <span v-else-if="loading || !enabled" class="lcu-img-placeholder" />
     <span v-else class="lcu-img-error" />
   </div>
 </template>

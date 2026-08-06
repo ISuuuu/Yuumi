@@ -61,7 +61,7 @@ pub(crate) fn put_cached(key: String, data: Value) {
 }
 
 /// 构建访问 OP.GG 的 HTTP 客户端（支持可选代理）
-pub fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
+fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
     let mut builder = reqwest::Client::builder().user_agent(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     );
@@ -81,6 +81,32 @@ pub fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Clien
     }
 
     builder.build().unwrap_or_else(|_| reqwest::Client::new())
+}
+
+/// 已缓存的 OP.GG 客户端（代理配置不变时进程级复用，变更时才重建）
+struct OpggClientEntry {
+    enable_proxy: bool,
+    proxy_addr: String,
+    client: reqwest::Client,
+}
+
+static OPGG_CLIENT: OnceLock<Mutex<Option<OpggClientEntry>>> = OnceLock::new();
+
+fn get_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
+    let cache = OPGG_CLIENT.get_or_init(|| Mutex::new(None));
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(entry) = guard.as_ref() {
+        if entry.enable_proxy == enable_proxy && entry.proxy_addr == proxy_addr {
+            return entry.client.clone();
+        }
+    }
+    let client = build_opgg_client(enable_proxy, proxy_addr);
+    *guard = Some(OpggClientEntry {
+        enable_proxy,
+        proxy_addr: proxy_addr.to_string(),
+        client: client.clone(),
+    });
+    client
 }
 
 /// 读取全局代理配置
@@ -104,7 +130,7 @@ pub(crate) async fn get_json(
     }
 
     let (enable_proxy, proxy_addr) = proxy_config(app_state).await;
-    let client = build_opgg_client(enable_proxy, &proxy_addr);
+    let client = get_opgg_client(enable_proxy, &proxy_addr);
 
     let mut last_err = String::new();
     for attempt in 1..=OPGG_MAX_RETRIES {
@@ -142,7 +168,7 @@ pub(crate) async fn post_json(
     body: &Value,
 ) -> Result<Value, String> {
     let (enable_proxy, proxy_addr) = proxy_config(app_state).await;
-    let client = build_opgg_client(enable_proxy, &proxy_addr);
+    let client = get_opgg_client(enable_proxy, &proxy_addr);
 
     let mut last_err = String::new();
     for attempt in 1..=OPGG_MAX_RETRIES {

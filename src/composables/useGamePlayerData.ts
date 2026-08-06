@@ -220,15 +220,7 @@ export function useGamePlayerData(
     if (!summonerId) return;
 
     const existing = playerData.value[cellId];
-    const existingIsCurrentPlayer =
-      summonerId === currentSummonerId.value ||
-      (!!existing?.info?.puuid &&
-        existing.info.puuid === currentSummonerPuuid.value);
-    if (
-      existing?.info &&
-      (!existingIsCurrentPlayer || existing.matches.length >= 10)
-    )
-      return;
+    if (existing?.info) return;
 
     playerData.value[cellId] = {
       info: null,

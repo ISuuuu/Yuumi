@@ -72,6 +72,13 @@ pub async fn get_game_player_summaries(
 
     let assets = app_state.game_data.read().await.clone();
 
+    // 复用全局并发信号量（由配置 ApiConcurrencyNumber 控制），
+    // 限制同时打向 LCU 的玩家查询数量，避免 10 人并发造成请求风暴
+    let semaphore = {
+        let lock = app_state.api_semaphore.read().await;
+        lock.clone()
+    };
+
     // 并发查询所有玩家
     let mut handles = Vec::new();
     for player in &players {
@@ -80,8 +87,10 @@ pub async fn get_game_player_summaries(
         let http = lcu.http_client.clone();
         let player = player.clone();
         let assets = assets.clone();
+        let semaphore = semaphore.clone();
 
         handles.push(tokio::spawn(async move {
+            let _permit = semaphore.acquire().await.ok()?;
             fetch_player_summary(&http, &base, &auth, &player, current_summoner_id, &assets).await
         }));
     }

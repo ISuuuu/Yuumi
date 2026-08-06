@@ -745,42 +745,13 @@ pub async fn spectate_directly(
         .ok_or_else(|| "召唤师数据中缺少 puuid".to_string())?
         .to_string();
 
-    // ── 3. 通过 LCU 获取 SGP token（/entitlements/v1/token → accessToken）──
-    let token_url = format!("{}/entitlements/v1/token", lcu_base);
-    let token_resp = lcu
-        .http_client
-        .get(&token_url)
-        .header("Authorization", &auth)
-        .send()
-        .await
-        .map_err(|e| format!("获取 SGP token 失败: {}", e))?;
-
-    if !token_resp.status().is_success() {
-        return Err(format!(
-            "获取 SGP token 失败: HTTP {}",
-            token_resp.status().as_u16()
-        ));
-    }
-
-    let token_data: serde_json::Value = token_resp
-        .json()
-        .await
-        .map_err(|e| format!("解析 SGP token 失败: {}", e))?;
-    let sgp_token = token_data
-        .get("accessToken")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "SGP token 数据中缺少 accessToken".to_string())?
-        .to_string();
+    // ── 3. 获取 SGP accessToken（30 分钟缓存复用）与共享客户端 ──
+    let sgp_token = crate::lcu::sgp::get_sgp_token(lcu.port, &auth).await?;
 
     // ── 4. 构建 SGP base URL 并请求观战凭据 ──
     let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
 
-    let sgp_client = reqwest::Client::builder()
-        .no_proxy()
-        .user_agent("RiotClient/78.0.1.1352 (Windows;10;co;red)")
-        .http1_only()
-        .build()
-        .map_err(|e| format!("创建 SGP HTTP 客户端失败: {}", e))?;
+    let sgp_client = crate::lcu::sgp::get_sgp_client();
 
     let sgp_url = format!(
         "{}/gsm/v1/ledge/spectator/region/{}/puuid/{}",

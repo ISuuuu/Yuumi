@@ -12,7 +12,7 @@ const currentTab = ref("matches");
 
 const {
   summoner, matches, recentMatches, rankedQueues, loading, copied,
-  loadSummoner, loadCareerData, loadRankedStats,
+  loadSummoner, loadCareerData, loadRankedStats, refreshSummonerOnly,
   copyRiotId, clearCache, fetchMatchHistoryWithFallback,
 } = useMatchHistory();
 
@@ -37,7 +37,7 @@ watch(
   { immediate: true },
 );
 
-// 对局结束后自动刷新召唤师数据
+// 对局结束后自动刷新召唤师头部数据（战绩刷新由 MatchHistoryTab 统一负责）
 watch(
   () => store.gamePhase,
   async (phase: string, oldPhase: string | undefined) => {
@@ -46,7 +46,7 @@ watch(
     const endPhases = ["EndOfGame", "Lobby", "None"];
     if (gamePhases.includes(oldPhase ?? "") && endPhases.includes(phase ?? "")) {
       await new Promise((r) => setTimeout(r, 2000));
-      await loadSummoner(true);
+      await refreshSummonerOnly();
     }
   },
 );

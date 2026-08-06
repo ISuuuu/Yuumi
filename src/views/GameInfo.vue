@@ -56,6 +56,9 @@ const {
 // 保存玩家映射：puuid → { tag, encounterCount }，用于玩家卡片旁标记"曾同局"
 const savedPlayerMap = ref<Record<string, SavedPlayerMarker>>({});
 
+// in-flight 去重：挂载/连接/选人等多触发源同时到达时只发一次查询
+let savedPlayerMapInflight: Promise<void> | null = null;
+
 // 当前对局正在显示的玩家 puuid 集合（本局玩家不算"历史"）
 const displayedPuuids = computed(() => {
   const set = new Set<string>();
@@ -69,11 +72,16 @@ const displayedPuuids = computed(() => {
 async function loadSavedPlayerMap() {
   const puuid = currentSummonerPuuid.value;
   if (!puuid || !store.isConnected) return;
-  try {
-    savedPlayerMap.value = await querySavedPlayersMap(puuid);
-  } catch (e) {
-    console.error("[GameInfo] 保存玩家映射加载失败:", e);
-  }
+  if (savedPlayerMapInflight) return;
+  savedPlayerMapInflight = (async () => {
+    try {
+      savedPlayerMap.value = await querySavedPlayersMap(puuid);
+    } catch (e) {
+      console.error("[GameInfo] 保存玩家映射加载失败:", e);
+    } finally {
+      savedPlayerMapInflight = null;
+    }
+  })();
 }
 
 watch(() => store.gamePhase, (phase) => {

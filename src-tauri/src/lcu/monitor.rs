@@ -153,6 +153,9 @@ pub fn start(
                                     }
                                     was_connected = true;
 
+                                    // LCU 重启后旧 SGP token 失效，清空缓存
+                                    super::sgp::clear_sgp_token_cache();
+
                                     // 异步加载游戏资源映射（不阻塞监控循环）
                                     let gd = game_data.clone();
                                     let app_handle_for_gd = app_handle.clone();
@@ -208,6 +211,7 @@ pub fn start(
                             *lock = None;
                         }
                         was_connected = false;
+                        super::sgp::clear_sgp_token_cache();
 
                         // 取消 WS 连接循环，避免在 LOL 退出后后台持续尝试连接旧端口并打印日志
                         {
