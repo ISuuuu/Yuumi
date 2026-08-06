@@ -486,10 +486,20 @@ fn releases_cache_path() -> PathBuf {
     path
 }
 
+/// 归一化版本号（去掉前缀 v 与首尾空白）
+fn normalize_version(v: &str) -> String {
+    v.trim().trim_start_matches('v').trim().to_string()
+}
+
 /// 获取 GitHub 版本更新日志（带本地缓存，缓存有效期 24 小时，
 /// 避免频繁请求触发 GitHub API 未认证限流）。
+/// 传入当前版本号时，若缓存中缺少该版本对应的 release
+/// （例如刚通过更新器升到新版本），则视为缓存过期强制重新拉取。
 #[tauri::command]
-pub async fn get_release_changelog(app: tauri::AppHandle) -> Result<Vec<ReleaseEntry>, String> {
+pub async fn get_release_changelog(
+    app: tauri::AppHandle,
+    current_version: Option<String>,
+) -> Result<Vec<ReleaseEntry>, String> {
     const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
     let cache_path = releases_cache_path();
 
@@ -503,7 +513,16 @@ pub async fn get_release_changelog(app: tauri::AppHandle) -> Result<Vec<ReleaseE
                     .and_then(|t| t.elapsed().ok())
                     .map(|d| d.as_secs() > CACHE_TTL_SECS)
                     .unwrap_or(true);
-                if !is_stale && !cache.is_empty() {
+                // 缓存中是否缺少当前版本对应的 release（刚升级到新版本时缓存通常还没有它）
+                let current = current_version
+                    .as_deref()
+                    .map(normalize_version)
+                    .filter(|v| !v.is_empty());
+                let missing_current = match &current {
+                    Some(v) => !cache.iter().any(|e| normalize_version(&e.tag) == *v),
+                    None => false,
+                };
+                if !is_stale && !missing_current && !cache.is_empty() {
                     log::info!("[get_release_changelog] 命中本地缓存，跳过 GitHub 请求");
                     return Ok(cache);
                 }

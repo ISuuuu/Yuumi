@@ -88,7 +88,7 @@ async function fetchReleaseHistory() {
   try {
     const releases = await invoke<
       { tag: string; publishedAt: string; body: string }[]
-    >("get_release_changelog");
+    >("get_release_changelog", { currentVersion: appVersion.value });
     const { marked } = await import("marked");
     versionHistory.value = releases.map((rel) => ({
       tag: rel.tag,
