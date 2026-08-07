@@ -132,6 +132,10 @@ const isPickable = (championId: number) => {
 // 经由官方 API 验证成功属于本人的动态点亮英雄 ID 集合
 const unlockedMyBenchChampions = ref<Set<number>>(new Set());
 
+// 等待 session 更新验证交换真正生效（LCU swap 接口对队友英雄也会返回 2xx 但静默不生效）
+const pendingSwapVerify = ref<number | null>(null);
+let swapVerifyTimer: number | undefined;
+
 // 前 15 秒准备阶段保护期时长（毫秒）
 const FIRST_STAGE_PROTECT_MS = 15000;
 
@@ -212,17 +216,22 @@ async function swapChampion(champ: any) {
     {},
   );
 
-  if (resp.success) {
-    console.log(`[BenchOverlay] 抢/换英雄成功: ${cid}`);
-    // 验证成功，将该英雄及换下的旧英雄强行加入动态点亮集合
-    unlockedMyBenchChampions.value.add(cid);
-    if (previousMyChampionId.value > 0) {
-      unlockedMyBenchChampions.value.add(previousMyChampionId.value);
-    }
-  } else {
+  if (!resp.success) {
     console.warn(`[BenchOverlay] 抢/换英雄失败: ${cid}, 错误:`, resp.error);
     showHint("前 15 秒保护期");
+    return;
   }
+
+  // HTTP 成功不代表真正换到（队友的英雄接口也会返回成功但静默不生效），
+  // 需等待下一次 session 更新确认我手持的英雄变为 cid 后才点亮
+  pendingSwapVerify.value = cid;
+  if (swapVerifyTimer) window.clearTimeout(swapVerifyTimer);
+  swapVerifyTimer = window.setTimeout(() => {
+    if (pendingSwapVerify.value === cid) {
+      pendingSwapVerify.value = null;
+      showHint("前 15 秒保护期");
+    }
+  }, 2000);
 }
 
 // 关闭悬浮窗
@@ -249,6 +258,11 @@ watch(
       myHistoricalChampions.value = [];
       previousMyChampionId.value = 0;
       unlockedMyBenchChampions.value.clear();
+      pendingSwapVerify.value = null;
+      if (swapVerifyTimer) {
+        window.clearTimeout(swapVerifyTimer);
+        swapVerifyTimer = undefined;
+      }
       console.log("[BenchOverlay] 跨阶段进入选人阶段，初始化开始时间戳与动态点亮库");
     }
   },
@@ -276,6 +290,23 @@ watch(
         myHistoricalChampions.value = [...myHistoricalChampions.value, previousMyChampionId.value];
         console.log(`[BenchOverlay] 录入被替换放回板凳席的旧英雄: ${previousMyChampionId.value}`, myHistoricalChampions.value);
       }
+    }
+
+    // 交换验证：手持英雄变为点击的目标英雄说明交换真正生效，此时才动态点亮
+    if (pendingSwapVerify.value && myCid > 0 && myCid === pendingSwapVerify.value) {
+      const oldCid = previousMyChampionId.value;
+      unlockedMyBenchChampions.value.add(myCid);
+      if (oldCid > 0 && oldCid !== myCid) {
+        unlockedMyBenchChampions.value.add(oldCid);
+      }
+      pendingSwapVerify.value = null;
+      if (swapVerifyTimer) {
+        window.clearTimeout(swapVerifyTimer);
+        swapVerifyTimer = undefined;
+      }
+      console.log(
+        `[BenchOverlay] 交换验证生效，点亮: ${myCid} 及换下放回板凳席的 ${oldCid}`,
+      );
     }
 
     if (myCid > 0) {
