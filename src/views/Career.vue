@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, inject, watch, provide, type Ref } from "vue";
+import { ref, inject, watch, provide, onMounted, onUnmounted, type Ref } from "vue";
+import { listen } from "@tauri-apps/api/event";
 import { useLcuStore } from "../store/lcuStore";
 import MatchHistoryTab from "../components/career/MatchHistoryTab.vue";
 import LootManagerTab from "../components/career/LootManagerTab.vue";
@@ -56,6 +57,31 @@ const navigateSearchPayload = inject<
   Ref<{ name: string; gameId: number | null } | null>
 >("navigateSearchPayload")!;
 const navigateTo = inject<(page: string) => void>("navigateTo");
+
+// 游戏静态资源就绪事件：若当前战绩缺少技能/装备图标，则自动重新拉取
+// （首次连接时 game_data 可能尚未就绪，导致 parse 出的图标 URL 为空）
+let unlistenGameDataReady: (() => void) | null = null;
+onMounted(async () => {
+  try {
+    unlistenGameDataReady = await listen("game-data-ready", () => {
+      const puuid = summoner.value?.puuid;
+      if (!puuid || matches.value.length === 0) return;
+      const hasMissingIcons = matches.value.some(
+        (m) => !m.spell1IconUrl || !m.spell2IconUrl || m.itemIconUrls.length === 0,
+      );
+      if (hasMissingIcons) {
+        console.log("[Career] 检测到技能/装备图标缺失，重新拉取战绩");
+        loadCareerData(puuid);
+      }
+    });
+  } catch (e) {
+    console.error("订阅 game-data-ready 事件失败:", e);
+  }
+});
+
+onUnmounted(() => {
+  if (unlistenGameDataReady) unlistenGameDataReady();
+});
 
 function goToHistory() {
   if (!summoner.value) return;

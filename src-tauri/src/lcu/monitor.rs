@@ -183,6 +183,14 @@ pub fn start(
                                                 log::info!("游戏资源已更新");
                                                 let _ =
                                                     app_handle_for_gd.emit("game-data-ready", ());
+                                                // 后台补充 CDragon 海克斯名称/描述，不阻塞核心资源就绪
+                                                let gd_cdragon = gd.clone();
+                                                crate::spawn_log_panic(async move {
+                                                    super::game_data::merge_cdragon_augments_async(
+                                                        gd_cdragon,
+                                                    )
+                                                    .await;
+                                                });
                                             }
                                             Err(e) => log::error!("加载游戏资源失败: {}", e),
                                         }

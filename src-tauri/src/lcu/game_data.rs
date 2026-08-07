@@ -1,8 +1,9 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use serde::Deserialize;
 use serde_json::Value;
+use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
 
 use crate::{build_auth_header, LcuClient};
@@ -101,13 +102,26 @@ pub async fn fetch_game_data_assets(lcu: &LcuClient) -> GameDataAssets {
     last_assets
 }
 
+/// 从 CDragon 补充海克斯强化的中文名称/描述，并合并回共享的 game_data。
+/// 不阻塞核心资源（物品/技能/符文）写入与 game-data-ready 事件。
+pub async fn merge_cdragon_augments_async(game_data: Arc<RwLock<GameDataAssets>>) {
+    let cdragon = fetch_cdragon_augment_details().await;
+    if cdragon.is_empty() {
+        return;
+    }
+    let mut gd = game_data.write().await;
+    let merged = merge_augment_data(std::mem::take(&mut gd.augments), cdragon);
+    gd.augments = merged;
+    log::info!("CDragon 海克斯详情已合并");
+}
+
 /// 从 LCU 预加载所有游戏资源路径（单次尝试）。
 async fn fetch_game_data_assets_inner(lcu: &LcuClient) -> GameDataAssets {
     let auth = build_auth_header(&lcu.token);
     let base = format!("https://127.0.0.1:{}", lcu.port);
 
-    // 先尝试标准数组解析
-    let (items, spells, runes, champions, augments, cdragon_augments) = tokio::join!(
+    // 先尝试标准数组解析（CDragon 海克斯详情单独异步合并，不阻塞核心资源就绪）
+    let (items, spells, runes, champions, augments) = tokio::join!(
         fetch_id_map(
             &lcu.http_client,
             &base,
@@ -133,11 +147,7 @@ async fn fetch_game_data_assets_inner(lcu: &LcuClient) -> GameDataAssets {
             &auth,
             "/lol-game-data/assets/v1/cherry-augments.json",
         ),
-        fetch_cdragon_augment_details(),
     );
-
-    // 用 CDragon 数据补充 LCU 缺失的名称和描述
-    let augments = merge_augment_data(augments, cdragon_augments);
 
     // 对任何为空的资源，用灵活解析器重试
     let items = if items.is_empty() {
