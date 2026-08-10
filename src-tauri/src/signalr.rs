@@ -260,6 +260,7 @@ async fn negotiate(server_url: &str) -> Result<String, Box<dyn std::error::Error
 
     let http_client = reqwest::Client::builder()
         .danger_accept_invalid_certs(is_local)
+        .timeout(std::time::Duration::from_secs(10))
         .build()?;
 
     let negotiate_url = format!("{}/lcuHub/negotiate?negotiateVersion=1", server_url);
