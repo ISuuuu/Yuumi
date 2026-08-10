@@ -1690,7 +1690,10 @@ fn convert_seraphine_lcu_icon_path_to_cdragon(raw_icon: &str) -> String {
         return String::new();
     }
     // 复用 LCU 路径归一化（补全 /lol-game-data/assets、.tex→.png、小写）
-    let path = convert_seraphine_lcu_icon_path(raw_icon);
+    let mut path = convert_seraphine_lcu_icon_path(raw_icon);
+    // 剔除文件名中的 Set 版本标记（如 `.TFT_Set17.tex`），该标记只存在于 tft.json 元数据，
+    // CDragon 镜像与游戏文件实际不含此后缀，直接请求会 404
+    strip_tft_set_marker_from_path(&mut path);
     if path.starts_with("/lol-game-data/assets/") {
         let sub = path.strip_prefix("/lol-game-data/assets/").unwrap_or(&path);
         format!("https://raw.communitydragon.org/latest/game/{}", sub)
@@ -1706,5 +1709,81 @@ fn convert_seraphine_lcu_icon_path_to_cdragon(raw_icon: &str) -> String {
             "https://raw.communitydragon.org/latest/game/{}",
             path.trim_start_matches('/')
         )
+    }
+}
+
+/// 剔除文件名中的 TFT Set 版本标记（形如 `.tft_set17` / `.tft_17_2` / `.tft_event_5yr_set17`），
+/// 只处理最后一个 `/` 之后的文件名部分（目录名如 `tft17_riven` 无前导点，不会误匹配），
+/// 且标记内必须包含数字，避免误伤正常文件名。
+fn strip_tft_set_marker_from_path(path: &mut String) {
+    let Some(slash) = path.rfind('/') else {
+        return;
+    };
+    let head = slash + 1;
+    let Some(rel) = path.get(head..) else {
+        return;
+    };
+    let Some(marker) = rel.find(".tft_") else {
+        return;
+    };
+    let marker_abs = head + marker;
+    let Some(rest) = path.get(marker_abs + 1..) else {
+        return;
+    };
+    let Some(ext_dot) = rest.find('.') else {
+        return;
+    };
+    let token = &rest[..ext_dot];
+    if !token.chars().any(|c| c.is_ascii_digit()) {
+        return;
+    }
+    let ext = rest[ext_dot..].to_string();
+    path.truncate(marker_abs);
+    path.push_str(&ext);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_tft_set_marker_from_path_strips_known_markers() {
+        let cases = [
+            (
+                "/lol-game-data/assets/characters/tft17_riven/skins/base/images/tft17_riven_splash_tile_18.tft_set17.png",
+                "/lol-game-data/assets/characters/tft17_riven/skins/base/images/tft17_riven_splash_tile_18.png",
+            ),
+            (
+                "/lol-game-data/assets/characters/tft17_xxx/skins/base/images/xxx.tft_17_2.png",
+                "/lol-game-data/assets/characters/tft17_xxx/skins/base/images/xxx.png",
+            ),
+            (
+                "/lol-game-data/assets/characters/tft17_yyy/skins/base/images/yyy.tft_event_5yr_set17.png",
+                "/lol-game-data/assets/characters/tft17_yyy/skins/base/images/yyy.png",
+            ),
+            (
+                "/lol-game-data/assets/items/tft17_item_something.tft_set17_postlaunchaugments.png",
+                "/lol-game-data/assets/items/tft17_item_something.png",
+            ),
+        ];
+        for (input, expected) in cases {
+            let mut path = input.to_string();
+            strip_tft_set_marker_from_path(&mut path);
+            assert_eq!(path, expected);
+        }
+    }
+
+    #[test]
+    fn strip_tft_set_marker_from_path_keeps_normal_paths() {
+        let cases = [
+            "/lol-game-data/assets/characters/tft16_aatrox/skins/base/images/tft16_aatrox_splash_tile_0.png",
+            "/lol-game-data/assets/items/tft_item_bfs.png",
+            "/lol-game-data/assets/characters/tft17_riven/skins/base/images/tft17_riven_splash_tile_18.png",
+        ];
+        for input in cases {
+            let mut path = input.to_string();
+            strip_tft_set_marker_from_path(&mut path);
+            assert_eq!(path, input);
+        }
     }
 }
