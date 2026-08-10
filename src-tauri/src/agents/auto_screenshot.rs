@@ -70,7 +70,7 @@ async fn get_summoner_name_from_lcu(app_handle: &AppHandle) -> Option<String> {
 /// 开启多杀截图的后台守护任务
 pub fn start(app_handle: AppHandle) {
     crate::spawn_log_panic(async move {
-        let mut last_processed_event_id: i32 = -1;
+        let mut last_processed_event_id: Option<i32> = None;
         let mut active_player_name: Option<String> = None;
 
         // 创建专用 HTTP 客户端，设置 short 超时以防连接卡住
@@ -84,7 +84,7 @@ pub fn start(app_handle: AppHandle) {
         loop {
             if !IN_GAME.load(Ordering::SeqCst) {
                 // 非游戏中，重置状态，转入 2s 一次的挂起休眠
-                last_processed_event_id = -1;
+                last_processed_event_id = None;
                 active_player_name = None;
                 sleep(Duration::from_secs(2)).await;
                 continue;
@@ -168,23 +168,23 @@ pub fn start(app_handle: AppHandle) {
 
                         match resp.json::<LiveEventsResponse>().await {
                             Ok(events_resp) => {
-                                // 首次运行，初始化 last_processed_event_id 为当前最新事件，防止拉起旧数据
-                                if last_processed_event_id == -1 {
-                                    last_processed_event_id = events_resp
-                                        .Events
-                                        .iter()
-                                        .map(|e| e.EventID)
-                                        .max()
-                                        .unwrap_or(-1);
-                                    log::info!(
-                                        "游戏内事件监控初始化，当前最大 EventID: {}",
-                                        last_processed_event_id
-                                    );
+                                // 首次拿到有效事件时初始化 last_processed_event_id，防止拉起旧数据；
+                                // 空事件列表（加载期 LCD 尚未就绪）保持 None，不打印日志，等首个有效事件
+                                if last_processed_event_id.is_none() {
+                                    if let Some(max_id) =
+                                        events_resp.Events.iter().map(|e| e.EventID).max()
+                                    {
+                                        last_processed_event_id = Some(max_id);
+                                        log::info!(
+                                            "游戏内事件监控初始化，当前最大 EventID: {}",
+                                            max_id
+                                        );
+                                    }
                                 }
 
                                 for event in events_resp.Events {
-                                    if event.EventID > last_processed_event_id {
-                                        last_processed_event_id = event.EventID;
+                                    if event.EventID > last_processed_event_id.unwrap_or(-1) {
+                                        last_processed_event_id = Some(event.EventID);
 
                                         log::info!(
                                             "收到局内新事件: ID={}, Name={}, Killer={:?}, LegendaryTo={:?}, Recipient={:?}, Streak={:?}",
@@ -278,7 +278,16 @@ pub fn start(app_handle: AppHandle) {
                                 }
                             }
                             Err(e) => {
-                                log::warn!("解析 Live Client Data eventdata JSON 失败: {}", e);
+                                // 尚未拿到首个有效事件说明处于游戏加载期，LCD 未就绪，属预期，debug 即可；
+                                // 已初始化后仍解析失败才是对局中的真实异常，保留 WARN
+                                if last_processed_event_id.is_none() {
+                                    log::debug!(
+                                        "Live Client Data eventdata 解析失败 (游戏仍在加载，LCD 尚未就绪): {}",
+                                        e
+                                    );
+                                } else {
+                                    log::warn!("解析 Live Client Data eventdata JSON 失败: {}", e);
+                                }
                             }
                         }
                     }
