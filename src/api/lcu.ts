@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
+/** lol_path 列表中的特殊标记：表示该条目为「启动 WeGame」而非真实客户端路径（与 Rust 侧 config::WEGAME_MARKER 保持一致） */
+export const WEGAME_MARKER = "WeGame";
+
 export interface LcuApiResponse<T> {
   success: boolean;
   data?: T;
@@ -312,6 +315,8 @@ export const setSummonerSpells = (spell1Id: number, spell2Id: number) =>
 
 export interface GeneralConfig {
   LolPath: string[];
+  /** WeGame 客户端安装路径（对应 LolPath 中的 "WeGame" 标记条目） */
+  WegamePath: string | null;
   EnableStartLolWithApp: boolean;
   EnableCloseToTray: boolean | null;
   EnableGameStartMinimize: boolean;

@@ -84,6 +84,8 @@
     "lolPathDesc": "Set the League Client installation directory",
     "detectBtn": "Auto Detect",
     "browseBtn": "Browse",
+    "wegameAddBtn": "Add WeGame Launcher",
+    "wegamePathPlaceholder": "WeGame install path (editable)",
     "pathRemove": "Remove",
     "pathEmpty": "No client paths configured",
     "phantomProcess": "Phantom Process Key",
@@ -517,6 +519,7 @@
     "launchDesc": "Please start the League of Legends client first.",
     "launchBtn": "Launch Client",
     "lolPathLabel": "Client Path:",
+    "wegameNotSet": "Path not set",
     "waitingForLol": "Waiting for LeagueClient to start..."
   },
   "championPicker": {

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
+use crate::config::WEGAME_MARKER;
 use crate::{build_auth_header, lcu::client::lcu_request, AppState};
 
 // ─── 创建 5v5 训练营 ───
@@ -518,10 +519,9 @@ fn fix_lcu_window_win32(zoom: f64) -> Result<String, String> {
 }
 
 fn get_persisted_settings_path(lol_paths: &[String]) -> Option<PathBuf> {
-    if lol_paths.is_empty() {
-        return None;
-    }
-    let p = Path::new(&lol_paths[0]);
+    // 跳过 WeGame 标记，取第一个真实客户端路径
+    let real_path = lol_paths.iter().find(|p| *p != WEGAME_MARKER)?;
+    let p = Path::new(real_path);
     let base_dir = if p.is_file() { p.parent()? } else { p };
     Some(
         base_dir
@@ -810,12 +810,14 @@ pub async fn spectate_directly(
 
     // ── 5. 定位 Game 目录并启动 League of Legends.exe ──
     let cfg = app_state.config.read().await;
+    // 跳过 WeGame 标记，取第一个真实客户端路径
     let lol_path = cfg
         .general
         .lol_path
-        .first()
-        .ok_or_else(|| "未配置英雄联盟客户端路径，请在设置中配置".to_string())?
-        .clone();
+        .iter()
+        .find(|p| *p != WEGAME_MARKER)
+        .cloned()
+        .ok_or_else(|| "未配置英雄联盟客户端路径，请在设置中配置".to_string())?;
     drop(cfg);
 
     // 优先尝试 lol_path/Game（Yuumi 配置的是含 LeagueClient.exe 的根目录）

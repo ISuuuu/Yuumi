@@ -84,6 +84,8 @@
     "lolPathDesc": "設置英雄聯盟客戶端所在目錄的路徑",
     "detectBtn": "自動檢測",
     "browseBtn": "瀏覽文件夾",
+    "wegameAddBtn": "添加 WeGame 啟動項",
+    "wegamePathPlaceholder": "WeGame 安裝路徑（可手動修改）",
     "pathRemove": "刪除",
     "pathEmpty": "暫無客戶端路徑",
     "phantomProcess": "使用幻加密鑰",
@@ -518,6 +520,7 @@
     "launchDesc": "請先啟動國服或外服的《英雄聯盟》客戶端。",
     "launchBtn": "啟動客戶端",
     "lolPathLabel": "客戶端路徑：",
+    "wegameNotSet": "未設置路徑",
     "waitingForLol": "正在等待 LeagueClient 啟動..."
   },
   "championPicker": {

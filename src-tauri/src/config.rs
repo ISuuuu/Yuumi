@@ -5,6 +5,10 @@ use std::path::PathBuf;
 /// 并在 [`AppConfig::migrate`] 中实现从旧版本到新版本的幂等迁移。
 pub const CONFIG_VERSION: u32 = 2;
 
+/// lol_path 列表中的特殊标记：表示该条目为「启动 WeGame」而非真实客户端路径。
+/// 真实路径不可能恰好等于该字符串，可作为安全的判别值。
+pub const WEGAME_MARKER: &str = "WeGame";
+
 /// 获取配置文件路径: %APPDATA%/Yuumi/config.json
 fn config_path() -> PathBuf {
     let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -24,6 +28,9 @@ fn default_config_version() -> u32 {
 #[serde(default)]
 pub struct GeneralConfig {
     pub lol_path: Vec<String>,
+    /// WeGame 客户端安装路径（对应 lol_path 中的 WEGAME_MARKER 条目，用户可手动修改）
+    #[serde(default)]
+    pub wegame_path: Option<String>,
     pub enable_start_lol_with_app: bool,
     pub enable_close_to_tray: Option<bool>,
     pub enable_game_start_minimize: bool,
@@ -48,6 +55,7 @@ impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
             lol_path: Vec::new(),
+            wegame_path: None,
             enable_start_lol_with_app: false,
             enable_close_to_tray: None,
             enable_game_start_minimize: false,

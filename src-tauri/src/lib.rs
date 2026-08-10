@@ -346,6 +346,7 @@ pub fn run() {
             commands::lcu::get_lcu_connection_info,
             commands::lcu::get_map_side,
             commands::tools::detect_lol_path,
+            commands::tools::detect_wegame_path,
             commands::tools::select_lol_folder,
             commands::tools::select_folder,
             commands::tools::open_screenshot_folder,

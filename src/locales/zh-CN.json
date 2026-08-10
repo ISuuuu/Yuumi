@@ -84,6 +84,8 @@
     "lolPathDesc": "设置英雄联盟客户端所在目录的路径",
     "detectBtn": "自动检测",
     "browseBtn": "浏览文件夹",
+    "wegameAddBtn": "添加 WeGame 启动项",
+    "wegamePathPlaceholder": "WeGame 安装路径（可手动修改）",
     "pathRemove": "删除",
     "pathEmpty": "暂无客户端路径",
     "phantomProcess": "使用幻加密钥",
@@ -518,6 +520,7 @@
     "launchDesc": "请先启动国服或外服的《英雄联盟》客户端。",
     "launchBtn": "启动客户端",
     "lolPathLabel": "客户端路径：",
+    "wegameNotSet": "未设置路径",
     "waitingForLol": "正在等待 LeagueClient 启动..."
   },
   "championPicker": {

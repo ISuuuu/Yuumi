@@ -2,7 +2,7 @@
 import { ref, watch, onMounted } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import { invoke } from "@tauri-apps/api/core";
-import { fetchConfig } from "../api/lcu";
+import { fetchConfig, WEGAME_MARKER } from "../api/lcu";
 
 const store = useLcuStore();
 const connectionDetails = ref<{
@@ -10,6 +10,7 @@ const connectionDetails = ref<{
   port: number;
 } | null>(null);
 const lolPaths = ref<string[]>([]);
+const wegamePath = ref<string>("");
 const selectedPath = ref<string>("");
 
 async function loadConnectionDetails() {
@@ -29,8 +30,12 @@ async function loadPaths() {
   try {
     const cfg = await fetchConfig();
     lolPaths.value = cfg.General?.LolPath || [];
+    wegamePath.value = cfg.General?.WegamePath || "";
     if (lolPaths.value.length > 0) {
-      selectedPath.value = lolPaths.value[0];
+      // 若路径列表包含 WeGame 启动项，则默认选中它（国服用户通常走 WeGame 进游戏）
+      selectedPath.value = lolPaths.value.includes(WEGAME_MARKER)
+        ? WEGAME_MARKER
+        : lolPaths.value[0];
     }
   } catch (e) {
     console.error("加载客户端路径失败:", e);
@@ -122,7 +127,18 @@ watch(
             class="path-radio"
             :class="{ checked: selectedPath === p }"
           ></span>
-          <span class="path-text">{{ p }}</span>
+          <span class="path-text">
+            <template v-if="p === WEGAME_MARKER">
+              <span class="wegame-badge">WeGame</span>
+              <span class="wegame-sub" v-if="wegamePath">{{
+                wegamePath
+              }}</span>
+              <span class="wegame-sub wegame-muted" v-else>{{
+                $t("home.wegameNotSet")
+              }}</span>
+            </template>
+            <template v-else>{{ p }}</template>
+          </span>
         </div>
       </div>
       <div class="loading-ring">
@@ -359,9 +375,36 @@ watch(
   box-shadow: inset 0 0 0 3px white;
 }
 .path-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.wegame-badge {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--primary-color) 80%, #ffffff),
+    var(--primary-color)
+  );
+}
+.wegame-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  color: var(--text-color);
+}
+.wegame-muted {
+  color: var(--text-dimmed);
+  font-style: italic;
 }
 
 .loading-ring {

@@ -1,6 +1,7 @@
+use crate::config::WEGAME_MARKER;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::window::Effect;
 use tauri::Manager;
 
@@ -80,6 +81,277 @@ pub async fn detect_lol_path() -> Result<Option<String>, String> {
     })
     .await
     .map_err(|e| format!("路径检测任务异常终止: {}", e))?
+}
+
+/// 从注册表读取指定键的 REG_SZ 字符串值（Windows 专用，其他平台返回 None）
+fn reg_string_value(key: &str, name: &str) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let output = std::process::Command::new("reg")
+            .args(["query", key, "/v", name])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if line.contains(name) {
+                if let Some(pos) = line.find("REG_SZ") {
+                    let raw = line[pos + 6..].trim();
+                    if !raw.is_empty() {
+                        return Some(raw.replace("\\", "/"));
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (key, name);
+    }
+    None
+}
+
+/// 从注册表卸载项中查找 WeGame（DisplayName 含 WeGame 的项，读 InstallLocation 或 DisplayIcon）
+fn find_wegame_from_uninstall() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let uninstall_roots = [
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        ];
+        for root in uninstall_roots {
+            let list_output = match std::process::Command::new("reg")
+                .args(["query", root])
+                .output()
+            {
+                Ok(o) => o,
+                Err(_) => continue,
+            };
+            if !list_output.status.success() {
+                continue;
+            }
+            for line in String::from_utf8_lossy(&list_output.stdout).lines() {
+                let subkey = line.trim();
+                if !subkey.starts_with(root) || subkey.len() <= root.len() {
+                    continue;
+                }
+                let name = match reg_string_value(subkey, "DisplayName") {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if !name.to_lowercase().contains("wegame") {
+                    continue;
+                }
+                // 优先 InstallLocation
+                if let Some(dir) = reg_string_value(subkey, "InstallLocation") {
+                    let exe = Path::new(&dir).join("wegame.exe");
+                    if exe.exists() {
+                        return Some(exe);
+                    }
+                }
+                // 其次 DisplayIcon（可能是 "路径,图标序号" 或带引号，取逗号前的路径）
+                if let Some(icon) = reg_string_value(subkey, "DisplayIcon") {
+                    let clean = icon
+                        .split(',')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .trim_matches('"');
+                    if !clean.is_empty() {
+                        let icon_path = Path::new(clean);
+                        if icon_path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_lowercase())
+                            == Some("wegame.exe".to_string())
+                            && icon_path.exists()
+                        {
+                            return Some(icon_path.to_path_buf());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        return None;
+    }
+    None
+}
+
+/// 探测 WeGame 可执行文件位置（注册表 InstallPath → 注册表卸载项 → 常见安装目录 → 运行进程），找不到返回 None
+fn find_wegame_exe() -> Option<PathBuf> {
+    // 1. 注册表 InstallPath（WeGame 可能装在用户级或系统级）
+    for key in [
+        r"HKCU\SOFTWARE\Tencent\WeGame",
+        r"HKLM\SOFTWARE\Tencent\WeGame",
+        r"HKLM\SOFTWARE\WOW6432Node\Tencent\WeGame",
+    ] {
+        if let Some(dir) = reg_string_value(key, "InstallPath") {
+            let exe = Path::new(&dir).join("wegame.exe");
+            if exe.exists() {
+                return Some(exe);
+            }
+        }
+    }
+
+    // 2. 注册表卸载项（安装信息所在，含 DisplayName/InstallLocation/DisplayIcon）
+    if let Some(exe) = find_wegame_from_uninstall() {
+        return Some(exe);
+    }
+
+    // 3. 常见安装目录（遍历所有存在盘符的 Program Files / Program Files (x86)）
+    for letter in b'A'..=b'Z' {
+        let drive = format!("{}:\\", letter as char);
+        if !Path::new(&drive).exists() {
+            continue;
+        }
+        for sub_dir in ["Program Files", "Program Files (x86)"] {
+            let exe = Path::new(&drive)
+                .join(sub_dir)
+                .join("WeGame")
+                .join("wegame.exe");
+            if exe.exists() {
+                return Some(exe);
+            }
+        }
+    }
+    // 补充常见非标准安装目录（这些目录未必在注册表卸载项中，直接探测最稳妥）
+    for dir in [r"D:\WeGame", r"E:\WeGame"] {
+        let exe = Path::new(dir).join("wegame.exe");
+        if exe.exists() {
+            return Some(exe);
+        }
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let exe = Path::new(&local).join("WeGame").join("wegame.exe");
+        if exe.exists() {
+            return Some(exe);
+        }
+    }
+
+    // 4. 进程兜底：WeGame 运行中时从其 exe 路径推断
+    {
+        use sysinfo::System;
+        let mut sys = System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        for process in sys.processes().values() {
+            let name = process.name().to_string_lossy().to_lowercase();
+            if name == "wegame.exe" || name == "wegame" {
+                if let Some(exe_path) = process.exe() {
+                    return Some(exe_path.to_path_buf());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// 自动检测 WeGame 安装位置（找不到返回 None，供前端「添加 WeGame 启动项」使用）
+#[tauri::command]
+pub async fn detect_wegame_path() -> Result<Option<String>, String> {
+    let exe = tauri::async_runtime::spawn_blocking(find_wegame_exe)
+        .await
+        .map_err(|e| format!("WeGame 检测任务异常终止: {}", e))?;
+    Ok(exe.map(|exe| {
+        exe.parent()
+            .map(|d| d.to_string_lossy().replace("\\", "/"))
+            .unwrap_or_else(|| exe.to_string_lossy().to_string())
+    }))
+}
+
+/// 启动 WeGame 客户端。优先使用用户配置的路径（可能是目录或 exe 完整路径），
+/// 未配置或路径失效时自动探测 wegame.exe 位置，找不到返回可读错误。
+fn launch_wegame(configured_path: Option<&str>) -> Result<(), String> {
+    if let Some(p) = configured_path {
+        let trimmed = p.trim();
+        if !trimmed.is_empty() {
+            let path = Path::new(trimmed);
+            let exe = if path.is_file() {
+                path.to_path_buf()
+            } else {
+                path.join("wegame.exe")
+            };
+            if exe.exists() {
+                log::info!("启动 WeGame (配置路径): {:?}", exe);
+                return spawn_executable(&exe, &[]);
+            }
+            log::warn!("配置的 WeGame 路径无效 ({:?})，回退自动探测", exe);
+        }
+    }
+
+    let exe = find_wegame_exe().ok_or_else(|| {
+        "未找到 WeGame。请先安装 WeGame，或在设置中手动配置 WeGame 路径。".to_string()
+    })?;
+    log::info!("启动 WeGame (自动探测): {:?}", exe);
+    spawn_executable(&exe, &[])
+}
+
+/// 启动可执行文件并处理 UAC 提升（设置 cwd 防止 DLL 加载报错；740/5 走管理员提权）
+fn spawn_executable(exe: &Path, args: &[&str]) -> Result<(), String> {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args);
+    // 关键：设置启动工作目录为 exe 所在的父目录，防止 DLL 加载或配置读取报拒绝访问错误 (os error 5)
+    if let Some(parent) = exe.parent() {
+        cmd.current_dir(parent);
+    }
+    match cmd.spawn() {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let os_err = e.raw_os_error();
+            // 拦截 740 (需要提升) 与 5 (拒绝访问) 并尝试以 UAC 管理员提权运行
+            if os_err == Some(740) || os_err == Some(5) {
+                log::info!("启动客户端遇到权限限制 ({:?})，尝试提升权限启动...", os_err);
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    let working_dir = exe
+                        .parent()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default();
+
+                    let escape_ps_string = |s: &str| -> String { s.replace("'", "''") };
+
+                    let escaped_exe = escape_ps_string(&exe.to_string_lossy());
+                    let escaped_working_dir = escape_ps_string(&working_dir);
+
+                    // 格式化参数传给 PowerShell
+                    let args_str = args
+                        .iter()
+                        .map(|arg| format!("'{}'", escape_ps_string(arg)))
+                        .collect::<Vec<String>>()
+                        .join(", ");
+
+                    let command_str = if args_str.is_empty() {
+                        format!(
+                            "Start-Process -FilePath '{}' -WorkingDirectory '{}' -Verb RunAs",
+                            escaped_exe, escaped_working_dir
+                        )
+                    } else {
+                        format!(
+                            "Start-Process -FilePath '{}' -ArgumentList {} -WorkingDirectory '{}' -Verb RunAs",
+                            escaped_exe,
+                            args_str,
+                            escaped_working_dir
+                        )
+                    };
+
+                    let status = std::process::Command::new("powershell")
+                        .creation_flags(0x08000000) // 隐藏 powershell 窗口
+                        .args(["-Command", &command_str])
+                        .spawn();
+                    if status.is_ok() {
+                        return Ok(());
+                    }
+                }
+            }
+            Err(format!("启动失败: {}", e))
+        }
+    }
 }
 
 /// 打开原生文件夹选择对话框，返回用户选择的路径
@@ -246,72 +518,6 @@ pub async fn launch_lol_client(
         None
     };
 
-    // 启动可执行文件并处理 UAC 提升的辅助函数
-    let spawn_executable = |exe: &std::path::Path, args: &[&str]| -> Result<(), String> {
-        let mut cmd = std::process::Command::new(exe);
-        cmd.args(args);
-        // 关键：设置启动工作目录为 exe 所在的父目录，防止 DLL 加载或配置读取报拒绝访问错误 (os error 5)
-        if let Some(parent) = exe.parent() {
-            cmd.current_dir(parent);
-        }
-        match cmd.spawn() {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                let os_err = e.raw_os_error();
-                // 拦截 740 (需要提升) 与 5 (拒绝访问) 并尝试以 UAC 管理员提权运行
-                if os_err == Some(740) || os_err == Some(5) {
-                    log::info!(
-                        "启动 LOL 客户端遇到权限限制 ({:?})，尝试提升权限启动...",
-                        os_err
-                    );
-                    #[cfg(target_os = "windows")]
-                    {
-                        use std::os::windows::process::CommandExt;
-                        let working_dir = exe
-                            .parent()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_default();
-
-                        let escape_ps_string = |s: &str| -> String { s.replace("'", "''") };
-
-                        let escaped_exe = escape_ps_string(&exe.to_string_lossy());
-                        let escaped_working_dir = escape_ps_string(&working_dir);
-
-                        // 格式化参数传给 PowerShell
-                        let args_str = args
-                            .iter()
-                            .map(|arg| format!("'{}'", escape_ps_string(arg)))
-                            .collect::<Vec<String>>()
-                            .join(", ");
-
-                        let command_str = if args_str.is_empty() {
-                            format!(
-                                "Start-Process -FilePath '{}' -WorkingDirectory '{}' -Verb RunAs",
-                                escaped_exe, escaped_working_dir
-                            )
-                        } else {
-                            format!(
-                                "Start-Process -FilePath '{}' -ArgumentList {} -WorkingDirectory '{}' -Verb RunAs",
-                                escaped_exe,
-                                args_str,
-                                escaped_working_dir
-                            )
-                        };
-
-                        let status = std::process::Command::new("powershell")
-                            .creation_flags(0x08000000) // 隐藏 powershell 窗口
-                            .args(["-Command", &command_str])
-                            .spawn();
-                        if status.is_ok() {
-                            return Ok(());
-                        }
-                    }
-                }
-                Err(format!("启动失败: {}", e))
-            }
-        }
-    };
-
     // 智能转换：若是 Riot 纳管的外服，改由 RiotClientServices.exe 启动
     let check_and_launch = |exe: std::path::PathBuf| -> Result<(), String> {
         let mut riot_service = None;
@@ -350,6 +556,10 @@ pub async fn launch_lol_client(
 
     // 指定了路径则直接用
     if let Some(p) = path {
+        if p == WEGAME_MARKER {
+            let cfg = app_state.config.read().await;
+            return launch_wegame(cfg.general.wegame_path.as_deref());
+        }
         if let Some(exe) = find_executable(&p) {
             log::info!("启动 LOL 客户端: {:?}", exe);
             check_and_launch(exe)?;
@@ -364,6 +574,9 @@ pub async fn launch_lol_client(
     // 否则遍历配置路径
     let cfg = app_state.config.read().await;
     for p in &cfg.general.lol_path {
+        if p == WEGAME_MARKER {
+            return launch_wegame(cfg.general.wegame_path.as_deref());
+        }
         if let Some(exe) = find_executable(p) {
             log::info!("启动 LOL 客户端: {:?}", exe);
             check_and_launch(exe)?;

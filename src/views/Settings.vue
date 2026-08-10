@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { fetchConfig, updateConfig } from "../api/lcu";
+import { fetchConfig, updateConfig, WEGAME_MARKER } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
 import {
   updateThemeColor,
@@ -268,6 +268,38 @@ async function handleBrowseFolder() {
   }
 }
 
+// 添加 WeGame 启动项（自动检测安装位置，检测不到则提示）
+async function handleAddWeGame() {
+  try {
+    if (!config.value) return;
+    const paths = config.value.General.LolPath || [];
+    if (paths.includes(WEGAME_MARKER)) {
+      showToast("WeGame 启动项已存在");
+      return;
+    }
+    const path = await invoke<string | null>("detect_wegame_path");
+    if (path) {
+      paths.push(WEGAME_MARKER);
+      config.value.General.WegamePath = path;
+      config.value.General.LolPath = paths;
+      await updateConfig(config.value);
+      showToast("已添加 WeGame 启动项 (" + path + ")");
+    } else {
+      showToast("未检测到 WeGame 安装路径，请先安装 WeGame", "error");
+    }
+  } catch (e: any) {
+    showToast("检测失败: " + e.toString(), "error");
+  }
+}
+
+// 手动设置 WeGame 路径（条目内点击编辑后保存）
+async function handleEditWegamePath(val: string) {
+  if (!config.value) return;
+  const v = val.trim();
+  config.value.General.WegamePath = v || null;
+  await updateConfig(config.value);
+}
+
 // 选择自动截图保存目录
 async function handleSelectScreenshotFolder() {
   try {
@@ -299,7 +331,12 @@ async function handleOpenScreenshotFolder() {
 // 删除指定路径
 async function handleRemovePath(index: number) {
   if (!config.value) return;
+  const removed = config.value.General.LolPath[index];
   config.value.General.LolPath.splice(index, 1);
+  // 删除 WeGame 启动项时同步清空其路径，避免残留
+  if (removed === WEGAME_MARKER) {
+    config.value.General.WegamePath = null;
+  }
   await updateConfig(config.value);
 }
 
@@ -607,20 +644,41 @@ function applyThemeMode(mode: string) {
             :key="index"
             class="path-item"
           >
-            <n-input
-              class="path-input"
-              :value="path"
-              @change="(val) => handleEditPathDirect(index, val)"
-              :placeholder="t('settings.lolPathPlaceholder')"
-              style="flex: 1; margin-right: 8px"
-            />
-            <n-button
-              size="tiny"
-              circle
-              @click="handleRemovePath(index)"
-              :title="t('settings.pathRemove')"
-              >✕</n-button
-            >
+            <template v-if="path === WEGAME_MARKER">
+              <div class="wegame-item">
+                <span class="wegame-badge">WeGame</span>
+                <n-input
+                  class="path-input"
+                  :value="config?.General?.WegamePath ?? ''"
+                  @change="(val) => handleEditWegamePath(String(val))"
+                  :placeholder="t('settings.wegamePathPlaceholder')"
+                  style="flex: 1; min-width: 0"
+                />
+              </div>
+              <n-button
+                size="tiny"
+                circle
+                @click="handleRemovePath(index)"
+                :title="t('settings.pathRemove')"
+                >✕</n-button
+              >
+            </template>
+            <template v-else>
+              <n-input
+                class="path-input"
+                :value="path"
+                @change="(val) => handleEditPathDirect(index, val)"
+                :placeholder="t('settings.lolPathPlaceholder')"
+                style="flex: 1; margin-right: 8px"
+              />
+              <n-button
+                size="tiny"
+                circle
+                @click="handleRemovePath(index)"
+                :title="t('settings.pathRemove')"
+                >✕</n-button
+              >
+            </template>
           </div>
           <div v-if="!config?.General?.LolPath?.length" class="path-empty">
             {{ $t("settings.pathEmpty") }}
@@ -632,6 +690,9 @@ function applyThemeMode(mode: string) {
             }}</n-button>
             <n-button size="small" @click="handleBrowseFolder">{{
               $t("settings.browseBtn")
+            }}</n-button>
+            <n-button size="small" @click="handleAddWeGame">{{
+              $t("settings.wegameAddBtn")
             }}</n-button>
           </div>
         </n-collapse-item>
@@ -1668,11 +1729,33 @@ function applyThemeMode(mode: string) {
   text-align: center;
   padding: 12px 0;
 }
+/* WeGame 启动项条目 */
+.wegame-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.wegame-badge {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--primary-color) 80%, #ffffff),
+    var(--primary-color)
+  );
+}
 .path-actions {
   display: flex;
   gap: 8px;
   margin-top: 8px;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 /* 分段控制组件（扁平化按钮组） */
 .segmented-control {
