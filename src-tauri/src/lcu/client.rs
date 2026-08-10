@@ -216,23 +216,28 @@ pub async fn lcu_request(
     };
     let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
 
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
+    // 在锁内只提取连接参数（http_client 克隆是 Arc 浅拷贝，代价极低），
+    // 尽早释放读锁，避免重试循环期间阻塞 monitor 的重连写锁
+    let (port, token, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
-    let url = format!("https://127.0.0.1:{}{}", lcu.port, path);
+    let url = format!("https://127.0.0.1:{}{}", port, path);
 
     // Basic Auth: base64("riot:<token>")
-    let auth_value = build_auth_header(&lcu.token);
+    let auth_value = build_auth_header(&token);
 
     let mut last_err = String::new();
 
     for attempt in 1..=MAX_RETRIES {
         let mut req = match method.to_uppercase().as_str() {
-            "GET" => lcu.http_client.get(&url),
-            "POST" => lcu.http_client.post(&url),
-            "PUT" => lcu.http_client.put(&url),
-            "PATCH" => lcu.http_client.patch(&url),
-            "DELETE" => lcu.http_client.delete(&url),
+            "GET" => http_client.get(&url),
+            "POST" => http_client.post(&url),
+            "PUT" => http_client.put(&url),
+            "PATCH" => http_client.patch(&url),
+            "DELETE" => http_client.delete(&url),
             other => return Err(format!("不支持的 HTTP 方法: {}", other)),
         };
 
@@ -551,13 +556,13 @@ fn save_asset_and_build_url(path: &str, content_type: &str, bytes: &[u8]) -> Str
 
     let cache_path = path.to_string();
     let cache_data = data_url.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn_blocking(move || {
         write_asset_cache(&cache_path, &cache_data);
     });
 
     if let Some(tft_local_path) = get_tft_local_cache_path(path) {
         let bytes_vec = bytes.to_vec();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn_blocking(move || {
             if let Some(parent) = tft_local_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }

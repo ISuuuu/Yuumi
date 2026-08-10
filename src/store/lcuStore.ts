@@ -155,7 +155,6 @@ export const useLcuStore = defineStore("lcu", () => {
     wsConnected.value = v;
   }
   function setGamePhase(v: GamePhase) {
-    console.log("[lcuStore] setGamePhase:", v, "prev:", gamePhase.value);
     const prev = gamePhase.value;
     gamePhase.value = v;
     if (v === "ChampSelect" && prev !== "ChampSelect") {

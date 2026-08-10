@@ -787,7 +787,8 @@ fn spawn_tag_reminder(app_handle: AppHandle) {
             return;
         }
 
-        let tagged = crate::saved_players::query_tagged_for_reminder(app_state, &self_puuid);
+        let tagged =
+            crate::saved_players::query_tagged_for_reminder(app_state, self_puuid.clone()).await;
         if tagged.is_empty() {
             return;
         }

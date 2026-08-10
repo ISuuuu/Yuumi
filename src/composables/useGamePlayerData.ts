@@ -586,22 +586,33 @@ export function useGamePlayerData(
     },
   );
 
+  // 团队内容签名：成员 cellId + 英雄 ID。session 高频事件中仅倒计时变化时签名不变，跳过无效重载
+  let lastSessionTeamSig = "";
+  const teamSig = (team: any[]) =>
+    (team || []).map((p: any) => `${p.cellId}:${p.championId || p.championPickIntent || 0}`).join(",");
+
   watch(
     () => store.champSelectSession,
     (session: any) => {
       if (session && store.gamePhase === "ChampSelect") {
+        const myTeam = session.myTeam || [];
+        const theirTeam = session.theirTeam || [];
+        const sig = teamSig(myTeam) + "|" + teamSig(theirTeam);
+        if (sig === lastSessionTeamSig) return;
+        lastSessionTeamSig = sig;
+
         loading.value = false;
         error.value = "";
-        gameflowMyTeam.value = session.myTeam || [];
+        gameflowMyTeam.value = myTeam;
         loadAllPlayers();
         fetchPremadeColors();
 
         try {
-          if (session.myTeam && session.myTeam.length > 0) {
-            lazySetItem("yuumi_last_gameflow_my_team", session.myTeam);
+          if (myTeam.length > 0) {
+            lazySetItem("yuumi_last_gameflow_my_team", myTeam);
           }
-          if (session.theirTeam && session.theirTeam.length > 0) {
-            lazySetItem("yuumi_last_gameflow_their_team", session.theirTeam);
+          if (theirTeam.length > 0) {
+            lazySetItem("yuumi_last_gameflow_their_team", theirTeam);
           }
         } catch {
           /* ignore */

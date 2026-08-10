@@ -580,11 +580,9 @@ pub async fn set_game_settings_readonly(
 // ─── OP.GG MCP API - 云顶之弈热门阵容 ───
 
 /// 附加羁绊/英雄名称/图标映射到 MCP 阵容数据（每次都重新构建，避免缓存里残留错误 URL）
-async fn attach_tft_meta_maps(app_state: &AppState, parsed: &mut serde_json::Value) {
-    let lcu_guard = app_state.lcu_client.read().await;
-    let lcu = lcu_guard.as_ref();
-    let meta_maps = crate::parsers::tft::fetch_tft_meta_maps(lcu).await;
-    drop(lcu_guard);
+async fn attach_tft_meta_maps(parsed: &mut serde_json::Value) {
+    // 映射字典不依赖 LCU 客户端（走内存/磁盘/CDragon 缓存），无需持锁
+    let meta_maps = crate::parsers::tft::fetch_tft_meta_maps(None).await;
     if let Some(obj) = parsed.as_object_mut() {
         if let Some(trait_map) = meta_maps.get("trait_name_map") {
             obj.insert("trait_name_map".to_string(), trait_map.clone());
@@ -613,7 +611,7 @@ pub async fn fetch_tft_meta_decks(
 
     // 尝试内存缓存（阵容本体可复用，但图标映射每次重新附加）
     if let Some(mut parsed) = crate::lcu::opgg::get_cached(&cache_key) {
-        attach_tft_meta_maps(app_state.inner(), &mut parsed).await;
+        attach_tft_meta_maps(&mut parsed).await;
         return Ok(parsed);
     }
 
@@ -669,7 +667,7 @@ pub async fn fetch_tft_meta_decks(
         .map_err(|e| format!("解析 OP.GG MCP 数据失败: {}", e))?;
 
     // 附加 TFT 羁绊中文名称映射 + 英雄图标映射 + 英雄中文名称映射（LCU 优先，CDragon 兜底）
-    attach_tft_meta_maps(app_state.inner(), &mut parsed).await;
+    attach_tft_meta_maps(&mut parsed).await;
 
     // 写入内存缓存（缓存的是含映射的完整 payload；命中时仍会再刷新一次映射）
     crate::lcu::opgg::put_cached(cache_key, parsed.clone());

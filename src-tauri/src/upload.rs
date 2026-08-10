@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
 
@@ -487,11 +487,15 @@ fn build_batch_upload_url(base_url: &str) -> String {
 
 /// 创建用于外部 API 的 reqwest Client（正常 SSL 验证，30 秒超时）。
 /// 与 LCU Client（danger_accept_invalid_certs=true）分开，避免影响外部 HTTPS 请求。
-fn external_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+/// 复用同一个 Client（OnceLock），避免每次上传重复 TLS 握手与连接池重建。
+fn external_http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
 }
 
 /// 执行单场对局上传任务（支持自动离线降级与落盘存盘）

@@ -84,6 +84,22 @@ fn conn(state: &AppState) -> MutexGuard<'_, Connection> {
     state.saved_db.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// 在阻塞线程池执行数据库闭包，避免 SQLite 同步 I/O 占用 tokio 工作线程。
+/// （async 命令的统一入口：克隆 Arc 进闭包，锁在阻塞线程内获取释放）
+async fn with_db<T, F>(state: &AppState, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut Connection) -> Result<T, String> + Send + 'static,
+{
+    let db = state.saved_db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut conn = db.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut conn)
+    })
+    .await
+    .map_err(|e| format!("数据库任务异常终止: {}", e))?
+}
+
 fn now() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
@@ -242,26 +258,35 @@ pub fn record_encounter(
 }
 
 /// 查询带 tag 的玩家（选人阶段聊天提醒使用），返回 (puuid, tag)
-pub fn query_tagged_for_reminder(state: &AppState, self_puuid: &str) -> Vec<(String, String)> {
-    let conn = conn(state);
-    let mut stmt = match conn.prepare(
-        "SELECT puuid, tag FROM saved_players WHERE self_puuid = ?1 AND tag IS NOT NULL AND tag != ''",
-    ) {
-        Ok(s) => s,
-        Err(e) => {
-            log::error!("查询标记玩家失败: {}", e);
-            return Vec::new();
-        }
-    };
-    let rows = stmt.query_map(params![self_puuid], |r| Ok((r.get(0)?, r.get(1)?)));
-    let out = match rows {
-        Ok(iter) => iter.collect::<Result<Vec<_>, _>>().unwrap_or_default(),
-        Err(e) => {
-            log::error!("查询标记玩家失败: {}", e);
-            Vec::new()
-        }
-    };
-    out
+pub async fn query_tagged_for_reminder(
+    state: &AppState,
+    self_puuid: String,
+) -> Vec<(String, String)> {
+    with_db(state, move |conn| {
+        let mut stmt = match conn.prepare(
+            "SELECT puuid, tag FROM saved_players WHERE self_puuid = ?1 AND tag IS NOT NULL AND tag != ''",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("查询标记玩家失败: {}", e);
+                return Ok(Vec::new());
+            }
+        };
+        let rows = stmt.query_map(params![self_puuid], |r| Ok((r.get(0)?, r.get(1)?)));
+        let out = match rows {
+            Ok(iter) => iter.collect::<Result<Vec<_>, _>>().unwrap_or_default(),
+            Err(e) => {
+                log::error!("查询标记玩家失败: {}", e);
+                Vec::new()
+            }
+        };
+        Ok(out)
+    })
+    .await
+    .unwrap_or_else(|e| {
+        log::error!("查询标记玩家失败: {}", e);
+        Vec::new()
+    })
 }
 
 // ─── Tauri 命令 ───
@@ -286,42 +311,44 @@ pub struct SaveSavedPlayerInput {
 
 /// 保存/更新玩家记录（upsert）。tag 为 None 时保留已有 tag，Some 时覆盖。
 #[tauri::command]
-pub fn save_saved_player(
+pub async fn save_saved_player(
     app_state: tauri::State<'_, AppState>,
     dto: SaveSavedPlayerInput,
 ) -> Result<(), String> {
-    let conn = conn(&app_state);
-    let ts = now();
-    let last_met = if dto.encountered { Some(ts) } else { None };
-    conn.execute(
-        "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 0, ?8, ?9)
-         ON CONFLICT(puuid, self_puuid, region, rso_platform_id) DO UPDATE SET
-           tag = CASE WHEN excluded.tag IS NULL THEN saved_players.tag ELSE excluded.tag END,
-           summoner_name = CASE WHEN excluded.summoner_name = '' THEN saved_players.summoner_name ELSE excluded.summoner_name END,
-           profile_icon_id = CASE WHEN excluded.profile_icon_id = 0 THEN saved_players.profile_icon_id ELSE excluded.profile_icon_id END,
-           update_at = excluded.update_at,
-           last_met_at = COALESCE(excluded.last_met_at, saved_players.last_met_at)",
-        params![
-            dto.puuid,
-            dto.self_puuid,
-            dto.region,
-            dto.rso_platform_id,
-            dto.tag,
-            dto.summoner_name,
-            dto.profile_icon_id,
-            ts,
-            last_met,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    with_db(app_state.inner(), move |conn| {
+        let ts = now();
+        let last_met = if dto.encountered { Some(ts) } else { None };
+        conn.execute(
+            "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 0, ?8, ?9)
+             ON CONFLICT(puuid, self_puuid, region, rso_platform_id) DO UPDATE SET
+               tag = CASE WHEN excluded.tag IS NULL THEN saved_players.tag ELSE excluded.tag END,
+               summoner_name = CASE WHEN excluded.summoner_name = '' THEN saved_players.summoner_name ELSE excluded.summoner_name END,
+               profile_icon_id = CASE WHEN excluded.profile_icon_id = 0 THEN saved_players.profile_icon_id ELSE excluded.profile_icon_id END,
+               update_at = excluded.update_at,
+               last_met_at = COALESCE(excluded.last_met_at, saved_players.last_met_at)",
+            params![
+                dto.puuid,
+                dto.self_puuid,
+                dto.region,
+                dto.rso_platform_id,
+                dto.tag,
+                dto.summoner_name,
+                dto.profile_icon_id,
+                ts,
+                last_met,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
 }
 
 /// 分页查询全部保存玩家（按最近相遇/更新时间倒序）
 /// filter: "tagged" 只看已标记玩家，"multiple" 只看多次相遇玩家，其他为全部
 #[tauri::command]
-pub fn query_all_saved_players(
+pub async fn query_all_saved_players(
     app_state: tauri::State<'_, AppState>,
     self_puuid: String,
     page: Option<i64>,
@@ -334,34 +361,37 @@ pub fn query_all_saved_players(
         Some("tagged") => " AND tag IS NOT NULL AND tag != ''",
         Some("multiple") => " AND (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) >= 2",
         _ => "",
-    };
-    let conn = conn(&app_state);
-    let count: i64 = conn
-        .query_row(
-            &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{where_clause}"),
-            params![self_puuid],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {}, \
-             (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
-             (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
-             FROM saved_players WHERE self_puuid = ?1{where_clause} \
-             ORDER BY last_met_at DESC, update_at DESC LIMIT ?2 OFFSET ?3",
-            SAVED_PLAYER_COLS
-        ))
-        .map_err(|e| e.to_string())?;
-    let data = stmt
-        .query_map(
-            params![self_puuid, page_size, (page - 1) * page_size],
-            row_to_saved_player,
-        )
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(PageResult { data, count })
+    }
+    .to_string();
+    with_db(app_state.inner(), move |conn| {
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{where_clause}"),
+                params![self_puuid],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {}, \
+                 (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
+                 (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
+                 FROM saved_players WHERE self_puuid = ?1{where_clause} \
+                 ORDER BY last_met_at DESC, update_at DESC LIMIT ?2 OFFSET ?3",
+                SAVED_PLAYER_COLS
+            ))
+            .map_err(|e| e.to_string())?;
+        let data = stmt
+            .query_map(
+                params![self_puuid, page_size, (page - 1) * page_size],
+                row_to_saved_player,
+            )
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(PageResult { data, count })
+    })
+    .await
 }
 
 /// 保存玩家的精简标记（对局信息页徽章用）
@@ -374,45 +404,47 @@ pub struct SavedPlayerMarker {
 
 /// 获取全部保存玩家的精简映射：puuid → 标记信息（tag + 相遇次数）
 #[tauri::command]
-pub fn get_saved_players_map(
+pub async fn get_saved_players_map(
     app_state: tauri::State<'_, AppState>,
     self_puuid: String,
 ) -> Result<HashMap<String, SavedPlayerMarker>, String> {
-    let conn = conn(&app_state);
     if self_puuid.is_empty() {
         return Ok(HashMap::new());
     }
-    let mut stmt = conn
-        .prepare(
-            "SELECT sp.puuid,
-                    sp.tag,
-                    (SELECT COUNT(*) FROM encountered_games eg
-                     WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid)
-             FROM saved_players sp WHERE sp.self_puuid = ?1",
-        )
-        .map_err(|e| e.to_string())?;
-    let mut map = HashMap::new();
-    let rows = stmt
-        .query_map(params![self_puuid], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                SavedPlayerMarker {
-                    tag: r.get(1)?,
-                    encounter_count: r.get::<_, i32>(2).unwrap_or(1),
-                },
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-    for row in rows {
-        let (puuid, marker) = row.map_err(|e| e.to_string())?;
-        map.insert(puuid, marker);
-    }
-    Ok(map)
+    with_db(app_state.inner(), move |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT sp.puuid,
+                        sp.tag,
+                        (SELECT COUNT(*) FROM encountered_games eg
+                         WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid)
+                 FROM saved_players sp WHERE sp.self_puuid = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut map = HashMap::new();
+        let rows = stmt
+            .query_map(params![self_puuid], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    SavedPlayerMarker {
+                        tag: r.get(1)?,
+                        encounter_count: r.get::<_, i32>(2).unwrap_or(1),
+                    },
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (puuid, marker) = row.map_err(|e| e.to_string())?;
+            map.insert(puuid, marker);
+        }
+        Ok(map)
+    })
+    .await
 }
 
 /// 分页查询与某玩家的相遇对局记录（按时间倒序）
 #[tauri::command]
-pub fn query_encountered_games(
+pub async fn query_encountered_games(
     app_state: tauri::State<'_, AppState>,
     self_puuid: String,
     puuid: String,
@@ -422,77 +454,80 @@ pub fn query_encountered_games(
 ) -> Result<PageResult<EncounteredGameDto>, String> {
     let page = page.unwrap_or(1).max(1);
     let page_size = page_size.unwrap_or(20).clamp(1, 100);
-    let conn = conn(&app_state);
+    let q = queue_type.unwrap_or_default();
 
-    let q = queue_type.clone().unwrap_or_default();
-
-    let count: i64 = if q.is_empty() {
-        conn.query_row(
-            "SELECT COUNT(*) FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2",
-            params![self_puuid, puuid],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?
-    } else {
-        conn.query_row(
-            "SELECT COUNT(*) FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 AND queue_type = ?3",
-            params![self_puuid, puuid, q],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?
-    };
-
-    let data = if q.is_empty() {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 ORDER BY update_at DESC LIMIT ?3 OFFSET ?4",
+    with_db(app_state.inner(), move |conn| {
+        let count: i64 = if q.is_empty() {
+            conn.query_row(
+                "SELECT COUNT(*) FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2",
+                params![self_puuid, puuid],
+                |r| r.get(0),
             )
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(
-                params![self_puuid, puuid, page_size, (page - 1) * page_size],
-                row_to_encountered,
-            )
-            .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?
-    } else {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 AND queue_type = ?3 ORDER BY update_at DESC LIMIT ?4 OFFSET ?5",
+        } else {
+            conn.query_row(
+                "SELECT COUNT(*) FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 AND queue_type = ?3",
+                params![self_puuid, puuid, q],
+                |r| r.get(0),
             )
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(
-                params![self_puuid, puuid, q, page_size, (page - 1) * page_size],
-                row_to_encountered,
-            )
-            .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?
-    };
-    Ok(PageResult { data, count })
+        };
+
+        let data = if q.is_empty() {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 ORDER BY update_at DESC LIMIT ?3 OFFSET ?4",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(
+                    params![self_puuid, puuid, page_size, (page - 1) * page_size],
+                    row_to_encountered,
+                )
+                .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+        } else {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 AND queue_type = ?3 ORDER BY update_at DESC LIMIT ?4 OFFSET ?5",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(
+                    params![self_puuid, puuid, q, page_size, (page - 1) * page_size],
+                    row_to_encountered,
+                )
+                .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+        };
+        Ok(PageResult { data, count })
+    })
+    .await
 }
 
 /// 删除保存玩家及其相遇记录
 #[tauri::command]
-pub fn delete_saved_player(
+pub async fn delete_saved_player(
     app_state: tauri::State<'_, AppState>,
     puuid: String,
     self_puuid: String,
 ) -> Result<(), String> {
-    let conn = conn(&app_state);
-    conn.execute(
-        "DELETE FROM saved_players WHERE puuid = ?1 AND self_puuid = ?2",
-        params![puuid, self_puuid],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "DELETE FROM encountered_games WHERE puuid = ?1 AND self_puuid = ?2",
-        params![puuid, self_puuid],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    with_db(app_state.inner(), move |conn| {
+        conn.execute(
+            "DELETE FROM saved_players WHERE puuid = ?1 AND self_puuid = ?2",
+            params![puuid, self_puuid],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM encountered_games WHERE puuid = ?1 AND self_puuid = ?2",
+            params![puuid, self_puuid],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
 }
 
 // ─── 导出 / 导入 tag JSON ───
@@ -505,8 +540,7 @@ pub async fn backfill_saved_player_identity(
 ) -> Result<u32, String> {
     let app_state = app_state.inner();
 
-    let targets: Vec<(String, String)> = {
-        let conn = conn(app_state);
+    let targets: Vec<(String, String)> = with_db(app_state, |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT puuid, self_puuid FROM saved_players WHERE tag_line IS NULL OR tag_line = '' OR summoner_name IS NULL OR summoner_name = '' OR profile_icon_id = 0",
@@ -516,8 +550,9 @@ pub async fn backfill_saved_player_identity(
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
-    };
+            .map_err(|e| e.to_string())
+    })
+    .await?;
 
     if targets.is_empty() {
         return Ok(0);
@@ -577,35 +612,43 @@ pub async fn backfill_saved_player_identity(
     // 2. 批量写入 SQLite (在一个事务中进行)
     let mut updated = 0u32;
     if !fetched_results.is_empty() {
-        let mut conn = conn(app_state);
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let db = app_state.saved_db.clone();
+        updated = tauri::async_runtime::spawn_blocking(move || {
+            let mut conn = db.lock().unwrap_or_else(|e| e.into_inner());
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-        {
-            let mut stmt = tx
-                .prepare(
-                    "UPDATE saved_players
-                     SET tag_line = CASE WHEN tag_line IS NULL OR tag_line = '' THEN ?1 ELSE tag_line END,
-                         summoner_name = CASE WHEN summoner_name IS NULL OR summoner_name = '' THEN ?2 ELSE summoner_name END,
-                         profile_icon_id = CASE WHEN profile_icon_id = 0 THEN ?3 ELSE profile_icon_id END
-                     WHERE puuid = ?4 AND self_puuid = ?5",
-                )
-                .map_err(|e| e.to_string())?;
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "UPDATE saved_players
+                         SET tag_line = CASE WHEN tag_line IS NULL OR tag_line = '' THEN ?1 ELSE tag_line END,
+                             summoner_name = CASE WHEN summoner_name IS NULL OR summoner_name = '' THEN ?2 ELSE summoner_name END,
+                             profile_icon_id = CASE WHEN profile_icon_id = 0 THEN ?3 ELSE profile_icon_id END
+                         WHERE puuid = ?4 AND self_puuid = ?5",
+                    )
+                    .map_err(|e| e.to_string())?;
 
-            for (puuid, self_puuid, tag_line, summoner_name, profile_icon_id) in fetched_results {
-                match stmt.execute(params![
-                    tag_line,
-                    summoner_name,
-                    profile_icon_id,
-                    puuid,
-                    self_puuid
-                ]) {
-                    Ok(_) => updated += 1,
-                    Err(e) => log::warn!("回填召唤师信息失败: {}", e),
+                for (puuid, self_puuid, tag_line, summoner_name, profile_icon_id) in
+                    fetched_results
+                {
+                    match stmt.execute(params![
+                        tag_line,
+                        summoner_name,
+                        profile_icon_id,
+                        puuid,
+                        self_puuid
+                    ]) {
+                        Ok(_) => updated += 1,
+                        Err(e) => log::warn!("回填召唤师信息失败: {}", e),
+                    }
                 }
             }
-        }
 
-        tx.commit().map_err(|e| e.to_string())?;
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok::<u32, String>(updated)
+        })
+        .await
+        .map_err(|e| format!("数据库任务异常终止: {}", e))??;
     }
 
     if updated > 0 {
@@ -616,83 +659,88 @@ pub async fn backfill_saved_player_identity(
 
 /// 导出所有带 tag 的玩家到用户选择的 JSON 文件。返回保存路径（取消则 None）。
 #[tauri::command]
-pub fn export_tagged_players_to_json_file(
+pub async fn export_tagged_players_to_json_file(
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    let conn = conn(&app_state);
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {} FROM saved_players WHERE tag IS NOT NULL AND tag != ''",
-            SAVED_PLAYER_COLS
-        ))
-        .map_err(|e| e.to_string())?;
-    let data = stmt
-        .query_map([], row_to_saved_player)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+    with_db(app_state.inner(), |conn| {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {} FROM saved_players WHERE tag IS NOT NULL AND tag != ''",
+                SAVED_PLAYER_COLS
+            ))
+            .map_err(|e| e.to_string())?;
+        let data = stmt
+            .query_map([], row_to_saved_player)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
 
-    let file = rfd::FileDialog::new()
-        .set_title("导出标记玩家")
-        .add_filter("JSON", &["json"])
-        .set_file_name("tagged_players.json")
-        .save_file();
-    let Some(path) = file else {
-        return Ok(None);
-    };
-    let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
-    Ok(Some(path.to_string_lossy().to_string()))
+        let file = rfd::FileDialog::new()
+            .set_title("导出标记玩家")
+            .add_filter("JSON", &["json"])
+            .set_file_name("tagged_players.json")
+            .save_file();
+        let Some(path) = file else {
+            return Ok(None);
+        };
+        let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+        std::fs::write(&path, json).map_err(|e| e.to_string())?;
+        Ok(Some(path.to_string_lossy().to_string()))
+    })
+    .await
 }
 
 /// 从用户选择的 JSON 文件导入标记玩家。返回导入数量（取消则 0）。
 #[tauri::command]
-pub fn import_tagged_players_from_json_file(
+pub async fn import_tagged_players_from_json_file(
     app_state: tauri::State<'_, AppState>,
 ) -> Result<u32, String> {
-    let file = rfd::FileDialog::new()
-        .set_title("导入标记玩家")
-        .add_filter("JSON", &["json"])
-        .pick_file();
-    let Some(path) = file else {
-        return Ok(0);
-    };
-    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let records: Vec<SavedPlayerDto> = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    with_db(app_state.inner(), |conn| {
+        let file = rfd::FileDialog::new()
+            .set_title("导入标记玩家")
+            .add_filter("JSON", &["json"])
+            .pick_file();
+        let Some(path) = file else {
+            return Ok(0);
+        };
+        let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let records: Vec<SavedPlayerDto> =
+            serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
-    let conn = conn(&app_state);
-    let mut count = 0u32;
-    for r in records {
-        let result = conn.execute(
-            "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-             ON CONFLICT(puuid, self_puuid, region, rso_platform_id) DO UPDATE SET
-               tag = excluded.tag,
-               summoner_name = excluded.summoner_name,
-               profile_icon_id = excluded.profile_icon_id,
-               tag_line = excluded.tag_line,
-               champion_id = excluded.champion_id,
-               update_at = excluded.update_at,
-               last_met_at = excluded.last_met_at",
-            params![
-                r.puuid,
-                r.self_puuid,
-                r.region,
-                r.rso_platform_id,
-                r.tag,
-                r.summoner_name,
-                r.profile_icon_id,
-                r.tag_line,
-                r.champion_id,
-                r.update_at,
-                r.last_met_at,
-            ],
-        );
-        if let Err(e) = result {
-            log::warn!("导入玩家失败: {}", e);
-            continue;
+        let mut count = 0u32;
+        for r in records {
+            let result = conn.execute(
+                "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 ON CONFLICT(puuid, self_puuid, region, rso_platform_id) DO UPDATE SET
+                   tag = excluded.tag,
+                   summoner_name = excluded.summoner_name,
+                   profile_icon_id = excluded.profile_icon_id,
+                   tag_line = excluded.tag_line,
+                   champion_id = excluded.champion_id,
+                   update_at = excluded.update_at,
+                   last_met_at = excluded.last_met_at",
+                params![
+                    r.puuid,
+                    r.self_puuid,
+                    r.region,
+                    r.rso_platform_id,
+                    r.tag,
+                    r.summoner_name,
+                    r.profile_icon_id,
+                    r.tag_line,
+                    r.champion_id,
+                    r.update_at,
+                    r.last_met_at,
+                ],
+            );
+            if let Err(e) = result {
+                log::warn!("导入玩家失败: {}", e);
+                continue;
+            }
+            count += 1;
         }
-        count += 1;
-    }
-    Ok(count)
+        Ok(count)
+    })
+    .await
 }

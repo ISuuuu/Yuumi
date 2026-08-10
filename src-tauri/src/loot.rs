@@ -100,15 +100,20 @@ fn loot_priority(loot_id: &str) -> i32 {
 pub async fn get_openable_loots(
     app_state: State<'_, AppState>,
 ) -> Result<Vec<OpenableLoot>, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
-    let auth = build_auth_header(&lcu.token);
-    let base = format!("https://127.0.0.1:{}", lcu.port);
+    // 锁内只提取连接参数，尽早释放读锁，避免 HTTP 请求期间阻塞 monitor 重连
+    let (auth, base, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (
+            build_auth_header(&lcu.token),
+            format!("https://127.0.0.1:{}", lcu.port),
+            lcu.http_client.clone(),
+        )
+    };
 
     // 1. 获取 player-loot
     let url = format!("{}/lol-loot/v1/player-loot", base);
-    let loot_resp = lcu
-        .http_client
+    let loot_resp = http_client
         .get(&url)
         .header("Authorization", &auth)
         .send()
@@ -127,9 +132,8 @@ pub async fn get_openable_loots(
         }
     }
 
-    let mut result = Vec::new();
-
-    // 2. 筛选可开启的战利品（箱子、法球等）并拉取配方
+    // 2. 筛选可开启的战利品（箱子、法球等）
+    let mut candidates: Vec<(String, String, i32, Option<String>)> = Vec::new();
     for item in loots.iter() {
         let loot_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
         let loot_id = item.get("lootId").and_then(|v| v.as_str()).unwrap_or("");
@@ -165,127 +169,167 @@ pub async fn get_openable_loots(
             continue;
         }
 
-        // 获取此 item 的配方
-        let recipe_url = format!("{}/lol-loot/v1/recipes/initial-item/{}", base, loot_id);
-        if let Ok(recipe_resp) = lcu
-            .http_client
-            .get(&recipe_url)
-            .header("Authorization", &auth)
-            .send()
+        candidates.push((loot_id.to_string(), name, count, tile_path));
+    }
+
+    // 3. 并发拉取各箱子配方（避免 N 个箱子串行请求，战利品多时显著降低耗时）
+    let loots_arc = std::sync::Arc::new(loots);
+    let loot_counts_arc = std::sync::Arc::new(loot_counts);
+
+    let mut tasks = Vec::new();
+    for (loot_id, name, count, tile_path) in candidates {
+        let http = http_client.clone();
+        let base = base.clone();
+        let auth = auth.clone();
+        let loots = loots_arc.clone();
+        let loot_counts = loot_counts_arc.clone();
+        tasks.push(tokio::spawn(async move {
+            fetch_openable_recipe(
+                &http,
+                &base,
+                &auth,
+                &loot_id,
+                &name,
+                count,
+                &tile_path,
+                &loot_counts,
+                &loots,
+            )
             .await
-        {
-            if let Ok(recipes) = recipe_resp.json::<Vec<serde_json::Value>>().await {
-                for r in recipes {
-                    let recipe_name = r.get("recipeName").and_then(|v| v.as_str()).unwrap_or("");
-                    let slots = r.get("slots").and_then(|v| v.as_array());
+        }));
+    }
 
-                    if !recipe_name.is_empty() {
-                        let slots = match slots {
-                            Some(s) => s,
-                            None => continue,
-                        };
-                        let mut need_key = false;
-                        let mut key_loot_id: Option<String> = None;
-                        let mut key_count = 0;
-                        let mut key_name = None;
-
-                        if slots.len() > 1 {
-                            need_key = true;
-
-                            // 查找钥匙槽位 (同时支持新版 lootIds 列表和旧版 slotRules 规则匹配)
-                            if let Some(key_slot) = slots.iter().find(|s| {
-                                // 方式 A: 检查 slots 里的 lootIds 数组是否包含 key
-                                if let Some(loot_ids) = s.get("lootIds").and_then(|v| v.as_array())
-                                {
-                                    if loot_ids.iter().any(|id| {
-                                        id.as_str()
-                                            .map(|s| {
-                                                s.contains("key")
-                                                    || s.contains("KEY")
-                                                    || s.contains("Key")
-                                            })
-                                            .unwrap_or(false)
-                                    }) {
-                                        return true;
-                                    }
-                                }
-                                // 方式 B: 检查旧版的 slotRules
-                                s.get("slotRules")
-                                    .and_then(|sr| sr.get("queryValue").and_then(|qv| qv.as_str()))
-                                    .map(|q| {
-                                        q.contains("key") || q.contains("KEY") || q.contains("Key")
-                                    })
-                                    .unwrap_or(false)
-                            }) {
-                                // 提取钥匙 ID
-                                let mut kid = None;
-
-                                // 优先从 lootIds 数组里提取第一个包含 key 的 ID
-                                if let Some(loot_ids) =
-                                    key_slot.get("lootIds").and_then(|v| v.as_array())
-                                {
-                                    kid = loot_ids.iter().find_map(|id| {
-                                        id.as_str()
-                                            .filter(|s| {
-                                                s.contains("key")
-                                                    || s.contains("KEY")
-                                                    || s.contains("Key")
-                                            })
-                                            .map(|s| s.to_string())
-                                    });
-                                }
-
-                                // 如果没有，再从 slotRules 提取
-                                if kid.is_none() {
-                                    kid = key_slot
-                                        .get("slotRules")
-                                        .and_then(|sr| sr.get("queryValue"))
-                                        .and_then(|qv| qv.as_str())
-                                        .map(|s| s.to_string());
-                                }
-
-                                if let Some(ref id) = kid {
-                                    key_count = *loot_counts.get(id).unwrap_or(&0);
-
-                                    // 查找钥匙对应的名字描述
-                                    if let Some(key_item) = loots.iter().find(|item| {
-                                        item.get("lootId").and_then(|v| v.as_str()) == Some(id)
-                                    }) {
-                                        key_name = key_item
-                                            .get("itemDesc")
-                                            .and_then(|v| v.as_str())
-                                            .map(|s| s.to_string());
-                                    } else {
-                                        key_name = Some(if id.contains("premium") {
-                                            "杰作钥匙".to_string()
-                                        } else {
-                                            "海克斯科技钥匙".to_string()
-                                        });
-                                    }
-                                }
-                                key_loot_id = kid;
-                            }
-                        }
-
-                        result.push(OpenableLoot {
-                            loot_id: loot_id.to_string(),
-                            name: name.to_string(),
-                            count,
-                            recipe_name: recipe_name.to_string(),
-                            need_key,
-                            key_loot_id,
-                            key_count,
-                            key_name,
-                            tile_path: tile_path.clone(),
-                        });
-                        break; // 取第一个开启配方即可
-                    }
-                }
-            }
+    let mut result = Vec::new();
+    for handle in tasks {
+        if let Ok(Some(openable)) = handle.await {
+            result.push(openable);
         }
     }
 
     Ok(result)
+}
+
+/// 查询单个战利品的开启配方并解析为 OpenableLoot（供 get_openable_loots 并发调用）
+#[allow(clippy::too_many_arguments)]
+async fn fetch_openable_recipe(
+    http_client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    loot_id: &str,
+    name: &str,
+    count: i32,
+    tile_path: &Option<String>,
+    loot_counts: &std::collections::HashMap<String, i32>,
+    loots: &[serde_json::Value],
+) -> Option<OpenableLoot> {
+    // 获取此 item 的配方
+    let recipe_url = format!("{}/lol-loot/v1/recipes/initial-item/{}", base, loot_id);
+    let recipe_resp = http_client
+        .get(&recipe_url)
+        .header("Authorization", auth)
+        .send()
+        .await
+        .ok()?;
+    let recipes: Vec<serde_json::Value> = recipe_resp.json().await.ok()?;
+    for r in recipes {
+        let recipe_name = r.get("recipeName").and_then(|v| v.as_str()).unwrap_or("");
+        let slots = r.get("slots").and_then(|v| v.as_array());
+
+        if !recipe_name.is_empty() {
+            let slots = match slots {
+                Some(s) => s,
+                None => continue,
+            };
+            let mut need_key = false;
+            let mut key_loot_id: Option<String> = None;
+            let mut key_count = 0;
+            let mut key_name = None;
+
+            if slots.len() > 1 {
+                need_key = true;
+
+                // 查找钥匙槽位 (同时支持新版 lootIds 列表和旧版 slotRules 规则匹配)
+                if let Some(key_slot) = slots.iter().find(|s| {
+                    // 方式 A: 检查 slots 里的 lootIds 数组是否包含 key
+                    if let Some(loot_ids) = s.get("lootIds").and_then(|v| v.as_array()) {
+                        if loot_ids.iter().any(|id| {
+                            id.as_str()
+                                .map(|s| {
+                                    s.contains("key") || s.contains("KEY") || s.contains("Key")
+                                })
+                                .unwrap_or(false)
+                        }) {
+                            return true;
+                        }
+                    }
+                    // 方式 B: 检查旧版的 slotRules
+                    s.get("slotRules")
+                        .and_then(|sr| sr.get("queryValue").and_then(|qv| qv.as_str()))
+                        .map(|q| q.contains("key") || q.contains("KEY") || q.contains("Key"))
+                        .unwrap_or(false)
+                }) {
+                    // 提取钥匙 ID
+                    let mut kid = None;
+
+                    // 优先从 lootIds 数组里提取第一个包含 key 的 ID
+                    if let Some(loot_ids) = key_slot.get("lootIds").and_then(|v| v.as_array()) {
+                        kid = loot_ids.iter().find_map(|id| {
+                            id.as_str()
+                                .filter(|s| {
+                                    s.contains("key") || s.contains("KEY") || s.contains("Key")
+                                })
+                                .map(|s| s.to_string())
+                        });
+                    }
+
+                    // 如果没有，再从 slotRules 提取
+                    if kid.is_none() {
+                        kid = key_slot
+                            .get("slotRules")
+                            .and_then(|sr| sr.get("queryValue"))
+                            .and_then(|qv| qv.as_str())
+                            .map(|s| s.to_string());
+                    }
+
+                    if let Some(ref id) = kid {
+                        key_count = *loot_counts.get(id).unwrap_or(&0);
+
+                        // 查找钥匙对应的名字描述
+                        if let Some(key_item) = loots
+                            .iter()
+                            .find(|item| item.get("lootId").and_then(|v| v.as_str()) == Some(id))
+                        {
+                            key_name = key_item
+                                .get("itemDesc")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                        } else {
+                            key_name = Some(if id.contains("premium") {
+                                "杰作钥匙".to_string()
+                            } else {
+                                "海克斯科技钥匙".to_string()
+                            });
+                        }
+                    }
+                    key_loot_id = kid;
+                }
+            }
+
+            return Some(OpenableLoot {
+                loot_id: loot_id.to_string(),
+                name: name.to_string(),
+                count,
+                recipe_name: recipe_name.to_string(),
+                need_key,
+                key_loot_id,
+                key_count,
+                key_name,
+                tile_path: tile_path.clone(),
+            });
+        }
+    }
+
+    None
 }
 
 /// 2. 异步后台批量开启命令
@@ -768,14 +812,19 @@ async fn find_recipe_upgrade_info(
 /// 4. 获取玩家所有碎片类战利品（排除材料/货币/箱子）
 #[tauri::command]
 pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<LootItem>, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
-    let auth = build_auth_header(&lcu.token);
-    let base = format!("https://127.0.0.1:{}", lcu.port);
+    // 锁内只提取连接参数，尽早释放读锁，避免 HTTP 请求期间阻塞 monitor 重连
+    let (auth, base, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (
+            build_auth_header(&lcu.token),
+            format!("https://127.0.0.1:{}", lcu.port),
+            lcu.http_client.clone(),
+        )
+    };
 
     let url = format!("{}/lol-loot/v1/player-loot", base);
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", &auth)
         .send()
@@ -790,8 +839,7 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
     let mut owned_ward_skin_ids = std::collections::HashSet::new();
 
     let summoner_url = format!("{}/lol-summoner/v1/current-summoner", base);
-    if let Ok(summoner_resp) = lcu
-        .http_client
+    if let Ok(summoner_resp) = http_client
         .get(&summoner_url)
         .header("Authorization", &auth)
         .send()
@@ -801,147 +849,17 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
             if let Ok(summoner_json) = summoner_resp.json::<serde_json::Value>().await {
                 if let Some(summoner_id) = summoner_json.get("summonerId").and_then(|v| v.as_i64())
                 {
-                    // 1. 获取已拥有皮肤列表
-                    let skins_url = format!(
-                        "{}/lol-champions/v1/inventories/by-summoner/{}/skins",
-                        base, summoner_id
+                    // 1-4. 并发拉取已拥有皮肤/头像/表情/守卫皮肤（原串行 4 个大请求，并发显著降低耗时）
+                    let (skins, icons, emotes, wards) = tokio::join!(
+                        fetch_owned_skins(&http_client, &base, &auth, summoner_id),
+                        fetch_owned_icons(&http_client, &base, &auth, summoner_id),
+                        fetch_owned_emotes(&http_client, &base, &auth),
+                        fetch_owned_ward_skins(&http_client, &base, &auth, summoner_id),
                     );
-                    if let Ok(skins_resp) = lcu
-                        .http_client
-                        .get(&skins_url)
-                        .header("Authorization", &auth)
-                        .send()
-                        .await
-                    {
-                        if skins_resp.status().is_success() {
-                            if let Ok(skins_json) =
-                                skins_resp.json::<Vec<serde_json::Value>>().await
-                            {
-                                for s in skins_json {
-                                    if let (Some(skin_id), Some(ownership)) =
-                                        (s.get("id").and_then(|v| v.as_i64()), s.get("ownership"))
-                                    {
-                                        if ownership
-                                            .get("owned")
-                                            .and_then(|v| v.as_bool())
-                                            .unwrap_or(false)
-                                        {
-                                            owned_skin_ids.insert(skin_id as i32);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 2. 获取已拥有头像图标列表
-                    let icons_url = format!(
-                        "{}/lol-collections/v1/inventories/{}/summoner-icons",
-                        base, summoner_id
-                    );
-                    if let Ok(icons_resp) = lcu
-                        .http_client
-                        .get(&icons_url)
-                        .header("Authorization", &auth)
-                        .send()
-                        .await
-                    {
-                        if icons_resp.status().is_success() {
-                            if let Ok(icons_json) = icons_resp.json::<serde_json::Value>().await {
-                                if let Some(arr) = icons_json.as_array() {
-                                    for item in arr {
-                                        if let Some(id) = item.get("id").and_then(|v| v.as_i64()) {
-                                            owned_icon_ids.insert(id as i32);
-                                        } else if let Some(id) =
-                                            item.get("iconId").and_then(|v| v.as_i64())
-                                        {
-                                            owned_icon_ids.insert(id as i32);
-                                        }
-                                    }
-                                } else if let Some(obj) = icons_json.as_object() {
-                                    if let Some(icons_arr) =
-                                        obj.get("icons").and_then(|v| v.as_array())
-                                    {
-                                        for item in icons_arr {
-                                            if let Some(id) =
-                                                item.get("id").and_then(|v| v.as_i64())
-                                            {
-                                                owned_icon_ids.insert(id as i32);
-                                            } else if let Some(id) =
-                                                item.get("iconId").and_then(|v| v.as_i64())
-                                            {
-                                                owned_icon_ids.insert(id as i32);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 3. 获取已拥有表情列表
-                    let emotes_url = format!("{}/lol-inventory/v1/inventory/emotes", base);
-                    if let Ok(emotes_resp) = lcu
-                        .http_client
-                        .get(&emotes_url)
-                        .header("Authorization", &auth)
-                        .send()
-                        .await
-                    {
-                        if emotes_resp.status().is_success() {
-                            if let Ok(emotes_json) = emotes_resp.json::<serde_json::Value>().await {
-                                if let Some(arr) = emotes_json.as_array() {
-                                    for item in arr {
-                                        if let Some(id) =
-                                            item.get("itemId").and_then(|v| v.as_i64())
-                                        {
-                                            owned_emote_ids.insert(id as i32);
-                                        } else if let Some(id) =
-                                            item.get("id").and_then(|v| v.as_i64())
-                                        {
-                                            owned_emote_ids.insert(id as i32);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 4. 获取已拥有守卫皮肤列表
-                    let ward_skins_url = format!(
-                        "{}/lol-collections/v1/inventories/{}/ward-skins",
-                        base, summoner_id
-                    );
-                    if let Ok(ward_skins_resp) = lcu
-                        .http_client
-                        .get(&ward_skins_url)
-                        .header("Authorization", &auth)
-                        .send()
-                        .await
-                    {
-                        if ward_skins_resp.status().is_success() {
-                            if let Ok(ward_skins_json) =
-                                ward_skins_resp.json::<serde_json::Value>().await
-                            {
-                                if let Some(arr) = ward_skins_json.as_array() {
-                                    for item in arr {
-                                        if let (Some(ward_skin_id), Some(ownership)) = (
-                                            item.get("id").and_then(|v| v.as_i64()),
-                                            item.get("ownership"),
-                                        ) {
-                                            if ownership
-                                                .get("owned")
-                                                .and_then(|v| v.as_bool())
-                                                .unwrap_or(false)
-                                            {
-                                                owned_ward_skin_ids.insert(ward_skin_id as i32);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    owned_skin_ids = skins;
+                    owned_icon_ids = icons;
+                    owned_emote_ids = emotes;
+                    owned_ward_skin_ids = wards;
                 }
             }
         }
@@ -1080,6 +998,163 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
     }
 
     Ok(result)
+}
+
+/// 获取已拥有皮肤 ID 集合
+async fn fetch_owned_skins(
+    http_client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    summoner_id: i64,
+) -> std::collections::HashSet<i32> {
+    let mut owned = std::collections::HashSet::new();
+    let url = format!(
+        "{}/lol-champions/v1/inventories/by-summoner/{}/skins",
+        base, summoner_id
+    );
+    if let Ok(skins_resp) = http_client
+        .get(&url)
+        .header("Authorization", auth)
+        .send()
+        .await
+    {
+        if skins_resp.status().is_success() {
+            if let Ok(skins_json) = skins_resp.json::<Vec<serde_json::Value>>().await {
+                for s in skins_json {
+                    if let (Some(skin_id), Some(ownership)) =
+                        (s.get("id").and_then(|v| v.as_i64()), s.get("ownership"))
+                    {
+                        if ownership
+                            .get("owned")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false)
+                        {
+                            owned.insert(skin_id as i32);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    owned
+}
+
+/// 获取已拥有头像图标 ID 集合
+async fn fetch_owned_icons(
+    http_client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    summoner_id: i64,
+) -> std::collections::HashSet<i32> {
+    let mut owned = std::collections::HashSet::new();
+    let url = format!(
+        "{}/lol-collections/v1/inventories/{}/summoner-icons",
+        base, summoner_id
+    );
+    if let Ok(icons_resp) = http_client
+        .get(&url)
+        .header("Authorization", auth)
+        .send()
+        .await
+    {
+        if icons_resp.status().is_success() {
+            if let Ok(icons_json) = icons_resp.json::<serde_json::Value>().await {
+                if let Some(arr) = icons_json.as_array() {
+                    for item in arr {
+                        if let Some(id) = item.get("id").and_then(|v| v.as_i64()) {
+                            owned.insert(id as i32);
+                        } else if let Some(id) = item.get("iconId").and_then(|v| v.as_i64()) {
+                            owned.insert(id as i32);
+                        }
+                    }
+                } else if let Some(obj) = icons_json.as_object() {
+                    if let Some(icons_arr) = obj.get("icons").and_then(|v| v.as_array()) {
+                        for item in icons_arr {
+                            if let Some(id) = item.get("id").and_then(|v| v.as_i64()) {
+                                owned.insert(id as i32);
+                            } else if let Some(id) = item.get("iconId").and_then(|v| v.as_i64()) {
+                                owned.insert(id as i32);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    owned
+}
+
+/// 获取已拥有表情 ID 集合
+async fn fetch_owned_emotes(
+    http_client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+) -> std::collections::HashSet<i32> {
+    let mut owned = std::collections::HashSet::new();
+    let url = format!("{}/lol-inventory/v1/inventory/emotes", base);
+    if let Ok(emotes_resp) = http_client
+        .get(&url)
+        .header("Authorization", auth)
+        .send()
+        .await
+    {
+        if emotes_resp.status().is_success() {
+            if let Ok(emotes_json) = emotes_resp.json::<serde_json::Value>().await {
+                if let Some(arr) = emotes_json.as_array() {
+                    for item in arr {
+                        if let Some(id) = item.get("itemId").and_then(|v| v.as_i64()) {
+                            owned.insert(id as i32);
+                        } else if let Some(id) = item.get("id").and_then(|v| v.as_i64()) {
+                            owned.insert(id as i32);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    owned
+}
+
+/// 获取已拥有守卫皮肤 ID 集合
+async fn fetch_owned_ward_skins(
+    http_client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    summoner_id: i64,
+) -> std::collections::HashSet<i32> {
+    let mut owned = std::collections::HashSet::new();
+    let url = format!(
+        "{}/lol-collections/v1/inventories/{}/ward-skins",
+        base, summoner_id
+    );
+    if let Ok(ward_skins_resp) = http_client
+        .get(&url)
+        .header("Authorization", auth)
+        .send()
+        .await
+    {
+        if ward_skins_resp.status().is_success() {
+            if let Ok(ward_skins_json) = ward_skins_resp.json::<serde_json::Value>().await {
+                if let Some(arr) = ward_skins_json.as_array() {
+                    for item in arr {
+                        if let (Some(ward_skin_id), Some(ownership)) = (
+                            item.get("id").and_then(|v| v.as_i64()),
+                            item.get("ownership"),
+                        ) {
+                            if ownership
+                                .get("owned")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                owned.insert(ward_skin_id as i32);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    owned
 }
 
 /// 5. 批量分解选中碎片（后台顺序执行，逐条广播进度）

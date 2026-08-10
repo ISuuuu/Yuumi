@@ -477,23 +477,16 @@ watch(currentPage, (val) => {
   }
 }, { immediate: true });
 
+// 防止 session 高频事件重复请求开启悬浮窗（Rust 侧已按 300ms 节流，这里再做一次性守卫）
+let benchOverlayRequested = false;
+
 async function showBenchOverlay(show: boolean = true) {
-  console.log(
-    "[bench-debug] showBenchOverlay 被调用: show =",
-    show,
-    "EnableBenchOverlay 配置值 =",
-    appConfig.value?.Functions?.EnableBenchOverlay,
-  );
+  if (!show) benchOverlayRequested = false;
   // 检查配置开关
   if (show && appConfig.value?.Functions?.EnableBenchOverlay === false) {
-    console.log("[bench-debug] 悬浮窗已被配置开关禁用，不执行开启");
     return;
   }
   try {
-    console.log(
-      "[bench-debug] 正在通过 invoke 向 Rust 发送窗口控制命令: show =",
-      show,
-    );
     await invoke("show_bench_overlay_window", { show });
   } catch (err) {
     console.error("[bench] 控制悬浮窗失败:", err);
@@ -587,24 +580,11 @@ watch(gamePhase, (phase: string) => {
 
   // ─── 大乱斗板凳席悬浮窗生命周期控制 ───
   if (phase === "ChampSelect") {
-    console.log(
-      "[bench-debug] 进入选人阶段，等待 1.5 秒后检测大乱斗板凳席状态...",
-    );
     setTimeout(async () => {
       const session = store.champSelectSession;
-      console.log(
-        "[bench-debug] 1.5秒检测结果: session 存在 =",
-        !!session,
-        "benchEnabled =",
-        session?.benchEnabled,
-      );
       if (session && session.benchEnabled) {
-        console.log("[bench-debug] 满足创建悬浮窗条件，准备开启...");
+        benchOverlayRequested = true;
         await showBenchOverlay();
-      } else {
-        console.log(
-          "[bench-debug] 不满足创建悬浮窗条件: session 为空或 benchEnabled 为 false",
-        );
       }
     }, 1500);
   } else {
@@ -618,15 +598,11 @@ watch(
   () => store.champSelectSession,
   async (session) => {
     if (isOverlayWindow.value) return;
-    console.log(
-      "[bench-debug] watch(session) 触发：session 存在 =",
-      !!session,
-      "benchEnabled =",
-      session?.benchEnabled,
-    );
     if (store.gamePhase === "ChampSelect" && session && session.benchEnabled) {
-      console.log("[bench-debug] watch(session) 条件满足，准备开启悬浮窗...");
-      await showBenchOverlay();
+      if (!benchOverlayRequested) {
+        benchOverlayRequested = true;
+        await showBenchOverlay();
+      }
     }
   },
 );
@@ -1269,6 +1245,7 @@ html[data-mica="true"] body {
   --titlebar-bg: #ffffff;
   --settings-row-bg: #f1f5f9;
   --settings-row-bg-hover: #e2e8f0;
+  --glass-filter: none;
 }
 [data-theme="dark"]:not([data-mica="true"]) {
   --sidebar-bg: #111827;
@@ -1277,6 +1254,7 @@ html[data-mica="true"] body {
   --titlebar-bg: #0b0f19;
   --settings-row-bg: #1e293b;
   --settings-row-bg-hover: #334155;
+  --glass-filter: none;
 }
 
 /* 全局 Naive UI 浮动弹出层毛玻璃化与硬件加速 */

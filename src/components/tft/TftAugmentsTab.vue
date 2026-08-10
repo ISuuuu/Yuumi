@@ -16,14 +16,15 @@ onMounted(() => {
   }
   const viewEl = document.querySelector(".tft-view");
   if (viewEl) {
-    viewEl.addEventListener("scroll", handleScroll);
+    viewEl.addEventListener("scroll", handleScrollDebounced);
   }
 });
 
 onUnmounted(() => {
+  if (scrollDebounceTimer) window.clearTimeout(scrollDebounceTimer);
   const viewEl = document.querySelector(".tft-view");
   if (viewEl) {
-    viewEl.removeEventListener("scroll", handleScroll);
+    viewEl.removeEventListener("scroll", handleScrollDebounced);
   }
 });
 
@@ -35,6 +36,13 @@ function handleScroll(e: Event) {
     }
   }
 }
+
+// 滚动加载防抖：滚动事件高频触发，仅在停止滚动后结算是否加载更多
+let scrollDebounceTimer: number | undefined;
+const handleScrollDebounced = (e: Event) => {
+  if (scrollDebounceTimer) window.clearTimeout(scrollDebounceTimer);
+  scrollDebounceTimer = window.setTimeout(() => handleScroll(e), 120);
+};
 
 watch([searchQuery, selectedTier], () => {
   displayLimit.value = 40;

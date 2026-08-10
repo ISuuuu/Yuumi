@@ -20,6 +20,9 @@ const POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Readiness probe: how many times to retry, and interval between retries.
 const PROBE_MAX_RETRIES: u32 = 5;
 const PROBE_INTERVAL: Duration = Duration::from_secs(2);
+/// WMIC 兜底检测节流：连续未找到 LCU 达到该轮数才调用一次 wmic 子进程，
+/// 避免 LOL 未运行期间每 2 秒同步 spawn 一次子进程
+const WMIC_THROTTLE_ROUNDS: u32 = 5;
 
 /// 启动 LCU 进程轮询监测器。
 /// 两种检测方式并用，确保可靠连接：
@@ -44,9 +47,11 @@ pub fn start(
             sys.refresh_processes(sysinfo::ProcessesToUpdate::All, false);
 
             // 优先尝试从 lockfile 获取，备用从进程参数获取，最后 WMIC 兜底（需管理员）
-            let mut lcu_info = find_via_lockfile(&sys)
-                .or_else(|| find_via_cmdline(&sys))
-                .or_else(find_via_wmic);
+            // WMIC 每轮同步 spawn 子进程开销大，仅在连续多轮未命中时降频调用
+            let mut lcu_info = find_via_lockfile(&sys).or_else(|| find_via_cmdline(&sys));
+            if lcu_info.is_none() && consecutive_misses.is_multiple_of(WMIC_THROTTLE_ROUNDS) {
+                lcu_info = find_via_wmic();
+            }
 
             // 连续未找到 LCU 达到阈值时，全量重建进程树作为兜底
             if lcu_info.is_none() {
@@ -64,38 +69,40 @@ pub fn start(
                 consecutive_misses = 0;
             }
 
-            // 诊断日志：异步写入，避免阻塞 tokio 工作线程
+            // 诊断日志：异步写入，避免阻塞 tokio 工作线程（降频：连续多轮未找到时才写，避免每 2 秒写一次磁盘）
             if lcu_info.is_none() {
-                let processes_snapshot: Vec<_> = sys
-                    .processes()
-                    .iter()
-                    .filter(|(_, p)| {
-                        p.name()
-                            .to_string_lossy()
-                            .to_lowercase()
-                            .contains("leagueclientux")
-                    })
-                    .map(|(pid, p)| {
-                        format!(
-                            "PID={:?}, Name={:?}, EXE={:?}, CMD={:?}",
-                            pid,
-                            p.name(),
-                            p.exe(),
-                            p.cmd()
-                        )
-                    })
-                    .collect();
-                tokio::task::spawn_blocking(move || {
-                    let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
-                    if let Ok(mut file) = std::fs::File::create(&debug_path) {
-                        use std::io::Write;
-                        let _ = writeln!(file, "====== 实时 LOL 进程诊断 ======");
-                        for entry in &processes_snapshot {
-                            let _ = writeln!(file, "找到进程: {}", entry);
+                if consecutive_misses.is_multiple_of(MISS_THRESHOLD) {
+                    let processes_snapshot: Vec<_> = sys
+                        .processes()
+                        .iter()
+                        .filter(|(_, p)| {
+                            p.name()
+                                .to_string_lossy()
+                                .to_lowercase()
+                                .contains("leagueclientux")
+                        })
+                        .map(|(pid, p)| {
+                            format!(
+                                "PID={:?}, Name={:?}, EXE={:?}, CMD={:?}",
+                                pid,
+                                p.name(),
+                                p.exe(),
+                                p.cmd()
+                            )
+                        })
+                        .collect();
+                    tokio::task::spawn_blocking(move || {
+                        let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
+                        if let Ok(mut file) = std::fs::File::create(&debug_path) {
+                            use std::io::Write;
+                            let _ = writeln!(file, "====== 实时 LOL 进程诊断 ======");
+                            for entry in &processes_snapshot {
+                                let _ = writeln!(file, "找到进程: {}", entry);
+                            }
+                            let _ = writeln!(file, "===============================");
                         }
-                        let _ = writeln!(file, "===============================");
-                    }
-                });
+                    });
+                }
             } else {
                 let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
                 let _ = std::fs::remove_file(&debug_path);

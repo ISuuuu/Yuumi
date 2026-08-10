@@ -22,10 +22,40 @@ let unlistenMyChampion: (() => void) | undefined;
 const currentNow = ref<number>(Date.now());
 let timeTicker: number | undefined;
 
-onMounted(async () => {
+function startTimeTicker() {
+  if (timeTicker) return;
   timeTicker = window.setInterval(() => {
     currentNow.value = Date.now();
   }, 100);
+}
+
+function stopTimeTicker() {
+  if (timeTicker) {
+    window.clearInterval(timeTicker);
+    timeTicker = undefined;
+  }
+}
+
+// 仅当保护期计算需要 currentNow 时（timer 缺失或未满 15 秒）才运行时钟，
+// 满保护期后停止 100ms 定时器，避免持续驱动全组件重渲染
+function syncTimeTicker() {
+  const timer = store.champSelectSession?.timer as any;
+  if (
+    timer &&
+    typeof timer.totalTimeInPhase === "number" &&
+    timer.totalTimeInPhase > 0
+  ) {
+    const elapsed = timer.totalTimeInPhase - (timer.adjustedTimeLeftInPhase || 0);
+    if (elapsed >= FIRST_STAGE_PROTECT_MS) {
+      stopTimeTicker();
+      return;
+    }
+  }
+  startTimeTicker();
+}
+
+onMounted(async () => {
+  startTimeTicker();
 
   // 监听Rust直接推送的"我的英雄"事件（跨Webview通信，处理未来的英雄变化）
   unlistenMyChampion = await listen<number>("bench-my-champion", (event) => {
@@ -263,7 +293,7 @@ watch(
         window.clearTimeout(swapVerifyTimer);
         swapVerifyTimer = undefined;
       }
-      console.log("[BenchOverlay] 跨阶段进入选人阶段，初始化开始时间戳与动态点亮库");
+      startTimeTicker();
     }
   },
   { immediate: true }
@@ -272,12 +302,13 @@ watch(
 watch(
   () => store.champSelectSession,
   async (session) => {
-    console.log("[BenchOverlay] LCU Session 改变:", session);
     if (!session) {
       return;
     }
-    console.log("[BenchOverlay Session Dump] Raw Session Object:", JSON.parse(JSON.stringify(session)));
-    
+
+    // 根据 session timer 状态动态启停 100ms 时钟（仅保护期回退计算需要）
+    syncTimeTicker();
+
     // 从session持续更新我的历史英雄（含换下退至板凳席的旧英雄追踪）
     const myPlayer = session.myTeam?.find(
       (p: any) => Number(p.cellId) === Number(session.localPlayerCellId)
@@ -288,7 +319,6 @@ watch(
     if (previousMyChampionId.value > 0 && previousMyChampionId.value !== myCid) {
       if (!myHistoricalChampions.value.includes(previousMyChampionId.value)) {
         myHistoricalChampions.value = [...myHistoricalChampions.value, previousMyChampionId.value];
-        console.log(`[BenchOverlay] 录入被替换放回板凳席的旧英雄: ${previousMyChampionId.value}`, myHistoricalChampions.value);
       }
     }
 
@@ -304,29 +334,16 @@ watch(
         window.clearTimeout(swapVerifyTimer);
         swapVerifyTimer = undefined;
       }
-      console.log(
-        `[BenchOverlay] 交换验证生效，点亮: ${myCid} 及换下放回板凳席的 ${oldCid}`,
-      );
     }
 
     if (myCid > 0) {
       previousMyChampionId.value = myCid;
       if (!myHistoricalChampions.value.includes(myCid)) {
         myHistoricalChampions.value = [...myHistoricalChampions.value, myCid];
-        console.log(`[BenchOverlay] session更新，录入我的当前英雄: ${myCid}`, myHistoricalChampions.value);
       }
     }
 
-    console.log(
-      "[BenchOverlay] 板凳席状态: benchEnabled =",
-      session.benchEnabled,
-      "benchChampions =",
-      session.benchChampions,
-      "phase =",
-      session.timer?.phase,
-    );
     if (pickableIds.value.length === 0) {
-      console.log("[BenchOverlay] 选人会话更新且可用列表为空，补充拉取...");
       fetchPickableIds();
     }
   },

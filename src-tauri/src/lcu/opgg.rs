@@ -30,7 +30,7 @@ pub(crate) fn get_cached(key: &str) -> Option<Value> {
     let cache = get_opgg_cache().lock().ok()?;
     let entry = cache.get(key)?;
     if entry.inserted_at.elapsed() < OPGG_CACHE_TTL {
-        log::info!("OP.GG 缓存命中: {}", key);
+        log::debug!("OP.GG 缓存命中: {}", key);
         Some(entry.data.clone())
     } else {
         None
@@ -49,7 +49,7 @@ pub(crate) fn put_cached(key: String, data: Value) {
                 cache.remove(&oldest_key);
             }
         }
-        log::info!("OP.GG 缓存写入: {}", key);
+        log::debug!("OP.GG 缓存写入: {}", key);
         cache.insert(
             key,
             OpggCacheEntry {

@@ -455,12 +455,16 @@ pub async fn get_match_history(
     end_index: Option<u32>,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<MatchDisplay>, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
+    // 锁内只提取连接参数，尽早释放读锁，避免 HTTP 请求/资源等待期间阻塞 monitor 重连
+    let (port, token, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
     let mut url = format!(
         "https://127.0.0.1:{}/lol-match-history/v1/products/lol/{}/matches",
-        lcu.port, puuid
+        port, puuid
     );
 
     let mut params = Vec::new();
@@ -475,10 +479,9 @@ pub async fn get_match_history(
         url.push_str(&params.join("&"));
     }
 
-    let auth = build_auth_header(&lcu.token);
+    let auth = build_auth_header(&token);
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", auth)
         .send()
@@ -494,7 +497,8 @@ pub async fn get_match_history(
     // 如果资源尚未加载完成，且 LCU 已连接，进行等待以防止解析出来的图片/装备路径为空（最多等 5 秒）
     crate::lcu::client::wait_for_game_data(app_state.inner()).await;
 
-    let assets = app_state.game_data.read().await;
+    // 锁内快速克隆资源快照后立即释放，避免同步解析期间长时间占用读锁
+    let assets = app_state.game_data.read().await.clone();
     let displays: Vec<MatchDisplay> = history
         .games
         .games
@@ -1022,7 +1026,8 @@ pub async fn get_recent_teammates(
 
     // 查询被标记的玩家（tag 非空），标记玩家优先显示
     let tagged_map: std::collections::HashMap<String, String> =
-        crate::saved_players::query_tagged_for_reminder(app_state.inner(), &puuid)
+        crate::saved_players::query_tagged_for_reminder(app_state.inner(), puuid.clone())
+            .await
             .into_iter()
             .collect();
 

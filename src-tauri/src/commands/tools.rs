@@ -6,124 +6,138 @@ use tauri::Manager;
 
 /// 自动检测 LOL 客户端安装路径（从运行中的 LeagueClientUx.exe 推断，或从 Windows 注册表兜底）
 #[tauri::command]
-pub fn detect_lol_path() -> Result<Option<String>, String> {
-    use sysinfo::System;
-    let mut sys = System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+pub async fn detect_lol_path() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        use sysinfo::System;
+        let mut sys = System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
-    // 1. 优先从运行中的客户端进程推断
-    for process in sys.processes().values() {
-        let name = process.name().to_string_lossy().to_lowercase();
-        if name == "leagueclientux.exe" {
-            if let Some(exe_path) = process.exe() {
-                let mut dir = exe_path.parent();
-                while let Some(d) = dir {
-                    if d.join("LeagueClient.exe").exists()
-                        || d.join("Client.exe").exists()
-                        || d.join("client.exe").exists()
-                    {
-                        return Ok(Some(d.to_string_lossy().to_string()));
+        // 1. 优先从运行中的客户端进程推断
+        for process in sys.processes().values() {
+            let name = process.name().to_string_lossy().to_lowercase();
+            if name == "leagueclientux.exe" {
+                if let Some(exe_path) = process.exe() {
+                    let mut dir = exe_path.parent();
+                    while let Some(d) = dir {
+                        if d.join("LeagueClient.exe").exists()
+                            || d.join("Client.exe").exists()
+                            || d.join("client.exe").exists()
+                        {
+                            return Ok(Some(d.to_string_lossy().to_string()));
+                        }
+                        dir = d.parent();
                     }
-                    dir = d.parent();
-                }
-                // 兜底：返回 exe 的上两级
-                if let Some(parent) = exe_path.parent() {
-                    if let Some(root) = parent.parent() {
-                        return Ok(Some(root.to_string_lossy().to_string()));
+                    // 兜底：返回 exe 的上两级
+                    if let Some(parent) = exe_path.parent() {
+                        if let Some(root) = parent.parent() {
+                            return Ok(Some(root.to_string_lossy().to_string()));
+                        }
                     }
                 }
             }
         }
-    }
 
-    // 2. 进程未运行，则按照 Python 逻辑，尝试从 Windows 注册表获取国服 LOL 路径
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(output) = std::process::Command::new("reg")
-            .args(["query", r"HKCU\SOFTWARE\Tencent\LOL", "/v", "InstallPath"])
-            .output()
+        // 2. 进程未运行，则按照 Python 逻辑，尝试从 Windows 注册表获取国服 LOL 路径
+        #[cfg(target_os = "windows")]
         {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    if line.contains("InstallPath") {
-                        if let Some(pos) = line.find("REG_SZ") {
-                            let raw_path = line[pos + 6..].trim();
-                            if !raw_path.is_empty() {
-                                // 统一成正斜杠格式，规范盘符大小写
-                                let mut path = raw_path.replace("\\", "/");
-                                if path.len() >= 2 && path.as_bytes()[1] == b':' {
-                                    let drive =
-                                        path.chars().next().unwrap().to_uppercase().to_string();
-                                    path = format!("{}{}", drive, &path[1..]);
-                                }
+            if let Ok(output) = std::process::Command::new("reg")
+                .args(["query", r"HKCU\SOFTWARE\Tencent\LOL", "/v", "InstallPath"])
+                .output()
+            {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines() {
+                        if line.contains("InstallPath") {
+                            if let Some(pos) = line.find("REG_SZ") {
+                                let raw_path = line[pos + 6..].trim();
+                                if !raw_path.is_empty() {
+                                    // 统一成正斜杠格式，规范盘符大小写
+                                    let mut path = raw_path.replace("\\", "/");
+                                    if path.len() >= 2 && path.as_bytes()[1] == b':' {
+                                        let drive =
+                                            path.chars().next().unwrap().to_uppercase().to_string();
+                                        path = format!("{}{}", drive, &path[1..]);
+                                    }
 
-                                // 如果是国服，注册表读出来的安装目录下有 TCLS 目录
-                                let tcls_dir = std::path::Path::new(&path).join("TCLS");
-                                if tcls_dir.exists() {
-                                    return Ok(Some(tcls_dir.to_string_lossy().replace("\\", "/")));
-                                }
+                                    // 如果是国服，注册表读出来的安装目录下有 TCLS 目录
+                                    let tcls_dir = std::path::Path::new(&path).join("TCLS");
+                                    if tcls_dir.exists() {
+                                        return Ok(Some(
+                                            tcls_dir.to_string_lossy().replace("\\", "/"),
+                                        ));
+                                    }
 
-                                return Ok(Some(path));
+                                    return Ok(Some(path));
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
 
-    Ok(None)
+        Ok(None)
+    })
+    .await
+    .map_err(|e| format!("路径检测任务异常终止: {}", e))?
 }
 
 /// 打开原生文件夹选择对话框，返回用户选择的路径
 #[tauri::command]
-pub fn select_lol_folder() -> Result<Option<String>, String> {
-    let folder = rfd::FileDialog::new()
-        .set_title("选择英雄联盟客户端安装目录")
-        .pick_folder();
-    Ok(folder.map(|p| p.to_string_lossy().to_string()))
+pub async fn select_lol_folder() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let folder = rfd::FileDialog::new()
+            .set_title("选择英雄联盟客户端安装目录")
+            .pick_folder();
+        Ok(folder.map(|p| p.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|e| format!("文件夹选择任务异常终止: {}", e))?
 }
 
 /// 打开原生文件夹选择对话框，支持自定义标题和默认起始目录，返回用户选择的路径
 #[tauri::command]
-pub fn select_folder(
+pub async fn select_folder(
     title: Option<String>,
     default_path: Option<String>,
 ) -> Result<Option<String>, String> {
-    let mut dialog = rfd::FileDialog::new();
-    if let Some(t) = title {
-        dialog = dialog.set_title(&t);
-    }
-
-    // 确定起始定位的目录
-    let mut start_path = None;
-    if let Some(ref dp) = default_path {
-        if !dp.is_empty() {
-            start_path = Some(std::path::PathBuf::from(dp));
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = rfd::FileDialog::new();
+        if let Some(t) = title {
+            dialog = dialog.set_title(&t);
         }
-    }
 
-    // 如果没有指定（或者为空），则使用默认的 "图片/Yuumi_Screenshots" 目录
-    let path_to_set = match start_path {
-        Some(p) => p,
-        None => {
-            if let Some(mut p) = dirs::picture_dir() {
-                p.push("Yuumi_Screenshots");
-                let _ = std::fs::create_dir_all(&p); // 确保它存在
-                p
-            } else {
-                std::path::PathBuf::new()
+        // 确定起始定位的目录
+        let mut start_path = None;
+        if let Some(ref dp) = default_path {
+            if !dp.is_empty() {
+                start_path = Some(std::path::PathBuf::from(dp));
             }
         }
-    };
 
-    if path_to_set.exists() {
-        dialog = dialog.set_directory(path_to_set);
-    }
+        // 如果没有指定（或者为空），则使用默认的 "图片/Yuumi_Screenshots" 目录
+        let path_to_set = match start_path {
+            Some(p) => p,
+            None => {
+                if let Some(mut p) = dirs::picture_dir() {
+                    p.push("Yuumi_Screenshots");
+                    let _ = std::fs::create_dir_all(&p); // 确保它存在
+                    p
+                } else {
+                    std::path::PathBuf::new()
+                }
+            }
+        };
 
-    let folder = dialog.pick_folder();
-    Ok(folder.map(|p| p.to_string_lossy().to_string()))
+        if path_to_set.exists() {
+            dialog = dialog.set_directory(path_to_set);
+        }
+
+        let folder = dialog.pick_folder();
+        Ok(folder.map(|p| p.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|e| format!("文件夹选择任务异常终止: {}", e))?
 }
 
 /// 在系统文件管理器中打开截图保存的目录

@@ -863,19 +863,23 @@ fn extract_augments_from_value(root: &serde_json::Value) -> Vec<TftAugmentInfo> 
 /// 抓取 TFT 基础数据字典（优先 LCU，备用 CDragon，带内存与磁盘缓存）
 /// 参照 Seraphine：LCU → CDragon（一次，无重试，无代理）
 async fn fetch_tft_data_mapping(_lcu: Option<&crate::LcuClient>) -> TftDataMapping {
-    let mut cache = CACHED_TFT_DATA.write().await;
-    if let Some(ref mapping) = *cache {
-        if !mapping.champions.is_empty() {
-            return mapping.clone();
+    // 1. 内存缓存快路径（仅读锁，命中即返回）
+    {
+        let cache = CACHED_TFT_DATA.read().await;
+        if let Some(ref mapping) = *cache {
+            if !mapping.champions.is_empty() {
+                return mapping.clone();
+            }
         }
     }
 
-    // 1. 尝试从本地磁盘缓存加载
+    // 2. 尝试从本地磁盘缓存加载（无锁）
     if let Some(cache_path) = get_tft_data_cache_path() {
         if cache_path.exists() {
             if let Ok(file_content) = std::fs::read_to_string(&cache_path) {
                 if let Ok(m) = serde_json::from_str::<TftDataMapping>(&file_content) {
                     if !m.champions.is_empty() {
+                        let mut cache = CACHED_TFT_DATA.write().await;
                         *cache = Some(m.clone());
                         return m;
                     }
@@ -884,10 +888,11 @@ async fn fetch_tft_data_mapping(_lcu: Option<&crate::LcuClient>) -> TftDataMappi
         }
     }
 
-    // 2. 参照 Seraphine update 方法：CDragon CDN 一次请求不重试
+    // 3. 参照 Seraphine update 方法：CDragon CDN 一次请求不重试（无锁执行，带超时防挂起）
     let cdn_url = "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json";
     let cdn_client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(20))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -896,7 +901,9 @@ async fn fetch_tft_data_mapping(_lcu: Option<&crate::LcuClient>) -> TftDataMappi
             if let Ok(root_val) = resp.json::<serde_json::Value>().await {
                 let m = parse_tft_data_from_value(&root_val);
                 if !m.champions.is_empty() {
-                    *cache = Some(m.clone());
+                    let m_for_cache = m.clone();
+                    let mut cache = CACHED_TFT_DATA.write().await;
+                    *cache = Some(m_for_cache);
                     let m_clone = m.clone();
                     let aug_list = extract_augments_from_value(&root_val);
                     log::info!("从 CDragon 成功提取到 {} 个 TFT 海克斯强化", aug_list.len());
@@ -1018,10 +1025,8 @@ async fn fetch_tft_augments_raw(app_state: &AppState) -> Vec<TftAugmentInfo> {
 /// 从 LCU 获取 TFT 数据资源
 #[tauri::command]
 pub async fn get_tft_data(app_state: State<'_, AppState>) -> Result<TftDataMapping, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
-
-    Ok(fetch_tft_data_mapping(Some(lcu)).await)
+    let _ = app_state.lcu().await?; // 仅确认 LCU 在线，不持锁（映射字典可能走 CDN 下载）
+    Ok(fetch_tft_data_mapping(None).await)
 }
 
 /// 从已解析的 tft.json 缓存中提取所有海克斯强化信息（支持强制跳过缓存刷新）
@@ -1113,17 +1118,20 @@ pub async fn get_tft_ranked_stats(
     puuid: String,
     app_state: State<'_, AppState>,
 ) -> Result<TftRankDisplay, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
+    // 锁内只提取连接参数，尽早释放读锁，避免 HTTP 请求期间阻塞 monitor 重连
+    let (port, token, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
     let url = format!(
         "https://127.0.0.1:{}/lol-ranked/v1/ranked-stats/{}",
-        lcu.port, puuid
+        port, puuid
     );
-    let auth = build_auth_header(&lcu.token);
+    let auth = build_auth_header(&token);
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", auth)
         .send()
@@ -1220,13 +1228,22 @@ pub async fn get_tft_match_history(
     end_index: Option<u32>,
     app_state: State<'_, AppState>,
 ) -> Result<TftMatchSummary, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
+    // 锁内只提取连接参数，尽早释放读锁，避免 HTTP/CDN 请求期间阻塞 monitor 重连
+    let (port, token, server, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (
+            lcu.port,
+            lcu.token.clone(),
+            lcu.server.clone(),
+            lcu.http_client.clone(),
+        )
+    };
 
     // 预先拉取/建立 TFT 资源与图标映射字典
-    let tft_data = fetch_tft_data_mapping(Some(lcu)).await;
+    let tft_data = fetch_tft_data_mapping(None).await;
 
-    let auth = build_auth_header(&lcu.token);
+    let auth = build_auth_header(&token);
 
     let b = beg_index.unwrap_or(0);
     let e = end_index.unwrap_or(20);
@@ -1235,23 +1252,22 @@ pub async fn get_tft_match_history(
     let candidate_urls = vec![
         format!(
             "https://127.0.0.1:{}/lol-match-history/v1/products/tft/{}/matches?begIndex={}&endIndex={}",
-            lcu.port, puuid, b, e
+            port, puuid, b, e
         ),
         format!(
             "https://127.0.0.1:{}/lol-match-history/v1/products/tft/{}/matches?beginIndex={}&endIndex={}",
-            lcu.port, puuid, b, e
+            port, puuid, b, e
         ),
         format!(
             "https://127.0.0.1:{}/lol-match-history/v1/products/tft/{}/matches",
-            lcu.port, puuid
+            port, puuid
         ),
     ];
 
     let mut raw_json: Option<serde_json::Value> = None;
 
     for url in candidate_urls {
-        if let Ok(resp) = lcu
-            .http_client
+        if let Ok(resp) = http_client
             .get(&url)
             .header("Authorization", &auth)
             .send()
@@ -1268,11 +1284,11 @@ pub async fn get_tft_match_history(
 
     // 若 LCU 本地接口未成功获取，尝试使用 SGP 接口获取
     if raw_json.is_none() {
-        if let Some(server) = &lcu.server {
+        if let Some(server) = server.as_ref() {
             let server_lower = server.to_lowercase();
             if crate::lcu::sgp::is_tencent_server(&server_lower) {
                 // SGP token 30 分钟缓存复用，共享客户端进程级复用
-                if let Ok(sgp_token) = crate::lcu::sgp::get_sgp_token(lcu.port, &auth).await {
+                if let Ok(sgp_token) = crate::lcu::sgp::get_sgp_token(port, &auth).await {
                     let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
                     let sgp_url = format!(
                         "{}/match-history-query/v1/products/tft/player/{}/SUMMARY",

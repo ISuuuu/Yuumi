@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use base64::Engine;
@@ -16,6 +17,27 @@ use tokio_tungstenite::{
 
 // ── 订阅消息（对齐 Python: [5, "OnJsonApiEvent"]，2 个元素）────────────────
 const SUBSCRIBE_MSG: &str = r#"[5, "OnJsonApiEvent"]"#;
+
+/// champ-select session 事件节流间隔（毫秒）：
+/// 选人阶段 LCU 每秒推送多次（倒计时/悬停/动作变更），前端与各 Agent 只需要最新状态，
+/// 300ms 合并一次可显著降低前端 watcher / Agent / SignalR 的全链路处理压力
+const SESSION_THROTTLE_MS: u64 = 300;
+static LAST_SESSION_TS: AtomicU64 = AtomicU64::new(0);
+
+/// 判断 session 事件是否放行（处于节流窗口内则丢弃中间帧）
+fn session_throttle_allowed() -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let last = LAST_SESSION_TS.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < SESSION_THROTTLE_MS {
+        return false;
+    }
+    LAST_SESSION_TS
+        .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+}
 
 /// 前端关心的事件 URI 前缀列表。
 /// 等同于 Python LcuWebSocket 里 subscribes 的 uri 过滤。
@@ -275,6 +297,12 @@ fn process_event(text: &str, app_handle: &AppHandle) {
     if should_emit {
         log::debug!("[WS] 事件: {}", uri);
         let _ = app_handle.emit("lcu-ws-event", event_data.clone());
+    }
+
+    // 选人会话事件每秒推送多次，300ms 节流合并，
+    // 后续 Agent / bench / SignalR 处理均针对最新状态即可，丢弃过密中间帧
+    if uri.starts_with("/lol-champ-select/v1/session") && !session_throttle_allowed() {
+        return;
     }
 
     // ── 内部 Agent 转发 ──────────────────────────────────────────────────

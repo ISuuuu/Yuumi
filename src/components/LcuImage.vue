@@ -19,22 +19,50 @@ const { src: resolvedSrc, loading } = useLcuAsset(
 );
 
 const wrapperEl = ref<HTMLElement | null>(null);
-let observer: IntersectionObserver | null = null;
+
+// 模块级共享的 IntersectionObserver：大列表（数百个 LcuImage 实例）只创建一个 Observer，
+// 通过 WeakMap 分发到各自元素，避免每实例独立创建的资源浪费
+type ObserverRecord = { onVisible: () => void };
+let sharedObserver: IntersectionObserver | null = null;
+const observedTargets = new WeakMap<HTMLElement, ObserverRecord>();
+
+function getSharedObserver() {
+  if (!sharedObserver) {
+    sharedObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const target = entry.target as HTMLElement;
+          const rec = observedTargets.get(target);
+          if (rec && entry.isIntersecting) {
+            observedTargets.delete(target);
+            sharedObserver?.unobserve(target);
+            rec.onVisible();
+          }
+        }
+      },
+      { rootMargin: "200px" },
+    );
+  }
+  return sharedObserver;
+}
 
 onMounted(() => {
-  observer = new IntersectionObserver(
-    (entries) => {
-      if (entries[0]?.isIntersecting) {
+  if (wrapperEl.value) {
+    observedTargets.set(wrapperEl.value, {
+      onVisible: () => {
         enabled.value = true;
-        observer?.disconnect();
-      }
-    },
-    { rootMargin: "200px" },
-  );
-  if (wrapperEl.value) observer.observe(wrapperEl.value);
+      },
+    });
+    getSharedObserver().observe(wrapperEl.value);
+  }
 });
 
-onBeforeUnmount(() => observer?.disconnect());
+onBeforeUnmount(() => {
+  if (wrapperEl.value) {
+    observedTargets.delete(wrapperEl.value);
+    sharedObserver?.unobserve(wrapperEl.value);
+  }
+});
 </script>
 
 <template>
