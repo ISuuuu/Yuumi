@@ -64,10 +64,14 @@ Tauri v2 + Vue 3 + TypeScript 桌面应用。
 - **错误传播与序列化**：
   - `#[tauri::command]` 如果可能失败，必须返回 `Result<T, String>`。
   - 严禁随意使用 `unwrap()` 或 `panic!`，应使用 `map_err(|e| e.to_string())` 或 `thiserror` 将 Error 转化为前端友好的 String，并使用系统 `logging.rs` 的 logger 记录完整堆栈。
-- **共享状态管理**：只能通过 `tauri::State<'_, AppState>` 访问全局状态，不得使用不安全的全局静态变量。
+- **共享状态管理与死锁防护**：
+  - 只能通过 `tauri::State<'_, AppState>` 访问全局状态，不得使用不安全的全局静态变量。
+  - 在异步 Command 或后台 Task 中获取状态锁时，**严禁跨 `await` 点持有同步锁 (`std::sync::MutexGuard`)**，必须先释放锁或在作用域块分离后再 `await`，防止 Tokio 线程池死锁。
 - **异步与非阻塞**：
   - 严禁在 Command 的主线程中执行耗时的 CPU 计算或 I/O 操作。
-  - 使用 `tokio::spawn` 投递后台任务，并在执行完毕后通过 `tauri::Emitter::emit` (Tauri v2 API) 异步通知前端。
+  - 使用 `tokio::spawn` 投递后台任务，并在执行完毕后通过 `tauri::Emitter::emit`（Tauri v2 API，禁止使用 v1 的 `emit_all`）异步通知前端。
+- **命令注册 Checklist**：
+  - 新增 `#[tauri::command]` 时，**必须同步在 `lib.rs` 的 `invoke_handler!` 宏列表中注册**，否则前端调用会提示 command not found。
 
 ### Vue 3 前端 (Vue 3 / TypeScript)
 
@@ -98,6 +102,13 @@ pnpm tauri dev      # 开发（Vite + Tauri 窗口）
 pnpm tauri build    # 构建生产包
 pnpm dev            # 仅前端开发
 pnpm build          # 仅前端构建
+
+# 代码质量校验与测试（修改代码后进行验证）
+pnpm type-check      # Vue / TS 类型检查 (vue-tsc --noEmit)
+pnpm clippy          # Rust 代码静态检查 (cargo clippy)
+pnpm format          # Rust 代码格式化 (cargo fmt)
+pnpm test:rust       # 运行 Rust 单元测试 (cargo test)
+pnpm check-all       # 一键检查全部 (Format + Type-Check + Clippy)
 ```
 
 ## 项目结构
@@ -320,7 +331,9 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 - `Functions` — 所有自动化功能开关和候选列表 (自动接受/邀请/点赞/再来一局/ARAM报边/标记提醒)
 - `Other` — 其他杂项
 
-## 开发工具
+## 开发工具与调试日志
 
-开发模式下自动打开 DevTools（见 `lib.rs` 的 `setup` 闭包）。
-日志写入 `<exe_dir>/log/` 目录，每天轮转，保留 30 天。
+- **前端调试**: 开发模式下自动打开 Chromium DevTools（见 `lib.rs` 的 `setup` 闭包），按 `F12` 可审查组件与网络请求。
+- **日志系统**: 日志由 `flexi_logger` 接管，按天轮转保存 30 天。
+  - 日志文件输出路径：用户目录 `%APPDATA%/Yuumi/log/` 或可执行文件同级 `log/` 目录。
+  - 排查 LCU 通信或后台 Task 异常时，请检索最新 `.log` 文件中的 `[LCU]`, `[WS]`, `[Error]` 标记。
