@@ -386,65 +386,69 @@ async fn resolve_asset(app_state: &AppState, path: &str) -> Result<String, Strin
 
     // 1. 尝试优先从本地 LCU 获取
     if is_lcu_asset || is_loot_asset {
-        let lcu_guard = app_state.lcu_client.read().await;
-        if let Some(lcu) = lcu_guard.as_ref() {
-            // 战利品资源（/fe/lol-loot/...）路径区分大小写，直接透传；游戏资源则统一小写
-            let clean_path = if is_lcu_asset {
-                path.strip_prefix("/lol-game-data/assets/")
-                    .map(|s| format!("/lol-game-data/assets/{}", s.to_lowercase()))
-                    .unwrap_or_else(|| path.to_string())
-            } else {
-                path.to_string()
-            };
-            let lcu_url = format!("https://127.0.0.1:{}{}", lcu.port, clean_path);
-            let auth = build_auth_header(&lcu.token);
+        // 锁内只提取连接参数（http_client 克隆是 Arc 浅拷贝），立即释放读锁，
+        // 避免跨 HTTP await 持有锁阻塞 monitor 重连写锁
+        let (port, token, http_client) = {
+            let lcu_guard = app_state.lcu_client.read().await;
+            match lcu_guard.as_ref() {
+                Some(lcu) => (lcu.port, lcu.token.clone(), lcu.http_client.clone()),
+                None => return Err("LCU 未连接".to_string()),
+            }
+        };
+        // 战利品资源（/fe/lol-loot/...）路径区分大小写，直接透传；游戏资源则统一小写
+        let clean_path = if is_lcu_asset {
+            path.strip_prefix("/lol-game-data/assets/")
+                .map(|s| format!("/lol-game-data/assets/{}", s.to_lowercase()))
+                .unwrap_or_else(|| path.to_string())
+        } else {
+            path.to_string()
+        };
+        let lcu_url = format!("https://127.0.0.1:{}{}", port, clean_path);
+        let auth = build_auth_header(&token);
 
-            if let Ok(resp) = lcu
-                .http_client
-                .get(&lcu_url)
-                .header("Authorization", auth)
-                .send()
-                .await
+        if let Ok(resp) = http_client
+            .get(&lcu_url)
+            .header("Authorization", auth)
+            .send()
+            .await
+        {
+            if resp.status().is_success() {
+                let content_type = resp
+                    .headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+                    .filter(|s| s.starts_with("image/"))
+                    .unwrap_or_else(|| guess_content_type(path));
+
+                if let Ok(bytes) = resp.bytes().await {
+                    return Ok(save_asset_and_build_url(path, &content_type, &bytes));
+                }
+            } else if resp.status().as_u16() == 404
+                && is_lcu_asset
+                && clean_path.contains("/assets/assets/")
             {
-                if resp.status().is_success() {
-                    let content_type = resp
-                        .headers()
-                        .get("content-type")
-                        .and_then(|v| v.to_str().ok())
-                        .map(|s| s.to_string())
-                        .filter(|s| s.starts_with("image/"))
-                        .unwrap_or_else(|| guess_content_type(path));
-
-                    if let Ok(bytes) = resp.bytes().await {
-                        return Ok(save_asset_and_build_url(path, &content_type, &bytes));
-                    }
-                } else if resp.status().as_u16() == 404
-                    && is_lcu_asset
-                    && clean_path.contains("/assets/assets/")
+                // 如果双重 assets/assets/ 404，尝试降级为单重 assets/ 再发一次请求
+                let retry_path = clean_path.replace("/assets/assets/", "/assets/");
+                let retry_url = format!("https://127.0.0.1:{}{}", port, retry_path);
+                let auth_retry = build_auth_header(&token);
+                if let Ok(retry_resp) = http_client
+                    .get(&retry_url)
+                    .header("Authorization", auth_retry)
+                    .send()
+                    .await
                 {
-                    // 如果双重 assets/assets/ 404，尝试降级为单重 assets/ 再发一次请求
-                    let retry_path = clean_path.replace("/assets/assets/", "/assets/");
-                    let retry_url = format!("https://127.0.0.1:{}{}", lcu.port, retry_path);
-                    let auth_retry = build_auth_header(&lcu.token);
-                    if let Ok(retry_resp) = lcu
-                        .http_client
-                        .get(&retry_url)
-                        .header("Authorization", auth_retry)
-                        .send()
-                        .await
-                    {
-                        if retry_resp.status().is_success() {
-                            let content_type = retry_resp
-                                .headers()
-                                .get("content-type")
-                                .and_then(|v| v.to_str().ok())
-                                .map(|s| s.to_string())
-                                .filter(|s| s.starts_with("image/"))
-                                .unwrap_or_else(|| guess_content_type(path));
+                    if retry_resp.status().is_success() {
+                        let content_type = retry_resp
+                            .headers()
+                            .get("content-type")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string())
+                            .filter(|s| s.starts_with("image/"))
+                            .unwrap_or_else(|| guess_content_type(path));
 
-                            if let Ok(bytes) = retry_resp.bytes().await {
-                                return Ok(save_asset_and_build_url(path, &content_type, &bytes));
-                            }
+                        if let Ok(bytes) = retry_resp.bytes().await {
+                            return Ok(save_asset_and_build_url(path, &content_type, &bytes));
                         }
                     }
                 }

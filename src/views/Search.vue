@@ -722,14 +722,6 @@ function getAugmentUrl(augmentId: number) {
   return "";
 }
 
-function cleanAugmentDesc(desc: string): string {
-  if (!desc) return "";
-  return desc
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .trim();
-}
-
 /** 海克斯强化数据来源（stats 或 participant 上均可能携带） */
 interface AugmentSource {
   augments?: number[];
@@ -812,7 +804,6 @@ const gameDetails = computed(() => {
       const augmentIds = extractAugmentIds(stats, p);
       const augmentIconUrls: string[] = [];
       const augmentNames: string[] = [];
-      const augmentDescs: string[] = [];
 
       for (const id of augmentIds) {
         const url = getAugmentUrl(id);
@@ -821,7 +812,6 @@ const gameDetails = computed(() => {
           const detail = gameDataAssets.value?.augments?.[id];
           const name = detail?.name?.trim() ? detail.name : "海克斯强化";
           augmentNames.push(name);
-          augmentDescs.push(cleanAugmentDesc(detail?.description ?? ""));
         }
       }
 
@@ -848,7 +838,6 @@ const gameDetails = computed(() => {
         win: stats.win,
         augmentIconUrls,
         augmentNames,
-        augmentDescs,
       };
 
       if (p.teamId === 100) {
@@ -1392,7 +1381,6 @@ function getQueueName(queueId: number, backendName: string): string {
                               </template>
                               <div class="augment-tooltip">
                                 <div class="augment-tooltip-name">{{ p.augmentNames?.[idx] || "海克斯强化" }}</div>
-                                <div v-if="p.augmentDescs?.[idx]" class="augment-tooltip-desc">{{ cleanAugmentDesc(p.augmentDescs[idx]) }}</div>
                               </div>
                             </n-tooltip>
                           </div>
@@ -2401,27 +2389,17 @@ function getQueueName(queueId: number, backendName: string): string {
   max-width: 280px;
   padding: 8px 10px;
   text-align: left;
-  border-radius: 6px;
-  background: rgba(20, 15, 32, 0.95);
-  border: 1px solid rgba(168, 85, 247, 0.45);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 12px rgba(147, 51, 234, 0.3);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
 }
 
 .augment-tooltip-name {
-  font-weight: 700;
-  font-size: 0.95rem;
-  color: #fde047;
-  letter-spacing: 0.3px;
-  margin-bottom: 6px;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
-}
-
-.augment-tooltip-desc {
-  font-size: 0.82rem;
-  color: #e2e8f0;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-color);
+  letter-spacing: 0.2px;
 }
 
 .row-items-grid {

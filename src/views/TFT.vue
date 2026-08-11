@@ -59,9 +59,9 @@ async function fetchClientVersion() {
 }
 
 watch(
-  () => store.isConnected,
-  (connected) => {
-    if (connected) {
+  () => [store.isConnected, store.currentPage],
+  ([connected, page]) => {
+    if (connected && page === "tft") {
       loadTftData();
       fetchClientVersion();
     }

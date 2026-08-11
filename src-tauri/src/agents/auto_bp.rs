@@ -184,16 +184,39 @@ async fn do_auto_swap(
 
     for swap in &session.pick_order_swaps {
         if swap.state == "RECEIVED" {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             log::info!("自动接受楼层交换: swapId={}", swap.id);
             let url = format!(
                 "/lol-champ-select/v1/session/swaps/pick-order/{}/accept",
                 swap.id
             );
-            if lcu_post(app_handle, &url).await {
-                // 重置选人状态，以便重新触发
-                selection.is_champion_picked_completed = false;
-            }
+
+            // 重置选人状态，以便重新触发
+            selection.is_champion_picked_completed = false;
+
+            // 递增全局任务版本，产生本次独占任务 ID（对齐 do_auto_complete）
+            let current_id = {
+                let state = app_handle.state::<crate::AppState>();
+                state
+                    .bp_task_id
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    + 1
+            };
+
+            // 延迟接受放入后台任务，不阻塞 BP 主循环（秒退/阶段变化时由版本号取消）
+            let app_handle = app_handle.clone();
+            crate::spawn_log_panic(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                {
+                    let state = app_handle.state::<crate::AppState>();
+                    if state.bp_task_id.load(std::sync::atomic::Ordering::SeqCst) != current_id {
+                        log::info!("后台交换接受任务已失效 (版本不匹配)，退出");
+                        return;
+                    }
+                }
+
+                lcu_post(&app_handle, &url).await;
+            });
             return;
         }
     }
@@ -213,10 +236,33 @@ async fn do_auto_trade(
 
     for trade in &session.trades {
         if trade.state == "RECEIVED" {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             log::info!("自动接受英雄交换: tradeId={}", trade.id);
             let url = format!("/lol-champ-select/v1/session/trades/{}/accept", trade.id);
-            lcu_post(app_handle, &url).await;
+
+            // 递增全局任务版本，产生本次独占任务 ID（对齐 do_auto_complete）
+            let current_id = {
+                let state = app_handle.state::<crate::AppState>();
+                state
+                    .bp_task_id
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    + 1
+            };
+
+            // 延迟接受放入后台任务，不阻塞 BP 主循环（秒退/阶段变化时由版本号取消）
+            let app_handle = app_handle.clone();
+            crate::spawn_log_panic(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                {
+                    let state = app_handle.state::<crate::AppState>();
+                    if state.bp_task_id.load(std::sync::atomic::Ordering::SeqCst) != current_id {
+                        log::info!("后台交易接受任务已失效 (版本不匹配)，退出");
+                        return;
+                    }
+                }
+
+                lcu_post(&app_handle, &url).await;
+            });
             return;
         }
     }
@@ -527,10 +573,6 @@ async fn do_auto_ban(
         .collect();
     candidates.retain(|c| !all_bans.contains(c));
 
-    if cfg.auto_ban_delay > 0.0 {
-        tokio::time::sleep(std::time::Duration::from_secs_f64(cfg.auto_ban_delay)).await;
-    }
-
     if cfg.pretend_ban {
         let intents: Vec<i32> = session
             .my_team
@@ -546,9 +588,37 @@ async fn do_auto_ban(
     }
 
     let champion_id = candidates[0];
-    log::info!("自动禁用英雄: {}", champion_id);
+    let action_id = action.id;
 
-    lcu_patch_action(app_handle, action.id, champion_id, true).await;
+    // 延迟禁人放入后台任务（版本号取消机制），不阻塞 BP 主循环
+    if cfg.auto_ban_delay > 0.0 {
+        let delay = cfg.auto_ban_delay;
+        let current_id = {
+            let state = app_handle.state::<crate::AppState>();
+            state
+                .bp_task_id
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1
+        };
+        let app_handle = app_handle.clone();
+        crate::spawn_log_panic(async move {
+            tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+
+            {
+                let state = app_handle.state::<crate::AppState>();
+                if state.bp_task_id.load(std::sync::atomic::Ordering::SeqCst) != current_id {
+                    log::info!("后台禁人任务已失效 (版本不匹配)，退出");
+                    return;
+                }
+            }
+
+            log::info!("自动禁用英雄: {}", champion_id);
+            lcu_patch_action(&app_handle, action_id, champion_id, true).await;
+        });
+    } else {
+        log::info!("自动禁用英雄: {}", champion_id);
+        lcu_patch_action(app_handle, action_id, champion_id, true).await;
+    }
 }
 
 // ─── 自动选人 ───

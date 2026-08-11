@@ -181,14 +181,6 @@ function getKdaClass(kda: string): string {
   return "kda-normal";
 }
 
-function cleanAugmentDesc(desc: string): string {
-  if (!desc) return "";
-  return desc
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .trim();
-}
-
 async function calculateRecentTeammates() {
   if (!summoner.value?.puuid || recentMatches.value.length === 0) {
     recentTeammates.value = [];
@@ -619,7 +611,6 @@ watch(
                 </template>
                 <div class="career-aug-tooltip">
                   <div class="career-aug-tooltip-name">{{ m.augmentNames?.[idx] || "海克斯强化" }}</div>
-                  <div v-if="m.augmentDescs?.[idx]" class="career-aug-tooltip-desc">{{ cleanAugmentDesc(m.augmentDescs[idx]) }}</div>
                 </div>
               </n-tooltip>
             </div>
@@ -1395,27 +1386,17 @@ watch(
   max-width: 280px;
   padding: 8px 10px;
   text-align: left;
-  border-radius: 6px;
-  background: rgba(20, 15, 32, 0.95);
-  border: 1px solid rgba(168, 85, 247, 0.45);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 12px rgba(147, 51, 234, 0.3);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
 }
 
 .career-aug-tooltip-name {
-  font-weight: 700;
-  font-size: 0.95rem;
-  color: #fde047;
-  letter-spacing: 0.3px;
-  margin-bottom: 6px;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
-}
-
-.career-aug-tooltip-desc {
-  font-size: 0.82rem;
-  color: #e2e8f0;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-color);
+  letter-spacing: 0.2px;
 }
 
 @keyframes fadeIn {

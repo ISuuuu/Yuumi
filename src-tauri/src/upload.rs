@@ -412,19 +412,21 @@ async fn fetch_or_cache_puuid(
         }
     }
 
-    // 从 LCU 获取
+    // 从 LCU 获取（锁内只提取连接参数，立即释放读锁）
     let state = app_handle.state::<crate::AppState>();
-    let lock = state.lcu_client.read().await;
-    let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+    let (port, token, http_client) = {
+        let lock = state.lcu_client.read().await;
+        let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
     let url = format!(
         "https://127.0.0.1:{}/lol-summoner/v1/current-summoner",
-        lcu.port
+        port
     );
-    let auth = crate::build_auth_header(&lcu.token);
+    let auth = crate::build_auth_header(&token);
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", auth)
         .send()
@@ -647,6 +649,18 @@ async fn post_payload_to_api(payload: &UploadPayload, upload_url: &str) -> Resul
                     } else {
                         last_err = "解析响应失败".to_string();
                     }
+                } else if resp.status().is_client_error() {
+                    // 4xx 客户端错误（参数/鉴权等）重试无意义，直接放弃
+                    log::warn!(
+                        "对局 {} 上传被拒绝: HTTP {}，不重试",
+                        game_id,
+                        resp.status()
+                    );
+                    return Err(format!(
+                        "对局 {} 上传失败: HTTP {} (客户端错误不重试)",
+                        game_id,
+                        resp.status()
+                    ));
                 } else {
                     last_err = format!("HTTP {}", resp.status());
                 }
@@ -704,14 +718,17 @@ fn extract_gameflow_game_id(data: &Value) -> Option<u64> {
 
 async fn fetch_gameflow_game_id(app_handle: &AppHandle) -> Result<Option<u64>, String> {
     let state = app_handle.state::<crate::AppState>();
-    let lock = state.lcu_client.read().await;
-    let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+    // 锁内只提取连接参数，立即释放读锁
+    let (port, token, http_client) = {
+        let lock = state.lcu_client.read().await;
+        let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
-    let url = format!("https://127.0.0.1:{}/lol-gameflow/v1/session", lcu.port);
-    let auth = crate::build_auth_header(&lcu.token);
+    let url = format!("https://127.0.0.1:{}/lol-gameflow/v1/session", port);
+    let auth = crate::build_auth_header(&token);
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", auth)
         .send()
@@ -732,17 +749,20 @@ async fn fetch_gameflow_game_id(app_handle: &AppHandle) -> Result<Option<u64>, S
 /// 获取最新一局的 gameId
 async fn fetch_latest_game_id(app_handle: &AppHandle, puuid: &str) -> Result<u64, String> {
     let state = app_handle.state::<crate::AppState>();
-    let lock = state.lcu_client.read().await;
-    let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+    // 锁内只提取连接参数，立即释放读锁
+    let (port, token, http_client) = {
+        let lock = state.lcu_client.read().await;
+        let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
     let url = format!(
         "https://127.0.0.1:{}/lol-match-history/v1/products/lol/{}/matches?begIndex=0&endIndex=1",
-        lcu.port, puuid
+        port, puuid
     );
-    let auth = crate::build_auth_header(&lcu.token);
+    let auth = crate::build_auth_header(&token);
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", auth)
         .send()
@@ -1363,47 +1383,62 @@ async fn batch_upload_by_ids(
         .as_ref()
         .map(|(_, puuid)| puuid.as_str());
 
-    // 获取英雄名称映射
+    // 获取英雄名称映射（Arc 共享，避免并发任务各自深拷贝）
     let champion_names = {
         let state = app_handle.state::<crate::AppState>();
         let gd = state.game_data.read().await;
-        gd.champions.clone()
+        Arc::new(gd.champions.clone())
     };
 
-    // 逐个获取对局详情并构建 payload
-    let mut payloads: Vec<UploadPayload> = Vec::new();
-    for &game_id in game_ids {
-        let detail_url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
-        match lcu_client
-            .get(&detail_url)
-            .header("Authorization", &auth)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => match resp.json::<GameDetail>().await {
-                Ok(detail) => {
-                    payloads.push(build_upload_payload(
-                        &detail,
-                        current_puuid,
-                        &champion_names,
-                    ));
+    // 并发获取对局详情并构建 payload（限流并发 10，避免请求风暴）
+    use futures_util::StreamExt;
+    let payloads: Vec<UploadPayload> = futures_util::stream::iter(game_ids.iter().copied())
+        .map(|game_id| {
+            let lcu_client = lcu_client.clone();
+            let auth = auth.clone();
+            let base = base.clone();
+            let current_puuid = current_puuid.map(str::to_owned);
+            let champion_names = champion_names.clone();
+            async move {
+                let detail_url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
+                match lcu_client
+                    .get(&detail_url)
+                    .header("Authorization", &auth)
+                    .send()
+                    .await
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        match resp.json::<GameDetail>().await {
+                            Ok(detail) => Some(build_upload_payload(
+                                &detail,
+                                current_puuid.as_deref(),
+                                &champion_names,
+                            )),
+                            Err(e) => {
+                                log::warn!("批量上传: 解析对局 {} 详情失败: {}", game_id, e);
+                                None
+                            }
+                        }
+                    }
+                    Ok(resp) => {
+                        log::warn!(
+                            "批量上传: 获取对局 {} 详情失败: HTTP {}",
+                            game_id,
+                            resp.status()
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        log::warn!("批量上传: 获取对局 {} 详情请求失败: {}", game_id, e);
+                        None
+                    }
                 }
-                Err(e) => {
-                    log::warn!("批量上传: 解析对局 {} 详情失败: {}", game_id, e);
-                }
-            },
-            Ok(resp) => {
-                log::warn!(
-                    "批量上传: 获取对局 {} 详情失败: HTTP {}",
-                    game_id,
-                    resp.status()
-                );
             }
-            Err(e) => {
-                log::warn!("批量上传: 获取对局 {} 详情请求失败: {}", game_id, e);
-            }
-        }
-    }
+        })
+        .buffer_unordered(10)
+        .filter_map(|x| async move { x })
+        .collect()
+        .await;
 
     if payloads.is_empty() {
         log::error!("批量上传: 全部 {} 场对局详情获取失败", game_ids.len());

@@ -73,17 +73,21 @@ impl LcuSummoner {
 pub async fn get_current_summoner(
     app_state: State<'_, AppState>,
 ) -> Result<SummonerDisplay, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
+    // 锁内只提取连接参数（http_client 克隆是 Arc 浅拷贝），立即释放读锁，
+    // 避免跨 HTTP await 持有锁阻塞 monitor 重连写锁
+    let (port, token, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
     let url = format!(
         "https://127.0.0.1:{}/lol-summoner/v1/current-summoner",
-        lcu.port
+        port
     );
-    let auth = build_auth_header(&lcu.token);
+    let auth = build_auth_header(&token);
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", auth)
         .send()

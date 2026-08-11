@@ -1,11 +1,12 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, Error as TlsError, SignatureScheme};
+use serde::Deserialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::watch;
@@ -199,13 +200,20 @@ async fn try_connect(
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
-    // rustls ClientConfig，NoVerifier = Python ssl=False
-    let tls_config = ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(NoVerifier))
-        .with_no_client_auth();
+    // rustls ClientConfig，NoVerifier = Python ssl=False（进程级复用，避免每次重建）
+    static TLS_CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
+    let tls_config = TLS_CONFIG
+        .get_or_init(|| {
+            Arc::new(
+                ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(Arc::new(NoVerifier))
+                    .with_no_client_auth(),
+            )
+        })
+        .clone();
 
-    let connector = Connector::Rustls(Arc::new(tls_config));
+    let connector = Connector::Rustls(tls_config);
 
     // Basic Auth header（对齐 Python: BasicAuth('riot', token)）
     let credentials = format!("riot:{}", token);
@@ -292,6 +300,12 @@ fn process_event(text: &str, app_handle: &AppHandle) {
         None => return,
     };
 
+    // 选人会话事件每秒推送多次，300ms 节流合并（置于 emit 之前），
+    // 前端 emit / Agent / bench / SignalR 全链路均针对最新状态即可，丢弃过密中间帧
+    if uri.starts_with("/lol-champ-select/v1/session") && !session_throttle_allowed() {
+        return;
+    }
+
     // 只广播前端关心的 URI（对齐 Python matchUri 的 uri 过滤）
     let should_emit = WATCHED_URIS.iter().any(|prefix| uri.starts_with(prefix));
     if should_emit {
@@ -299,19 +313,12 @@ fn process_event(text: &str, app_handle: &AppHandle) {
         let _ = app_handle.emit("lcu-ws-event", event_data.clone());
     }
 
-    // 选人会话事件每秒推送多次，300ms 节流合并，
-    // 后续 Agent / bench / SignalR 处理均针对最新状态即可，丢弃过密中间帧
-    if uri.starts_with("/lol-champ-select/v1/session") && !session_throttle_allowed() {
-        return;
-    }
-
     // ── 内部 Agent 转发 ──────────────────────────────────────────────────
     let state = app_handle.state::<crate::AppState>();
 
     if uri.starts_with("/lol-champ-select/v1/session") {
         if let Some(data) = event_data.get("data") {
-            match serde_json::from_value::<crate::agents::auto_bp::ChampSelectSession>(data.clone())
-            {
+            match crate::agents::auto_bp::ChampSelectSession::deserialize(data) {
                 Ok(session) => {
                     if let Err(e) = state.bp_session_tx.try_send(session) {
                         match e {
@@ -432,9 +439,7 @@ fn process_event(text: &str, app_handle: &AppHandle) {
 
     if uri.starts_with("/lol-matchmaking/v1/ready-check") {
         if let Some(data) = event_data.get("data") {
-            if let Ok(ready_check) =
-                serde_json::from_value::<crate::agents::auto_match::ReadyCheckData>(data.clone())
-            {
+            if let Ok(ready_check) = crate::agents::auto_match::ReadyCheckData::deserialize(data) {
                 if let Err(e) = state.gameflow_tx.try_send(
                     crate::agents::auto_match::GameflowEvent::ReadyCheck(ready_check),
                 ) {
@@ -446,9 +451,7 @@ fn process_event(text: &str, app_handle: &AppHandle) {
 
     if uri.starts_with("/lol-honor-v2/v1/ballot") {
         if let Some(data) = event_data.get("data") {
-            if let Ok(ballot) =
-                serde_json::from_value::<crate::agents::auto_match::HonorBallot>(data.clone())
-            {
+            if let Ok(ballot) = crate::agents::auto_match::HonorBallot::deserialize(data) {
                 if let Err(e) = state.gameflow_tx.try_send(
                     crate::agents::auto_match::GameflowEvent::HonorBallot(ballot),
                 ) {
@@ -460,9 +463,8 @@ fn process_event(text: &str, app_handle: &AppHandle) {
 
     if uri.starts_with("/lol-lobby/v2/received-invitations") {
         if let Some(data) = event_data.get("data") {
-            if let Ok(invitations) = serde_json::from_value::<
-                Vec<crate::agents::auto_match::ReceivedInvitation>,
-            >(data.clone())
+            if let Ok(invitations) =
+                Vec::<crate::agents::auto_match::ReceivedInvitation>::deserialize(data)
             {
                 if let Err(e) = state.gameflow_tx.try_send(
                     crate::agents::auto_match::GameflowEvent::ReceivedInvitations(invitations),
@@ -481,13 +483,13 @@ fn process_event(text: &str, app_handle: &AppHandle) {
         || uri == "/lol-champ-select/v1/session"
         || uri == "/lol-summoner/v1/current-summoner"
     {
-        let event_data_clone = event_data.clone();
+        // 仅提取一次 data 字段，避免对整个事件体克隆后再克隆 data 的双重深拷贝
+        let data = event_data
+            .get("data")
+            .unwrap_or(&serde_json::Value::Null)
+            .clone();
         let uri = uri.to_string();
         crate::spawn_log_panic(async move {
-            let data = event_data_clone
-                .get("data")
-                .unwrap_or(&serde_json::Value::Null)
-                .clone();
             if uri == "/lol-gameflow/v1/gameflow-phase" {
                 if let Some(phase) = data.as_str() {
                     let phase_name = match phase {

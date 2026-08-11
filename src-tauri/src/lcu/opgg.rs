@@ -13,6 +13,8 @@ const OPGG_CACHE_MAX_ENTRIES: usize = 100;
 const OPGG_CACHE_TTL: Duration = Duration::from_secs(600); // 10 分钟
 const OPGG_MAX_RETRIES: u32 = 3;
 const OPGG_RETRY_DELAY: Duration = Duration::from_millis(500);
+/// OP.GG 单次请求超时（境外服务常走代理，避免连接挂起导致前端无限转圈）
+const OPGG_TIMEOUT: Duration = Duration::from_secs(15);
 
 struct OpggCacheEntry {
     data: Value,
@@ -62,9 +64,11 @@ pub(crate) fn put_cached(key: String, data: Value) {
 
 /// 构建访问 OP.GG 的 HTTP 客户端（支持可选代理）
 fn build_opgg_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
-    let mut builder = reqwest::Client::builder().user_agent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    );
+    let mut builder = reqwest::Client::builder()
+        .timeout(OPGG_TIMEOUT)
+        .user_agent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        );
 
     if enable_proxy && !proxy_addr.is_empty() {
         let proxy_url = if proxy_addr.contains("://") {

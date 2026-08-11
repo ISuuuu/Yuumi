@@ -4,7 +4,6 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::MutexGuard;
 
 /// SQLite 数据库文件路径：<config_dir>/Yuumi/saved_players.db
 fn db_path() -> PathBuf {
@@ -78,10 +77,6 @@ pub fn init_db() -> rusqlite::Result<Connection> {
     );
 
     Ok(conn)
-}
-
-fn conn(state: &AppState) -> MutexGuard<'_, Connection> {
-    state.saved_db.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// 在阻塞线程池执行数据库闭包，避免 SQLite 同步 I/O 占用 tokio 工作线程。
@@ -202,59 +197,77 @@ fn row_to_encountered(row: &rusqlite::Row<'_>) -> rusqlite::Result<EncounteredGa
 
 // ─── 对局结束自动记录相遇 ───
 
-/// 记录一次对局相遇：upsert saved_player（更新 lastMetAt）+ 插入 encountered_games
-pub fn record_encounter(
+/// 记录对局相遇：批量 upsert saved_player（更新 lastMetAt）+ 插入 encountered_games。
+/// 全部玩家在单个 SQLite 事务中处理，由 with_db 调度到阻塞线程，避免同步 I/O 占用 tokio 工作线程。
+pub async fn record_encounters(
     state: &AppState,
-    player: &GamePlayerEntry,
-    self_puuid: &str,
+    players: Vec<GamePlayerEntry>,
+    self_puuid: String,
     game_id: i64,
-    queue_type: &str,
-) {
-    let conn = conn(state);
-    let ts = now();
+    queue_type: String,
+) -> usize {
+    with_db(state, move |conn| {
+        let ts = now();
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let mut recorded = 0;
 
-    // 主键含 region/rso_platform_id，若该玩家已存在则复用其值，
-    // 否则用 '' 作为新的占位，避免同一玩家因 region 不一致产生重复行
-    let (region, rso_platform_id): (String, String) = conn
-        .query_row(
-            "SELECT region, rso_platform_id FROM saved_players WHERE puuid = ?1 AND self_puuid = ?2",
-            params![player.puuid, self_puuid],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap_or((String::new(), String::new()));
+        for player in &players {
+            if player.puuid.is_empty() || player.puuid == self_puuid {
+                continue;
+            }
 
-    if let Err(e) = conn.execute(
-        "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
-         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9, ?9)
-         ON CONFLICT(puuid, self_puuid, region, rso_platform_id) DO UPDATE SET
-           summoner_name = CASE WHEN excluded.summoner_name = '' THEN saved_players.summoner_name ELSE excluded.summoner_name END,
-           profile_icon_id = CASE WHEN excluded.profile_icon_id = 0 THEN saved_players.profile_icon_id ELSE excluded.profile_icon_id END,
-           tag_line = CASE WHEN excluded.tag_line IS NULL OR excluded.tag_line = '' THEN saved_players.tag_line ELSE excluded.tag_line END,
-           champion_id = CASE WHEN excluded.champion_id = 0 THEN saved_players.champion_id ELSE excluded.champion_id END,
-           update_at = excluded.update_at,
-           last_met_at = excluded.last_met_at",
-        params![
-            player.puuid,
-            self_puuid,
-            region,
-            rso_platform_id,
-            player.summoner_name,
-            player.profile_icon_id,
-            player.tag_line,
-            player.champion_id,
-            ts
-        ],
-    ) {
+            // 主键含 region/rso_platform_id，若该玩家已存在则复用其值，
+            // 否则用 '' 作为新的占位，避免同一玩家因 region 不一致产生重复行
+            let (region, rso_platform_id): (String, String) = tx
+                .query_row(
+                    "SELECT region, rso_platform_id FROM saved_players WHERE puuid = ?1 AND self_puuid = ?2",
+                    params![player.puuid, self_puuid],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap_or((String::new(), String::new()));
+
+            tx.execute(
+                "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9, ?9)
+                 ON CONFLICT(puuid, self_puuid, region, rso_platform_id) DO UPDATE SET
+                   summoner_name = CASE WHEN excluded.summoner_name = '' THEN saved_players.summoner_name ELSE excluded.summoner_name END,
+                   profile_icon_id = CASE WHEN excluded.profile_icon_id = 0 THEN saved_players.profile_icon_id ELSE excluded.profile_icon_id END,
+                   tag_line = CASE WHEN excluded.tag_line IS NULL OR excluded.tag_line = '' THEN saved_players.tag_line ELSE excluded.tag_line END,
+                   champion_id = CASE WHEN excluded.champion_id = 0 THEN saved_players.champion_id ELSE excluded.champion_id END,
+                   update_at = excluded.update_at,
+                   last_met_at = excluded.last_met_at",
+                params![
+                    player.puuid,
+                    self_puuid,
+                    region,
+                    rso_platform_id,
+                    player.summoner_name,
+                    player.profile_icon_id,
+                    player.tag_line,
+                    player.champion_id,
+                    ts
+                ],
+            )
+            .map_err(|e| format!("记录相遇玩家失败: {}", e))?;
+
+            tx.execute(
+                "INSERT INTO encountered_games (game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at)
+                 VALUES (?1, ?2, ?3, '', '', ?4, ?5)",
+                params![game_id, player.puuid, self_puuid, queue_type, ts],
+            )
+            .map_err(|e| format!("记录相遇对局失败: {}", e))?;
+
+            recorded += 1;
+        }
+
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(recorded)
+    })
+    .await
+    .unwrap_or_else(|e| {
         log::error!("记录相遇玩家失败: {}", e);
-        return;
-    }
-    if let Err(e) = conn.execute(
-        "INSERT INTO encountered_games (game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at)
-         VALUES (?1, ?2, ?3, '', '', ?4, ?5)",
-        params![game_id, player.puuid, self_puuid, queue_type, ts],
-    ) {
-        log::error!("记录相遇对局失败: {}", e);
-    }
+        0
+    })
 }
 
 /// 查询带 tag 的玩家（选人阶段聊天提醒使用），返回 (puuid, tag)

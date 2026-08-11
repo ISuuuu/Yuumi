@@ -3,7 +3,7 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, Error as TlsError, SignatureScheme};
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::{
@@ -237,11 +237,7 @@ async fn try_connect(
 
     let tls_connector = if is_local {
         // localhost: LCU 使用自签名证书，需跳过验证
-        let tls_config = ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(NoVerifier))
-            .with_no_client_auth();
-        Some(Connector::Rustls(Arc::new(tls_config)))
+        Some(Connector::Rustls(local_tls_config()))
     } else {
         // 远程服务器: 使用正常 TLS 验证，不跳过证书检查
         None
@@ -255,13 +251,53 @@ async fn try_connect(
     Ok(ws_stream)
 }
 
+/// 已缓存的 SignalR 协商 HTTP 客户端（local/远程两态，进程级复用）
+struct NegotiateClientEntry {
+    is_local: bool,
+    client: reqwest::Client,
+}
+
+static NEGOTIATE_CLIENT: OnceLock<Mutex<Option<NegotiateClientEntry>>> = OnceLock::new();
+
+fn get_negotiate_client(is_local: bool) -> reqwest::Client {
+    let cache = NEGOTIATE_CLIENT.get_or_init(|| Mutex::new(None));
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(entry) = guard.as_ref() {
+        if entry.is_local == is_local {
+            return entry.client.clone();
+        }
+    }
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(is_local)
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_default();
+    *guard = Some(NegotiateClientEntry {
+        is_local,
+        client: client.clone(),
+    });
+    client
+}
+
+/// 本地 LCU 自签名证书 TLS 配置（进程级复用，避免重连时重建）
+fn local_tls_config() -> Arc<ClientConfig> {
+    static TLS_CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
+    TLS_CONFIG
+        .get_or_init(|| {
+            Arc::new(
+                ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(Arc::new(NoVerifier))
+                    .with_no_client_auth(),
+            )
+        })
+        .clone()
+}
+
 async fn negotiate(server_url: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let is_local = server_url.contains("127.0.0.1") || server_url.contains("localhost");
 
-    let http_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(is_local)
-        .timeout(std::time::Duration::from_secs(10))
-        .build()?;
+    let http_client = get_negotiate_client(is_local);
 
     let negotiate_url = format!("{}/lcuHub/negotiate?negotiateVersion=1", server_url);
     log::info!(
@@ -614,14 +650,17 @@ async fn send_report(
 
 async fn lcu_get(app_handle: &AppHandle, endpoint: &str) -> Result<Value, String> {
     let state = app_handle.state::<crate::AppState>();
-    let lock = state.lcu_client.read().await;
-    let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+    // 锁内只提取连接参数，立即释放读锁，避免跨 HTTP await 持有锁阻塞 monitor 重连写锁
+    let (port, token, http_client) = {
+        let lock = state.lcu_client.read().await;
+        let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
-    let url = format!("https://127.0.0.1:{}{}", lcu.port, endpoint);
-    let auth = crate::build_auth_header(&lcu.token);
+    let url = format!("https://127.0.0.1:{}{}", port, endpoint);
+    let auth = crate::build_auth_header(&token);
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", auth)
         .send()
@@ -648,17 +687,20 @@ pub async fn get_current_summoner_name() -> String {
 
 async fn query_current_summoner(app_handle: &AppHandle) -> Result<serde_json::Value, String> {
     let state = app_handle.state::<crate::AppState>();
-    let lock = state.lcu_client.read().await;
-    let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+    // 锁内只提取连接参数，立即释放读锁，避免跨 HTTP await 持有锁阻塞 monitor 重连写锁
+    let (port, token, http_client) = {
+        let lock = state.lcu_client.read().await;
+        let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
     let url = format!(
         "https://127.0.0.1:{}/lol-summoner/v1/current-summoner",
-        lcu.port
+        port
     );
-    let auth = crate::build_auth_header(&lcu.token);
+    let auth = crate::build_auth_header(&token);
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", auth)
         .send()

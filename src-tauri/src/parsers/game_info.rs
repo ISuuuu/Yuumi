@@ -146,14 +146,19 @@ async fn fetch_player_summary(
     let name = summoner.display_name.unwrap_or_default();
     let level = summoner.summoner_level.unwrap_or(0);
 
-    // 2. 获取段位信息
+    // 2+3. 段位与战绩请求互相独立，并发发出（rank ∥ matches）
     let rank_url = format!("{}/lol-ranked/v1/ranked-stats/{}", base, puuid);
-    let rank_info = match http
-        .get(&rank_url)
-        .header("Authorization", auth)
-        .send()
-        .await
-    {
+    let games_url = format!(
+        "{}/lol-match-history/v1/products/lol/{}/matches?begIndex=0&endIndex=11",
+        base, puuid
+    );
+
+    let (rank_resp, games_resp) = tokio::join!(
+        http.get(&rank_url).header("Authorization", auth).send(),
+        http.get(&games_url).header("Authorization", auth).send(),
+    );
+
+    let rank_info = match rank_resp {
         Ok(resp) => resp
             .json::<serde_json::Value>()
             .await
@@ -162,17 +167,7 @@ async fn fetch_player_summary(
         Err(_) => None,
     };
 
-    // 3. 获取战绩
-    let games_url = format!(
-        "{}/lol-match-history/v1/products/lol/{}/matches?begIndex=0&endIndex=11",
-        base, puuid
-    );
-    let games_info = match http
-        .get(&games_url)
-        .header("Authorization", auth)
-        .send()
-        .await
-    {
+    let games_info = match games_resp {
         Ok(resp) => resp.json::<LcuMatchHistoryResponse>().await.ok(),
         Err(_) => None,
     };

@@ -172,39 +172,37 @@ pub async fn get_openable_loots(
         candidates.push((loot_id.to_string(), name, count, tile_path));
     }
 
-    // 3. 并发拉取各箱子配方（避免 N 个箱子串行请求，战利品多时显著降低耗时）
+    // 3. 并发拉取各箱子配方（限流并发 10，避免战利品多时无界 spawn 造成请求风暴）
     let loots_arc = std::sync::Arc::new(loots);
     let loot_counts_arc = std::sync::Arc::new(loot_counts);
 
-    let mut tasks = Vec::new();
-    for (loot_id, name, count, tile_path) in candidates {
-        let http = http_client.clone();
-        let base = base.clone();
-        let auth = auth.clone();
-        let loots = loots_arc.clone();
-        let loot_counts = loot_counts_arc.clone();
-        tasks.push(tokio::spawn(async move {
-            fetch_openable_recipe(
-                &http,
-                &base,
-                &auth,
-                &loot_id,
-                &name,
-                count,
-                &tile_path,
-                &loot_counts,
-                &loots,
-            )
-            .await
-        }));
-    }
-
-    let mut result = Vec::new();
-    for handle in tasks {
-        if let Ok(Some(openable)) = handle.await {
-            result.push(openable);
-        }
-    }
+    use futures_util::StreamExt;
+    let result: Vec<OpenableLoot> = futures_util::stream::iter(candidates)
+        .map(|(loot_id, name, count, tile_path)| {
+            let http = http_client.clone();
+            let base = base.clone();
+            let auth = auth.clone();
+            let loots = loots_arc.clone();
+            let loot_counts = loot_counts_arc.clone();
+            async move {
+                fetch_openable_recipe(
+                    &http,
+                    &base,
+                    &auth,
+                    &loot_id,
+                    &name,
+                    count,
+                    &tile_path,
+                    &loot_counts,
+                    &loots,
+                )
+                .await
+            }
+        })
+        .buffer_unordered(10)
+        .filter_map(|x| async move { x })
+        .collect()
+        .await;
 
     Ok(result)
 }

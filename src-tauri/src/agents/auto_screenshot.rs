@@ -30,16 +30,19 @@ fn compare_names(name_a: &str, name_b: &str) -> bool {
 /// Fallback 方案：尝试从 LCU 接口获取当前登录召唤师的 displayName
 async fn get_summoner_name_from_lcu(app_handle: &AppHandle) -> Option<String> {
     let state = app_handle.state::<crate::AppState>();
-    let lcu_lock = state.lcu().await.ok()?;
-    let lcu = lcu_lock.as_ref()?;
+    // 锁内只提取连接参数，立即释放读锁，避免跨 HTTP await 持有锁阻塞 monitor 重连写锁
+    let (port, token, http_client) = {
+        let lcu_lock = state.lcu().await.ok()?;
+        let lcu = lcu_lock.as_ref()?;
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
     let url = format!(
         "https://127.0.0.1:{}/lol-summoner/v1/current-summoner",
-        lcu.port
+        port
     );
-    let auth = crate::build_auth_header(&lcu.token);
+    let auth = crate::build_auth_header(&token);
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", auth)
         .send()
@@ -182,11 +185,18 @@ pub fn start(app_handle: AppHandle) {
                                     }
                                 }
 
+                                // 获取用户配置（移出事件循环，每轮轮询只读一次，避免逐事件克隆 FunctionsConfig）
+                                let cfg = {
+                                    let state = app_handle.state::<crate::AppState>();
+                                    let lock = state.config.read().await;
+                                    lock.functions.clone()
+                                };
+
                                 for event in events_resp.Events {
                                     if event.EventID > last_processed_event_id.unwrap_or(-1) {
                                         last_processed_event_id = Some(event.EventID);
 
-                                        log::info!(
+                                        log::debug!(
                                             "收到局内新事件: ID={}, Name={}, Killer={:?}, LegendaryTo={:?}, Recipient={:?}, Streak={:?}",
                                             event.EventID,
                                             event.EventName,
@@ -195,13 +205,6 @@ pub fn start(app_handle: AppHandle) {
                                             event.Recipient,
                                             event.KillStreak
                                         );
-
-                                        // 获取用户配置
-                                        let cfg = {
-                                            let state = app_handle.state::<crate::AppState>();
-                                            let lock = state.config.read().await;
-                                            lock.functions.clone()
-                                        };
 
                                         if !cfg.enable_screenshot_on_multikill {
                                             continue;

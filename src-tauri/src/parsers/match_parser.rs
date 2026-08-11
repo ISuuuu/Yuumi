@@ -120,7 +120,6 @@ pub struct MatchDisplay {
     pub augment_ids: Vec<i32>,
     pub augment_icon_urls: Vec<String>,
     pub augment_names: Vec<String>,
-    pub augment_descs: Vec<String>,
 }
 
 // ─── 数据清洗 ───
@@ -150,14 +149,13 @@ fn extract_augment_ids(stats: &LcuMatchStats) -> Vec<i32> {
     ]))
 }
 
-/// 根据 ID 列表从资源表解析海克斯图标/名称/描述（名称为空时兜底"海克斯强化"）
+/// 根据 ID 列表从资源表解析海克斯图标/名称（名称为空时兜底"海克斯强化"）
 fn resolve_augment_details(
     ids: &[i32],
     assets: &crate::lcu::game_data::GameDataAssets,
-) -> (Vec<String>, Vec<String>, Vec<String>) {
+) -> (Vec<String>, Vec<String>) {
     let mut icon_urls = Vec::new();
     let mut names = Vec::new();
-    let mut descs = Vec::new();
     for &id in ids {
         if let Some(detail) = assets.augments.get(&id) {
             icon_urls.push(detail.icon_path.clone());
@@ -167,10 +165,9 @@ fn resolve_augment_details(
                 detail.name.clone()
             };
             names.push(name);
-            descs.push(detail.description.clone());
         }
     }
-    (icon_urls, names, descs)
+    (icon_urls, names)
 }
 
 impl LcuMatchGame {
@@ -231,8 +228,7 @@ impl LcuMatchGame {
             .collect();
 
         let augment_ids = extract_augment_ids(stats);
-        let (augment_icon_urls, augment_names, augment_descs) =
-            resolve_augment_details(&augment_ids, assets);
+        let (augment_icon_urls, augment_names) = resolve_augment_details(&augment_ids, assets);
 
         MatchDisplay {
             queue_id: self.queue_id,
@@ -268,7 +264,6 @@ impl LcuMatchGame {
             augment_ids,
             augment_icon_urls,
             augment_names,
-            augment_descs,
         }
     }
 }
@@ -497,8 +492,8 @@ pub async fn get_match_history(
     // 如果资源尚未加载完成，且 LCU 已连接，进行等待以防止解析出来的图片/装备路径为空（最多等 5 秒）
     crate::lcu::client::wait_for_game_data(app_state.inner()).await;
 
-    // 锁内快速克隆资源快照后立即释放，避免同步解析期间长时间占用读锁
-    let assets = app_state.game_data.read().await.clone();
+    // 直接持读锁解析（to_display 为纯内存转换，无 await），避免每次全量深克隆 GameDataAssets
+    let assets = app_state.game_data.read().await;
     let displays: Vec<MatchDisplay> = history
         .games
         .games
@@ -519,16 +514,17 @@ pub async fn get_match_history_sgp(
     end_index: u32,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<MatchDisplay>, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
+    // 锁内只提取连接参数，立即释放读锁，避免跨 SGP token 获取 + 15s 超时请求持有锁阻塞 monitor 重连写锁
+    let (port, token, server) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (lcu.port, lcu.token.clone(), lcu.server.clone())
+    };
 
     // 仅腾讯国服支持 SGP
-    let server = match &lcu.server {
-        Some(s) => s,
-        None => {
-            log::info!("无法获取服务器信息，跳过 SGP 战绩获取");
-            return Ok(Vec::new());
-        }
+    let Some(server) = server else {
+        log::info!("无法获取服务器信息，跳过 SGP 战绩获取");
+        return Ok(Vec::new());
     };
     let server_lower = server.to_lowercase();
     if !crate::lcu::sgp::is_tencent_server(&server_lower) {
@@ -536,10 +532,10 @@ pub async fn get_match_history_sgp(
         return Ok(Vec::new());
     }
 
-    let auth = build_auth_header(&lcu.token);
+    let auth = build_auth_header(&token);
 
     // ── 1. 获取 SGP accessToken（30 分钟缓存复用）与共享客户端 ──
-    let sgp_token = crate::lcu::sgp::get_sgp_token(lcu.port, &auth).await?;
+    let sgp_token = crate::lcu::sgp::get_sgp_token(port, &auth).await?;
 
     // ── 2. 构建 SGP base URL 与客户端 ──
     let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
@@ -715,8 +711,7 @@ pub async fn get_match_history_sgp(
                     .filter_map(|key| stats.get(key).and_then(|v| v.as_i64()).map(|id| id as i32)),
                 ),
         );
-        let (augment_icon_urls, augment_names, augment_descs) =
-            resolve_augment_details(&augment_ids, &assets);
+        let (augment_icon_urls, augment_names) = resolve_augment_details(&augment_ids, &assets);
 
         let kda = if deaths == 0 {
             "Perfect".to_string()
@@ -771,7 +766,6 @@ pub async fn get_match_history_sgp(
             augment_ids,
             augment_icon_urls,
             augment_names,
-            augment_descs,
         });
     }
 
@@ -988,12 +982,16 @@ pub async fn get_recent_teammates(
     puuid: String,
     app_state: State<'_, AppState>,
 ) -> Result<RecentTeammatesResponse, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().ok_or("LCU未连接")?;
-
-    let auth = build_auth_header(&lcu.token);
-    let base = format!("https://127.0.0.1:{}", lcu.port);
-    let http = lcu.http_client.clone();
+    // 锁内只提取连接参数，立即释放读锁，避免跨整个 fan-out await 持有锁阻塞 monitor 重连写锁
+    let (auth, base, http) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().ok_or("LCU未连接")?;
+        (
+            build_auth_header(&lcu.token),
+            format!("https://127.0.0.1:{}", lcu.port),
+            lcu.http_client.clone(),
+        )
+    };
 
     // 复用 LCU 并发信号量，限制同时查询的对局数量，避免打满 LCU
     let semaphore = {

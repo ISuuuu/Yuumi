@@ -28,11 +28,15 @@ pub async fn get_lcu_connection_info(
 /// 获取选人阶段所在队伍（蓝色方/红色方）
 #[tauri::command]
 pub async fn get_map_side(app_state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
-    let lock = app_state.lcu_client.read().await;
-    let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+    // 锁内只提取连接参数，立即释放读锁，避免跨最长约 2.4s 的重试循环持有锁阻塞 monitor 重连写锁
+    let (port, token, http_client) = {
+        let lock = app_state.lcu_client.read().await;
+        let lcu = lock.as_ref().ok_or("LCU 未连接")?;
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
-    let auth = crate::build_auth_header(&lcu.token);
-    let base = format!("https://127.0.0.1:{}", lcu.port);
+    let auth = crate::build_auth_header(&token);
+    let base = format!("https://127.0.0.1:{}", port);
 
     // 方法1: 从 pin-drop-notification 获取 mapSide
     // 重试最多 5 次因为选人会话初始化可能稍有延迟
@@ -41,8 +45,7 @@ pub async fn get_map_side(app_state: tauri::State<'_, AppState>) -> Result<Optio
         if i > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         }
-        match lcu
-            .http_client
+        match http_client
             .get(&map_side_url)
             .header("Authorization", &auth)
             .send()
@@ -66,8 +69,7 @@ pub async fn get_map_side(app_state: tauri::State<'_, AppState>) -> Result<Optio
     // 方法2: 读取选人会话来推断队伍
     // 如果 myTeam 的 `cellId` 小的一方为蓝色方
     let session_url = format!("{}/lol-champ-select/v1/session", base);
-    match lcu
-        .http_client
+    match http_client
         .get(&session_url)
         .header("Authorization", &auth)
         .send()

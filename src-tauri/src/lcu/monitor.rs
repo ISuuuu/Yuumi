@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::OnceLock;
 use sysinfo::System;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
@@ -17,6 +18,8 @@ fn sanitize_cmdline(cmd: &str) -> String {
 }
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// 稳定连接后退避到 5s，降低空转轮询开销
+const POLL_INTERVAL_STABLE: Duration = Duration::from_secs(5);
 /// Readiness probe: how many times to retry, and interval between retries.
 const PROBE_MAX_RETRIES: u32 = 5;
 const PROBE_INTERVAL: Duration = Duration::from_secs(2);
@@ -39,18 +42,25 @@ pub fn start(
         let mut consecutive_misses: u32 = 0;
         // 每 MISS_THRESHOLD 次连续未找到 LCU，做一次全量重建（兜底增量刷新的边界情况）
         const MISS_THRESHOLD: u32 = 10;
+        // 稳定连接后已删除诊断文件，避免每轮调用 remove_file
+        let mut debug_file_removed = false;
 
         loop {
-            sleep(POLL_INTERVAL).await;
+            sleep(if was_connected {
+                POLL_INTERVAL_STABLE
+            } else {
+                POLL_INTERVAL
+            })
+            .await;
             // 增量刷新进程列表，避免每 2 秒全量重建带来的 CPU 和内存开销；
             // 第二参数传 false 代表若进程在系统中已不存在，则从进程列表中移除，杜绝内存泄漏和死进程残留
             sys.refresh_processes(sysinfo::ProcessesToUpdate::All, false);
 
             // 优先尝试从 lockfile 获取，备用从进程参数获取，最后 WMIC 兜底（需管理员）
-            // WMIC 每轮同步 spawn 子进程开销大，仅在连续多轮未命中时降频调用
+            // WMIC 每轮 spawn 子进程开销大，仅在连续多轮未命中时降频调用
             let mut lcu_info = find_via_lockfile(&sys).or_else(|| find_via_cmdline(&sys));
             if lcu_info.is_none() && consecutive_misses.is_multiple_of(WMIC_THROTTLE_ROUNDS) {
-                lcu_info = find_via_wmic();
+                lcu_info = find_via_wmic().await;
             }
 
             // 连续未找到 LCU 达到阈值时，全量重建进程树作为兜底
@@ -103,9 +113,10 @@ pub fn start(
                         }
                     });
                 }
-            } else {
+            } else if !debug_file_removed {
                 let debug_path = std::env::temp_dir().join("yuumi_lcu_debug.txt");
                 let _ = std::fs::remove_file(&debug_path);
+                debug_file_removed = true;
             }
 
             // ── 阶段 1: 只读检查是否需要重连（不持有写锁）──
@@ -139,80 +150,50 @@ pub fn start(
                             // 不写入状态，下个轮询周期自动重试
                         } else {
                             // ── 阶段 3: 探测通过，构建客户端并提交状态 ──
-                            match reqwest::Client::builder()
-                                .danger_accept_invalid_certs(true)
-                                .no_proxy()
-                                .timeout(Duration::from_secs(10))
-                                .build()
                             {
-                                Ok(http_client) => {
-                                    let client = LcuClient {
+                                let http_client = shared_lcu_http_client().clone();
+                                let client = LcuClient {
+                                    pid,
+                                    port,
+                                    token: token.clone(),
+                                    server: server.clone(),
+                                    http_client,
+                                };
+                                // 写锁仅短暂持有
+                                {
+                                    let mut lock = lcu_state.write().await;
+                                    *lock = Some(client);
+                                }
+                                was_connected = true;
+
+                                // LCU 重启后旧 SGP token 失效，清空缓存
+                                super::sgp::clear_sgp_token_cache();
+
+                                // 异步加载游戏资源映射（不阻塞监控循环）
+                                let gd = game_data.clone();
+                                let app_handle_for_gd = app_handle.clone();
+                                let token_for_gd = token.clone();
+                                crate::spawn_log_panic(async move {
+                                    let tmp_lcu = LcuClient {
                                         pid,
                                         port,
-                                        token: token.clone(),
-                                        server: server.clone(),
-                                        http_client,
+                                        token: token_for_gd.clone(),
+                                        server: None,
+                                        http_client: shared_lcu_http_client().clone(),
                                     };
-                                    // 写锁仅短暂持有
-                                    {
-                                        let mut lock = lcu_state.write().await;
-                                        *lock = Some(client);
-                                    }
-                                    was_connected = true;
+                                    let assets =
+                                        super::game_data::fetch_game_data_assets(&tmp_lcu).await;
+                                    *gd.write().await = assets;
+                                    log::info!("游戏资源已更新");
+                                    let _ = app_handle_for_gd.emit("game-data-ready", ());
+                                });
 
-                                    // LCU 重启后旧 SGP token 失效，清空缓存
-                                    super::sgp::clear_sgp_token_cache();
+                                let _ = app_handle.emit(
+                                    "lcu-client-started",
+                                    serde_json::json!({ "port": port }),
+                                );
 
-                                    // 异步加载游戏资源映射（不阻塞监控循环）
-                                    let gd = game_data.clone();
-                                    let app_handle_for_gd = app_handle.clone();
-                                    let token_for_gd = token.clone();
-                                    crate::spawn_log_panic(async move {
-                                        match reqwest::Client::builder()
-                                            .danger_accept_invalid_certs(true)
-                                            .no_proxy()
-                                            .build()
-                                        {
-                                            Ok(http) => {
-                                                let tmp_lcu = LcuClient {
-                                                    pid,
-                                                    port,
-                                                    token: token_for_gd.clone(),
-                                                    server: None,
-                                                    http_client: http,
-                                                };
-                                                let assets =
-                                                    super::game_data::fetch_game_data_assets(
-                                                        &tmp_lcu,
-                                                    )
-                                                    .await;
-                                                *gd.write().await = assets;
-                                                log::info!("游戏资源已更新");
-                                                let _ =
-                                                    app_handle_for_gd.emit("game-data-ready", ());
-                                                // 后台补充 CDragon 海克斯名称/描述，不阻塞核心资源就绪
-                                                let gd_cdragon = gd.clone();
-                                                crate::spawn_log_panic(async move {
-                                                    super::game_data::merge_cdragon_augments_async(
-                                                        gd_cdragon,
-                                                    )
-                                                    .await;
-                                                });
-                                            }
-                                            Err(e) => log::error!("加载游戏资源失败: {}", e),
-                                        }
-                                    });
-
-                                    let _ = app_handle.emit(
-                                        "lcu-client-started",
-                                        serde_json::json!({ "port": port }),
-                                    );
-
-                                    super::ws::connect(app_handle.clone(), port, token);
-                                }
-                                Err(e) => {
-                                    log::error!("创建 HTTP 客户端失败: {}", e);
-                                }
+                                super::ws::connect(app_handle.clone(), port, token);
                             }
                         }
                     }
@@ -367,11 +348,10 @@ fn find_via_cmdline(sys: &System) -> Option<(u32, u16, String, Option<String>)> 
 }
 
 /// 方式三：通过 WMIC 获取命令行参数
-fn find_via_wmic() -> Option<(u32, u16, String, Option<String>)> {
+async fn find_via_wmic() -> Option<(u32, u16, String, Option<String>)> {
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        let output = std::process::Command::new("wmic")
+        let output = tokio::process::Command::new("wmic")
             .args([
                 "process",
                 "WHERE",
@@ -381,6 +361,7 @@ fn find_via_wmic() -> Option<(u32, u16, String, Option<String>)> {
             ])
             .creation_flags(0x08000000) // CREATE_NO_WINDOW: 阻止黑窗口/终端闪烁
             .output()
+            .await
             .ok()?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -467,6 +448,18 @@ fn extract_server_from_sys(sys: &System) -> Option<String> {
     None
 }
 
+/// 共享的 LCU HTTP 客户端（探测就绪与加载游戏资源复用，避免重复构建 TLS 连接池）
+fn shared_lcu_http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .no_proxy()
+            .build()
+            .unwrap_or_default()
+    })
+}
+
 /// 探测 LCU HTTP 服务器是否真正可接受请求。
 /// 在 monitor 写入共享状态之前调用，防止在服务器尚未就绪时触发前端 API 调用。
 /// 最多重试 `PROBE_MAX_RETRIES` 次，间隔 `PROBE_INTERVAL`。
@@ -474,11 +467,7 @@ async fn probe_lcu_readiness(port: u16, token: &str) -> Result<(), String> {
     let auth = crate::build_auth_header(token);
     let url = format!("https://127.0.0.1:{}/system/v1/builds", port);
 
-    let http = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .no_proxy()
-        .build()
-        .map_err(|e| format!("创建探测 HTTP 客户端失败: {}", e))?;
+    let http = shared_lcu_http_client();
 
     for attempt in 1..=PROBE_MAX_RETRIES {
         match http

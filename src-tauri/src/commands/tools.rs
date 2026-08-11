@@ -2,6 +2,8 @@ use crate::config::WEGAME_MARKER;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 use tauri::window::Effect;
 use tauri::Manager;
 
@@ -474,20 +476,22 @@ pub async fn launch_lol_client(
     app_state: tauri::State<'_, AppState>,
     path: Option<String>,
 ) -> Result<(), String> {
-    // 先检查是否已有客户端在运行
-    {
+    // 先检查是否已有客户端在运行（进程扫描为同步阻塞操作，放入阻塞线程池）
+    let already_running = tokio::task::spawn_blocking(|| {
         use sysinfo::System;
         let mut sys = System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        let already_running = sys.processes().values().any(|p| {
+        sys.processes().values().any(|p| {
             p.name()
                 .to_string_lossy()
                 .eq_ignore_ascii_case("leagueclientux.exe")
-        });
-        if already_running {
-            log::info!("客户端已在运行，跳过启动");
-            return Ok(());
-        }
+        })
+    })
+    .await
+    .map_err(|e| format!("进程扫描任务异常终止: {}", e))?;
+    if already_running {
+        log::info!("客户端已在运行，跳过启动");
+        return Ok(());
     }
 
     // 智能探测客户端执行文件的辅助函数
@@ -642,6 +646,49 @@ pub async fn show_bench_overlay_window(
     Ok(())
 }
 
+/// GitHub 请求客户端（代理配置不变时进程级复用，变更时才重建）
+struct GhClientEntry {
+    enable_proxy: bool,
+    proxy_addr: String,
+    client: reqwest::Client,
+}
+
+static GITHUB_CLIENT: OnceLock<Mutex<Option<GhClientEntry>>> = OnceLock::new();
+
+fn get_github_client(enable_proxy: bool, proxy_addr: &str) -> reqwest::Client {
+    let cache = GITHUB_CLIENT.get_or_init(|| Mutex::new(None));
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(entry) = guard.as_ref() {
+        if entry.enable_proxy == enable_proxy && entry.proxy_addr == proxy_addr {
+            return entry.client.clone();
+        }
+    }
+
+    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(15));
+    if enable_proxy && !proxy_addr.is_empty() {
+        let proxy_url = if proxy_addr.contains("://") {
+            proxy_addr.to_string()
+        } else {
+            format!("http://{}", proxy_addr)
+        };
+        match reqwest::Proxy::all(&proxy_url) {
+            Ok(proxy) => {
+                builder = builder.proxy(proxy);
+                log::info!("[fetch_github_text] 已启用 GitHub 代理: {proxy_url}");
+            }
+            Err(e) => log::warn!("[fetch_github_text] 代理地址解析失败，将直连: {e}"),
+        }
+    }
+
+    let client = builder.build().unwrap_or_else(|_| reqwest::Client::new());
+    *guard = Some(GhClientEntry {
+        enable_proxy,
+        proxy_addr: proxy_addr.to_string(),
+        client: client.clone(),
+    });
+    client
+}
+
 /// 通过配置的 GitHub HTTP 代理请求远程文本内容（仅限 GitHub 域名，用于公告/版本历史拉取）
 #[tauri::command]
 pub async fn fetch_github_text(app: tauri::AppHandle, url: String) -> Result<String, String> {
@@ -664,25 +711,8 @@ pub async fn fetch_github_text(app: tauri::AppHandle, url: String) -> Result<Str
         )
     };
 
-    let mut builder = reqwest::Client::builder();
-    if enable_proxy && !proxy_addr.is_empty() {
-        let proxy_url = if proxy_addr.contains("://") {
-            proxy_addr.clone()
-        } else {
-            format!("http://{}", proxy_addr)
-        };
-        match reqwest::Proxy::all(&proxy_url) {
-            Ok(proxy) => {
-                builder = builder.proxy(proxy);
-                log::info!("[fetch_github_text] 已启用 GitHub 代理: {proxy_url}");
-            }
-            Err(e) => log::warn!("[fetch_github_text] 代理地址解析失败，将直连: {e}"),
-        }
-    }
-
-    let client = builder
-        .build()
-        .map_err(|e| format!("HTTP 客户端初始化失败: {e}"))?;
+    // 复用进程级缓存的客户端（代理配置不变时不重建，避免每次请求都新建）
+    let client = get_github_client(enable_proxy, &proxy_addr);
     let resp = client
         .get(&url)
         .header("User-Agent", "Yuumi/1.0")

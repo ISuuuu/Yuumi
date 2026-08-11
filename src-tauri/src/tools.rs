@@ -21,11 +21,16 @@ pub async fn create_5v5_practice_lobby(
     params: CreateLobbyParams,
     app_state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
+    // 锁内只提取连接参数（http_client 克隆是 Arc 浅拷贝），立即释放读锁，
+    // 避免跨 HTTP await 持有锁阻塞 monitor 重连写锁
+    let (port, token, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
-    let url = format!("https://127.0.0.1:{}/lol-lobby/v1/lobby", lcu.port);
-    let auth = build_auth_header(&lcu.token);
+    let url = format!("https://127.0.0.1:{}/lol-lobby/v1/lobby", port);
+    let auth = build_auth_header(&token);
 
     let body = serde_json::json!({
         "customGameLobby": {
@@ -44,8 +49,7 @@ pub async fn create_5v5_practice_lobby(
         "isCustom": true
     });
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .post(&url)
         .header("Authorization", auth)
         .json(&body)
@@ -66,16 +70,19 @@ pub async fn create_5v5_practice_lobby(
 /// 逻辑：先 reroll，再从 bench 换回之前暂存的英雄。
 #[tauri::command]
 pub async fn aram_reroll_and_swap_back(app_state: State<'_, AppState>) -> Result<String, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
+    // 锁内只提取连接参数，立即释放读锁，避免跨多个 HTTP await 持有锁阻塞 monitor 重连写锁
+    let (port, token, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
-    let auth = build_auth_header(&lcu.token);
-    let base = format!("https://127.0.0.1:{}", lcu.port);
+    let auth = build_auth_header(&token);
+    let base = format!("https://127.0.0.1:{}", port);
 
     // 第一步：获取当前选择的英雄 ID
     let sel_url = format!("{}/lol-champ-select/v1/session/my-selection", base);
-    let sel_resp = lcu
-        .http_client
+    let sel_resp = http_client
         .get(&sel_url)
         .header("Authorization", &auth)
         .send()
@@ -94,8 +101,7 @@ pub async fn aram_reroll_and_swap_back(app_state: State<'_, AppState>) -> Result
 
     // 第二步：reroll
     let reroll_url = format!("{}/lol-champ-select/v1/session/my-selection/reroll", base);
-    let reroll_resp = lcu
-        .http_client
+    let reroll_resp = http_client
         .post(&reroll_url)
         .header("Authorization", &auth)
         .send()
@@ -111,8 +117,7 @@ pub async fn aram_reroll_and_swap_back(app_state: State<'_, AppState>) -> Result
         "{}/lol-champ-select/v1/session/bench/swap/{}",
         base, original_champion
     );
-    let swap_resp = lcu
-        .http_client
+    let swap_resp = http_client
         .post(&swap_url)
         .header("Authorization", &auth)
         .send()
@@ -222,17 +227,20 @@ pub async fn get_champion_skins(
     champion_id: i32,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<SkinEntry>, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
-    let auth = build_auth_header(&lcu.token);
-    let base = format!("https://127.0.0.1:{}", lcu.port);
+    // 锁内只提取连接参数，立即释放读锁，避免跨 HTTP await 持有锁阻塞 monitor 重连写锁
+    let (port, token, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
+    let auth = build_auth_header(&token);
+    let base = format!("https://127.0.0.1:{}", port);
 
     let url = format!(
         "{}/lol-game-data/assets/v1/champions/{}.json",
         base, champion_id
     );
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", &auth)
         .send()
@@ -365,14 +373,17 @@ pub async fn open_log_folder(app: tauri::AppHandle) -> Result<String, String> {
 /// 获取当前 LCU 客户端缩放比例（用于窗口修复）
 #[tauri::command]
 pub async fn get_lcu_zoom(app_state: State<'_, AppState>) -> Result<f64, String> {
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
+    // 锁内只提取连接参数，立即释放读锁，避免跨 HTTP await 持有锁阻塞 monitor 重连写锁
+    let (port, token, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
 
-    let url = format!("https://127.0.0.1:{}/riotclient/zoom-scale", lcu.port);
-    let auth = build_auth_header(&lcu.token);
+    let url = format!("https://127.0.0.1:{}/riotclient/zoom-scale", port);
+    let auth = build_auth_header(&token);
 
-    let resp = lcu
-        .http_client
+    let resp = http_client
         .get(&url)
         .header("Authorization", auth)
         .send()
@@ -391,30 +402,38 @@ pub async fn get_lcu_zoom(app_state: State<'_, AppState>) -> Result<f64, String>
 /// 通过系统命令强制重新设置窗口属性。
 #[tauri::command]
 pub async fn fix_lcu_window(app_state: State<'_, AppState>) -> Result<String, String> {
-    // 获取当前缩放比例
-    let zoom = {
-        let lock = app_state.lcu().await?;
-        let lcu = lock.as_ref().unwrap();
-        let url = format!("https://127.0.0.1:{}/riotclient/zoom-scale", lcu.port);
-        let auth = build_auth_header(&lcu.token);
-        let resp = lcu
-            .http_client
+    // 获取当前缩放比例（锁内只提取连接参数，立即释放读锁）
+    let (pid, zoom) = {
+        let (pid, port, token, http_client) = {
+            let lock = app_state.lcu().await?;
+            let lcu = lock.as_ref().unwrap();
+            (
+                lcu.pid,
+                lcu.port,
+                lcu.token.clone(),
+                lcu.http_client.clone(),
+            )
+        };
+        let url = format!("https://127.0.0.1:{}/riotclient/zoom-scale", port);
+        let auth = build_auth_header(&token);
+        let resp = http_client
             .get(&url)
             .header("Authorization", auth)
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        if resp.status().is_success() {
+        let zoom = if resp.status().is_success() {
             resp.json::<f64>().await.map_err(|e| e.to_string())?
         } else {
             return Err(format!("获取缩放失败: HTTP {}", resp.status()));
-        }
+        };
+        (pid, zoom)
     };
 
     // 通过 Win32 API 直接操作窗口，替代旧的 PowerShell 脚本方案
     #[cfg(target_os = "windows")]
     {
-        fix_lcu_window_win32(zoom)
+        fix_lcu_window_win32(zoom, pid)
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -424,7 +443,7 @@ pub async fn fix_lcu_window(app_state: State<'_, AppState>) -> Result<String, St
 }
 
 #[cfg(target_os = "windows")]
-fn fix_lcu_window_win32(zoom: f64) -> Result<String, String> {
+fn fix_lcu_window_win32(zoom: f64, target_pid: u32) -> Result<String, String> {
     use std::ffi::c_void;
     use std::ptr;
 
@@ -460,6 +479,10 @@ fn fix_lcu_window_win32(zoom: f64) -> Result<String, String> {
         };
 
         if hwnd.is_null() {
+            // 未直接命中 RiotWindow 时，按已知 pid 枚举窗口定位（复用 AppState 中的 pid，免全量进程扫描）
+            if target_pid == 0 {
+                return Err("未找到 LCU 窗口".to_string());
+            }
             struct EnumData {
                 target_pid: u32,
                 hwnd: *mut c_void,
@@ -477,26 +500,12 @@ fn fix_lcu_window_win32(zoom: f64) -> Result<String, String> {
                 }
             }
 
-            let target_pid = {
-                let sys = sysinfo::System::new_all();
-                sys.processes().iter().find_map(|(pid, process)| {
-                    let name = process.name().to_string_lossy().to_lowercase();
-                    if name == "leagueclientux.exe" || name == "leagueclientux" {
-                        Some(pid.as_u32())
-                    } else {
-                        None
-                    }
-                })
+            let mut data = EnumData {
+                target_pid,
+                hwnd: ptr::null_mut(),
             };
-
-            if let Some(pid) = target_pid {
-                let mut data = EnumData {
-                    target_pid: pid,
-                    hwnd: ptr::null_mut(),
-                };
-                EnumWindows(Some(enum_callback), (&mut data as *mut EnumData).cast());
-                hwnd = data.hwnd;
-            }
+            EnumWindows(Some(enum_callback), (&mut data as *mut EnumData).cast());
+            hwnd = data.hwnd;
         }
 
         if hwnd.is_null() {
@@ -579,7 +588,7 @@ pub async fn set_game_settings_readonly(
 
 // ─── OP.GG MCP API - 云顶之弈热门阵容 ───
 
-/// 附加羁绊/英雄名称/图标映射到 MCP 阵容数据（每次都重新构建，避免缓存里残留错误 URL）
+/// 附加羁绊/英雄名称/图标映射到 MCP 阵容数据（fetch_tft_meta_maps 内部有 Value 形态缓存，命中时仅浅克隆）
 async fn attach_tft_meta_maps(parsed: &mut serde_json::Value) {
     // 映射字典不依赖 LCU 客户端（走内存/磁盘/CDragon 缓存），无需持锁
     let meta_maps = crate::parsers::tft::fetch_tft_meta_maps(None).await;
@@ -609,7 +618,7 @@ pub async fn fetch_tft_meta_decks(
 ) -> Result<serde_json::Value, String> {
     let cache_key = "tft_meta_decks".to_string();
 
-    // 尝试内存缓存（阵容本体可复用，但图标映射每次重新附加）
+    // 尝试内存缓存（阵容本体与图标映射均有独立缓存）
     if let Some(mut parsed) = crate::lcu::opgg::get_cached(&cache_key) {
         attach_tft_meta_maps(&mut parsed).await;
         return Ok(parsed);
@@ -695,15 +704,23 @@ pub async fn spectate_directly(
         return Err("请输入召唤师名称".to_string());
     }
 
-    let lock = app_state.lcu().await?;
-    let lcu = lock.as_ref().unwrap();
-    let auth = build_auth_header(&lcu.token);
-    let lcu_base = format!("https://127.0.0.1:{}", lcu.port);
+    // 锁内只提取连接参数（http_client 克隆是 Arc 浅拷贝），立即释放读锁，
+    // 避免跨多个 HTTP await（含最长 15s 超时的 SGP 请求）持有锁阻塞 monitor 重连写锁
+    let (port, token, http_client, server) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().unwrap();
+        (
+            lcu.port,
+            lcu.token.clone(),
+            lcu.http_client.clone(),
+            lcu.server.clone(),
+        )
+    };
+    let auth = build_auth_header(&token);
+    let lcu_base = format!("https://127.0.0.1:{}", port);
 
     // ── 1. 获取大区标识 ──
-    let server = lcu
-        .server
-        .as_ref()
+    let server = server
         .ok_or_else(|| "无法获取大区信息（--rso_platform_id），请重启客户端后重试".to_string())?;
     let server_lower = server.to_lowercase();
 
@@ -716,8 +733,7 @@ pub async fn spectate_directly(
 
     // ── 2. 通过 LCU 获取召唤师 puuid ──
     let summoner_url = format!("{}/lol-summoner/v1/summoners", lcu_base);
-    let summoner_resp = lcu
-        .http_client
+    let summoner_resp = http_client
         .get(&summoner_url)
         .header("Authorization", &auth)
         .query(&[("name", &name)])
@@ -744,7 +760,7 @@ pub async fn spectate_directly(
         .to_string();
 
     // ── 3. 获取 SGP accessToken（30 分钟缓存复用）与共享客户端 ──
-    let sgp_token = crate::lcu::sgp::get_sgp_token(lcu.port, &auth).await?;
+    let sgp_token = crate::lcu::sgp::get_sgp_token(port, &auth).await?;
 
     // ── 4. 构建 SGP base URL 并请求观战凭据 ──
     let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
@@ -861,7 +877,7 @@ pub async fn spectate_directly(
             &format!("{}:{}", observer_ip, observer_port),
             encryption_key,
             &game_id.to_string(),
-            server,
+            &server,
         ])
         .current_dir(&game_dir)
         .spawn()

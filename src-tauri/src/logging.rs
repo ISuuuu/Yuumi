@@ -137,8 +137,8 @@ impl RotatingFileWriter {
         );
 
         if let Some(ref mut f) = self.file {
+            // 不做每行 flush（避免每条日志一次磁盘 fsync），崩溃时丢弃尾部日志可接受
             f.write_all(msg.as_bytes())?;
-            f.flush()?;
             self.current_size += msg.len() as u64;
         }
 
@@ -199,13 +199,12 @@ impl Log for Logger {
 /// - 日志文件：`<exe_dir>/log/yuumi_2026-06-25.log`，超过 2MB 后 `yuumi_2026-06-25-1.log`
 /// - 日志内容：`2026-06-25 11:55:26.123 [INFO ] module:42 - message`
 /// - Debug 模式下同时输出到 stderr
-/// - log_level: 20=Debug, 30=Warn, 40=Info
+/// - log_level: 0=Info(默认), 2=Error
 pub fn init(log_level: u32) {
     let level = match log_level {
-        0 | 10 => LevelFilter::Debug,
-        1 | 20 | 30 | 40 => LevelFilter::Info,
+        0 | 10 | 20 | 30 | 40 => LevelFilter::Info,
         2 => LevelFilter::Error,
-        _ => LevelFilter::Debug, // Default to Debug as requested
+        _ => LevelFilter::Info, // 默认 Info（原为 Debug）
     };
 
     let log_dir = std::env::current_exe()
