@@ -9,12 +9,9 @@ pub const CONFIG_VERSION: u32 = 2;
 /// 真实路径不可能恰好等于该字符串，可作为安全的判别值。
 pub const WEGAME_MARKER: &str = "WeGame";
 
-/// 获取配置文件路径: %APPDATA%/Yuumi/config.json
+/// 获取配置文件路径: %APPDATA%/Yuumi/config.json（便携版为 exe 旁 data/config.json）
 fn config_path() -> PathBuf {
-    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("Yuumi");
-    path.push("config.json");
-    path
+    crate::runtime::app_data_dir().join("config.json")
 }
 
 fn default_config_version() -> u32 {

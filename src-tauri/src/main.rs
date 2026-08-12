@@ -2,6 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // 便携模式识别与数据目录解析：必须在一切逻辑（尤其 config 加载）之前
+    yuumi_lib::runtime::init();
+
     // 在任何 TLS 连接之前安装 ring 作为全局 rustls CryptoProvider，
     // 避免 ring 与 aws-lc-rs 共存时 rustls 无法自动选择而 panic。
     rustls::crypto::ring::default_provider()

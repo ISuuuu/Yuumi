@@ -100,6 +100,13 @@ Yuumi/
 | Functions       | 自动化流程开关（BP/匹配/重连/荣誉/邀请/上传/多杀截图等）+ 候选列表                  |
 | Other           | 公告记录、搜索历史                                                                  |
 
+## 便携版
+
+每次发版同时发布 `*_portable.zip`（绿色版，解压即用）：
+
+- 通过 exe 同目录的 `portable.flag` 标记识别，配置文件/数据库/缓存/WebView 数据均隔离到 `data/` 目录，可整体拷贝迁移，与安装版互不干扰
+- **不支持自动更新**，升级请到 [GitHub Releases](https://github.com/ISuuuu/Yuumi/releases/latest) 手动下载新版 zip 覆盖
+
 ## 致谢
 
 - [Seraphine](https://github.com/Zzaphkiel/Seraphine) — 原版 Python 实现

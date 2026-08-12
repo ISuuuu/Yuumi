@@ -3,14 +3,10 @@ use crate::AppState;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 
-/// SQLite 数据库文件路径：<config_dir>/Yuumi/saved_players.db
-fn db_path() -> PathBuf {
-    let mut p = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    p.push("Yuumi");
-    p.push("saved_players.db");
-    p
+/// SQLite 数据库文件路径：<data_dir>/saved_players.db
+fn db_path() -> std::path::PathBuf {
+    crate::runtime::app_data_dir().join("saved_players.db")
 }
 
 /// 打开（必要时创建）数据库并建表

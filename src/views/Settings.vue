@@ -107,6 +107,9 @@ async function fetchReleaseHistory() {
 // 手动检查更新状态
 const checkingUpdate = ref(false);
 
+// 是否为便携版（便携版不支持自动更新）
+const isPortable = ref(false);
+
 async function manualCheckUpdate() {
   if (checkingUpdate.value) return;
   checkingUpdate.value = true;
@@ -123,6 +126,13 @@ async function manualCheckUpdate() {
   } finally {
     checkingUpdate.value = false;
   }
+}
+
+/** 便携版：跳转 GitHub Releases 手动下载新版 */
+function goToReleases() {
+  openUrl("https://github.com/ISuuuu/Yuumi/releases/latest").catch(
+    (err: any) => console.error("打开 Releases 页面失败:", err),
+  );
 }
 
 const { showToast } = useToast();
@@ -163,6 +173,13 @@ onMounted(async () => {
     appVersion.value = await getVersion();
   } catch (e) {
     console.warn("获取版本号失败:", e);
+  }
+
+  // 识别便携版（便携版不支持自动更新，界面隐藏更新入口）
+  try {
+    isPortable.value = await invoke<boolean>("is_portable");
+  } catch (e) {
+    console.warn("识别便携版失败:", e);
   }
 
   // 预取版本更新历史
@@ -1281,61 +1298,98 @@ function applyThemeMode(mode: string) {
       <div class="card-item border-bottom">
         <div class="card-left">
           <h3 class="card-title">{{ $t("settings.checkUpdateTitle") }}</h3>
-          <span class="card-desc">{{ $t("settings.checkUpdateDesc") }}</span>
+          <span class="card-desc">
+            {{
+              isPortable
+                ? $t("settings.portableUpdateDesc")
+                : $t("settings.checkUpdateDesc")
+            }}
+          </span>
         </div>
         <div class="card-right" style="flex-shrink: 0; gap: 10px">
-          <n-button
-            size="small"
-            :disabled="checkingUpdate"
-            @click="manualCheckUpdate"
-            :title="
-              checkingUpdate
-                ? $t('settings.checkingUpdate')
-                : $t('settings.checkUpdateBtn')
-            "
-          >
-            <template #icon>
-              <svg
-                v-if="!checkingUpdate"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                width="13"
-                height="13"
-              >
-                <path d="M21 2v6h-6" />
-                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-                <path d="M3 22v-6h6" />
-                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-              </svg>
-              <svg
-                v-else
-                class="spin"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                width="13"
-                height="13"
-              >
-                <path
-                  d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"
-                />
-              </svg>
-            </template>
-            {{
-              checkingUpdate
-                ? $t("settings.checkingUpdate")
-                : $t("settings.checkUpdateBtn")
-            }}
-          </n-button>
-          <n-switch
-            v-model:value="config.General.EnableCheckUpdate"
-            @update:value="autoSave"
-          />
+          <!-- 便携版：不支持自动更新，引导手动下载 -->
+          <template v-if="isPortable">
+            <n-button
+              size="small"
+              type="primary"
+              ghost
+              @click="goToReleases"
+              :title="$t('settings.goToReleases')"
+            >
+              <template #icon>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="13"
+                  height="13"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              </template>
+              {{ $t("settings.goToReleases") }}
+            </n-button>
+          </template>
+          <!-- 安装版：检查更新按钮 + 开关 -->
+          <template v-else>
+            <n-button
+              size="small"
+              :disabled="checkingUpdate"
+              @click="manualCheckUpdate"
+              :title="
+                checkingUpdate
+                  ? $t('settings.checkingUpdate')
+                  : $t('settings.checkUpdateBtn')
+              "
+            >
+              <template #icon>
+                <svg
+                  v-if="!checkingUpdate"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="13"
+                  height="13"
+                >
+                  <path d="M21 2v6h-6" />
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                  <path d="M3 22v-6h6" />
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                </svg>
+                <svg
+                  v-else
+                  class="spin"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  width="13"
+                  height="13"
+                >
+                  <path
+                    d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"
+                  />
+                </svg>
+              </template>
+              {{
+                checkingUpdate
+                  ? $t("settings.checkingUpdate")
+                  : $t("settings.checkUpdateBtn")
+              }}
+            </n-button>
+            <n-switch
+              v-model:value="config.General.EnableCheckUpdate"
+              @update:value="autoSave"
+            />
+          </template>
         </div>
       </div>
 

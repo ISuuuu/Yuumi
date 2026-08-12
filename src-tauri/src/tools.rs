@@ -326,10 +326,7 @@ pub async fn fetch_opgg_data(
 /// 清除本地游戏资源缓存（头像、装备、技能、符文、强化图标）
 #[tauri::command]
 pub async fn clear_game_cache() -> Result<String, String> {
-    let cache_dir = dirs::config_dir()
-        .ok_or("无法获取 AppData 路径")?
-        .join("Yuumi")
-        .join("cache");
+    let cache_dir = crate::runtime::app_data_dir().join("cache");
 
     if !cache_dir.exists() {
         return Ok("缓存目录不存在，无需清除".to_string());

@@ -131,8 +131,8 @@ pub struct TftMatchSummary {
 
 // ─── 辅助函数 ───
 
-/// 参照 Seraphine 的 LCU 路径转换：把 .tex 换成 .png，低写处理并拼接 /lol-game-data/assets/
-fn convert_seraphine_lcu_icon_path(raw_icon: &str) -> String {
+/// LCU 路径转换：把 .tex 换成 .png，低写处理并拼接 /lol-game-data/assets/
+fn convert_lcu_icon_path(raw_icon: &str) -> String {
     if raw_icon.is_empty() {
         return String::new();
     }
@@ -313,7 +313,7 @@ fn parse_single_tft_participant(
                         .cloned()
                         .unwrap_or_default();
 
-                    let item_icon_url = convert_seraphine_lcu_icon_path(&raw_item_icon);
+                    let item_icon_url = convert_lcu_icon_path(&raw_item_icon);
 
                     item_names.push(translated);
                     if !item_icon_url.is_empty() {
@@ -337,7 +337,7 @@ fn parse_single_tft_participant(
                         .to_string()
                 });
 
-            let icon_url = convert_seraphine_lcu_icon_path(&raw_icon);
+            let icon_url = convert_lcu_icon_path(&raw_icon);
 
             units.push(TftUnitDisplay {
                 character_id,
@@ -400,7 +400,7 @@ fn parse_single_tft_participant(
                             .to_string()
                     });
 
-                let icon_url = convert_seraphine_lcu_icon_path(&raw_trait_icon);
+                let icon_url = convert_lcu_icon_path(&raw_trait_icon);
 
                 traits.push(TftTraitDisplay {
                     name,
@@ -477,7 +477,7 @@ fn parse_tft_data_from_value(root: &serde_json::Value) -> TftDataMapping {
                         .insert(api_lower.clone(), name.to_string());
 
                     if !icon.is_empty() {
-                        let icon_converted = convert_seraphine_lcu_icon_path(icon);
+                        let icon_converted = convert_lcu_icon_path(icon);
                         mapping
                             .champion_icons
                             .insert(api_name.to_string(), icon_converted.clone());
@@ -498,7 +498,7 @@ fn parse_tft_data_from_value(root: &serde_json::Value) -> TftDataMapping {
                     mapping.traits.insert(api_lower.clone(), name.to_string());
 
                     if !icon.is_empty() {
-                        let icon_converted = convert_seraphine_lcu_icon_path(icon);
+                        let icon_converted = convert_lcu_icon_path(icon);
                         mapping
                             .trait_icons
                             .insert(api_name.to_string(), icon_converted.clone());
@@ -533,7 +533,7 @@ fn parse_tft_data_from_value(root: &serde_json::Value) -> TftDataMapping {
                     .insert(api_lower.clone(), name.to_string());
             }
             if let Some(icon) = item.get("icon").and_then(|v| v.as_str()) {
-                let icon_converted = convert_seraphine_lcu_icon_path(icon);
+                let icon_converted = convert_lcu_icon_path(icon);
                 mapping
                     .item_icons
                     .insert(api_name.to_string(), icon_converted.clone());
@@ -558,13 +558,13 @@ fn parse_tft_data_from_value(root: &serde_json::Value) -> TftDataMapping {
 }
 
 fn get_tft_data_cache_path() -> Option<std::path::PathBuf> {
-    let dir = dirs::config_dir()?.join("Yuumi").join("cache");
+    let dir = crate::runtime::app_data_dir().join("cache");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir.join("tft_data.json"))
 }
 
 fn get_tft_augments_cache_path() -> Option<std::path::PathBuf> {
-    let dir = dirs::config_dir()?.join("Yuumi").join("cache");
+    let dir = crate::runtime::app_data_dir().join("cache");
     std::fs::create_dir_all(&dir).ok()?;
     // 缓存版本号 +1：旧版缓存含未解析的 @占位符@，需要强制重新生成
     let v2_path = dir.join("tft_augments_v2.json");
@@ -779,7 +779,7 @@ fn extract_augments_from_value(root: &serde_json::Value) -> Vec<TftAugmentInfo> 
             .cloned()
             .unwrap_or_default();
         let desc = resolve_tft_desc_tokens(&clean_tft_desc(raw_desc), &effects);
-        let icon_path = convert_seraphine_lcu_icon_path(icon);
+        let icon_path = convert_lcu_icon_path(icon);
         let tier = extract_augment_tier(api_name, icon, name);
 
         result.push(TftAugmentInfo {
@@ -901,7 +901,7 @@ async fn fetch_cdragon_zh_cn(proxy: Option<&str>) -> Option<serde_json::Value> {
 }
 
 /// 抓取 TFT 基础数据字典（优先 LCU，备用 CDragon，带内存与磁盘缓存）
-/// 参照 Seraphine：LCU → CDragon（一次，无重试，无代理）
+/// LCU → CDragon（一次，无重试，无代理）
 async fn fetch_tft_data_mapping(_lcu: Option<&crate::LcuClient>) -> TftDataMapping {
     // 1. 内存缓存快路径（仅读锁，命中即返回）
     {
@@ -929,7 +929,7 @@ async fn fetch_tft_data_mapping(_lcu: Option<&crate::LcuClient>) -> TftDataMappi
         }
     }
 
-    // 3. 参照 Seraphine update 方法：CDragon CDN 一次请求不重试（合并下载入口，无锁执行，带超时防挂起）
+    // 3. CDragon CDN 一次请求不重试（合并下载入口，无锁执行，带超时防挂起）
     if let Some(root_val) = fetch_cdragon_zh_cn(None).await {
         let m = parse_tft_data_from_value(&root_val);
         if !m.champions.is_empty() {
@@ -1609,7 +1609,7 @@ pub async fn fetch_tft_meta_maps(lcu: Option<&crate::LcuClient>) -> serde_json::
                 .champion_icons
                 .iter()
                 .map(|(k, v)| {
-                    let cdn = convert_seraphine_lcu_icon_path_to_cdragon(v);
+                    let cdn = convert_lcu_icon_path_to_cdragon(v);
                     (k.clone(), cdn)
                 })
                 .collect();
@@ -1618,7 +1618,7 @@ pub async fn fetch_tft_meta_maps(lcu: Option<&crate::LcuClient>) -> serde_json::
                 .item_icons
                 .iter()
                 .map(|(k, v)| {
-                    let cdn = convert_seraphine_lcu_icon_path_to_cdragon(v);
+                    let cdn = convert_lcu_icon_path_to_cdragon(v);
                     (k.clone(), cdn)
                 })
                 .collect();
@@ -1678,12 +1678,12 @@ pub async fn fetch_tft_meta_maps(lcu: Option<&crate::LcuClient>) -> serde_json::
 /// tft.json 里常见原始路径是 `ASSETS/Characters/.../*.tex`（无 `/lol-game-data` 前缀）。
 /// 必须先归一化成 LCU 路径，再映射到 CDragon 的 `.../latest/game/...`，
 /// 否则会生成 `.../latest/assets/...` 这种 404 URL。
-fn convert_seraphine_lcu_icon_path_to_cdragon(raw_icon: &str) -> String {
+fn convert_lcu_icon_path_to_cdragon(raw_icon: &str) -> String {
     if raw_icon.is_empty() {
         return String::new();
     }
     // 复用 LCU 路径归一化（补全 /lol-game-data/assets、.tex→.png、小写）
-    let mut path = convert_seraphine_lcu_icon_path(raw_icon);
+    let mut path = convert_lcu_icon_path(raw_icon);
     // 剔除文件名中的 Set 版本标记（如 `.TFT_Set17.tex`），该标记只存在于 tft.json 元数据，
     // CDragon 镜像与游戏文件实际不含此后缀，直接请求会 404
     strip_tft_set_marker_from_path(&mut path);

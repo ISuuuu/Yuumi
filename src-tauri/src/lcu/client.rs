@@ -34,10 +34,7 @@ fn cdn_client() -> &'static reqwest::Client {
 
 /// 返回资源缓存目录，不存在时自动创建
 fn get_asset_cache_dir() -> Option<PathBuf> {
-    let dir = dirs::config_dir()?
-        .join("Yuumi")
-        .join("cache")
-        .join("assets");
+    let dir = crate::runtime::app_data_dir().join("cache").join("assets");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }
@@ -72,7 +69,7 @@ fn guess_content_type(path: &str) -> String {
     .to_string()
 }
 
-/// 获取 TFT 本地持久化缓存的绝对路径（兼容并复用 Seraphine 已下载的图片）
+/// 获取 TFT 本地持久化缓存的绝对路径
 fn get_tft_local_cache_path(path: &str) -> Option<PathBuf> {
     let lower_path = path.to_lowercase();
 
@@ -109,25 +106,13 @@ fn get_tft_local_cache_path(path: &str) -> Option<PathBuf> {
         "tft_item_icons"
     };
 
-    let config_dir = dirs::config_dir()?;
-
-    // 1. 优先尝试从 Seraphine 的缓存目录读取已有的图片文件
-    let seraphine_path = config_dir
-        .join("Seraphine")
-        .join("game")
-        .join(sub_folder)
-        .join(&file_name);
-    if seraphine_path.exists() {
-        return Some(seraphine_path);
-    }
-
-    // 2. 否则，使用 Yuumi 自己的持久化缓存路径
-    let yuumi_path = config_dir
-        .join("Yuumi")
-        .join("game")
-        .join(sub_folder)
-        .join(&file_name);
-    Some(yuumi_path)
+    // 使用 Yuumi 自己的持久化缓存路径
+    Some(
+        crate::runtime::app_data_dir()
+            .join("game")
+            .join(sub_folder)
+            .join(&file_name),
+    )
 }
 
 /// 尝试从文件缓存读取，返回 (data_url, content_type)，过期或不存在则返回 None
@@ -338,7 +323,7 @@ pub async fn call_lcu_api(
 /// 前端可用于 <img :src="dataUrl">，绕过自签名证书问题。
 /// 路径限制：必须以 `/lol-game-data/assets/`、`/fe/lol-loot/assets/` 或 `http(s)://` CDN 绝对路径开头。
 /// 支持 7 天文件缓存，相同资源在缓存有效期内直接返回，无需重复请求。
-/// 当 LCU 未开启或资源 404 时，参考 Seraphine 自动降级从 CommunityDragon CDN 下载。
+/// 当 LCU 未开启或资源 404 时，自动降级从 CommunityDragon CDN 下载。
 ///
 /// 这也是批量命令 `get_lcu_assets` 复用的单个资源解析核心，保证取值链路完全一致。
 async fn resolve_asset(app_state: &AppState, path: &str) -> Result<String, String> {
@@ -352,7 +337,7 @@ async fn resolve_asset(app_state: &AppState, path: &str) -> Result<String, Strin
         );
     }
 
-    // 优先读取 TFT 本地持久化缓存（复用 Seraphine 已缓存的图片文件）。
+    // 优先读取 TFT 本地持久化缓存。
     // 文件读取移入 spawn_blocking，避免阻塞 tokio 工作线程。
     if let Some(tft_local_path) = get_tft_local_cache_path(path) {
         let tft_owned = tft_local_path.clone();
@@ -456,7 +441,7 @@ async fn resolve_asset(app_state: &AppState, path: &str) -> Result<String, Strin
         }
     }
 
-    // 2. 备用：LCU 不可用、未连上或返回 404 时，向 CDragon CDN 发起请求（参照 Seraphine 逻辑）
+    // 2. 备用：LCU 不可用、未连上或返回 404 时，向 CDragon CDN 发起请求
     let client = cdn_client();
 
     let url = if is_http_cdn {

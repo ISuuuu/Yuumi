@@ -735,12 +735,9 @@ pub struct ReleaseEntry {
     pub body: String,
 }
 
-/// 缓存文件: %APPDATA%/Yuumi/releases_cache.json
+/// 缓存文件: <data_dir>/releases_cache.json（便携版为 exe 旁 data/）
 fn releases_cache_path() -> PathBuf {
-    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("Yuumi");
-    path.push("releases_cache.json");
-    path
+    crate::runtime::app_data_dir().join("releases_cache.json")
 }
 
 /// 归一化版本号（去掉前缀 v 与首尾空白）

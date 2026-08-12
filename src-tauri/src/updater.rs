@@ -15,6 +15,10 @@ pub struct UpdateInfo {
     pub pub_date: Option<String>,
 }
 
+/// 便携版调用更新命令时的错误信息
+const PORTABLE_UPDATE_ERR: &str =
+    "便携版不支持自动更新，请前往 GitHub Releases 手动下载新版 zip 覆盖";
+
 /// 下载进度事件
 #[derive(Debug, serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +80,10 @@ macro_rules! build_updater {
 /// 返回 Some(UpdateInfo) 表示有更新，None 表示已是最新
 #[tauri::command]
 pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    if crate::runtime::is_portable() {
+        return Err(PORTABLE_UPDATE_ERR.into());
+    }
+
     let state = app.state::<AppState>();
 
     // 1. 如果有已下载好的待安装更新，直接返回其信息，不用发起网络请求
@@ -132,6 +140,10 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
 /// 通过 `updater://progress` 事件向前端推送下载进度
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    if crate::runtime::is_portable() {
+        return Err(PORTABLE_UPDATE_ERR.into());
+    }
+
     let state = app.state::<AppState>();
     if state
         .is_downloading
@@ -192,6 +204,11 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 /// 静默后台下载新版本（检查 + 下载），不阻塞前端
 /// 启动时自动检测调用此入口
 pub async fn start_background_download(app: AppHandle) {
+    if crate::runtime::is_portable() {
+        log::info!("便携版不支持自动更新，跳过后台更新检查");
+        return;
+    }
+
     let updater = match build_updater!(&app) {
         Ok(u) => u,
         Err(e) => {
@@ -319,6 +336,10 @@ async fn background_download_update(
 /// 安装已下载的待更新版本（从 AppState 读取已保存的字节）
 #[tauri::command]
 pub async fn install_pending_update(app: AppHandle) -> Result<(), String> {
+    if crate::runtime::is_portable() {
+        return Err(PORTABLE_UPDATE_ERR.into());
+    }
+
     let state = app.state::<AppState>();
     let pending = state
         .pending_update

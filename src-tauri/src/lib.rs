@@ -5,6 +5,7 @@ pub mod lcu;
 pub mod logging;
 pub mod loot;
 pub mod parsers;
+pub mod runtime;
 pub mod saved_players;
 pub mod signalr;
 pub mod tools;
@@ -97,7 +98,14 @@ impl AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    // 便携模式下动态化 identifier，避免与安装版（或多份便携副本）抢占单实例互斥锁
+    let mut context = tauri::generate_context!();
+    if runtime::is_portable() {
+        context.config_mut().identifier =
+            format!("com.yuumi.app.portable.{}", runtime::portable_instance_id());
+    }
+
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             let _ = app.emit("single-instance", (argv, cwd));
             if let Some(window) = app.get_webview_window("main") {
@@ -106,8 +114,16 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+
+    // 便携版不注册 updater 插件：自动更新对便携版彻底禁用（升级需手动下载 zip 覆盖）
+    let builder = if runtime::is_portable() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_updater::Builder::new().build())
+    };
+
+    builder
         .setup(|app| {
             // 加载配置并做 clamp 限制，防止因 api_concurrency_number 为 0 导致请求挂起
             let mut app_config = config::AppConfig::load();
@@ -285,12 +301,12 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // ─── 启动时静默检查并后台下载更新 ───
+            // ─── 启动时静默检查并后台下载更新（便携版不支持自动更新，跳过）───
             {
                 let cfg_snapshot = app_config_arc.blocking_read();
                 let enable_check = cfg_snapshot.general.enable_check_update;
                 drop(cfg_snapshot);
-                if enable_check {
+                if enable_check && !runtime::is_portable() {
                     let app_handle = app.handle().clone();
                     crate::spawn_log_panic(async move {
                         // 延迟 3 秒，等待主窗口完全加载后再检查
@@ -371,8 +387,9 @@ pub fn run() {
             saved_players::export_tagged_players_to_json_file,
             saved_players::import_tagged_players_from_json_file,
             saved_players::backfill_saved_player_identity,
+            runtime::is_portable,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
 

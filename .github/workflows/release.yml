@@ -221,6 +221,11 @@ jobs:
             Copy-Item "src-tauri/target/release/resources" "$PORTABLE_DIR/" -Recurse
           }
 
+          # 便携版标记文件 + 预留数据目录（运行时识别 portable.flag 后数据写到此 data/）
+          New-Item -ItemType File -Force -Path "$PORTABLE_DIR/portable.flag" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$PORTABLE_DIR/data" | Out-Null
+          New-Item -ItemType File -Force -Path "$PORTABLE_DIR/data/.keep" | Out-Null
+
           # 打包成 zip
           Compress-Archive -Path "$PORTABLE_DIR/*" -DestinationPath $ZIP_NAME -Force
           Write-Host "Portable zip created: $ZIP_NAME"
