@@ -1412,6 +1412,10 @@ function applyThemeMode(mode: string) {
               </template>
               {{ $t("settings.goToReleases") }}
             </n-button>
+            <n-switch
+              v-model:value="config.General.EnableCheckUpdate"
+              @update:value="autoSave"
+            />
           </template>
           <!-- 安装版：检查更新按钮 + 开关 -->
           <template v-else>
