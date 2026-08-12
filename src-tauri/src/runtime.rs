@@ -3,7 +3,7 @@
 //! 便携版通过「exe 同目录存在 `portable.flag` 空文件」识别（仅 Windows）。
 //! 便携模式下：
 //! - 所有数据（配置/DB/缓存/WebView2 缓存）隔离到 `exe 旁/data/` 目录，实现绿色可迁移；
-//! - 自动更新被禁用（见 `updater.rs`），升级需手动下载 zip 覆盖；
+//! - 自动更新通过 `portable_updater.rs` 走 zip 覆盖流程（详见该模块）；
 //! - Tauri identifier 动态化，避免与安装版或多份便携副本互相抢占单实例。
 //!
 //! `init()` 必须在一切业务逻辑（尤其 `config::AppConfig::load()`）之前调用，

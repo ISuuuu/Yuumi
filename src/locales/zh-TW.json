@@ -155,7 +155,7 @@
     "checkUpdateDesc": "在 Yuumi 啟動時自動檢查更新",
     "checkUpdateBtn": "檢查更新",
     "checkingUpdate": "檢查中...",
-    "portableUpdateDesc": "便攜版不支援自動更新，升級請到 GitHub Releases 手動下載新版 zip 覆蓋",
+    "portableUpdateDesc": "便攜版透過 zip 覆蓋方式自動更新，更新後自動重啟",
     "goToReleases": "前往 GitHub 下載",
     "alreadyLatest": "已是最新版本！",
     "checkUpdateFailed": "檢查更新失敗",

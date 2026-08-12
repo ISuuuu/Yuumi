@@ -155,7 +155,7 @@
     "checkUpdateDesc": "Auto-check for updates on startup",
     "checkUpdateBtn": "Check Update",
     "checkingUpdate": "Checking...",
-    "portableUpdateDesc": "Portable build does not support auto-update. Download the latest zip from GitHub Releases to upgrade",
+    "portableUpdateDesc": "Portable build updates via zip overwrite and restarts automatically",
     "goToReleases": "Download from GitHub",
     "alreadyLatest": "Already up to date!",
     "checkUpdateFailed": "Check update failed",

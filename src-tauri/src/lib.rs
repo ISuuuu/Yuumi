@@ -5,6 +5,7 @@ pub mod lcu;
 pub mod logging;
 pub mod loot;
 pub mod parsers;
+pub mod portable_updater;
 pub mod runtime;
 pub mod saved_players;
 pub mod signalr;
@@ -98,6 +99,9 @@ impl AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 便携版：清理上次更新残留的临时目录（不阻塞）
+    portable_updater::schedule_cleanup_from_environment();
+
     // 便携模式下动态化 identifier，避免与安装版（或多份便携副本）抢占单实例互斥锁
     let mut context = tauri::generate_context!();
     if runtime::is_portable() {
@@ -114,16 +118,13 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_opener::init());
-
-    // 便携版不注册 updater 插件：自动更新对便携版彻底禁用（升级需手动下载 zip 覆盖）
-    let builder = if runtime::is_portable() {
-        builder
-    } else {
-        builder.plugin(tauri_plugin_updater::Builder::new().build())
-    };
+        .plugin(tauri_plugin_opener::init())
+        // updater 插件无条件注册：安装版走 NSIS 安装包，便携版复用同一插件
+        // 通过 updater_builder().target("windows-x86_64-portable") 拉取便携 zip
+        .plugin(tauri_plugin_updater::Builder::new().build());
 
     builder
+        .manage(portable_updater::PortableUpdateState::default())
         .setup(|app| {
             // 加载配置并做 clamp 限制，防止因 api_concurrency_number 为 0 导致请求挂起
             let mut app_config = config::AppConfig::load();
@@ -301,18 +302,23 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // ─── 启动时静默检查并后台下载更新（便携版不支持自动更新，跳过）───
+            // ─── 启动时静默检查并后台下载更新（便携版走 zip 覆盖流程）───
             {
                 let cfg_snapshot = app_config_arc.blocking_read();
                 let enable_check = cfg_snapshot.general.enable_check_update;
                 drop(cfg_snapshot);
-                if enable_check && !runtime::is_portable() {
+                if enable_check {
                     let app_handle = app.handle().clone();
                     crate::spawn_log_panic(async move {
                         // 延迟 3 秒，等待主窗口完全加载后再检查
                         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        // start_background_download 内部自动完成：检查→后台下载→存储→事件通知
-                        updater::start_background_download(app_handle).await;
+                        if runtime::is_portable() {
+                            // 便携版：仅检查并通知前端，下载由用户点击触发
+                            portable_updater::start_background_check(app_handle).await;
+                        } else {
+                            // start_background_download 内部自动完成：检查→后台下载→存储→事件通知
+                            updater::start_background_download(app_handle).await;
+                        }
                     });
                 }
             }
@@ -378,6 +384,9 @@ pub fn run() {
             updater::check_update,
             updater::install_update,
             updater::install_pending_update,
+            portable_updater::check_portable_update,
+            portable_updater::download_portable_update,
+            portable_updater::apply_portable_update,
             commands::tools::show_bench_overlay_window,
             saved_players::save_saved_player,
             saved_players::query_all_saved_players,
@@ -396,6 +405,12 @@ pub fn run() {
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("你好, {}! 欢迎使用 Yuumi!", name)
+}
+
+/// 便携版更新 helper 进程入口判定（main() 第一行调用）。
+/// 返回 true 表示当前进程是更新 helper 且已处理完毕，main 应立即 return。
+pub fn run_portable_update_helper_if_requested() -> bool {
+    portable_updater::run_helper_if_requested()
 }
 
 /// 构建 LCU Basic Auth header 值

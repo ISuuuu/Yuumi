@@ -15,10 +15,6 @@ pub struct UpdateInfo {
     pub pub_date: Option<String>,
 }
 
-/// 便携版调用更新命令时的错误信息
-const PORTABLE_UPDATE_ERR: &str =
-    "便携版不支持自动更新，请前往 GitHub Releases 手动下载新版 zip 覆盖";
-
 /// 下载进度事件
 #[derive(Debug, serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +28,7 @@ pub struct DownloadProgress {
 }
 
 /// 从 AppState 读取代理配置，返回 (enable_proxy, proxy_addr)
-async fn get_proxy_config(app: &AppHandle) -> (bool, String) {
+pub(crate) async fn get_proxy_config(app: &AppHandle) -> (bool, String) {
     let state = app.state::<AppState>();
     let cfg = state.config.read().await;
     (
@@ -41,49 +37,55 @@ async fn get_proxy_config(app: &AppHandle) -> (bool, String) {
     )
 }
 
+/// 构建带代理配置的 UpdaterBuilder（尚未 `.build()`，便携版需在其上指定 target）
+pub(crate) async fn updater_builder(
+    app: &AppHandle,
+) -> Result<tauri_plugin_updater::UpdaterBuilder, String> {
+    let (enable_proxy, proxy_addr) = get_proxy_config(app).await;
+    let mut builder = app.updater_builder();
+    if enable_proxy && !proxy_addr.is_empty() {
+        // proxy_addr 格式为 "host:port"，补全为 http://host:port
+        let proxy_url = if proxy_addr.starts_with("http://") || proxy_addr.starts_with("https://") {
+            proxy_addr.clone()
+        } else {
+            format!("http://{}", proxy_addr)
+        };
+        match proxy_url.parse::<url::Url>() {
+            Ok(url) => {
+                builder = builder.proxy(url);
+                log::info!("更新器已启用 GitHub 代理: {proxy_url}");
+            }
+            Err(e) => {
+                log::warn!("代理地址解析失败，将直连: {e}");
+            }
+        }
+    }
+    Ok(builder)
+}
+
+/// 构建并 build Updater，若用户启用了 GitHub 代理则自动注入。
+/// 返回 `Result<Updater, String>`，不依赖调用方返回类型（可安全用于 `?` 或 `match`）。
+macro_rules! build_updater {
+    ($app:expr) => {{
+        match crate::updater::updater_builder($app).await {
+            Ok(builder) => builder
+                .build()
+                .map_err(|e| format!("无法初始化更新器: {e}")),
+            Err(e) => Err(e),
+        }
+    }};
+}
+
 /// 已后台下载完成的待安装更新（仅存储字节，Update 实例在 install 时重新获取）
 pub struct PendingUpdate {
     pub bytes: Vec<u8>,
     pub info: UpdateInfo,
 }
 
-/// 构建 UpdaterBuilder，若用户启用了 GitHub 代理则自动注入
-macro_rules! build_updater {
-    ($app:expr) => {{
-        let (enable_proxy, proxy_addr) = get_proxy_config($app).await;
-        let mut builder = $app.updater_builder();
-        if enable_proxy && !proxy_addr.is_empty() {
-            // proxy_addr 格式为 "host:port"，补全为 http://host:port
-            let proxy_url =
-                if proxy_addr.starts_with("http://") || proxy_addr.starts_with("https://") {
-                    proxy_addr.clone()
-                } else {
-                    format!("http://{}", proxy_addr)
-                };
-            match proxy_url.parse::<url::Url>() {
-                Ok(url) => {
-                    builder = builder.proxy(url);
-                    log::info!("更新器已启用 GitHub 代理: {proxy_url}");
-                }
-                Err(e) => {
-                    log::warn!("代理地址解析失败，将直连: {e}");
-                }
-            }
-        }
-        builder
-            .build()
-            .map_err(|e| format!("无法初始化更新器: {e}"))
-    }};
-}
-
 /// 检查是否有新版本，若有则自动触发后台下载（不阻塞返回）
 /// 返回 Some(UpdateInfo) 表示有更新，None 表示已是最新
 #[tauri::command]
 pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
-    if crate::runtime::is_portable() {
-        return Err(PORTABLE_UPDATE_ERR.into());
-    }
-
     let state = app.state::<AppState>();
 
     // 1. 如果有已下载好的待安装更新，直接返回其信息，不用发起网络请求
@@ -140,10 +142,6 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
 /// 通过 `updater://progress` 事件向前端推送下载进度
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
-    if crate::runtime::is_portable() {
-        return Err(PORTABLE_UPDATE_ERR.into());
-    }
-
     let state = app.state::<AppState>();
     if state
         .is_downloading
@@ -204,11 +202,6 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 /// 静默后台下载新版本（检查 + 下载），不阻塞前端
 /// 启动时自动检测调用此入口
 pub async fn start_background_download(app: AppHandle) {
-    if crate::runtime::is_portable() {
-        log::info!("便携版不支持自动更新，跳过后台更新检查");
-        return;
-    }
-
     let updater = match build_updater!(&app) {
         Ok(u) => u,
         Err(e) => {
@@ -336,10 +329,6 @@ async fn background_download_update(
 /// 安装已下载的待更新版本（从 AppState 读取已保存的字节）
 #[tauri::command]
 pub async fn install_pending_update(app: AppHandle) -> Result<(), String> {
-    if crate::runtime::is_portable() {
-        return Err(PORTABLE_UPDATE_ERR.into());
-    }
-
     let state = app.state::<AppState>();
     let pending = state
         .pending_update

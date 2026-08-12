@@ -107,19 +107,49 @@ async function fetchReleaseHistory() {
 // 手动检查更新状态
 const checkingUpdate = ref(false);
 
-// 是否为便携版（便携版不支持自动更新）
+// 是否为便携版（便携版更新走 zip 覆盖方案）
 const isPortable = ref(false);
+
+// App.vue 提供的更新弹窗推送函数（便携版手动检查时用）
+const showUpdateInfo = inject<(info: UpdateInfo) => void>(
+  "showUpdateInfo",
+  () => {},
+);
+
+interface PortableUpdateInfo {
+  version: string;
+  date?: string;
+  body?: string;
+}
 
 async function manualCheckUpdate() {
   if (checkingUpdate.value) return;
   checkingUpdate.value = true;
   try {
-    const result = await invoke<UpdateInfo | null>("check_update");
-    if (result) {
-      // check_update 已自动触发后台下载，App.vue 的 UpdateDialog 会接管气泡和进度
-      showToast(`已开始下载 v${result.version}`, "success");
+    if (isPortable.value) {
+      const result = await invoke<PortableUpdateInfo | null>(
+        "check_portable_update",
+      );
+      if (result) {
+        // 便携版：把更新信息推送到 App.vue 的 UpdateDialog，由用户点击下载
+        showUpdateInfo({
+          version: result.version,
+          currentVersion: appVersion.value || "",
+          notes: result.body,
+          pubDate: result.date,
+        });
+        showToast(`发现新版本 v${result.version}`, "success");
+      } else {
+        showToast("已是最新版本！", "success");
+      }
     } else {
-      showToast("已是最新版本！", "success");
+      const result = await invoke<UpdateInfo | null>("check_update");
+      if (result) {
+        // check_update 已自动触发后台下载，App.vue 的 UpdateDialog 会接管气泡和进度
+        showToast(`已开始下载 v${result.version}`, "success");
+      } else {
+        showToast("已是最新版本！", "success");
+      }
     }
   } catch (e: any) {
     showToast("检查更新失败: " + String(e), "error");
@@ -1307,8 +1337,56 @@ function applyThemeMode(mode: string) {
           </span>
         </div>
         <div class="card-right" style="flex-shrink: 0; gap: 10px">
-          <!-- 便携版：不支持自动更新，引导手动下载 -->
+          <!-- 便携版：检查更新（zip 覆盖方案）+ 手动前往 GitHub 下载 -->
           <template v-if="isPortable">
+            <n-button
+              size="small"
+              :disabled="checkingUpdate"
+              @click="manualCheckUpdate"
+              :title="
+                checkingUpdate
+                  ? $t('settings.checkingUpdate')
+                  : $t('settings.checkUpdateBtn')
+              "
+            >
+              <template #icon>
+                <svg
+                  v-if="!checkingUpdate"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="13"
+                  height="13"
+                >
+                  <path d="M21 2v6h-6" />
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                  <path d="M3 22v-6h6" />
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                </svg>
+                <svg
+                  v-else
+                  class="spin"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  width="13"
+                  height="13"
+                >
+                  <path
+                    d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"
+                  />
+                </svg>
+              </template>
+              {{
+                checkingUpdate
+                  ? $t("settings.checkingUpdate")
+                  : $t("settings.checkUpdateBtn")
+              }}
+            </n-button>
             <n-button
               size="small"
               type="primary"

@@ -2,6 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // 便携版更新 helper 进程入口：必须在一切初始化（含 runtime::init）之前判定
+    if yuumi_lib::run_portable_update_helper_if_requested() {
+        return;
+    }
+
     // 便携模式识别与数据目录解析：必须在一切逻辑（尤其 config 加载）之前
     yuumi_lib::runtime::init();
 
