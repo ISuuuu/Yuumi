@@ -227,6 +227,24 @@ function openReleasePage() {
         {{ downloadReady ? "点击重启安装" : `新版本 v${updateInfo.version}` }}
       </div>
     </div>
+    <button
+      v-if="!downloadReady"
+      class="mini-close"
+      @click.stop="dismiss"
+      title="关闭更新气泡"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+        width="10"
+        height="10"
+      >
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
+      </svg>
+    </button>
   </div>
 
   <!-- 全屏弹窗：用 Teleport 放到 body 最上层 -->
@@ -295,8 +313,8 @@ function openReleasePage() {
           <button
             v-if="!installing"
             class="update-close"
-            @click="downloadReady ? dismiss() : minimize()"
-            :title="downloadReady ? '稍后' : '后台下载'"
+            @click="minimize"
+            :title="downloadReady ? '后台运行' : '后台下载'"
           >
             <svg
               viewBox="0 0 24 24"
@@ -378,7 +396,7 @@ function openReleasePage() {
         <div v-if="!installing" class="update-actions">
           <!-- 下载完成 → 立即重启 -->
           <template v-if="downloadReady">
-            <button class="btn-dismiss" @click="dismiss">稍后</button>
+            <button class="btn-dismiss" @click="minimize">稍后</button>
             <button class="btn-install" @click="installPending">
               立即重启
             </button>
@@ -388,7 +406,7 @@ function openReleasePage() {
             <button v-if="errorMsg" class="btn-manual" @click="openReleasePage">
               浏览器下载
             </button>
-            <button class="btn-dismiss" @click="dismiss">稍后提醒</button>
+            <button class="btn-dismiss" @click="minimize">稍后提醒</button>
             <button class="btn-install" @click="installNow">
               {{ errorMsg ? "重试" : "立即更新" }}
             </button>
@@ -640,9 +658,9 @@ function openReleasePage() {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #e06c75;
-  background: rgba(224, 108, 117, 0.1);
-  border: 1px solid rgba(224, 108, 117, 0.2);
+  color: var(--loss-color, #e06c75);
+  background: var(--loss-bg, rgba(224, 108, 117, 0.1));
+  border: 1px solid var(--loss-border, rgba(224, 108, 117, 0.2));
   border-radius: 8px;
   padding: 8px 12px;
   margin-bottom: 16px;
@@ -842,6 +860,29 @@ function openReleasePage() {
 .mini-info {
   display: flex;
   flex-direction: column;
+}
+
+.mini-close {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary, #999);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: 4px;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.mini-close:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  color: var(--text-primary, #e8eaf0);
 }
 
 .mini-title {

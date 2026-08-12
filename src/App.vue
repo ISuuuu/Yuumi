@@ -210,6 +210,14 @@ onMounted(async () => {
     updateInfo.value = event.payload;
   });
 
+  // 监听后台下载完成事件：若用户此前已关闭更新弹窗，重新弹出"更新就绪"气泡，
+  // 避免下载好的更新因前端丢失入口而无法安装
+  await listen<UpdateInfo>("updater://download-ready", (event) => {
+    if (!updateInfo.value) {
+      updateInfo.value = event.payload;
+    }
+  });
+
   // 自动启动 LOL 客户端并按需显示主窗口
   try {
     appConfig.value = await fetchConfig();
@@ -1063,6 +1071,15 @@ async function handleClose() {
   --primary-color-alpha-20: rgba(0, 210, 196, 0.20);
   --primary-color-alpha-30: rgba(0, 210, 196, 0.3);
   --primary-color-alpha-40: rgba(0, 210, 196, 0.4);
+
+  /* 更新弹窗/旧组件使用的变量 → 映射到主页主题变量（惰性解析，自动跟随亮暗色与用户主题色） */
+  --theme-color: var(--primary-color);
+  --bg-card: var(--bg-color);
+  --text-primary: var(--text-color);
+  --text-secondary: var(--text-muted);
+  --text-tertiary: var(--text-dimmed);
+  --bg-secondary: var(--hover-bg);
+  --bg-hover: var(--hover-bg);
 
   /* 纯白水晶极光主题变量 */
   --bg-color-gradient: linear-gradient(
