@@ -111,7 +111,12 @@ const isOverlayWindow = ref(
 // 自动更新弹窗
 const updateInfo = ref<UpdateInfo | null>(null);
 
-// 是否为便携版（便携版不支持自动更新，跳过更新监听与弹窗）
+// 供子组件（Settings 手动检查）将便携版更新信息推送到 UpdateDialog
+provide("showUpdateInfo", (info: UpdateInfo) => {
+  updateInfo.value = info;
+});
+
+// 是否为便携版（决定更新弹窗走 zip 覆盖方案）
 const isPortable = ref(false);
 
 // Toast 通知（通过 Naive UI Message API）
@@ -193,19 +198,17 @@ onMounted(async () => {
     navigate(event.payload);
   });
 
-  // 识别便携版（便携版不支持自动更新，跳过更新监听）
+  // 识别便携版（便携版更新走 zip 覆盖方案）
   try {
     isPortable.value = await invoke<boolean>("is_portable");
   } catch (e) {
     console.warn("[App] 识别便携版失败:", e);
   }
 
-  // 监听 Rust 后端推送的更新可用事件（仅安装版）
-  if (!isPortable.value) {
-    await listen<UpdateInfo>("updater://update-available", (event) => {
-      updateInfo.value = event.payload;
-    });
-  }
+  // 监听 Rust 后端推送的更新可用事件（安装版后台下载 / 便携版后台检查均会触发）
+  await listen<UpdateInfo>("updater://update-available", (event) => {
+    updateInfo.value = event.payload;
+  });
 
   // 自动启动 LOL 客户端并按需显示主窗口
   try {
@@ -856,10 +859,11 @@ async function handleClose() {
 
         <NoticePopup v-if="noticeVisible" @close="noticeVisible = false" />
 
-        <!-- 自动更新弹窗（在 app-layout 外部，避免 overflow:hidden 限制；便携版不渲染） -->
+        <!-- 自动更新弹窗（在 app-layout 外部，避免 overflow:hidden 限制） -->
         <UpdateDialog
-          v-if="!isPortable"
+          v-if="updateInfo"
           :update-info="updateInfo"
+          :portable="isPortable"
           @dismiss="updateInfo = null"
         />
       </n-dialog-provider>

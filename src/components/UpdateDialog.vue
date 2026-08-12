@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -17,8 +17,15 @@ interface DownloadProgress {
   percent?: number;
 }
 
-const { updateInfo } = defineProps<{
+interface PortableUpdateProgress {
+  downloaded: number;
+  total: number;
+}
+
+const { updateInfo, portable } = defineProps<{
   updateInfo: UpdateInfo | null | undefined;
+  /** 是否为便携版（便携版更新走 zip 覆盖方案） */
+  portable?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -115,8 +122,12 @@ async function installPending() {
   installing.value = true;
   errorMsg.value = "";
   try {
-    await invoke("install_pending_update");
-    // install_pending_update 会重启应用，不会走到这里
+    if (portable) {
+      await invoke("apply_portable_update");
+    } else {
+      await invoke("install_pending_update");
+    }
+    // 两个命令都会重启/退出应用，不会走到这里
   } catch (e: any) {
     errorMsg.value = String(e);
     installing.value = false;
@@ -131,7 +142,23 @@ async function installNow() {
   progress.value = { downloaded: 0, total: undefined, percent: 0 };
 
   try {
-    await invoke("install_update");
+    if (portable) {
+      // 便携版：通过 Channel 接收下载进度，下载完成后进入"立即重启"阶段
+      const channel = new Channel<PortableUpdateProgress>();
+      channel.onmessage = (p) => {
+        const percent = p.total > 0 ? (p.downloaded / p.total) * 100 : 0;
+        progress.value = {
+          downloaded: p.downloaded,
+          total: p.total > 0 ? p.total : undefined,
+          percent,
+        };
+      };
+      await invoke("download_portable_update", { onProgress: channel });
+      downloadReady.value = true;
+      installing.value = false;
+    } else {
+      await invoke("install_update");
+    }
   } catch (e: any) {
     errorMsg.value = String(e);
     installing.value = false;
