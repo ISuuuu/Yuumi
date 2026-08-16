@@ -75,8 +75,10 @@ Tauri v2 + Vue 3 + TypeScript 桌面应用。
 
 ### Vue 3 前端 (Vue 3 / TypeScript)
 
-- **类型约束**：
+- **类型约束与强类型收敛**：
   - 必须对所有 `invoke` 的入参及返回结果定义明确的 TypeScript Interface，绝对禁止使用 `any`。
+  - 组件 `defineProps`、Composable 函数参数与返回值、Pinia Store 状态严禁随意使用 `any`；对于具备多形态或阶段性差异的数据结构（如选人与游戏内玩家对象、组队结构），必须在 `src/types/` 下统一定义结构明确的 Interface 或联合类型。
+  - 严格处理可选属性（`undefined` / `null`）的空值守卫：在进行函数参数传递、数学运算、数组查找或对象动态 key 索引（如 `playerData[key]`）前，必须通过可选链、空值合并操作符（`??`）或类型守卫完成安全收敛，防止类型逃逸与运行时错误。
   - Rust 返回的 Result 应该在前端有合理的错误捕获（`try-catch` 或 `.catch()`），并通过 `useToast` 或 `message` 呈现给用户。
 - **事件监听生命周期管理**：
   - 使用 `@tauri-apps/api/event` 的 `listen` 订阅 Rust 事件时，必须在组件销毁时（`onUnmounted`）调用返回的 `unlisten()` 函数，以防闭包内存泄漏。
