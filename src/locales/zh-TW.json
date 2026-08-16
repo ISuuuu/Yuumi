@@ -616,6 +616,8 @@
     "awaitingLoad": "進入選人階段後將自動加載對局信息",
     "winRateSuffix": "% 勝率",
     "noTeamData": "暫無隊伍數據",
+    "showAll": "全部戰績",
+    "showTeam": "按隊伍",
     "launchLolPrompt": "請先啟動英雄聯盟客戶端"
   },
   "career": {

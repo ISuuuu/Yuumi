@@ -7,27 +7,31 @@ import {
   type PremadeRow,
 } from "../types/gameInfo";
 
-/** 根据 teamParticipantId 分组，计算组队颜色映射 */
+/** 根据 teamParticipantId / partyId 分组，计算组队颜色映射 */
 export function computePremadeColors(team: any[]): Record<number, number> {
   if (!team || team.length === 0) return {};
-  const tIdToSIds: Record<number, number[]> = {};
+  const tIdToMembers: Record<string | number, any[]> = {};
 
   for (const p of team) {
-    const sid = p.summonerId;
-    const tpid = p.teamParticipantId;
-    if (!sid || tpid === undefined || tpid === null) continue;
-    if (!tIdToSIds[tpid]) tIdToSIds[tpid] = [];
-    tIdToSIds[tpid].push(sid);
+    const tpid = p.teamParticipantId ?? p.partyId;
+    if (tpid === undefined || tpid === null || tpid === "") continue;
+    if (!tIdToMembers[tpid]) tIdToMembers[tpid] = [];
+    tIdToMembers[tpid].push(p);
   }
 
   const result: Record<number, number> = {};
   let currentColor = 0;
 
-  for (const ids of Object.values(tIdToSIds)) {
-    if (ids.length === 1) {
-      result[ids[0]] = -1; // 单排
+  for (const members of Object.values(tIdToMembers)) {
+    if (members.length === 1) {
+      const p = members[0];
+      if (p.summonerId) result[p.summonerId] = -1;
+      if (p.cellId !== undefined) result[p.cellId] = -1;
     } else {
-      for (const id of ids) result[id] = currentColor;
+      for (const p of members) {
+        if (p.summonerId) result[p.summonerId] = currentColor;
+        if (p.cellId !== undefined) result[p.cellId] = currentColor;
+      }
       currentColor++;
     }
   }
@@ -44,13 +48,18 @@ export function buildPremadeGroups(
 
   for (const p of team) {
     const sid = p.summonerId;
-    if (!sid) continue;
-    const cIdx = colors[sid];
+    const cid = p.cellId;
+    const cIdx =
+      sid && colors[sid] !== undefined
+        ? colors[sid]
+        : cid !== undefined
+          ? colors[cid]
+          : undefined;
     if (cIdx === undefined || cIdx < 0) continue;
 
     if (!map[cIdx]) map[cIdx] = [];
     const champId = p.championId || p.championPickIntent || 0;
-    const pData = playerDataMap[p.cellId || sid];
+    const pData = playerDataMap[cid ?? sid];
     const name =
       pData?.info?.gameName ||
       pData?.info?.displayName ||
@@ -59,7 +68,7 @@ export function buildPremadeGroups(
       "";
 
     map[cIdx].push({
-      summonerId: sid,
+      summonerId: sid || cid,
       displayName: name,
       championId: champId,
     });
@@ -83,18 +92,38 @@ export function usePremadeGroup(
   premadeColorsTheir: Ref<Record<number, number>>,
 ) {
   /** 获取玩家组队颜色索引 */
-  function getPremadeIdx(summonerId: number, side: "my" | "their"): number {
+  function getPremadeIdx(
+    target: any,
+    side: "my" | "their" = "my",
+  ): number {
+    if (target === undefined || target === null) return -1;
     const colors =
       side === "my" ? premadeColorsMy.value : premadeColorsTheir.value;
-    return colors[summonerId] ?? -1;
+    if (!colors) return -1;
+
+    if (typeof target === "object") {
+      if (
+        target.summonerId !== undefined &&
+        target.summonerId !== 0 &&
+        colors[target.summonerId] !== undefined
+      ) {
+        return colors[target.summonerId];
+      }
+      if (target.cellId !== undefined && colors[target.cellId] !== undefined) {
+        return colors[target.cellId];
+      }
+      return -1;
+    }
+
+    return colors[target] ?? -1;
   }
 
   /** 左侧玩家卡片组队样式 */
   function getPremadeCardStyle(
-    summonerId: number,
-    side: "my" | "their",
+    target: any,
+    side: "my" | "their" = "my",
   ): Record<string, string> {
-    const idx = getPremadeIdx(summonerId, side);
+    const idx = getPremadeIdx(target, side);
     if (idx < 0) return {};
     const c = PREMADE_COLORS[idx % PREMADE_COLORS.length];
     return {

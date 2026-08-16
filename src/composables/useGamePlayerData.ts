@@ -39,6 +39,25 @@ function setRankToCache(puuid: string, data: any) {
   rankCache.set(puuid, { data, timestamp: Date.now() });
 }
 
+// ── 保留对局数据 localStorage：持续保留上一局数据，直到新对局开始（ChampSelect 时清理）
+const RESERVE_TEAM_KEYS = [
+  "yuumi_last_gameflow_my_team",
+  "yuumi_last_gameflow_their_team",
+  "yuumi_last_game_player_data",
+  "yuumi_last_premade_colors_my",
+  "yuumi_last_premade_colors_their",
+];
+
+function clearReserveDataFromStorage() {
+  try {
+    for (const k of RESERVE_TEAM_KEYS) {
+      localStorage.removeItem(k);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 // ── gameflow session 短期缓存，避免同一流程中多次请求同一端点
 let cachedSession: { data: any; timestamp: number } | null = null;
 const SESSION_CACHE_TTL = 30 * 1000; // 30 秒
@@ -108,14 +127,79 @@ export function useGamePlayerData(
   const currentQueueId = ref<number | null>(null);
   const isTftMode = ref(false);
 
+  // ── 保留对局数据写入：组队信息 + 战绩 + 队伍列表一起落盘
+  function writeReserveData() {
+    lazySetItem("yuumi_last_game_player_data", playerData.value);
+    lazySetItem("yuumi_last_gameflow_my_team", myTeam.value);
+    lazySetItem("yuumi_last_gameflow_their_team", theirTeam.value);
+    lazySetItem("yuumi_last_premade_colors_my", premadeColorsMy.value);
+    lazySetItem("yuumi_last_premade_colors_their", premadeColorsTheir.value);
+  }
+
+  // ── 从 localStorage 恢复保留数据（有数据即恢复，直到新对局开始）
+  function restoreReserveDataFromLocalStorage(): boolean {
+    try {
+      const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
+      const savedTheirTeam = localStorage.getItem(
+        "yuumi_last_gameflow_their_team",
+      );
+      const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
+      const savedPremadeMy = localStorage.getItem("yuumi_last_premade_colors_my");
+      const savedPremadeTheir = localStorage.getItem("yuumi_last_premade_colors_their");
+      let any = false;
+      if (savedMyTeam) {
+        const parsed = JSON.parse(savedMyTeam);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          gameflowMyTeam.value = parsed;
+          any = true;
+        }
+      }
+      if (savedTheirTeam) {
+        const parsed = JSON.parse(savedTheirTeam);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          gameflowTheirTeam.value = parsed;
+          any = true;
+        }
+      }
+      if (savedPlayerData) {
+        const parsed = JSON.parse(savedPlayerData);
+        if (parsed && Object.keys(parsed).length > 0) {
+          playerData.value = parsed;
+          any = true;
+        }
+      }
+      if (savedPremadeMy) {
+        try {
+          premadeColorsMy.value = JSON.parse(savedPremadeMy);
+        } catch {
+          if (gameflowMyTeam.value.length > 0)
+            premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
+        }
+      } else if (gameflowMyTeam.value.length > 0) {
+        premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
+      }
+      if (savedPremadeTheir) {
+        try {
+          premadeColorsTheir.value = JSON.parse(savedPremadeTheir);
+        } catch {
+          if (gameflowTheirTeam.value.length > 0)
+            premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
+        }
+      } else if (gameflowTheirTeam.value.length > 0) {
+        premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
+      }
+      return any;
+    } catch {
+      return false;
+    }
+  }
+
   // ── localStorage 写入防抖
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   function debouncedSavePlayerData() {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      lazySetItem("yuumi_last_game_player_data", playerData.value);
-      lazySetItem("yuumi_last_gameflow_my_team", myTeam.value);
-      lazySetItem("yuumi_last_gameflow_their_team", theirTeam.value);
+      writeReserveData();
     }, 500);
   }
 
@@ -179,20 +263,50 @@ export function useGamePlayerData(
 
   async function fetchPremadeColors() {
     try {
+      if (!currentSummonerId.value && !currentSummonerPuuid.value) {
+        const s = await fetchCurrentSummoner();
+        if (s?.summonerId) currentSummonerId.value = s.summonerId;
+        if (s?.puuid) currentSummonerPuuid.value = s.puuid;
+      }
       const data = await fetchSessionCached();
-      if (!data?.gameData) return;
-      const { teamOne, teamTwo } = data.gameData;
-      if (!teamOne || !teamTwo || teamOne.length === 0) return;
-
-      const isTeamOne = teamOne.some(
-        (p: any) => p.summonerId === currentSummonerId.value,
-      );
-      const ally = isTeamOne ? teamOne : teamTwo;
-      const enemy = isTeamOne ? teamTwo : teamOne;
-      sessionAllyTeam.value = ally;
-      sessionEnemyTeam.value = enemy;
-      premadeColorsMy.value = computePremadeColors(ally);
-      premadeColorsTheir.value = computePremadeColors(enemy);
+      if (data?.gameData) {
+        const { teamOne, teamTwo } = data.gameData;
+        if (teamOne && teamTwo && teamOne.length > 0 && teamTwo.length > 0) {
+          const isTeamOne = teamOne.some(
+            (p: any) =>
+              (currentSummonerId.value && p.summonerId === currentSummonerId.value) ||
+              (currentSummonerPuuid.value && p.puuid === currentSummonerPuuid.value),
+          );
+          const ally = isTeamOne ? teamOne : teamTwo;
+          const enemy = isTeamOne ? teamTwo : teamOne;
+          sessionAllyTeam.value = ally;
+          sessionEnemyTeam.value = enemy;
+          premadeColorsMy.value = computePremadeColors(ally);
+          premadeColorsTheir.value = computePremadeColors(enemy);
+          return;
+        }
+      }
+      // 备选降级：若 gameflow 暂无组队数据，但选人 session 已有 teamParticipantId
+      if (
+        Object.keys(premadeColorsMy.value).length === 0 &&
+        store.champSelectSession?.myTeam?.some(
+          (p: any) => p.teamParticipantId !== undefined || p.partyId !== undefined,
+        )
+      ) {
+        premadeColorsMy.value = computePremadeColors(
+          store.champSelectSession.myTeam,
+        );
+      }
+      if (
+        Object.keys(premadeColorsTheir.value).length === 0 &&
+        store.champSelectSession?.theirTeam?.some(
+          (p: any) => p.teamParticipantId !== undefined || p.partyId !== undefined,
+        )
+      ) {
+        premadeColorsTheir.value = computePremadeColors(
+          store.champSelectSession.theirTeam,
+        );
+      }
     } catch {
       /* ignore */
     }
@@ -394,8 +508,20 @@ export function useGamePlayerData(
   }
 
   async function processTeamData(teamOne: any[], teamTwo: any[]) {
+    if (!currentSummonerId.value && !currentSummonerPuuid.value) {
+      try {
+        const s = await fetchCurrentSummoner();
+        if (s?.summonerId) currentSummonerId.value = s.summonerId;
+        if (s?.puuid) currentSummonerPuuid.value = s.puuid;
+      } catch {
+        /* ignore */
+      }
+    }
+
     const isTeamOne = teamOne.some(
-      (p: any) => p.summonerId === currentSummonerId.value,
+      (p: any) =>
+        (currentSummonerId.value && p.summonerId === currentSummonerId.value) ||
+        (currentSummonerPuuid.value && p.puuid === currentSummonerPuuid.value),
     );
     const allyTeam = isTeamOne ? teamOne : teamTwo;
     const enemyTeam = isTeamOne ? teamTwo : teamOne;
@@ -428,6 +554,8 @@ export function useGamePlayerData(
 
     lazySetItem("yuumi_last_gameflow_my_team", gameflowMyTeam.value);
     lazySetItem("yuumi_last_gameflow_their_team", gameflowTheirTeam.value);
+    lazySetItem("yuumi_last_premade_colors_my", premadeColorsMy.value);
+    lazySetItem("yuumi_last_premade_colors_their", premadeColorsTheir.value);
 
     // 先加载当前可见队伍，再后台加载另一队，避免一次性并发请求过多
     const visible = activeTab.value === "my" ? allyTeam : enemyTeam;
@@ -455,13 +583,7 @@ export function useGamePlayerData(
       playerData.value = {};
       premadeColorsMy.value = {};
       premadeColorsTheir.value = {};
-      try {
-        localStorage.removeItem("yuumi_last_gameflow_my_team");
-        localStorage.removeItem("yuumi_last_gameflow_their_team");
-        localStorage.removeItem("yuumi_last_game_player_data");
-      } catch {
-        /* ignore */
-      }
+      clearReserveDataFromStorage();
       loading.value = false;
       return;
     }
@@ -528,30 +650,16 @@ export function useGamePlayerData(
   // 监听 Watchers
   watch(isGameActive, (active) => {
     if (!active) {
-      try {
-        const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
-        const savedTheirTeam = localStorage.getItem(
-          "yuumi_last_gameflow_their_team",
-        );
-        const savedPlayerData = localStorage.getItem(
-          "yuumi_last_game_player_data",
-        );
-        if (savedMyTeam) {
-          const parsed = JSON.parse(savedMyTeam);
-          if (Array.isArray(parsed) && parsed.length > 0)
-            gameflowMyTeam.value = parsed;
-        }
-        if (savedTheirTeam) {
-          const parsed = JSON.parse(savedTheirTeam);
-          if (Array.isArray(parsed) && parsed.length > 0)
-            gameflowTheirTeam.value = parsed;
-        }
-        if (savedPlayerData) {
-          const parsed = JSON.parse(savedPlayerData);
-          if (parsed && Object.keys(parsed).length > 0) playerData.value = parsed;
-        }
-      } catch {
-        /* ignore */
+      const hasRefData =
+        gameflowMyTeam.value.length > 0 ||
+        gameflowTheirTeam.value.length > 0 ||
+        Object.keys(playerData.value).length > 0;
+      if (hasRefData) {
+        // 内存中已有最新对局数据（通常来自 InProgress/选人阶段事件），
+        // 直接保留并回写 localStorage 自我修复，避免被残留旧数据覆盖
+        writeReserveData();
+      } else {
+        restoreReserveDataFromLocalStorage();
       }
     } else {
       gameflowMyTeam.value = [];
@@ -572,13 +680,7 @@ export function useGamePlayerData(
         playerData.value = {};
         premadeColorsMy.value = {};
         premadeColorsTheir.value = {};
-        try {
-          localStorage.removeItem("yuumi_last_gameflow_my_team");
-          localStorage.removeItem("yuumi_last_gameflow_their_team");
-          localStorage.removeItem("yuumi_last_game_player_data");
-        } catch {
-          /* ignore */
-        }
+        clearReserveDataFromStorage();
         refreshState();
       }
       if (phase === "InProgress" || phase === "GameStart")
@@ -648,33 +750,11 @@ export function useGamePlayerData(
     }
 
     if (!isGameActive.value && appConfig.value?.Functions?.EnableReserveGameinfo) {
-      try {
-        const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
-        const savedTheirTeam = localStorage.getItem(
-          "yuumi_last_gameflow_their_team",
-        );
-        const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
-        if (savedMyTeam) {
-          const parsed = JSON.parse(savedMyTeam);
-          if (Array.isArray(parsed) && parsed.length > 0)
-            gameflowMyTeam.value = parsed;
-        }
-        if (savedTheirTeam) {
-          const parsed = JSON.parse(savedTheirTeam);
-          if (Array.isArray(parsed) && parsed.length > 0)
-            gameflowTheirTeam.value = parsed;
-        }
-        if (savedPlayerData) {
-          const parsed = JSON.parse(savedPlayerData);
-          if (parsed && Object.keys(parsed).length > 0) playerData.value = parsed;
-        }
-
-        if (gameflowMyTeam.value.length > 0)
+      if (restoreReserveDataFromLocalStorage()) {
+        if (Object.keys(premadeColorsMy.value).length === 0 && gameflowMyTeam.value.length > 0)
           premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
-        if (gameflowTheirTeam.value.length > 0)
+        if (Object.keys(premadeColorsTheir.value).length === 0 && gameflowTheirTeam.value.length > 0)
           premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
-      } catch {
-        /* ignore */
       }
     }
 

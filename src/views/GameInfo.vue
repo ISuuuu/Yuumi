@@ -4,15 +4,17 @@ import { onMounted, watch } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import type { AppConfig, SavedPlayerMarker } from "../api/lcu";
 import { querySavedPlayersMap } from "../api/lcu";
+import { PREMADE_COLORS } from "../types/gameInfo";
 import { usePremadeGroup } from "../composables/usePremadeGroup";
 import { useGamePlayerData } from "../composables/useGamePlayerData";
 import PlayerCard from "../components/gameinfo/PlayerCard.vue";
 import LcuOfflineState from "../components/LcuOfflineState.vue";
-import PremadeLegend from "../components/gameinfo/PremadeLegend.vue";
 import PlayerMatchColumn from "../components/gameinfo/PlayerMatchColumn.vue";
+import LcuImage from "../components/LcuImage.vue";
 
 const store = useLcuStore();
 const activeTab = ref<"my" | "their">("my");
+const viewMode = ref<"ten" | "five">("ten");
 
 // 应用配置（用于获取对局卡片颜色）
 const appConfig =
@@ -41,8 +43,8 @@ const {
 const {
   getPremadeIdx,
   getPremadeCardStyle,
-  hasAnyPremadeInfo,
-  premadeRows,
+  myPremadeGroups,
+  theirPremadeGroups,
 } = usePremadeGroup(
   myTeam,
   theirTeam,
@@ -52,6 +54,13 @@ const {
   premadeColorsMy,
   premadeColorsTheir,
 );
+
+function getChampionIcon(id: number): string {
+  return id > 0 ? `/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
+}
+
+// 10 列并排模式：两队列合并渲染（我方在前，敌方在后）
+const allPlayers = computed(() => [...myTeam.value, ...theirTeam.value]);
 
 // 保存玩家映射：puuid → { tag, encounterCount }，用于玩家卡片旁标记"曾同局"
 const savedPlayerMap = ref<Record<string, SavedPlayerMarker>>({});
@@ -106,9 +115,9 @@ onMounted(loadSavedPlayerMap);
       <p class="tip">{{ $t("gameInfo.awaitingLoad") }}</p>
     </div>
 
-    <div v-else class="game-layout">
-      <!-- 左侧：队伍切换 + 玩家列表 -->
-      <div class="left-panel">
+    <div v-else class="game-layout" :class="{ 'layout-ten': viewMode === 'ten' }">
+      <!-- 左侧：队伍切换 + 玩家列表（10 列模式隐藏） -->
+      <div v-if="viewMode === 'five'" class="left-panel">
         <div class="team-tabs">
           <button
             :class="['tab-btn', { active: activeTab === 'my' }]"
@@ -130,9 +139,9 @@ onMounted(loadSavedPlayerMap);
             :key="p.cellId ?? i"
             :player="p"
             :player-data="playerData[p.cellId]"
-            :premade-idx="getPremadeIdx(p.summonerId, activeTab)"
+            :premade-idx="getPremadeIdx(p, activeTab)"
             :active-tab="activeTab"
-            :premade-card-style="getPremadeCardStyle(p.summonerId, activeTab)"
+            :premade-card-style="getPremadeCardStyle(p, activeTab)"
             :saved-map="savedPlayerMap"
             :displayed-puuids="displayedPuuids"
           />
@@ -140,24 +149,279 @@ onMounted(loadSavedPlayerMap);
             {{ $t("gameInfo.noTeamData") }}
           </div>
         </div>
-
-        <!-- 组队图例 (按行交错配对) -->
-        <PremadeLegend
-          v-if="hasAnyPremadeInfo"
-          :premade-rows="premadeRows"
-        />
       </div>
 
-      <!-- 右侧：5 列战绩 -->
+      <!-- 右侧：5 列/10 列战绩 -->
       <div class="right-panel">
-        <div class="columns-container">
+        <div class="view-toolbar">
+          <!-- 10 列视图：左右精准 50% 对称阵营与组队信息 -->
+          <template v-if="viewMode === 'ten'">
+            <!-- 我方区域（占左侧 50%） -->
+            <div class="ten-toolbar-left">
+              <span class="side-pill ally-pill">
+                <span class="pill-dot"></span>
+                {{ $t("gameInfo.myTeam", { count: myTeam.length }) }}
+              </span>
+              <!-- 我方组队芯片 -->
+              <div v-if="myPremadeGroups.length > 0" class="premade-chips-wrapper">
+                <div
+                  v-for="group in myPremadeGroups"
+                  :key="group.colorIdx"
+                  class="premade-group-chip"
+                  :style="{
+                    borderColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].border,
+                    backgroundColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].bg,
+                  }"
+                  :title="$t('gameInfo.premadeIdx', { idx: group.colorIdx + 1 })"
+                >
+                  <span
+                    class="legend-dot"
+                    :style="{
+                      background: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].dot,
+                    }"
+                  ></span>
+                  <div class="premade-avatars">
+                    <template v-for="m in group.members" :key="m.summonerId">
+                      <LcuImage
+                        v-if="m.championId > 0"
+                        :src="getChampionIcon(m.championId)"
+                        class="premade-avatar"
+                        :title="m.displayName"
+                      />
+                      <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">
+                        {{ m.displayName ? m.displayName.slice(0, 1) : '?' }}
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 中间精准绝对居中 50% 轴线的 VS 分隔指示 -->
+            <div class="toolbar-center-vs">
+              <span class="side-vs">VS</span>
+            </div>
+
+            <!-- 敌方区域（占右侧 50%） -->
+            <div class="ten-toolbar-right">
+              <!-- 敌方组队芯片 -->
+              <div v-if="theirPremadeGroups.length > 0" class="premade-chips-wrapper">
+                <div
+                  v-for="group in theirPremadeGroups"
+                  :key="group.colorIdx"
+                  class="premade-group-chip"
+                  :style="{
+                    borderColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].border,
+                    backgroundColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].bg,
+                  }"
+                  :title="$t('gameInfo.premadeIdx', { idx: group.colorIdx + 1 })"
+                >
+                  <span
+                    class="legend-dot"
+                    :style="{
+                      background: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].dot,
+                    }"
+                  ></span>
+                  <div class="premade-avatars">
+                    <template v-for="m in group.members" :key="m.summonerId">
+                      <LcuImage
+                        v-if="m.championId > 0"
+                        :src="getChampionIcon(m.championId)"
+                        class="premade-avatar"
+                        :title="m.displayName"
+                      />
+                      <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">
+                        {{ m.displayName ? m.displayName.slice(0, 1) : '?' }}
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 敌方阵营指示与切换按钮容器 -->
+              <div class="ten-right-controls">
+                <span class="side-pill enemy-pill">
+                  <span class="pill-dot"></span>
+                  {{ $t("gameInfo.theirTeam", { count: theirTeam.length }) }}
+                </span>
+
+                <!-- 视图模式分段切换器 (10 列模式) -->
+                <div class="view-segmented-control">
+                  <button
+                    class="segment-btn"
+                    :class="{ active: false }"
+                    @click="viewMode = 'five'"
+                  >
+                    <svg class="segment-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                      <circle cx="9" cy="7" r="4" />
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                    </svg>
+                    <span>{{ $t("gameInfo.showTeam") }}</span>
+                  </button>
+                  <button
+                    class="segment-btn"
+                    :class="{ active: true }"
+                    @click="viewMode = 'ten'"
+                  >
+                    <svg class="segment-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                    </svg>
+                    <span>{{ $t("gameInfo.showAll") }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- 5 列视图：支持点击阵营胶囊切换队伍且带高亮联动 -->
+          <template v-else>
+            <div class="five-toolbar-content">
+              <!-- 我方组队区 -->
+              <div class="five-team-premade">
+                <span
+                  class="side-pill ally-pill clickable-pill"
+                  :class="{ 'active-pill': activeTab === 'my' }"
+                  :title="$t('gameInfo.myTeam', { count: myTeam.length })"
+                  @click="activeTab = 'my'"
+                >
+                  <span class="pill-dot"></span>
+                  {{ $t("gameInfo.myTeam", { count: myTeam.length }) }}
+                </span>
+                <div v-if="myPremadeGroups.length > 0" class="premade-chips-wrapper">
+                  <div
+                    v-for="group in myPremadeGroups"
+                    :key="group.colorIdx"
+                    class="premade-group-chip"
+                    :style="{
+                      borderColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].border,
+                      backgroundColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].bg,
+                    }"
+                    :title="$t('gameInfo.premadeIdx', { idx: group.colorIdx + 1 })"
+                  >
+                    <span
+                      class="legend-dot"
+                      :style="{
+                        background: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].dot,
+                      }"
+                    ></span>
+                    <div class="premade-avatars">
+                      <template v-for="m in group.members" :key="m.summonerId">
+                        <LcuImage
+                          v-if="m.championId > 0"
+                          :src="getChampionIcon(m.championId)"
+                          class="premade-avatar"
+                          :title="m.displayName"
+                        />
+                        <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">
+                          {{ m.displayName ? m.displayName.slice(0, 1) : '?' }}
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- VS 分隔指示 -->
+              <span class="side-vs">VS</span>
+
+              <!-- 敌方组队区 -->
+              <div class="five-team-premade">
+                <div v-if="theirPremadeGroups.length > 0" class="premade-chips-wrapper">
+                  <div
+                    v-for="group in theirPremadeGroups"
+                    :key="group.colorIdx"
+                    class="premade-group-chip"
+                    :style="{
+                      borderColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].border,
+                      backgroundColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].bg,
+                    }"
+                    :title="$t('gameInfo.premadeIdx', { idx: group.colorIdx + 1 })"
+                  >
+                    <span
+                      class="legend-dot"
+                      :style="{
+                        background: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].dot,
+                      }"
+                    ></span>
+                    <div class="premade-avatars">
+                      <template v-for="m in group.members" :key="m.summonerId">
+                        <LcuImage
+                          v-if="m.championId > 0"
+                          :src="getChampionIcon(m.championId)"
+                          class="premade-avatar"
+                          :title="m.displayName"
+                        />
+                        <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">
+                          {{ m.displayName ? m.displayName.slice(0, 1) : '?' }}
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+                <span
+                  class="side-pill enemy-pill clickable-pill"
+                  :class="{ 'active-pill': activeTab === 'their' }"
+                  :title="$t('gameInfo.theirTeam', { count: theirTeam.length })"
+                  @click="activeTab = 'their'"
+                >
+                  <span class="pill-dot"></span>
+                  {{ $t("gameInfo.theirTeam", { count: theirTeam.length }) }}
+                </span>
+              </div>
+            </div>
+
+            <!-- 视图模式分段切换器 (5 列模式) -->
+            <div class="view-segmented-control">
+              <button
+                class="segment-btn"
+                :class="{ active: true }"
+                @click="viewMode = 'five'"
+              >
+                <svg class="segment-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+                <span>{{ $t("gameInfo.showTeam") }}</span>
+              </button>
+              <button
+                class="segment-btn"
+                :class="{ active: false }"
+                @click="viewMode = 'ten'"
+              >
+                <svg class="segment-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                  <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                  <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                  <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                </svg>
+                <span>{{ $t("gameInfo.showAll") }}</span>
+              </button>
+            </div>
+          </template>
+        </div>
+
+        <div
+          class="columns-container"
+          :class="{ 'columns-ten': viewMode === 'ten' }"
+        >
           <PlayerMatchColumn
-            v-for="(p, i) in currentTeam"
+            v-for="(p, i) in viewMode === 'ten' ? allPlayers : currentTeam"
             :key="p.cellId ?? i"
             :player="p"
             :player-data="playerData[p.cellId]"
             :index="i"
             :app-config="appConfig"
+            :compact="viewMode === 'ten'"
+            :side="viewMode === 'ten' ? (i < myTeam.length ? 'ally' : 'enemy') : (activeTab === 'my' ? 'ally' : 'enemy')"
+            :premade-idx="getPremadeIdx(p, viewMode === 'ten' ? (i < myTeam.length ? 'my' : 'their') : activeTab)"
+            :class="{ 'team-separator': viewMode === 'ten' && i === myTeam.length }"
           />
         </div>
       </div>
@@ -202,6 +466,11 @@ onMounted(loadSavedPlayerMap);
   gap: 16px;
   flex: 1;
   min-height: 0;
+}
+
+/* 10 列并排模式：隐藏左侧面板，右侧占满整行 */
+.game-layout.layout-ten {
+  grid-template-columns: 1fr;
 }
 
 /* 左侧面板 */
@@ -263,10 +532,284 @@ onMounted(loadSavedPlayerMap);
   height: 100%;
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
+  display: flex;
+  flex-direction: column;
 }
+.view-toolbar {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.02);
+  flex-shrink: 0;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.toolbar-placeholder {
+  flex: 1;
+}
+
+/* 10 列视图阵营指示与组队芯片 */
+.ten-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 50%;
+  padding-right: 28px;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.toolbar-center-vs {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.ten-toolbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 50%;
+  padding-left: 28px;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.ten-right-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.five-toolbar-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.five-team-premade {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.premade-chips-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.premade-group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.premade-group-chip:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 5px currentColor;
+}
+
+.premade-avatars {
+  display: flex;
+  align-items: center;
+}
+
+.premade-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  box-sizing: border-box;
+  margin-left: -4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.premade-avatar:first-child {
+  margin-left: 0;
+}
+
+.premade-avatar-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--text-dimmed);
+  font-size: 0.6rem;
+  font-weight: 800;
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  box-sizing: border-box;
+  margin-left: -4px;
+}
+.premade-avatar-empty:first-child {
+  margin-left: 0;
+}
+
+.side-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.side-pill.ally-pill {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+}
+.side-pill.enemy-pill {
+  background: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
+  border: 1px solid rgba(244, 63, 94, 0.28);
+}
+.side-pill.clickable-pill {
+  cursor: pointer;
+  opacity: 0.65;
+  transition: all 0.2s ease-in-out;
+  user-select: none;
+}
+.side-pill.clickable-pill:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+.side-pill.clickable-pill.active-pill {
+  opacity: 1;
+  box-shadow: 0 0 8px currentColor;
+  transform: translateY(-1px);
+  font-weight: 800;
+}
+
+.pill-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.ally-pill .pill-dot {
+  background: #3b82f6;
+  box-shadow: 0 0 5px #3b82f6;
+}
+.enemy-pill .pill-dot {
+  background: #f43f5e;
+  box-shadow: 0 0 5px #f43f5e;
+}
+.side-vs {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: var(--text-dimmed);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  letter-spacing: 0.5px;
+}
+
+/* 视图分段控制器 */
+.view-segmented-control {
+  display: inline-flex;
+  align-items: center;
+  background: var(--hover-bg);
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  gap: 2px;
+}
+.segment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+.segment-btn:hover {
+  color: var(--text-color);
+}
+.segment-btn.active {
+  background: var(--card-bg);
+  color: var(--primary-color);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+.segment-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
 .columns-container {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+}
+.columns-ten {
+  grid-template-columns: repeat(10, 1fr);
+}
+.columns-ten :deep(.team-separator) {
+  border-left: 2px solid var(--border-color);
+  position: relative;
+}
+.columns-ten :deep(.team-separator)::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -2px;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    rgba(244, 63, 94, 0.6) 0%,
+    var(--border-color) 40%,
+    var(--border-color) 60%,
+    rgba(59, 130, 246, 0.6) 100%
+  );
 }
 </style>

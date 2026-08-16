@@ -615,6 +615,8 @@
     "awaitingLoad": "Match info will load automatically when champion select starts.",
     "winRateSuffix": "% WR",
     "noTeamData": "No team data available",
+    "showAll": "All players",
+    "showTeam": "By team",
     "launchLolPrompt": "Please launch the League of Legends client first"
   },
   "career": {

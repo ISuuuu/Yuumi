@@ -2,7 +2,6 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { PlayerData } from "../../types/gameInfo";
-import { PREMADE_COLORS } from "../../types/gameInfo";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import type { SavedPlayerMarker } from "../../api/lcu";
 import LcuImage from "../LcuImage.vue";
@@ -133,19 +132,6 @@ function formatRank(q: any): string {
 
     <div class="pc-info centered">
       <div class="pc-row pc-name-row-centered">
-        <span
-          v-if="premadeIdx >= 0"
-          class="premade-dot"
-          :style="{
-            background:
-              PREMADE_COLORS[premadeIdx % PREMADE_COLORS.length].dot,
-          }"
-          :title="
-            t('gameInfo.premadeIdx', {
-              idx: premadeIdx + 1,
-            })
-          "
-        ></span>
         <span class="name-group">
           <span
             class="name-text"
@@ -250,6 +236,8 @@ function formatRank(q: any): string {
 
 <style scoped>
 .player-card {
+  position: relative;
+  overflow: hidden;
   flex: 1;
   min-height: 0;
   max-height: 142px;
@@ -273,6 +261,10 @@ function formatRank(q: any): string {
   box-shadow:
     var(--shadow-md),
     0 4px 16px var(--primary-color-alpha-15);
+}
+.player-card.premade-card:hover {
+  filter: brightness(1.08);
+  transform: translateY(-2px) scale(1.01);
 }
 
 .profile-icon-wrapper-mini {
@@ -380,15 +372,6 @@ function formatRank(q: any): string {
 }
 .name-text:hover {
   color: var(--primary-color);
-}
-.premade-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  margin-right: 4px;
-  vertical-align: middle;
-  box-shadow: 0 0 4px currentColor;
 }
 .fate-badge {
   display: inline-flex;
