@@ -35,11 +35,13 @@ withDefaults(
 
 .offline-state-icon {
   font-size: 3rem;
+  line-height: 1;
   margin-bottom: 1rem;
 }
 
 .offline-state-tip {
   font-size: 0.95rem;
+  line-height: 1.6;
   color: var(--text-dimmed);
   margin: 0;
 }

@@ -137,7 +137,7 @@ watch(
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .client-ver-badge {
@@ -157,6 +157,9 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .tft-tabs {
