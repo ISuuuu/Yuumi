@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import type { PlayerData } from "../../types/gameInfo";
+import type { PlayerData, PremadePlayerLike } from "../../types/gameInfo";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import type { SavedPlayerMarker } from "../../api/lcu";
 import LcuImage from "../LcuImage.vue";
 
 const props = defineProps<{
-  player: any;
+  player: PremadePlayerLike;
   playerData?: PlayerData;
   premadeIdx: number;
   activeTab: "my" | "their";
@@ -108,7 +108,9 @@ function formatRank(q: any): string {
           <template v-if="player.championId || player.championPickIntent">
             <LcuImage
               :src="
-                getChampionIcon(player.championId || player.championPickIntent)
+                getChampionIcon(
+                  player.championId || player.championPickIntent || 0,
+                )
               "
               class="profile-avatar-mini"
               alt="champ"

@@ -2,13 +2,13 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { MatchDisplay, AppConfig } from "../../api/lcu";
-import type { PlayerData } from "../../types/gameInfo";
+import type { PlayerData, PremadePlayerLike } from "../../types/gameInfo";
 import { PREMADE_COLORS } from "../../types/gameInfo";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import LcuImage from "../LcuImage.vue";
 
 const props = defineProps<{
-  player: any;
+  player: PremadePlayerLike;
   playerData?: PlayerData;
   index: number;
   appConfig: AppConfig | null;

@@ -4,7 +4,7 @@ import { onMounted, watch } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import type { AppConfig, SavedPlayerMarker } from "../api/lcu";
 import { querySavedPlayersMap } from "../api/lcu";
-import { PREMADE_COLORS } from "../types/gameInfo";
+import { PREMADE_COLORS, type PremadePlayerLike } from "../types/gameInfo";
 import { usePremadeGroup } from "../composables/usePremadeGroup";
 import { useGamePlayerData } from "../composables/useGamePlayerData";
 import PlayerCard from "../components/gameinfo/PlayerCard.vue";
@@ -57,6 +57,11 @@ const {
 
 function getChampionIcon(id: number): string {
   return id > 0 ? `/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
+}
+
+function getPlayerData(p: PremadePlayerLike, idx: number) {
+  const key = p.cellId ?? p.summonerId ?? idx;
+  return playerData.value[key];
 }
 
 // 10 列并排模式：两队列合并渲染（我方在前，敌方在后）
@@ -138,7 +143,7 @@ onMounted(loadSavedPlayerMap);
             v-for="(p, i) in currentTeam"
             :key="p.cellId ?? i"
             :player="p"
-            :player-data="playerData[p.cellId]"
+            :player-data="getPlayerData(p, i)"
             :premade-idx="getPremadeIdx(p, activeTab)"
             :active-tab="activeTab"
             :premade-card-style="getPremadeCardStyle(p, activeTab)"
@@ -154,8 +159,8 @@ onMounted(loadSavedPlayerMap);
       <!-- 右侧：5 列/10 列战绩 -->
       <div class="right-panel">
         <div class="view-toolbar">
-          <!-- 10 列视图：左右精准 50% 对称阵营与组队信息 -->
-          <template v-if="viewMode === 'ten'">
+          <!-- 10 列视图且双方队伍均有数据：左右精准 50% 对称阵营与组队信息 -->
+          <template v-if="viewMode === 'ten' && theirTeam.length > 0">
             <!-- 我方区域（占左侧 50%） -->
             <div class="ten-toolbar-left">
               <span class="side-pill ally-pill">
@@ -278,16 +283,16 @@ onMounted(loadSavedPlayerMap);
             </div>
           </template>
 
-          <!-- 5 列视图：支持点击阵营胶囊切换队伍且带高亮联动 -->
+          <!-- 5 列视图 或 选人阶段敌方为空时的单方 5 列/10 列视图 -->
           <template v-else>
             <div class="five-toolbar-content">
               <!-- 我方组队区 -->
               <div class="five-team-premade">
                 <span
-                  class="side-pill ally-pill clickable-pill"
-                  :class="{ 'active-pill': activeTab === 'my' }"
+                  class="side-pill ally-pill"
+                  :class="{ 'clickable-pill': viewMode === 'five', 'active-pill': viewMode === 'five' && activeTab === 'my' }"
                   :title="$t('gameInfo.myTeam', { count: myTeam.length })"
-                  @click="activeTab = 'my'"
+                  @click="viewMode === 'five' ? (activeTab = 'my') : null"
                 >
                   <span class="pill-dot"></span>
                   {{ $t("gameInfo.myTeam", { count: myTeam.length }) }}
@@ -326,60 +331,63 @@ onMounted(loadSavedPlayerMap);
                 </div>
               </div>
 
-              <!-- VS 分隔指示 -->
-              <span class="side-vs">VS</span>
+              <!-- VS 分隔指示与敌方组队区（仅当敌方有数据时显示） -->
+              <template v-if="theirTeam.length > 0">
+                <!-- VS 分隔指示 -->
+                <span class="side-vs">VS</span>
 
-              <!-- 敌方组队区 -->
-              <div class="five-team-premade">
-                <div v-if="theirPremadeGroups.length > 0" class="premade-chips-wrapper">
-                  <div
-                    v-for="group in theirPremadeGroups"
-                    :key="group.colorIdx"
-                    class="premade-group-chip"
-                    :style="{
-                      borderColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].border,
-                      backgroundColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].bg,
-                    }"
-                    :title="$t('gameInfo.premadeIdx', { idx: group.colorIdx + 1 })"
-                  >
-                    <span
-                      class="legend-dot"
+                <!-- 敌方组队区 -->
+                <div class="five-team-premade">
+                  <div v-if="theirPremadeGroups.length > 0" class="premade-chips-wrapper">
+                    <div
+                      v-for="group in theirPremadeGroups"
+                      :key="group.colorIdx"
+                      class="premade-group-chip"
                       :style="{
-                        background: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].dot,
+                        borderColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].border,
+                        backgroundColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].bg,
                       }"
-                    ></span>
-                    <div class="premade-avatars">
-                      <template v-for="m in group.members" :key="m.summonerId">
-                        <LcuImage
-                          v-if="m.championId > 0"
-                          :src="getChampionIcon(m.championId)"
-                          class="premade-avatar"
-                          :title="m.displayName"
-                        />
-                        <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">
-                          {{ m.displayName ? m.displayName.slice(0, 1) : '?' }}
-                        </div>
-                      </template>
+                      :title="$t('gameInfo.premadeIdx', { idx: group.colorIdx + 1 })"
+                    >
+                      <span
+                        class="legend-dot"
+                        :style="{
+                          background: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].dot,
+                        }"
+                      ></span>
+                      <div class="premade-avatars">
+                        <template v-for="m in group.members" :key="m.summonerId">
+                          <LcuImage
+                            v-if="m.championId > 0"
+                            :src="getChampionIcon(m.championId)"
+                            class="premade-avatar"
+                            :title="m.displayName"
+                          />
+                          <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">
+                            {{ m.displayName ? m.displayName.slice(0, 1) : '?' }}
+                          </div>
+                        </template>
+                      </div>
                     </div>
                   </div>
+                  <span
+                    class="side-pill enemy-pill clickable-pill"
+                    :class="{ 'active-pill': activeTab === 'their' }"
+                    :title="$t('gameInfo.theirTeam', { count: theirTeam.length })"
+                    @click="activeTab = 'their'"
+                  >
+                    <span class="pill-dot"></span>
+                    {{ $t("gameInfo.theirTeam", { count: theirTeam.length }) }}
+                  </span>
                 </div>
-                <span
-                  class="side-pill enemy-pill clickable-pill"
-                  :class="{ 'active-pill': activeTab === 'their' }"
-                  :title="$t('gameInfo.theirTeam', { count: theirTeam.length })"
-                  @click="activeTab = 'their'"
-                >
-                  <span class="pill-dot"></span>
-                  {{ $t("gameInfo.theirTeam", { count: theirTeam.length }) }}
-                </span>
-              </div>
+              </template>
             </div>
 
-            <!-- 视图模式分段切换器 (5 列模式) -->
+            <!-- 视图模式分段切换器 (5 列模式或单方 10 列模式) -->
             <div class="view-segmented-control">
               <button
                 class="segment-btn"
-                :class="{ active: true }"
+                :class="{ active: viewMode === 'five' }"
                 @click="viewMode = 'five'"
               >
                 <svg class="segment-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -392,7 +400,7 @@ onMounted(loadSavedPlayerMap);
               </button>
               <button
                 class="segment-btn"
-                :class="{ active: false }"
+                :class="{ active: viewMode === 'ten' }"
                 @click="viewMode = 'ten'"
               >
                 <svg class="segment-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -409,19 +417,19 @@ onMounted(loadSavedPlayerMap);
 
         <div
           class="columns-container"
-          :class="{ 'columns-ten': viewMode === 'ten' }"
+          :class="{ 'columns-ten': viewMode === 'ten' && theirTeam.length > 0 }"
         >
           <PlayerMatchColumn
-            v-for="(p, i) in viewMode === 'ten' ? allPlayers : currentTeam"
+            v-for="(p, i) in (viewMode === 'ten' ? allPlayers : currentTeam)"
             :key="p.cellId ?? i"
             :player="p"
-            :player-data="playerData[p.cellId]"
+            :player-data="getPlayerData(p, i)"
             :index="i"
             :app-config="appConfig"
-            :compact="viewMode === 'ten'"
+            :compact="viewMode === 'ten' && theirTeam.length > 0"
             :side="viewMode === 'ten' ? (i < myTeam.length ? 'ally' : 'enemy') : (activeTab === 'my' ? 'ally' : 'enemy')"
             :premade-idx="getPremadeIdx(p, viewMode === 'ten' ? (i < myTeam.length ? 'my' : 'their') : activeTab)"
-            :class="{ 'team-separator': viewMode === 'ten' && i === myTeam.length }"
+            :class="{ 'team-separator': viewMode === 'ten' && theirTeam.length > 0 && i === myTeam.length }"
           />
         </div>
       </div>

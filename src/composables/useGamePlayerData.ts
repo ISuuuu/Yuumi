@@ -11,7 +11,7 @@ import {
   type MatchDisplay,
   type AppConfig,
 } from "../api/lcu";
-import type { PlayerData } from "../types/gameInfo";
+import type { PlayerData, PremadePlayerLike } from "../types/gameInfo";
 import { computePremadeColors } from "./usePremadeGroup";
 import { lazySetItem } from "../utils/lazyStorage";
 import { runWithConcurrency } from "../utils/runWithConcurrency";
@@ -118,11 +118,11 @@ export function useGamePlayerData(
   const currentSummonerPuuid = ref<string>("");
   const playerData = ref<Record<number, PlayerData>>({});
 
-  const sessionAllyTeam = ref<any[]>([]);
-  const sessionEnemyTeam = ref<any[]>([]);
+  const sessionAllyTeam = ref<PremadePlayerLike[]>([]);
+  const sessionEnemyTeam = ref<PremadePlayerLike[]>([]);
 
-  const gameflowMyTeam = ref<any[]>([]);
-  const gameflowTheirTeam = ref<any[]>([]);
+  const gameflowMyTeam = ref<PremadePlayerLike[]>([]);
+  const gameflowTheirTeam = ref<PremadePlayerLike[]>([]);
 
   const currentQueueId = ref<number | null>(null);
   const isTftMode = ref(false);
@@ -499,12 +499,22 @@ export function useGamePlayerData(
     const visible = activeTab.value === "my" ? my : their;
     const background = activeTab.value === "my" ? their : my;
 
-    await runWithConcurrency(visible, 3, (p) =>
-      loadPlayerData(p.cellId, p.summonerId),
-    );
-    void runWithConcurrency(background, 3, (p) =>
-      loadPlayerData(p.cellId, p.summonerId),
-    ).catch(() => {});
+    await runWithConcurrency(visible, 3, (p) => {
+      const cid = p.cellId ?? p.summonerId;
+      const sid = p.summonerId ?? p.cellId;
+      if (cid !== undefined && sid !== undefined) {
+        return loadPlayerData(cid, sid);
+      }
+      return Promise.resolve();
+    });
+    void runWithConcurrency(background, 3, (p) => {
+      const cid = p.cellId ?? p.summonerId;
+      const sid = p.summonerId ?? p.cellId;
+      if (cid !== undefined && sid !== undefined) {
+        return loadPlayerData(cid, sid);
+      }
+      return Promise.resolve();
+    }).catch(() => {});
   }
 
   async function processTeamData(teamOne: any[], teamTwo: any[]) {

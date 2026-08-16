@@ -19,6 +19,20 @@ export interface PremadeMember {
   championId: number;
 }
 
+export interface PremadePlayerLike {
+  summonerId?: number;
+  cellId?: number;
+  teamParticipantId?: number | string | null;
+  partyId?: number | string | null;
+  championId?: number;
+  championPickIntent?: number;
+  displayName?: string;
+  summonerName?: string;
+  puuid?: string;
+}
+
+export type PremadeTarget = number | PremadePlayerLike;
+
 export interface PremadeGroup {
   colorIdx: number;
   members: PremadeMember[];

@@ -4,13 +4,17 @@ import {
   type PlayerData,
   type PremadeGroup,
   type PremadeMember,
+  type PremadePlayerLike,
   type PremadeRow,
+  type PremadeTarget,
 } from "../types/gameInfo";
 
 /** 根据 teamParticipantId / partyId 分组，计算组队颜色映射 */
-export function computePremadeColors(team: any[]): Record<number, number> {
+export function computePremadeColors(
+  team: PremadePlayerLike[],
+): Record<number, number> {
   if (!team || team.length === 0) return {};
-  const tIdToMembers: Record<string | number, any[]> = {};
+  const tIdToMembers: Record<string | number, PremadePlayerLike[]> = {};
 
   for (const p of team) {
     const tpid = p.teamParticipantId ?? p.partyId;
@@ -39,7 +43,7 @@ export function computePremadeColors(team: any[]): Record<number, number> {
 }
 
 export function buildPremadeGroups(
-  team: any[],
+  team: PremadePlayerLike[],
   colors: Record<number, number>,
   playerDataMap: Record<number, PlayerData>,
 ): PremadeGroup[] {
@@ -59,7 +63,8 @@ export function buildPremadeGroups(
 
     if (!map[cIdx]) map[cIdx] = [];
     const champId = p.championId || p.championPickIntent || 0;
-    const pData = playerDataMap[cid ?? sid];
+    const pData =
+      cid !== undefined ? playerDataMap[cid] : sid ? playerDataMap[sid] : undefined;
     const name =
       pData?.info?.gameName ||
       pData?.info?.displayName ||
@@ -68,7 +73,7 @@ export function buildPremadeGroups(
       "";
 
     map[cIdx].push({
-      summonerId: sid || cid,
+      summonerId: sid || cid || 0,
       displayName: name,
       championId: champId,
     });
@@ -83,17 +88,17 @@ export function buildPremadeGroups(
 }
 
 export function usePremadeGroup(
-  myTeam: Ref<any[]>,
-  theirTeam: Ref<any[]>,
-  sessionAllyTeam: Ref<any[]>,
-  sessionEnemyTeam: Ref<any[]>,
+  myTeam: Ref<PremadePlayerLike[]>,
+  theirTeam: Ref<PremadePlayerLike[]>,
+  sessionAllyTeam: Ref<PremadePlayerLike[]>,
+  sessionEnemyTeam: Ref<PremadePlayerLike[]>,
   playerData: Ref<Record<number, PlayerData>>,
   premadeColorsMy: Ref<Record<number, number>>,
   premadeColorsTheir: Ref<Record<number, number>>,
 ) {
   /** 获取玩家组队颜色索引 */
   function getPremadeIdx(
-    target: any,
+    target: PremadeTarget | null | undefined,
     side: "my" | "their" = "my",
   ): number {
     if (target === undefined || target === null) return -1;
@@ -120,7 +125,7 @@ export function usePremadeGroup(
 
   /** 左侧玩家卡片组队样式 */
   function getPremadeCardStyle(
-    target: any,
+    target: PremadeTarget | null | undefined,
     side: "my" | "their" = "my",
   ): Record<string, string> {
     const idx = getPremadeIdx(target, side);
