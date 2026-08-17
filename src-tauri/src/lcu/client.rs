@@ -1,5 +1,6 @@
 use base64::Engine;
 use futures_util::stream::{self, StreamExt};
+use percent_encoding::percent_decode_str;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -115,8 +116,9 @@ fn get_tft_local_cache_path(path: &str) -> Option<PathBuf> {
     )
 }
 
-/// 尝试从文件缓存读取，返回 (data_url, content_type)，过期或不存在则返回 None
-fn try_read_asset_cache(path: &str) -> Option<(String, String)> {
+/// 尝试从文件缓存读取原始字节，过期或不存在则返回 None。
+/// 旧版本缓存的是 data URL 文本，检测到后直接删除并返回 None，触发重新拉取。
+fn try_read_asset_cache(path: &str) -> Option<Vec<u8>> {
     let dir = get_asset_cache_dir()?;
     let hash = stable_hash(path);
     let file_path = dir.join(&hash);
@@ -128,22 +130,17 @@ fn try_read_asset_cache(path: &str) -> Option<(String, String)> {
         return None;
     }
 
-    let data_url = std::fs::read_to_string(&file_path).ok()?;
-    if data_url.starts_with("data:") {
-        let content_type = data_url
-            .split(';')
-            .next()
-            .unwrap_or("data:image/png")
-            .trim_start_matches("data:")
-            .to_string();
-        Some((data_url, content_type))
-    } else {
-        None
+    let bytes = std::fs::read(&file_path).ok()?;
+    // 旧版缓存内容以 "data:" 文本开头，直接丢弃走重新拉取
+    if bytes.starts_with(b"data:") {
+        let _ = std::fs::remove_file(&file_path);
+        return None;
     }
+    Some(bytes)
 }
 
-/// 将 data URL 写入文件缓存
-fn write_asset_cache(path: &str, data_url: &str) {
+/// 将原始字节写入文件缓存
+fn write_asset_cache(path: &str, bytes: &[u8]) {
     let Some(dir) = get_asset_cache_dir() else {
         return;
     };
@@ -152,7 +149,7 @@ fn write_asset_cache(path: &str, data_url: &str) {
     let temp_path = dir.join(format!("{}.tmp", &hash));
 
     // 先写临时文件，成功后再原子重命名覆盖，规避并发写锁定和文件内容截断损坏风险
-    if std::fs::write(&temp_path, data_url).is_ok() {
+    if std::fs::write(&temp_path, bytes).is_ok() {
         let _ = std::fs::rename(&temp_path, target_path);
     }
 }
@@ -344,14 +341,14 @@ pub async fn call_lcu_api(
     lcu_request(app_state.inner(), &method, &path, body).await
 }
 
-/// 获取 LCU 静态资源（图片等），返回 data URL。
-/// 前端可用于 <img :src="dataUrl">，绕过自签名证书问题。
+/// 统一的 LCU 静态资源解析核心，返回 (原始字节, content_type)。
 /// 路径限制：必须以 `/lol-game-data/assets/`、`/fe/lol-loot/assets/` 或 `http(s)://` CDN 绝对路径开头。
 /// 支持 7 天文件缓存，相同资源在缓存有效期内直接返回，无需重复请求。
 /// 当 LCU 未开启或资源 404 时，自动降级从 CommunityDragon CDN 下载。
 ///
-/// 这也是批量命令 `get_lcu_assets` 复用的单个资源解析核心，保证取值链路完全一致。
-async fn resolve_asset(app_state: &AppState, path: &str) -> Result<String, String> {
+/// 返回值直接提供给 `yuumi-asset://` 自定义协议（原始字节响应），
+/// 兼容命令 `get_lcu_asset` / `get_lcu_assets` 在其基础上再做 base64 编码。
+async fn resolve_asset(app_state: &AppState, path: &str) -> Result<(Vec<u8>, String), String> {
     let is_http_cdn = path.starts_with("http://") || path.starts_with("https://");
     let is_lcu_asset = path.starts_with("/lol-game-data/assets/");
     let is_loot_asset = path.starts_with("/fe/lol-loot/assets/");
@@ -376,21 +373,20 @@ async fn resolve_asset(app_state: &AppState, path: &str) -> Result<String, Strin
         })
         .await
         {
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            let data_url = format!("data:{};base64,{}", content_type, b64);
             log::debug!("TFT 持久化缓存命中: {:?}", tft_local_path);
-            return Ok(data_url);
+            return Ok((bytes, content_type));
         }
     }
 
     // 优先读取文件缓存（spawn_blocking 避免阻塞 tokio 工作线程）
     {
         let path_owned = path.to_string();
-        if let Ok(Some((data_url, _))) =
+        if let Ok(Some(bytes)) =
             tokio::task::spawn_blocking(move || try_read_asset_cache(&path_owned)).await
         {
+            let content_type = guess_content_type(path);
             log::debug!("资源缓存命中: {}", path);
-            return Ok(data_url);
+            return Ok((bytes, content_type));
         }
     }
 
@@ -432,7 +428,9 @@ async fn resolve_asset(app_state: &AppState, path: &str) -> Result<String, Strin
                     .unwrap_or_else(|| guess_content_type(path));
 
                 if let Ok(bytes) = resp.bytes().await {
-                    return Ok(save_asset_and_build_url(path, &content_type, &bytes));
+                    let bytes = bytes.to_vec();
+                    save_asset_to_cache(path, &bytes);
+                    return Ok((bytes, content_type));
                 }
             } else if resp.status().as_u16() == 404
                 && is_lcu_asset
@@ -458,7 +456,9 @@ async fn resolve_asset(app_state: &AppState, path: &str) -> Result<String, Strin
                             .unwrap_or_else(|| guess_content_type(path));
 
                         if let Ok(bytes) = retry_resp.bytes().await {
-                            return Ok(save_asset_and_build_url(path, &content_type, &bytes));
+                            let bytes = bytes.to_vec();
+                            save_asset_to_cache(path, &bytes);
+                            return Ok((bytes, content_type));
                         }
                     }
                 }
@@ -517,13 +517,41 @@ async fn resolve_asset(app_state: &AppState, path: &str) -> Result<String, Strin
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     log::debug!("资源从 CDN 加载成功: {} ({} bytes)", path, bytes.len());
 
-    Ok(save_asset_and_build_url(path, &content_type, &bytes))
+    let bytes = bytes.to_vec();
+    save_asset_to_cache(path, &bytes);
+    Ok((bytes, content_type))
 }
 
-/// 单个资源的 Tauri 命令：调用核心解析逻辑，保持原有取值链路不变。
+/// 将资源原始字节写入文件缓存（及 TFT 本地持久化缓存），不进行任何编码。
+fn save_asset_to_cache(path: &str, bytes: &[u8]) {
+    let cache_path = path.to_string();
+    let cache_data = bytes.to_vec();
+    tauri::async_runtime::spawn_blocking(move || {
+        write_asset_cache(&cache_path, &cache_data);
+    });
+
+    if let Some(tft_local_path) = get_tft_local_cache_path(path) {
+        let bytes_vec = bytes.to_vec();
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Some(parent) = tft_local_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&tft_local_path, &bytes_vec);
+        });
+    }
+}
+
+/// 将原始字节编码为 data URL（仅供兼容命令 get_lcu_asset / get_lcu_assets 使用）
+fn bytes_to_data_url(content_type: &str, bytes: &[u8]) -> String {
+    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+    format!("data:{};base64,{}", content_type, b64)
+}
+
+/// 单个资源的 Tauri 命令：兼容层，内部仍返回 data URL，保持原有取值链路不变。
 #[tauri::command]
 pub async fn get_lcu_asset(path: String, app_state: State<'_, AppState>) -> Result<String, String> {
-    resolve_asset(app_state.inner(), &path).await
+    let (bytes, content_type) = resolve_asset(app_state.inner(), &path).await?;
+    Ok(bytes_to_data_url(&content_type, &bytes))
 }
 
 /// 批量资源请求的单项结果
@@ -534,8 +562,8 @@ pub struct AssetItem {
     pub error: Option<String>,
 }
 
-/// 批量获取 LCU 静态资源（图片等），返回每个资源对应的 data URL。
-/// 每个路径均复用 `get_lcu_asset` 相同的取值链路（TFT 缓存 → 文件缓存 → LCU → CDragon 兜底），
+/// 批量获取 LCU 静态资源（图片等），返回每个资源对应的 data URL（兼容层）。
+/// 每个路径均复用 `resolve_asset` 相同的取值链路（TFT 缓存 → 文件缓存 → LCU → CDragon 兜底），
 /// 单个资源的失败不会影响其他资源，可显著减少前端 IPC 往返次数。
 #[tauri::command]
 pub async fn get_lcu_assets(
@@ -546,9 +574,9 @@ pub async fn get_lcu_assets(
     let results: Vec<AssetItem> = stream::iter(paths)
         .map(|path| async move {
             match resolve_asset(app, &path).await {
-                Ok(data_url) => AssetItem {
+                Ok((bytes, content_type)) => AssetItem {
                     path,
-                    data_url: Some(data_url),
+                    data_url: Some(bytes_to_data_url(&content_type, &bytes)),
                     error: None,
                 },
                 Err(e) => AssetItem {
@@ -564,25 +592,46 @@ pub async fn get_lcu_assets(
     Ok(results)
 }
 
-fn save_asset_and_build_url(path: &str, content_type: &str, bytes: &[u8]) -> String {
-    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-    let data_url = format!("data:{};base64,{}", content_type, b64);
+/// 供 Builder 链式注册 `yuumi-asset://` 自定义协议的扩展 trait
+pub trait TauriBuilderExt {
+    fn register_asset_protocol(self) -> Self;
+}
 
-    let cache_path = path.to_string();
-    let cache_data = data_url.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        write_asset_cache(&cache_path, &cache_data);
-    });
-
-    if let Some(tft_local_path) = get_tft_local_cache_path(path) {
-        let bytes_vec = bytes.to_vec();
-        tauri::async_runtime::spawn_blocking(move || {
-            if let Some(parent) = tft_local_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(&tft_local_path, &bytes_vec);
-        });
+impl TauriBuilderExt for tauri::Builder<tauri::Wry> {
+    fn register_asset_protocol(self) -> Self {
+        self.register_asynchronous_uri_scheme_protocol("yuumi-asset", |ctx, request, responder| {
+            let app_handle = ctx.app_handle().clone();
+            let encoded_path = request.uri().path().to_string();
+            tauri::async_runtime::spawn(async move {
+                use tauri::Manager;
+                let app_state = app_handle.state::<AppState>();
+                // URI 的 path 段天然带一个 "/" 分隔符，整体 percent-encode 的路径解码后会
+                // 多出一个前导 "/"，剥掉它还原为 /lol-game-data/... 或 http(s):// 原始路径
+                let path = percent_decode_str(&encoded_path)
+                    .decode_utf8_lossy()
+                    .into_owned();
+                let path = path.strip_prefix('/').unwrap_or(&path).to_string();
+                let response = match resolve_asset(app_state.inner(), &path).await {
+                    Ok((bytes, content_type)) => http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", content_type)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Cache-Control", "public, max-age=604800")
+                        .body(bytes)
+                        .unwrap(),
+                    Err(e) => {
+                        log::warn!("[asset] 资源加载失败: {} - {}", path, e);
+                        http::Response::builder()
+                            .status(404)
+                            .header("Content-Type", "text/plain")
+                            // 禁止 404 被缓存：前端 @error 重试时重新赋值相同 URL 才能真正再次发起请求
+                            .header("Cache-Control", "no-store")
+                            .body(e.into_bytes())
+                            .unwrap()
+                    }
+                };
+                responder.respond(response);
+            });
+        })
     }
-
-    data_url
 }

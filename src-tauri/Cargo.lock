@@ -6678,6 +6678,7 @@ dependencies = [
  "futures-util",
  "http",
  "log",
+ "percent-encoding",
  "regex-lite",
  "reqwest 0.12.28",
  "rfd",

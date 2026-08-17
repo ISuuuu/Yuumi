@@ -15,6 +15,7 @@ pub mod upload;
 
 use crate::updater::{PendingUpdate, UpdateInfo};
 use base64::Engine;
+use lcu::client::TauriBuilderExt;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -124,6 +125,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build());
 
     builder
+        .register_asset_protocol()
         .manage(portable_updater::PortableUpdateState::default())
         .setup(|app| {
             // 加载配置并做 clamp 限制，防止因 api_concurrency_number 为 0 导致请求挂起

@@ -64,6 +64,10 @@ Tauri v2 + Vue 3 + TypeScript 桌面应用。
 - **错误传播与序列化**：
   - `#[tauri::command]` 如果可能失败，必须返回 `Result<T, String>`。
   - 严禁随意使用 `unwrap()` 或 `panic!`，应使用 `map_err(|e| e.to_string())` 或 `thiserror` 将 Error 转化为前端友好的 String，并使用系统 `logging.rs` 的 logger 记录完整堆栈。
+- **LCU 静态资源与自定义协议规范**：
+  - LCU 静态资源（英雄、技能、物品、符文、战利品等图标）由 Rust 端的 `yuumi-asset://` 自定义协议流式返回原始字节，彻底绕开 IPC 与 Base64 传输。
+  - WebView2 仅拦截 http/https 协议，前端图片 URL 使用 wry workaround 前缀 `http://yuumi-asset.localhost/`（host 含协议名），由 wry 自动还原为 `yuumi-asset://localhost/` 后再交给 Rust handler。
+  - `get_lcu_asset` / `get_lcu_assets` 仅作兼容层保留，新功能**严禁**通过 IPC 命令读取图片 Base64。
 - **共享状态管理与死锁防护**：
   - 只能通过 `tauri::State<'_, AppState>` 访问全局状态，不得使用不安全的全局静态变量。
   - 在异步 Command 或后台 Task 中获取状态锁时，**严禁跨 `await` 点持有同步锁 (`std::sync::MutexGuard`)**，必须先释放锁或在作用域块分离后再 `await`，防止 Tokio 线程池死锁。
@@ -85,6 +89,9 @@ Tauri v2 + Vue 3 + TypeScript 桌面应用。
 - **LCU API 隔离原则**：
   - 前端绝不应直接建立与 LCU 端口的 HTTP/WebSocket 连接。
   - 所有 LCU 接口的调用，必须经由 Rust 端的 `call_lcu_api` 转发，以规避 Token 泄漏并统一错误捕获。
+- **静态图片资源渲染规范**：
+  - 所有 LCU 静态资源（英雄、技能、装备、符文、战利品图标等）统一使用 `<LcuImage :src="path" />` 组件或 `useLcuAsset` composable。
+  - 资源加载底层基于 `yuumi-asset://` 自定义协议（前端使用 `http://yuumi-asset.localhost/` workaround URL）与 Chromium 原生网络层，自带 HTTP 强缓存与原生解码，**严禁使用 IPC `invoke` 批量传递图片 Base64 字符串**。
 - **组件及路由状态保留**：
   - 页面路由切换基于 Vue 的 `currentPage` 控制。
   - Search 页和 GameInfo 页由于数据量较大且需要保留搜索/对比状态，必须使用 `v-show` 保持组件挂载，避免重新渲染销毁状态。

@@ -57,6 +57,7 @@ rfd = "0.15"
 log = { version = "0.4", features = ["std"] }
 chrono = "0.4"
 url = "2.5.8"
+percent-encoding = "2"
 
 # 截图
 xcap = "0.0.14"
