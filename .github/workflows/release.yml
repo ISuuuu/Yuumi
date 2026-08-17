@@ -175,11 +175,11 @@ jobs:
           New-Item -ItemType File -Force -Path "$PORTABLE_DIR/data/.keep" | Out-Null
 
           # 打包成 zip（保留 Yuumi-portable/ 根目录）
-          Compress-Archive -Path $PORTABLE_DIR -DestinationPath $ZIP_NAME -Force
+          7z a -tzip -mx=7 $ZIP_NAME "$PORTABLE_DIR"
           Write-Host "Portable zip created: $ZIP_NAME"
 
           # 签名便携 zip（与安装版共用同一签名密钥，生成 .sig 供 latest.json 引用）
-          npx --yes tauri signer sign $ZIP_NAME --private-key "${{ env.TAURI_SIGNING_PRIVATE_KEY }}" --password "${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
+          pnpm tauri signer sign $ZIP_NAME --private-key "${{ env.TAURI_SIGNING_PRIVATE_KEY }}" --password "${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
           Get-ChildItem -Path "*.sig" | ForEach-Object { Write-Host "Signed: $($_.Name)" }
 
       - name: Generate latest.json for updater
@@ -207,7 +207,7 @@ jobs:
 
           if (-not $SIG_FILE) {
             Write-Host "No .sig found, generating..."
-            npx --yes tauri signer sign $EXE_FILE.FullName --private-key "${{ env.TAURI_SIGNING_PRIVATE_KEY }}" --password "${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
+            pnpm tauri signer sign $EXE_FILE.FullName --private-key "${{ env.TAURI_SIGNING_PRIVATE_KEY }}" --password "${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
             $SIG_FILE = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" | Select-Object -First 1
           }
 

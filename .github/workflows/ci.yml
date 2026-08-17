@@ -1,0 +1,63 @@
+name: CI & Build Cache
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-C linker=lld-link"
+
+jobs:
+  check-and-cache:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri'
+
+      - name: Cache NSIS
+        id: cache-nsis
+        uses: actions/cache@v4
+        with:
+          path: C:\Program Files (x86)\NSIS
+          key: ${{ runner.os }}-nsis-v1
+
+      - name: Install NSIS (required for Tauri Windows bundler)
+        if: steps.cache-nsis.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "NSIS cache miss. Installing via Chocolatey..."
+          choco install nsis -y
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Frontend type check & build
+        run: pnpm build
+
+      - name: Rust release compile (preheat cache for release tags)
+        run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml
