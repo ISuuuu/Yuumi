@@ -2,8 +2,12 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { MatchDisplay, AppConfig } from "../../api/lcu";
-import type { PlayerData, PremadePlayerLike } from "../../types/gameInfo";
-import { PREMADE_COLORS } from "../../types/gameInfo";
+import {
+  PREMADE_COLORS,
+  getChampionIcon,
+  type PlayerData,
+  type PremadePlayerLike,
+} from "../../types/gameInfo";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import LcuImage from "../LcuImage.vue";
 
@@ -32,10 +36,6 @@ const colHeaderStyle = computed(() => {
     borderBottomColor: premadeColor.value.border,
   };
 });
-
-function getChampionIcon(id: number): string {
-  return id > 0 ? `/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
-}
 
 const currentChampId = computed(
   () => props.player?.championId || props.player?.championPickIntent || 0,

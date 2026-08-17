@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import type { PremadeRow } from "../../types/gameInfo";
-import { PREMADE_COLORS } from "../../types/gameInfo";
+import {
+  PREMADE_COLORS,
+  getChampionIcon,
+  type PremadeRow,
+} from "../../types/gameInfo";
 import LcuImage from "../LcuImage.vue";
 
 defineProps<{
   premadeRows: PremadeRow[];
 }>();
-
-function getChampionIcon(id: number): string {
-  return id > 0 ? `/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
-}
 </script>
 
 <template>

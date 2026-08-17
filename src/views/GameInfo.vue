@@ -4,7 +4,11 @@ import { onMounted, watch } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import type { AppConfig, SavedPlayerMarker } from "../api/lcu";
 import { querySavedPlayersMap } from "../api/lcu";
-import { PREMADE_COLORS, type PremadePlayerLike } from "../types/gameInfo";
+import {
+  PREMADE_COLORS,
+  getChampionIcon,
+  type PremadePlayerLike,
+} from "../types/gameInfo";
 import { usePremadeGroup } from "../composables/usePremadeGroup";
 import { useGamePlayerData } from "../composables/useGamePlayerData";
 import PlayerCard from "../components/gameinfo/PlayerCard.vue";
@@ -54,10 +58,6 @@ const {
   premadeColorsMy,
   premadeColorsTheir,
 );
-
-function getChampionIcon(id: number): string {
-  return id > 0 ? `/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
-}
 
 function getPlayerData(p: PremadePlayerLike, idx: number) {
   const key = p.cellId ?? p.summonerId ?? idx;

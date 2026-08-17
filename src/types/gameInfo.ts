@@ -49,6 +49,10 @@ export interface PremadeColor {
   dot: string;
 }
 
+export function getChampionIcon(id: number): string {
+  return id > 0 ? `/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
+}
+
 // 预组队颜色方案（鲜明优雅的半透明组队背景色）
 export const PREMADE_COLORS: PremadeColor[] = [
   {

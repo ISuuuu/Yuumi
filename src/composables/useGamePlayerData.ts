@@ -514,7 +514,9 @@ export function useGamePlayerData(
         return loadPlayerData(cid, sid);
       }
       return Promise.resolve();
-    }).catch(() => {});
+    }).catch((err) => {
+      console.debug("[GameInfo] 后台队伍数据预加载失败:", err);
+    });
   }
 
   async function processTeamData(teamOne: any[], teamTwo: any[]) {
@@ -576,7 +578,9 @@ export function useGamePlayerData(
     );
     void runWithConcurrency(background, 3, (p) =>
       loadPlayerData(p.summonerId, p.summonerId),
-    ).catch(() => {});
+    ).catch((err) => {
+      console.debug("[GameInfo] 后台队伍数据预加载失败:", err);
+    });
   }
 
   async function loadFromGameflowSession() {

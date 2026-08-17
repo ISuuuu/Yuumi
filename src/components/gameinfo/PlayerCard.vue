@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import type { PlayerData, PremadePlayerLike } from "../../types/gameInfo";
+import {
+  getChampionIcon,
+  type PlayerData,
+  type PremadePlayerLike,
+} from "../../types/gameInfo";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import type { SavedPlayerMarker } from "../../api/lcu";
 import LcuImage from "../LcuImage.vue";
@@ -50,10 +54,6 @@ const TIER_MAP = computed<Record<string, string>>(() => ({
   GRANDMASTER: t("tools.spoofTier.GRANDMASTER"),
   CHALLENGER: t("tools.spoofTier.CHALLENGER"),
 }));
-
-function getChampionIcon(id: number): string {
-  return id > 0 ? `/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
-}
 
 function getKdaClass(kda: number | undefined): string {
   if (kda === undefined) return "kda-gray";
