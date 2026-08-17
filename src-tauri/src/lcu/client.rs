@@ -612,22 +612,34 @@ impl TauriBuilderExt for tauri::Builder<tauri::Wry> {
                     .into_owned();
                 let path = path.strip_prefix('/').unwrap_or(&path).to_string();
                 let response = match resolve_asset(app_state.inner(), &path).await {
-                    Ok((bytes, content_type)) => http::Response::builder()
+                    Ok((bytes, content_type)) => match http::Response::builder()
                         .status(200)
                         .header("Content-Type", content_type)
                         .header("Access-Control-Allow-Origin", "*")
                         .header("Cache-Control", "public, max-age=604800")
                         .body(bytes)
-                        .unwrap(),
+                    {
+                        Ok(response) => response,
+                        Err(error) => {
+                            log::error!("[asset] 构建成功响应失败: {}", error);
+                            http::Response::new(error.to_string().into_bytes())
+                        }
+                    },
                     Err(e) => {
                         log::warn!("[asset] 资源加载失败: {} - {}", path, e);
-                        http::Response::builder()
+                        match http::Response::builder()
                             .status(404)
                             .header("Content-Type", "text/plain")
                             // 禁止 404 被缓存：前端 @error 重试时重新赋值相同 URL 才能真正再次发起请求
                             .header("Cache-Control", "no-store")
                             .body(e.into_bytes())
-                            .unwrap()
+                        {
+                            Ok(response) => response,
+                            Err(error) => {
+                                log::error!("[asset] 构建错误响应失败: {}", error);
+                                http::Response::new(error.to_string().into_bytes())
+                            }
+                        }
                     }
                 };
                 responder.respond(response);

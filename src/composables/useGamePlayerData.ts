@@ -129,11 +129,18 @@ export function useGamePlayerData(
 
   // ── 保留对局数据写入：仅在双方队伍（10 人）完整就绪时才落盘保存为完整对局快照
   function writeReserveData() {
-    if (
-      gameflowMyTeam.value.length === 0 ||
-      gameflowTheirTeam.value.length === 0 ||
-      Object.keys(playerData.value).length === 0
-    ) {
+    const players = [...gameflowMyTeam.value, ...gameflowTheirTeam.value];
+    const hasCompletePlayerData =
+      gameflowMyTeam.value.length === 5 &&
+      gameflowTheirTeam.value.length === 5 &&
+      players.every((player) => {
+        const playerId = player.summonerId ?? player.cellId;
+        if (!playerId || playerId <= 0) return false;
+        const data = playerData.value[playerId];
+        return data !== undefined && !data.loading && data.info !== null;
+      });
+
+    if (!hasCompletePlayerData) {
       return;
     }
     lazySetItem("yuumi_last_game_player_data", playerData.value);
