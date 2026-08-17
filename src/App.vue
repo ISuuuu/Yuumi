@@ -522,7 +522,9 @@ async function showBenchOverlay(show: boolean = true) {
 // 游戏阶段变化 → 更新窗口标题 + 自动跳转对局信息页
 watch(gamePhase, (phase: string) => {
   if (isOverlayWindow.value) return;
-  console.log("[watch gamePhase] phase changed:", phase);
+  if (import.meta.env.DEV) {
+    console.log("[watch gamePhase] phase changed:", phase);
+  }
 
   // 更新窗口标题栏显示游戏状态
   const label = t("phase." + phase);
@@ -537,7 +539,9 @@ watch(gamePhase, (phase: string) => {
     (async () => {
       try {
         const side = await invoke<string | null>("get_map_side");
-        console.log("[watch gamePhase] get_map_side result:", side);
+        if (import.meta.env.DEV) {
+          console.log("[watch gamePhase] get_map_side result:", side);
+        }
         if (side) {
           const sideLabel =
             side === "blue" ? t("titlebar.blueSide") : t("titlebar.redSide");
@@ -583,7 +587,9 @@ watch(gamePhase, (phase: string) => {
     phase === "GameStart" ||
     phase === "InProgress"
   ) {
-    console.log("[watch gamePhase] navigating to gameinfo");
+    if (import.meta.env.DEV) {
+      console.log("[watch gamePhase] navigating to gameinfo");
+    }
     currentPage.value = "gameinfo";
 
     if (phase === "ChampSelect") {

@@ -615,8 +615,8 @@ pub async fn fetch_tft_meta_decks(
 ) -> Result<serde_json::Value, String> {
     let cache_key = "tft_meta_decks".to_string();
 
-    // 尝试内存缓存（阵容本体与图标映射均有独立缓存）
-    if let Some(mut parsed) = crate::lcu::opgg::get_cached(&cache_key) {
+    // 尝试内存/磁盘缓存（阵容本体与图标映射均有独立缓存）
+    if let Some(mut parsed) = crate::lcu::opgg::get_cached(&cache_key).await {
         attach_tft_meta_maps(&mut parsed).await;
         return Ok(parsed);
     }

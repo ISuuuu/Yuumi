@@ -80,7 +80,7 @@ async function fetchSessionCached(): Promise<any | null> {
   return null;
 }
 
-const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_matches_cache_${puuid}`;
+const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_gf_matches_cache_${puuid}`;
 function mergeMatchesWithCache(
   puuid: string,
   fresh: MatchDisplay[],
@@ -543,9 +543,11 @@ export function useGamePlayerData(
         if (
           p.summonerId &&
           p.cellId !== undefined &&
+          p.cellId !== p.summonerId &&
           playerData.value[p.cellId]
         ) {
           playerData.value[p.summonerId] = playerData.value[p.cellId];
+          delete playerData.value[p.cellId];
         }
       }
     }
@@ -625,8 +627,8 @@ export function useGamePlayerData(
       const { teamOne, teamTwo } = data.gameData;
       if (!teamOne || !teamTwo || teamOne.length === 0 || teamTwo.length === 0) {
         let retried = 0;
-        while (retried < 5) {
-          await new Promise((r) => setTimeout(r, 3000));
+        while (retried < 4) {
+          await new Promise((r) => setTimeout(r, 1000));
 
           if (reqId !== currentGameflowSessionRequestId) return;
           if (

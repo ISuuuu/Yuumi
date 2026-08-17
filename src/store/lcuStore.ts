@@ -280,7 +280,9 @@ export async function initLcuListeners() {
       const cid = Number(typeof data === "object" ? data?.championId || data?.id : data);
       if (cid > 0) {
         store.addHistoricalChampion(cid);
-        console.log(`[lcuStore] 收到 current-champion 事件，录入历史拥有英雄: ${cid}`);
+        if (import.meta.env.DEV) {
+          console.log(`[lcuStore] 收到 current-champion 事件，录入历史拥有英雄: ${cid}`);
+        }
       }
     } else if (uri.startsWith("/lol-matchmaking/v1/ready-check")) {
       store.setReadyCheck(data);

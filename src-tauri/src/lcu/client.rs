@@ -214,10 +214,12 @@ pub async fn lcu_request(
     // Basic Auth: base64("riot:<token>")
     let auth_value = build_auth_header(&token);
 
-    let mut last_err = String::new();
+    let method_upper = method.to_uppercase();
 
-    for attempt in 1..=MAX_RETRIES {
-        let mut req = match method.to_uppercase().as_str() {
+    // 基础请求对象在循环外构建一次（method 分发、URL 拼接、JSON body 序列化只做一次），
+    // 重试时通过 try_clone 复用同一请求，避免每轮循环重复构建。
+    let base_req = {
+        let mut req = match method_upper.as_str() {
             "GET" => http_client.get(&url),
             "POST" => http_client.post(&url),
             "PUT" => http_client.put(&url),
@@ -225,12 +227,35 @@ pub async fn lcu_request(
             "DELETE" => http_client.delete(&url),
             other => return Err(format!("不支持的 HTTP 方法: {}", other)),
         };
-
         req = req.header("Authorization", &auth_value);
-
         if let Some(ref json_body) = body {
             req = req.json(json_body);
         }
+        req
+    };
+
+    let mut last_err = String::new();
+
+    for attempt in 1..=MAX_RETRIES {
+        // 优先复用基础请求；try_clone 失败（异常 body）时降级为每轮重建
+        let req = match base_req.try_clone() {
+            Some(req) => req,
+            None => {
+                let mut req = match method_upper.as_str() {
+                    "GET" => http_client.get(&url),
+                    "POST" => http_client.post(&url),
+                    "PUT" => http_client.put(&url),
+                    "PATCH" => http_client.patch(&url),
+                    "DELETE" => http_client.delete(&url),
+                    _ => return Err("不支持的 HTTP 方法".to_string()),
+                };
+                req = req.header("Authorization", &auth_value);
+                if let Some(ref json_body) = body {
+                    req = req.json(json_body);
+                }
+                req
+            }
+        };
 
         match req.send().await {
             Ok(response) => {

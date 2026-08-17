@@ -4,6 +4,7 @@
 
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -11,6 +12,7 @@ use crate::AppState;
 
 const OPGG_CACHE_MAX_ENTRIES: usize = 100;
 const OPGG_CACHE_TTL: Duration = Duration::from_secs(600); // 10 分钟
+const OPGG_DISK_CACHE_TTL: Duration = Duration::from_secs(86400); // 24 小时
 const OPGG_MAX_RETRIES: u32 = 3;
 const OPGG_RETRY_DELAY: Duration = Duration::from_millis(500);
 /// OP.GG 单次请求超时（境外服务常走代理，避免连接挂起导致前端无限转圈）
@@ -27,8 +29,77 @@ fn get_opgg_cache() -> &'static Mutex<HashMap<String, OpggCacheEntry>> {
     OPGG_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// 读取缓存（未过期则返回数据）
-pub(crate) fn get_cached(key: &str) -> Option<Value> {
+/// FNV-1a 64位稳定哈希，生成磁盘缓存文件名（与 client.rs 的 stable_hash 同源）
+fn cache_file_hash(key: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in key.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x00000100000001B3);
+    }
+    format!("{:016x}.json", hash)
+}
+
+/// OP.GG 磁盘缓存目录（跨启动持久化，app_data/cache/opgg/）
+fn disk_cache_dir() -> Option<PathBuf> {
+    let dir = crate::runtime::app_data_dir().join("cache").join("opgg");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+/// 读取磁盘缓存（未过期则返回数据），文件读写走 spawn_blocking 避免阻塞 tokio
+pub(crate) async fn get_disk_cached(key: &str) -> Option<Value> {
+    let key_owned = key.to_string();
+    tokio::task::spawn_blocking(move || {
+        let dir = disk_cache_dir()?;
+        let file_path = dir.join(cache_file_hash(&key_owned));
+        let meta = std::fs::metadata(&file_path).ok()?;
+        if meta.modified().ok()?.elapsed().unwrap_or(Duration::MAX) > OPGG_DISK_CACHE_TTL {
+            let _ = std::fs::remove_file(&file_path); // 物理删除过期文件
+            return None;
+        }
+        let text = std::fs::read_to_string(&file_path).ok()?;
+        serde_json::from_str(&text).ok()
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// 写入磁盘缓存（原子写：先写 tmp 再 rename）
+fn put_disk_cached(key: &str, data: &Value) {
+    let key_owned = key.to_string();
+    let text = data.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(dir) = disk_cache_dir() else { return };
+        let hash = cache_file_hash(&key_owned);
+        let target = dir.join(&hash);
+        let temp = dir.join(format!("{}.tmp", &hash));
+        if std::fs::write(&temp, text).is_ok() {
+            let _ = std::fs::rename(&temp, &target);
+        }
+    });
+}
+
+/// 读取缓存（内存未命中时回退磁盘缓存并回填内存）
+pub(crate) async fn get_cached(key: &str) -> Option<Value> {
+    if let Some(data) = get_mem_cached(key) {
+        return Some(data);
+    }
+    if let Some(data) = get_disk_cached(key).await {
+        log::debug!("OP.GG 磁盘缓存命中: {}", key);
+        put_mem_cached(key.to_string(), data.clone());
+        return Some(data);
+    }
+    None
+}
+
+/// 写入缓存（内存 + 磁盘双写）
+pub(crate) fn put_cached(key: String, data: Value) {
+    put_mem_cached(key.clone(), data.clone());
+    put_disk_cached(&key, &data);
+}
+
+fn get_mem_cached(key: &str) -> Option<Value> {
     let cache = get_opgg_cache().lock().ok()?;
     let entry = cache.get(key)?;
     if entry.inserted_at.elapsed() < OPGG_CACHE_TTL {
@@ -39,8 +110,7 @@ pub(crate) fn get_cached(key: &str) -> Option<Value> {
     }
 }
 
-/// 写入缓存（超限时淘汰最旧条目）
-pub(crate) fn put_cached(key: String, data: Value) {
+fn put_mem_cached(key: String, data: Value) {
     if let Ok(mut cache) = get_opgg_cache().lock() {
         if cache.len() >= OPGG_CACHE_MAX_ENTRIES {
             if let Some(oldest_key) = cache
@@ -122,14 +192,14 @@ async fn proxy_config(app_state: &AppState) -> (bool, String) {
     )
 }
 
-/// GET 请求：带内存缓存与传输层重试（缓存的是原始响应体）
+/// GET 请求：带内存/磁盘缓存与传输层重试（缓存的是原始响应体）
 pub(crate) async fn get_json(
     app_state: &AppState,
     url: &str,
     query: &[(&str, &str)],
     cache_key: &str,
 ) -> Result<Value, String> {
-    if let Some(data) = get_cached(cache_key) {
+    if let Some(data) = get_cached(cache_key).await {
         return Ok(data);
     }
 
