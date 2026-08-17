@@ -541,7 +541,7 @@ pub async fn get_match_history_sgp(
     let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
     let sgp_client = crate::lcu::sgp::get_sgp_client();
 
-    // ── 3. 请求 SGP 战绩接口 ──
+    // ── 3. 请求 SGP 战绩接口（若 401 自动强制刷新 token 重试一次） ──
     if end_index < beg_index {
         return Err("参数错误: end_index 不能小于 beg_index".to_string());
     }
@@ -551,9 +551,10 @@ pub async fn get_match_history_sgp(
         sgp_base, puuid
     );
 
-    let sgp_resp = sgp_client
+    let mut current_token = sgp_token;
+    let mut sgp_resp = sgp_client
         .get(&sgp_url)
-        .header("Authorization", format!("Bearer {}", sgp_token))
+        .header("Authorization", format!("Bearer {}", current_token))
         .query(&[
             ("startIndex", &beg_index.to_string()),
             ("count", &count.to_string()),
@@ -561,6 +562,25 @@ pub async fn get_match_history_sgp(
         .send()
         .await
         .map_err(|e| format!("SGP 战绩请求失败: {}", e))?;
+
+    // 遇到 401 时强制刷新 token 并重试一次
+    if sgp_resp.status().as_u16() == 401 {
+        log::warn!("SGP 战绩返回 401 未授权，尝试强制刷新 accessToken 重试");
+        if let Ok(refreshed_token) = crate::lcu::sgp::get_sgp_token_force_refresh(port, &auth).await
+        {
+            current_token = refreshed_token;
+            sgp_resp = sgp_client
+                .get(&sgp_url)
+                .header("Authorization", format!("Bearer {}", current_token))
+                .query(&[
+                    ("startIndex", &beg_index.to_string()),
+                    ("count", &count.to_string()),
+                ])
+                .send()
+                .await
+                .map_err(|e| format!("SGP 战绩重试请求失败: {}", e))?;
+        }
+    }
 
     if !sgp_resp.status().is_success() {
         return Err(format!(

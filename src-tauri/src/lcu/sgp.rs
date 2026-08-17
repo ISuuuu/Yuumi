@@ -59,10 +59,19 @@ static SGP_TOKEN_CACHE: OnceLock<Mutex<Option<SgpTokenCache>>> = OnceLock::new()
 /// 获取 SGP 鉴权用 accessToken（/entitlements/v1/token 的 accessToken 字段）。
 /// 结果按 LCU 端口缓存 30 分钟，避免每次 SGP 请求都重复获取。
 pub async fn get_sgp_token(port: u16, auth: &str) -> Result<String, String> {
+    get_sgp_token_impl(port, auth, false).await
+}
+
+/// 强制刷新并获取最新的 SGP accessToken（当遇到 401 时重试用）
+pub async fn get_sgp_token_force_refresh(port: u16, auth: &str) -> Result<String, String> {
+    get_sgp_token_impl(port, auth, true).await
+}
+
+async fn get_sgp_token_impl(port: u16, auth: &str, force_refresh: bool) -> Result<String, String> {
     let cache = SGP_TOKEN_CACHE.get_or_init(|| Mutex::new(None));
 
-    // 命中缓存则直接复用（锁仅短暂持有，不在 await 期间持有）
-    {
+    // 非强制刷新时命中缓存则直接复用（锁仅短暂持有，不在 await 期间持有）
+    if !force_refresh {
         let guard = cache
             .lock()
             .map_err(|e| format!("SGP token 缓存锁异常: {}", e))?;

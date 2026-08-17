@@ -150,7 +150,7 @@ const loadingMore = ref(false); // 防止重复触发 SGP 加载
 const pageSwitching = ref(false); // 防止翻页期间重复触发
 const INITIAL_BATCH = 20; // 首次加载 20 条（2 页）
 const LOAD_MORE_COUNT = 30; // 每次增量加载 30 条
-const PREFETCH_PAGES = 3; // 提前 3 页预拉取
+const PREFETCH_PAGES = 1; // 提前 1 页预拉取
 
 // 搜索代数：每次发起新搜索自增，用于丢弃旧搜索的后台预取结果，防止串号污染
 let searchGeneration = 0;
@@ -422,7 +422,7 @@ async function loadMatchHistoryList() {
 
     // 首次加载一波 + 翻到尽头时增量拉取
     if (allMatchesSearch.value.length === 0) {
-      // 首次加载: 拉取 0~INITIAL_BATCH-1
+      // 首次加载: 仅向 LCU 拉取 0~INITIAL_BATCH-1（共 20 条，够看前 2 页，不触发 SGP）
       const raw = await fetchMatchHistory(
         summoner.value.puuid,
         0,
@@ -431,14 +431,11 @@ async function loadMatchHistoryList() {
       console.log(`[Search] 首次加载: raw.length=${raw.length}`);
       allMatchesSearch.value = raw;
       loadedGameIndex.value = INITIAL_BATCH;
-
-      // 首次加载后后台预拉取更多，不阻塞当前页渲染
-      schedulePrefetchMatches();
     } else if (
-      end + matchesPerPage * PREFETCH_PAGES >=
-      allMatchesSearch.value.length
+      currentPageNum.value >= 2 &&
+      end + matchesPerPage * PREFETCH_PAGES >= allMatchesSearch.value.length
     ) {
-      // 提前 PREFETCH_PAGES 页预拉取
+      // 用户翻到第 2 页或更后页时，若剩余数据不足则提前后台预取后续数据
       schedulePrefetchMatches();
     }
 
