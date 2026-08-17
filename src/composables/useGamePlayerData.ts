@@ -127,11 +127,18 @@ export function useGamePlayerData(
   const currentQueueId = ref<number | null>(null);
   const isTftMode = ref(false);
 
-  // ── 保留对局数据写入：组队信息 + 战绩 + 队伍列表一起落盘
+  // ── 保留对局数据写入：仅在双方队伍（10 人）完整就绪时才落盘保存为完整对局快照
   function writeReserveData() {
+    if (
+      gameflowMyTeam.value.length === 0 ||
+      gameflowTheirTeam.value.length === 0 ||
+      Object.keys(playerData.value).length === 0
+    ) {
+      return;
+    }
     lazySetItem("yuumi_last_game_player_data", playerData.value);
-    lazySetItem("yuumi_last_gameflow_my_team", myTeam.value);
-    lazySetItem("yuumi_last_gameflow_their_team", theirTeam.value);
+    lazySetItem("yuumi_last_gameflow_my_team", gameflowMyTeam.value);
+    lazySetItem("yuumi_last_gameflow_their_team", gameflowTheirTeam.value);
     lazySetItem("yuumi_last_premade_colors_my", premadeColorsMy.value);
     lazySetItem("yuumi_last_premade_colors_their", premadeColorsTheir.value);
   }
@@ -566,11 +573,6 @@ export function useGamePlayerData(
     premadeColorsMy.value = computePremadeColors(allyTeam);
     premadeColorsTheir.value = computePremadeColors(enemyTeam);
 
-    lazySetItem("yuumi_last_gameflow_my_team", gameflowMyTeam.value);
-    lazySetItem("yuumi_last_gameflow_their_team", gameflowTheirTeam.value);
-    lazySetItem("yuumi_last_premade_colors_my", premadeColorsMy.value);
-    lazySetItem("yuumi_last_premade_colors_their", premadeColorsTheir.value);
-
     // 先加载当前可见队伍，再后台加载另一队，避免一次性并发请求过多
     const visible = activeTab.value === "my" ? allyTeam : enemyTeam;
     const background = activeTab.value === "my" ? enemyTeam : allyTeam;
@@ -580,9 +582,16 @@ export function useGamePlayerData(
     );
     void runWithConcurrency(background, 3, (p) =>
       loadPlayerData(p.summonerId, p.summonerId),
-    ).catch((err) => {
-      console.debug("[GameInfo] 后台队伍数据预加载失败:", err);
-    });
+    )
+      .then(() => {
+        // 双方 10 人信息加载完毕，立即保存完整对局
+        writeReserveData();
+      })
+      .catch((err) => {
+        console.debug("[GameInfo] 后台队伍数据预加载失败:", err);
+        // 异常兜底，只要队伍齐备也保存
+        writeReserveData();
+      });
   }
 
   async function loadFromGameflowSession() {
@@ -627,8 +636,9 @@ export function useGamePlayerData(
       const { teamOne, teamTwo } = data.gameData;
       if (!teamOne || !teamTwo || teamOne.length === 0 || teamTwo.length === 0) {
         let retried = 0;
-        while (retried < 4) {
-          await new Promise((r) => setTimeout(r, 1000));
+        const maxRetries = 30; // 30 次重试，每次间隔 2 秒（覆盖进游戏后 60 秒），确保对局中随时能补齐 10 人
+        while (retried < maxRetries) {
+          await new Promise((r) => setTimeout(r, 2000));
 
           if (reqId !== currentGameflowSessionRequestId) return;
           if (
@@ -666,21 +676,25 @@ export function useGamePlayerData(
   // 监听 Watchers
   watch(isGameActive, (active) => {
     if (!active) {
-      const hasRefData =
-        gameflowMyTeam.value.length > 0 ||
-        gameflowTheirTeam.value.length > 0 ||
+      // 离开游戏活跃状态（回到 Lobby / EndOfGame 等）：
+      const hasFull10Players =
+        gameflowMyTeam.value.length > 0 &&
+        gameflowTheirTeam.value.length > 0 &&
         Object.keys(playerData.value).length > 0;
-      if (hasRefData) {
-        // 内存中已有最新对局数据（通常来自 InProgress/选人阶段事件），
-        // 直接保留并回写 localStorage 自我修复，避免被残留旧数据覆盖
+      if (hasFull10Players) {
+        // 内存中已有刚打完的 10 人完整对局，确保落盘
         writeReserveData();
       } else {
+        // 否则（如中途启动或选人秒退离开），尝试从 localStorage 恢复上一次完整的 10 人对局快照
         restoreReserveDataFromLocalStorage();
       }
     } else {
-      gameflowMyTeam.value = [];
-      gameflowTheirTeam.value = [];
-      playerData.value = {};
+      // 刚进入选人阶段时，清空当前内存视图以展示当前选人
+      if (store.gamePhase === "ChampSelect") {
+        gameflowMyTeam.value = [];
+        gameflowTheirTeam.value = [];
+        playerData.value = {};
+      }
     }
   });
 
@@ -696,7 +710,7 @@ export function useGamePlayerData(
         playerData.value = {};
         premadeColorsMy.value = {};
         premadeColorsTheir.value = {};
-        clearReserveDataFromStorage();
+        // 选人阶段不立即清空 localStorage，避免秒退导致已有完整对局丢失
         refreshState();
       }
       if (phase === "InProgress" || phase === "GameStart")
@@ -724,17 +738,6 @@ export function useGamePlayerData(
         gameflowMyTeam.value = myTeam;
         loadAllPlayers();
         fetchPremadeColors();
-
-        try {
-          if (myTeam.length > 0) {
-            lazySetItem("yuumi_last_gameflow_my_team", myTeam);
-          }
-          if (theirTeam.length > 0) {
-            lazySetItem("yuumi_last_gameflow_their_team", theirTeam);
-          }
-        } catch {
-          /* ignore */
-        }
       }
     },
   );
