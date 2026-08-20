@@ -22,6 +22,8 @@ import { setLocale } from "../i18n";
 const config =
   inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 const applyMicaEffect = inject<(enabled: boolean) => void>("applyMicaEffect");
+const hasUpdate = inject<Ref<boolean>>("hasUpdate", ref(false));
+const globalUpdateInfo = inject<Ref<UpdateInfo | null>>("updateInfo", ref(null));
 const dialog = useDialog();
 const { t } = useI18n();
 
@@ -145,7 +147,8 @@ async function manualCheckUpdate() {
     } else {
       const result = await invoke<UpdateInfo | null>("check_update");
       if (result) {
-        // check_update 已自动触发后台下载，App.vue 的 UpdateDialog 会接管气泡和进度
+        // 手动检查：无论自动更新开关是否开启，都立即弹出更新弹窗并展示后台下载进度
+        showUpdateInfo(result);
         showToast(`已开始下载 v${result.version}`, "success");
       } else {
         showToast("已是最新版本！", "success");
@@ -155,6 +158,26 @@ async function manualCheckUpdate() {
     showToast("检查更新失败: " + String(e), "error");
   } finally {
     checkingUpdate.value = false;
+  }
+}
+
+// 开机检测到的可更新版本，自动更新关闭时需点击此按钮才开始后台下载
+const immediateUpdating = ref(false);
+async function handleImmediateUpdate() {
+  if (!globalUpdateInfo.value) return;
+  if (immediateUpdating.value) return;
+  immediateUpdating.value = true;
+  // 先弹出更新气泡/弹窗，再触发后台下载（由 Rust 端 emit progress 事件驱动）
+  showUpdateInfo(globalUpdateInfo.value);
+  try {
+    const result = await invoke<UpdateInfo | null>("check_update");
+    if (result) {
+      showToast(`已开始下载 v${result.version}`, "success");
+    }
+  } catch (e: any) {
+    showToast("下载失败: " + String(e), "error");
+  } finally {
+    immediateUpdating.value = false;
   }
 }
 
@@ -1334,6 +1357,7 @@ function applyThemeMode(mode: string) {
                 ? $t("settings.portableUpdateDesc")
                 : $t("settings.checkUpdateDesc")
             }}
+            <template v-if="!isPortable"> — {{ $t("settings.checkUpdateAutoDownloadHint") }}</template>
           </span>
         </div>
         <div class="card-right" style="flex-shrink: 0; gap: 10px">
@@ -1471,6 +1495,31 @@ function applyThemeMode(mode: string) {
               v-model:value="config.General.EnableCheckUpdate"
               @update:value="autoSave"
             />
+          </template>
+        </div>
+      </div>
+
+      <!-- 更新可用提示（联动 hasUpdate） -->
+      <div v-if="hasUpdate && globalUpdateInfo" class="update-available-card">
+        <div class="update-available-left">
+          <span class="update-available-dot" />
+          <span class="update-available-text">发现新版本 v{{ globalUpdateInfo.version }}</span>
+          <span class="update-available-current">（当前 v{{ globalUpdateInfo.currentVersion }}）</span>
+        </div>
+        <div class="update-available-right">
+          <!-- 自动更新开启时提示后台下载中；关闭时展示“立即更新”按钮 -->
+          <template v-if="config?.General?.EnableCheckUpdate">
+            <span class="update-available-hint">{{ $t("settings.updateReadyHint") }}</span>
+          </template>
+          <template v-else>
+            <n-button
+              size="small"
+              type="primary"
+              :loading="immediateUpdating"
+              @click="handleImmediateUpdate"
+            >
+              立即更新
+            </n-button>
           </template>
         </div>
       </div>
@@ -2229,6 +2278,57 @@ function applyThemeMode(mode: string) {
   font-size: 0.75rem;
   color: var(--text-dimmed);
   font-weight: 500;
+}
+
+/* 更新可用提示卡片 */
+.update-available-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.08), rgba(0, 210, 196, 0.08));
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.update-available-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.update-available-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f43f5e;
+  box-shadow: 0 0 6px rgba(244, 63, 94, 0.8);
+  flex-shrink: 0;
+  animation: badge-pulse 2s infinite ease-in-out;
+}
+
+.update-available-text {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #f43f5e;
+}
+
+.update-available-current {
+  font-size: 0.76rem;
+  color: var(--text-dimmed);
+}
+
+.update-available-right {
+  flex-shrink: 0;
+}
+
+.update-available-hint {
+  font-size: 0.76rem;
+  color: var(--text-muted);
 }
 
 /* ── 版本更新历史（关于） ── */

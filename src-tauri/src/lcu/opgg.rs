@@ -73,7 +73,7 @@ fn put_disk_cached(key: &str, data: &Value) {
         let Some(dir) = disk_cache_dir() else { return };
         let hash = cache_file_hash(&key_owned);
         let target = dir.join(&hash);
-        let temp = dir.join(format!("{}.tmp", &hash));
+        let temp = dir.join(format!("{}.tmp", hash));
         if std::fs::write(&temp, text).is_ok() {
             let _ = std::fs::rename(&temp, &target);
         }

@@ -10,6 +10,7 @@ defineProps<{
   appConfig: AppConfig | null;
   summoner: SummonerDisplay | null;
   regionName: string;
+  hasUpdate?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -280,7 +281,7 @@ const { t: $t } = useI18n();
         @click="emit('navigate', 'settings')"
         :title="$t('nav.settings')"
       >
-        <span class="nav-icon">
+        <span class="nav-icon setting-icon-wrap">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -294,6 +295,7 @@ const { t: $t } = useI18n();
               d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
             />
           </svg>
+          <span v-if="hasUpdate" class="update-badge-dot" />
         </span>
         <span class="nav-label">{{ $t("nav.settings") }}</span>
       </div>
@@ -535,5 +537,35 @@ const { t: $t } = useI18n();
 .user-region {
   font-size: 0.68rem;
   color: var(--text-muted);
+}
+
+/* 设置图标红点徽标 - 水晶极光风格 */
+.setting-icon-wrap {
+  position: relative;
+}
+
+.update-badge-dot {
+  position: absolute;
+  top: -1px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  background-color: #f43f5e;
+  border-radius: 50%;
+  border: 1.5px solid var(--sidebar-bg, #1a1a1e);
+  box-shadow: 0 0 6px rgba(244, 63, 94, 0.8);
+  animation: badge-pulse 2s infinite ease-in-out;
+}
+
+@keyframes badge-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 4px rgba(244, 63, 94, 0.6);
+  }
+  50% {
+    transform: scale(1.15);
+    box-shadow: 0 0 8px rgba(244, 63, 94, 0.9);
+  }
 }
 </style>

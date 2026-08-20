@@ -146,7 +146,7 @@ fn write_asset_cache(path: &str, bytes: &[u8]) {
     };
     let hash = stable_hash(path);
     let target_path = dir.join(&hash);
-    let temp_path = dir.join(format!("{}.tmp", &hash));
+    let temp_path = dir.join(format!("{}.tmp", hash));
 
     // 先写临时文件，成功后再原子重命名覆盖，规避并发写锁定和文件内容截断损坏风险
     if std::fs::write(&temp_path, bytes).is_ok() {

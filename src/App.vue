@@ -108,12 +108,20 @@ const isOverlayWindow = ref(
   window.location.search.includes("window=bench-overlay"),
 );
 
-// 自动更新弹窗
+// 自动更新弹窗 + 侧边栏红点
+// updateInfo 仅用于 UpdateDialog 显示（需用户触发或自动下载时才赋值）
+// pendingUpdateInfo 用于侧边栏红点与 Settings 的“发现新版本”卡片
 const updateInfo = ref<UpdateInfo | null>(null);
+const pendingUpdateInfo = ref<UpdateInfo | null>(null);
+const hasUpdate = ref(false);
+provide("hasUpdate", hasUpdate);
+provide("updateInfo", pendingUpdateInfo);
 
-// 供子组件（Settings 手动检查）将便携版更新信息推送到 UpdateDialog
+// 供子组件（Settings 手动检查 / 立即更新）将更新信息推送到 UpdateDialog
 provide("showUpdateInfo", (info: UpdateInfo) => {
+  pendingUpdateInfo.value = info;
   updateInfo.value = info;
+  hasUpdate.value = true;
 });
 
 // 是否为便携版（决定更新弹窗走 zip 覆盖方案）
@@ -205,14 +213,23 @@ onMounted(async () => {
     console.warn("[App] 识别便携版失败:", e);
   }
 
-  // 监听 Rust 后端推送的更新可用事件（安装版后台下载 / 便携版后台检查均会触发）
+  // 监听 Rust 后端推送的更新可用事件
+  // 后台逻辑：startup_check_update 始终检测并 emit，仅当 EnableCheckUpdate=true 时才自动后台下载
+  // 前端策略：自动更新关闭时仅点亮侧边栏红点+Settings 卡片，不自动弹出下载气泡/弹窗
   await listen<UpdateInfo>("updater://update-available", (event) => {
-    updateInfo.value = event.payload;
+    pendingUpdateInfo.value = event.payload;
+    hasUpdate.value = true;
+    const autoEnabled = appConfig.value?.General?.EnableCheckUpdate ?? false;
+    if (autoEnabled) {
+      updateInfo.value = event.payload;
+    }
   });
 
   // 监听后台下载完成事件：若用户此前已关闭更新弹窗，重新弹出"更新就绪"气泡，
   // 避免下载好的更新因前端丢失入口而无法安装
   await listen<UpdateInfo>("updater://download-ready", (event) => {
+    pendingUpdateInfo.value = event.payload;
+    hasUpdate.value = true;
     if (!updateInfo.value) {
       updateInfo.value = event.payload;
     }
@@ -735,6 +752,7 @@ async function handleClose() {
               :app-config="appConfig"
               :summoner="summoner"
               :region-name="regionName"
+              :has-update="hasUpdate"
               @navigate="navigate"
               @toggle-sidebar="toggleSidebar"
               @open-opgg="openOpggWindow"

@@ -199,8 +199,61 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     app.restart();
 }
 
+/// 开机静默检查更新（无条件检测，下载行为按 EnableCheckUpdate 区分）。
+/// - 始终执行版本检查；若发现新版本则 emit `updater://update-available` 通知前端点亮徽标。
+/// - 仅当 `General.EnableCheckUpdate == true` 时才自动触发后台静默下载。
+pub async fn startup_check_update(app: AppHandle) {
+    let updater = match build_updater!(&app) {
+        Ok(u) => u,
+        Err(e) => {
+            log::warn!("开机更新初始化失败: {e}");
+            return;
+        }
+    };
+
+    let update = match updater.check().await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            log::info!("开机更新检查：已是最新版本");
+            return;
+        }
+        Err(e) => {
+            log::warn!("开机更新检查失败: {e}");
+            return;
+        }
+    };
+
+    let info = UpdateInfo {
+        version: update.version.clone(),
+        current_version: app.package_info().version.to_string(),
+        notes: update.body.clone(),
+        pub_date: update.date.map(|d| d.to_string()),
+    };
+
+    // 通知前端点亮设置徽标
+    let _ = app.emit("updater://update-available", &info);
+    log::info!("开机检测发现新版本 v{}，已通知前端", info.version);
+
+    // 读取配置决定是否自动后台下载
+    let enable_auto_download = {
+        let state = app.state::<AppState>();
+        let cfg = state.config.read().await;
+        cfg.general.enable_check_update
+    };
+
+    if enable_auto_download {
+        log::info!("自动更新已开启，后台静默下载 v{} ...", info.version);
+        background_download_update(app, update, info).await;
+    } else {
+        log::info!(
+            "自动更新未开启，仅通知前端（v{}），等待用户手动触发下载",
+            info.version
+        );
+    }
+}
+
 /// 静默后台下载新版本（检查 + 下载），不阻塞前端
-/// 启动时自动检测调用此入口
+/// 启动时自动检测调用此入口（保留兼容，内部复用 startup_check_update 的下载逻辑）
 pub async fn start_background_download(app: AppHandle) {
     let updater = match build_updater!(&app) {
         Ok(u) => u,

@@ -304,25 +304,20 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // ─── 启动时静默检查并后台下载更新（便携版走 zip 覆盖流程）───
+            // ─── 启动时无条件静默检查更新（下载行为由 EnableCheckUpdate 区分）───
             {
-                let cfg_snapshot = app_config_arc.blocking_read();
-                let enable_check = cfg_snapshot.general.enable_check_update;
-                drop(cfg_snapshot);
-                if enable_check {
-                    let app_handle = app.handle().clone();
-                    crate::spawn_log_panic(async move {
-                        // 延迟 3 秒，等待主窗口完全加载后再检查
-                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        if runtime::is_portable() {
-                            // 便携版：仅检查并通知前端，下载由用户点击触发
-                            portable_updater::start_background_check(app_handle).await;
-                        } else {
-                            // start_background_download 内部自动完成：检查→后台下载→存储→事件通知
-                            updater::start_background_download(app_handle).await;
-                        }
-                    });
-                }
+                let app_handle = app.handle().clone();
+                crate::spawn_log_panic(async move {
+                    // 延迟 3 秒，等待主窗口完全加载后再检查
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    if runtime::is_portable() {
+                        // 便携版：仅检查并通知前端，下载由用户点击触发
+                        portable_updater::start_background_check(app_handle).await;
+                    } else {
+                        // 安装版：无条件检查；若开启自动更新则后台静默下载，否则仅通知
+                        updater::startup_check_update(app_handle).await;
+                    }
+                });
             }
 
             Ok(())
