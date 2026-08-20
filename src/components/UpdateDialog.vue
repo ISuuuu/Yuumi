@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { marked } from "marked";
 
 export interface UpdateInfo {
   version: string;
@@ -22,19 +23,28 @@ interface PortableUpdateProgress {
   total: number;
 }
 
-const { updateInfo, portable } = defineProps<{
+const props = defineProps<{
   updateInfo: UpdateInfo | null | undefined;
   /** 是否为便携版（便携版更新走 zip 覆盖方案） */
   portable?: boolean;
+  /** 由父组件控制是否最小化为右下角气泡；未传时默认 true */
+  minimized?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "dismiss"): void;
+  (e: "update:minimized", value: boolean): void;
 }>();
 
 // ─── 状态 ───
 const installing = ref(false);
-const isMinimized = ref(true); // 默认从迷你气泡开始，不遮挡主界面
+const isMinimized = ref(props.minimized ?? true); // 默认从迷你气泡开始，不遮挡主界面
+watch(
+  () => props.minimized,
+  (v) => {
+    if (v !== undefined) isMinimized.value = v;
+  },
+);
 const downloadReady = ref(false);
 const progress = ref<DownloadProgress | null>(null);
 const errorMsg = ref("");
@@ -65,6 +75,17 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
+
+// 更新日志 Markdown 渲染（完整展示，不截断）
+const notesHtml = computed(() => {
+  const raw = props.updateInfo?.notes?.trim();
+  if (!raw) return "<p style='color:var(--text-tertiary)'>暂无更新说明</p>";
+  try {
+    return marked.parse(raw) as string;
+  } catch {
+    return `<pre style="white-space:pre-wrap;word-break:break-word;margin:0">${raw.replace(/</g, "&lt;")}</pre>`;
+  }
+});
 
 // ─── 事件监听 ───
 let unlistenProgress: (() => void) | null = null;
@@ -105,6 +126,7 @@ onMounted(async () => {
     (event) => {
       errorMsg.value = String(event.payload);
       isMinimized.value = false; // 出错时弹出显示错误
+      emit("update:minimized", false);
     },
   );
 });
@@ -122,7 +144,7 @@ async function installPending() {
   installing.value = true;
   errorMsg.value = "";
   try {
-    if (portable) {
+    if (props.portable) {
       await invoke("apply_portable_update");
     } else {
       await invoke("install_pending_update");
@@ -132,6 +154,7 @@ async function installPending() {
     errorMsg.value = String(e);
     installing.value = false;
     isMinimized.value = false;
+    emit("update:minimized", false);
   }
 }
 
@@ -142,7 +165,7 @@ async function installNow() {
   progress.value = { downloaded: 0, total: undefined, percent: 0 };
 
   try {
-    if (portable) {
+    if (props.portable) {
       // 便携版：通过 Channel 接收下载进度，下载完成后进入"立即重启"阶段
       const channel = new Channel<PortableUpdateProgress>();
       channel.onmessage = (p) => {
@@ -163,6 +186,7 @@ async function installNow() {
     errorMsg.value = String(e);
     installing.value = false;
     isMinimized.value = false;
+    emit("update:minimized", false);
   }
 }
 
@@ -173,10 +197,12 @@ function dismiss() {
 
 function minimize() {
   isMinimized.value = true;
+  emit("update:minimized", true);
 }
 
 function restore() {
   isMinimized.value = false;
+  emit("update:minimized", false);
 }
 
 function openReleasePage() {
@@ -344,13 +370,10 @@ function openReleasePage() {
           </button>
         </div>
 
-        <!-- 更新说明（仅手动更新/下载完成时显示） -->
-        <div
-          v-if="updateInfo.notes && (downloadReady || !progress)"
-          class="update-notes"
-        >
-          <div class="notes-label">更新说明</div>
-          <pre class="notes-content">{{ updateInfo.notes }}</pre>
+        <!-- 更新说明（始终显示，支持 Markdown 完整日志） -->
+        <div v-if="updateInfo.notes" class="update-notes">
+          <div class="notes-label">更新说明 — v{{ updateInfo.version }}{{ updateInfo.pubDate ? ` · ${updateInfo.pubDate.slice(0, 10)}` : "" }}</div>
+          <div class="notes-content" v-html="notesHtml"></div>
         </div>
 
         <!-- 下载进度（自动后台下载时显示） -->
@@ -583,13 +606,41 @@ function openReleasePage() {
 .notes-content {
   font-size: 13px;
   color: var(--text-secondary, #aaa);
-  line-height: 1.6;
-  white-space: pre-wrap;
+  line-height: 1.65;
   word-break: break-word;
   margin: 0;
-  max-height: 120px;
+  max-height: 220px;
   overflow-y: auto;
   font-family: inherit;
+}
+.notes-content :deep(h1),
+.notes-content :deep(h2),
+.notes-content :deep(h3) {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary, #e8eaf0);
+  margin: 10px 0 6px;
+}
+.notes-content :deep(ul),
+.notes-content :deep(ol) {
+  padding-left: 18px;
+  margin: 6px 0;
+}
+.notes-content :deep(li) {
+  margin-bottom: 4px;
+}
+.notes-content :deep(p) {
+  margin: 6px 0;
+}
+.notes-content :deep(code) {
+  background: rgba(0, 0, 0, 0.08);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.notes-content :deep(pre) {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ── 进度 ── */

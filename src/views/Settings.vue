@@ -112,8 +112,8 @@ const checkingUpdate = ref(false);
 // 是否为便携版（便携版更新走 zip 覆盖方案）
 const isPortable = ref(false);
 
-// App.vue 提供的更新弹窗推送函数（便携版手动检查时用）
-const showUpdateInfo = inject<(info: UpdateInfo) => void>(
+// App.vue 提供的更新弹窗推送函数（便携版手动检查 / 立即更新时用，expanded=true 直达带日志的大弹窗）
+const showUpdateInfo = inject<(info: UpdateInfo, expanded?: boolean) => void>(
   "showUpdateInfo",
   () => {},
 );
@@ -133,13 +133,16 @@ async function manualCheckUpdate() {
         "check_portable_update",
       );
       if (result) {
-        // 便携版：把更新信息推送到 App.vue 的 UpdateDialog，由用户点击下载
-        showUpdateInfo({
-          version: result.version,
-          currentVersion: appVersion.value || "",
-          notes: result.body,
-          pubDate: result.date,
-        });
+        // 便携版：直接展开带日志的大弹窗
+        showUpdateInfo(
+          {
+            version: result.version,
+            currentVersion: appVersion.value || "",
+            notes: result.body,
+            pubDate: result.date,
+          },
+          true,
+        );
         showToast(`发现新版本 v${result.version}`, "success");
       } else {
         showToast("已是最新版本！", "success");
@@ -147,8 +150,8 @@ async function manualCheckUpdate() {
     } else {
       const result = await invoke<UpdateInfo | null>("check_update");
       if (result) {
-        // 手动检查：无论自动更新开关是否开启，都立即弹出更新弹窗并展示后台下载进度
-        showUpdateInfo(result);
+        // 手动检查：直接展开带日志的大弹窗（跳过右下角小气泡）
+        showUpdateInfo(result, true);
         showToast(`已开始下载 v${result.version}`, "success");
       } else {
         showToast("已是最新版本！", "success");
@@ -167,8 +170,8 @@ async function handleImmediateUpdate() {
   if (!globalUpdateInfo.value) return;
   if (immediateUpdating.value) return;
   immediateUpdating.value = true;
-  // 先弹出更新气泡/弹窗，再触发后台下载（由 Rust 端 emit progress 事件驱动）
-  showUpdateInfo(globalUpdateInfo.value);
+  // 未开启自动更新时：点击“立即更新”直接展开带日志的大弹窗并触发后台下载（跳过小气泡）
+  showUpdateInfo(globalUpdateInfo.value, true);
   try {
     const result = await invoke<UpdateInfo | null>("check_update");
     if (result) {

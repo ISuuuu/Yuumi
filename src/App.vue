@@ -116,12 +116,15 @@ const pendingUpdateInfo = ref<UpdateInfo | null>(null);
 const hasUpdate = ref(false);
 provide("hasUpdate", hasUpdate);
 provide("updateInfo", pendingUpdateInfo);
+const updateDialogMinimized = ref(true);
 
 // 供子组件（Settings 手动检查 / 立即更新）将更新信息推送到 UpdateDialog
-provide("showUpdateInfo", (info: UpdateInfo) => {
+// expanded=true 时直接展开带日志的大弹窗（未开启自动更新时“立即更新”直达日志窗），否则显示右下角小气泡
+provide("showUpdateInfo", (info: UpdateInfo, expanded = false) => {
   pendingUpdateInfo.value = info;
   updateInfo.value = info;
   hasUpdate.value = true;
+  updateDialogMinimized.value = !expanded;
 });
 
 // 是否为便携版（决定更新弹窗走 zip 覆盖方案）
@@ -221,6 +224,7 @@ onMounted(async () => {
     hasUpdate.value = true;
     const autoEnabled = appConfig.value?.General?.EnableCheckUpdate ?? false;
     if (autoEnabled) {
+      updateDialogMinimized.value = true;
       updateInfo.value = event.payload;
     }
   });
@@ -231,6 +235,7 @@ onMounted(async () => {
     pendingUpdateInfo.value = event.payload;
     hasUpdate.value = true;
     if (!updateInfo.value) {
+      updateDialogMinimized.value = true;
       updateInfo.value = event.payload;
     }
   });
@@ -896,7 +901,9 @@ async function handleClose() {
           v-if="updateInfo"
           :update-info="updateInfo"
           :portable="isPortable"
+          :minimized="updateDialogMinimized"
           @dismiss="updateInfo = null"
+          @update:minimized="(v) => (updateDialogMinimized = v)"
         />
       </n-dialog-provider>
     </n-message-provider>
