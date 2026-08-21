@@ -1,1 +1,14 @@
-pnpm run check-all
+# 记录本次提交已暂存的文件（-z/-0 处理含空格/换行文件名）
+git diff --cached --name-only -z --diff-filter=ACMR > /tmp/yuumi-staged
+
+pnpm run format
+
+# 仅把原本已暂存的文件中被 format 改动过的部分重新暂存
+if [ -s /tmp/yuumi-staged ]; then
+  xargs -0 -r git add -- < /tmp/yuumi-staged
+fi
+rm -f /tmp/yuumi-staged
+
+# 剩余校验（不再重复 fmt-check，format 后必定通过）
+pnpm type-check
+pnpm clippy
