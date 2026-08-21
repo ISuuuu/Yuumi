@@ -128,15 +128,20 @@ pub fn connect(app_handle: AppHandle, port: u16, token: String) {
                             let app_clone = app_handle.clone();
                             crate::spawn_log_panic(async move {
                                 let state = app_clone.state::<crate::AppState>();
-                                let lcu_lock = state.lcu_client.read().await;
-                                if let Some(lcu) = lcu_lock.as_ref() {
+                                // 锁内仅提取连接参数，随后释放再发起 HTTP，避免跨 await 持有读锁阻塞 monitor 写锁
+                                let conn = {
+                                    let lcu_lock = state.lcu_client.read().await;
+                                    lcu_lock
+                                        .as_ref()
+                                        .map(|lcu| (lcu.port, lcu.token.clone(), lcu.http_client.clone()))
+                                };
+                                if let Some((port, token, http_client)) = conn {
                                     let url = format!(
                                         "https://127.0.0.1:{}/lol-gameflow/v1/gameflow-phase",
-                                        lcu.port
+                                        port
                                     );
-                                    let auth = crate::build_auth_header(&lcu.token);
-                                    if let Ok(resp) = lcu
-                                        .http_client
+                                    let auth = crate::build_auth_header(&token);
+                                    if let Ok(resp) = http_client
                                         .get(&url)
                                         .header("Authorization", auth)
                                         .send()

@@ -118,9 +118,19 @@ async function copyTeamCode(code: string | undefined) {
   }
 }
 
-function getBoardUnit(units: TftMetaUnit[] | undefined, x: number, y: number): TftMetaUnit | undefined {
-  if (!units) return undefined;
-  return units.find((u) => u.cell && u.cell.x === x && u.cell.y === y);
+// 棋盘 28 格每帧 280 次 find 优化：预建 Map<"x-y", unit>，模板查表 O(1)
+const boardUnitMap = computed(() => {
+  const map = new Map<string, TftMetaUnit>();
+  for (const u of displayUnits.value) {
+    if (u.cell && typeof u.cell.x === "number" && typeof u.cell.y === "number") {
+      map.set(`${u.cell.x}-${u.cell.y}`, u);
+    }
+  }
+  return map;
+});
+
+function getBoardUnitCached(x: number, y: number): TftMetaUnit | undefined {
+  return boardUnitMap.value.get(`${x}-${y}`);
 }
 
 function isFrontlineUnit(unit: TftMetaUnit): boolean {
@@ -447,33 +457,33 @@ onUnmounted(() => {
           <div class="tft-mini-board">
             <div v-for="y in [4, 3, 2, 1]" :key="'row-' + y" class="board-row">
               <div v-for="x in 7" :key="'cell-' + x + '-' + y" class="board-cell">
-                <template v-if="getBoardUnit(displayUnits, x, y)">
+                <template v-if="getBoardUnitCached(x, y)">
                   <div class="board-unit-wrap">
                     <div
-                      :class="['board-unit-box', { 'is-core': getBoardUnit(displayUnits, x, y)?.isCore }]"
-                      :title="getChampionDisplayName(getBoardUnit(displayUnits, x, y)?.characterId)"
+                      :class="['board-unit-box', { 'is-core': getBoardUnitCached(x, y)?.isCore }]"
+                      :title="getChampionDisplayName(getBoardUnitCached(x, y)?.characterId)"
                     >
                       <img
-                        v-if="getBoardUnit(displayUnits, x, y)?.iconUrl"
-                        :src="getBoardUnit(displayUnits, x, y)?.iconUrl"
+                        v-if="getBoardUnitCached(x, y)?.iconUrl"
+                        :src="getBoardUnitCached(x, y)?.iconUrl"
                         class="board-unit-img"
                         loading="lazy"
                       />
                       <span v-else class="board-unit-text">
-                        {{ getChampionDisplayName(getBoardUnit(displayUnits, x, y)?.characterId).slice(0, 2) }}
+                        {{ getChampionDisplayName(getBoardUnitCached(x, y)?.characterId).slice(0, 2) }}
                       </span>
                       <!-- 星级标记 -->
-                      <span v-if="getBoardUnit(displayUnits, x, y)?.tier === 3" class="board-stars gold">★★★</span>
-                      <span v-else-if="getBoardUnit(displayUnits, x, y)?.tier === 2" class="board-stars silver">★★</span>
+                      <span v-if="getBoardUnitCached(x, y)?.tier === 3" class="board-stars gold">★★★</span>
+                      <span v-else-if="getBoardUnitCached(x, y)?.tier === 2" class="board-stars silver">★★</span>
                       <!-- 核心标记 -->
-                      <span v-if="getBoardUnit(displayUnits, x, y)?.isCore" class="board-core-badge">C</span>
+                      <span v-if="getBoardUnitCached(x, y)?.isCore" class="board-core-badge">C</span>
                       <!-- 优先级标记 -->
-                      <span v-if="getBoardUnit(displayUnits, x, y)?.priority" class="board-priority-badge">P{{ getBoardUnit(displayUnits, x, y)?.priority }}</span>
+                      <span v-if="getBoardUnitCached(x, y)?.priority" class="board-priority-badge">P{{ getBoardUnitCached(x, y)?.priority }}</span>
                     </div>
                     <!-- 装备图标 -->
-                    <div v-if="getBoardUnit(displayUnits, x, y)?.items?.filter(Boolean).length" class="board-unit-items">
+                    <div v-if="getBoardUnitCached(x, y)?.items?.filter(Boolean).length" class="board-unit-items">
                       <div
-                        v-for="(item, iIdx) in getBoardUnit(displayUnits, x, y)!.items.filter(Boolean)"
+                        v-for="(item, iIdx) in getBoardUnitCached(x, y)!.items.filter(Boolean)"
                         :key="iIdx"
                         class="board-item-icon"
                         :title="getItemDisplayName(item)"

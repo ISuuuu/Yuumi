@@ -26,7 +26,7 @@ function startTimeTicker() {
   if (timeTicker) return;
   timeTicker = window.setInterval(() => {
     currentNow.value = Date.now();
-  }, 100);
+  }, 500);
 }
 
 function stopTimeTicker() {
@@ -211,11 +211,13 @@ const getProtectionState = (champ: any): { clickable: boolean; reason: string } 
   return { clickable: false, reason: "前 15 秒准备阶段 (队友保护期中)" };
 };
 
-// 判断板凳英雄是否可点击（满 15 秒后或动态点亮后高亮）
-const isBenchChampionClickable = (champ: any) => getProtectionState(champ).clickable;
-
-// 获取提示文案
-const getDisabledReason = (champ: any) => getProtectionState(champ).reason;
+// 聚合保护态到展示列表，避免模板内对同一 champ 多次调用 getProtectionState
+const benchDisplay = computed(() =>
+  benchChampions.value.map((c: any) => {
+    const st = getProtectionState(c);
+    return { champ: c, clickable: st.clickable, reason: st.reason };
+  }),
+);
 
 // 底部迷你提示（小窗口内替代 Naive UI 居中大 toast，避免遮挡英雄）
 const hintText = ref("");
@@ -385,14 +387,14 @@ watch(
       </div>
 
       <div
-        v-for="champ in benchChampions"
-        :key="champ.championId"
-        :class="['champ-item', { disabled: !isBenchChampionClickable(champ) }]"
-        @click="swapChampion(champ)"
-        :title="getDisabledReason(champ)"
+        v-for="entry in benchDisplay"
+        :key="entry.champ.championId"
+        :class="['champ-item', { disabled: !entry.clickable }]"
+        @click="swapChampion(entry.champ)"
+        :title="entry.reason"
       >
         <LcuImage
-          :src="`/lol-game-data/assets/v1/champion-icons/${champ.championId}.png`"
+          :src="`/lol-game-data/assets/v1/champion-icons/${entry.champ.championId}.png`"
           class="champ-avatar"
         />
       </div>

@@ -40,6 +40,7 @@ pub fn start(
         let mut was_connected = false;
         let mut sys = System::new();
         let mut consecutive_misses: u32 = 0;
+        let mut cached_exe_dir: Option<PathBuf> = None;
         // 每 MISS_THRESHOLD 次连续未找到 LCU，做一次全量重建（兜底增量刷新的边界情况）
         const MISS_THRESHOLD: u32 = 10;
         // 稳定连接后已删除诊断文件，避免每轮调用 remove_file
@@ -58,7 +59,8 @@ pub fn start(
 
             // 优先尝试从 lockfile 获取，备用从进程参数获取，最后 WMIC 兜底（需管理员）
             // WMIC 每轮 spawn 子进程开销大，仅在连续多轮未命中时降频调用
-            let mut lcu_info = find_via_lockfile(&sys).or_else(|| find_via_cmdline(&sys));
+            let mut lcu_info =
+                find_via_lockfile(&sys, &mut cached_exe_dir).or_else(|| find_via_cmdline(&sys));
             if lcu_info.is_none() && consecutive_misses.is_multiple_of(WMIC_THROTTLE_ROUNDS) {
                 lcu_info = find_via_wmic().await;
             }
@@ -70,7 +72,8 @@ pub fn start(
                     log::debug!("连续 {} 次未找到 LCU，执行全量进程刷新", consecutive_misses);
                     sys = System::new_all();
                     // 用全量数据再试一次（lockfile + cmdline，WMIC 不依赖 sys 无需重试）
-                    lcu_info = find_via_lockfile(&sys).or_else(|| find_via_cmdline(&sys));
+                    lcu_info = find_via_lockfile(&sys, &mut cached_exe_dir)
+                        .or_else(|| find_via_cmdline(&sys));
                     if lcu_info.is_some() {
                         consecutive_misses = 0;
                     }
@@ -207,6 +210,7 @@ pub fn start(
                             *lock = None;
                         }
                         was_connected = false;
+                        cached_exe_dir = None;
                         super::sgp::clear_sgp_token_cache();
 
                         // 取消 WS 连接循环，避免在 LOL 退出后后台持续尝试连接旧端口并打印日志
@@ -240,9 +244,27 @@ pub fn start(
 ///
 /// LCU 启动时会在安装目录写入 lockfile，格式为：
 /// `name:pid:port:password:protocol`
-fn find_via_lockfile(sys: &System) -> Option<(u32, u16, String, Option<String>)> {
-    // 找到 LeagueClientUx.exe 进程，获取其可执行文件所在目录
-    let exe_dir = find_lcu_exe_dir(sys)?;
+fn find_via_lockfile(
+    sys: &System,
+    cached_exe_dir: &mut Option<PathBuf>,
+) -> Option<(u32, u16, String, Option<String>)> {
+    // 复用已缓存的 exe_dir，避免每轮全量扫描进程列表；缓存失效时重新探测
+    let exe_dir = if let Some(cached) = cached_exe_dir.clone() {
+        // 快速校验缓存仍有效（lockfile 仍存在）
+        let p = cached.join("lockfile");
+        let alt = cached.parent().map(|par| par.join("lockfile"));
+        if p.exists() || alt.is_some_and(|ap| ap.exists()) {
+            cached
+        } else {
+            let fresh = find_lcu_exe_dir(sys)?;
+            *cached_exe_dir = Some(fresh.clone());
+            fresh
+        }
+    } else {
+        let fresh = find_lcu_exe_dir(sys)?;
+        *cached_exe_dir = Some(fresh.clone());
+        fresh
+    };
 
     let mut lockfile_path = exe_dir.join("lockfile");
     if !lockfile_path.exists() {
@@ -254,7 +276,11 @@ fn find_via_lockfile(sys: &System) -> Option<(u32, u16, String, Option<String>)>
         }
     }
 
-    let content = std::fs::read_to_string(&lockfile_path).ok()?;
+    let content = std::fs::read_to_string(&lockfile_path).ok().or_else(|| {
+        // 缓存指向的 lockfile 读取失败，清除缓存供下轮重探
+        *cached_exe_dir = None;
+        None
+    })?;
 
     // 解析 lockfile: name:pid:port:password:protocol
     let parts: Vec<&str> = content.trim().split(':').collect();
@@ -263,6 +289,12 @@ fn find_via_lockfile(sys: &System) -> Option<(u32, u16, String, Option<String>)>
     }
 
     let pid: u32 = parts[1].parse().ok()?;
+    // 校验 lockfile 中的 pid 对应进程仍存活：
+    // LOL 异常退出时 lockfile 会残留，若不校验，缓存会让 monitor 误判 LCU 仍在线（回归点）
+    if sys.process(sysinfo::Pid::from_u32(pid)).is_none() {
+        *cached_exe_dir = None;
+        return None;
+    }
     let port: u16 = parts[2].parse().ok()?;
     let password = parts[3].to_string();
 
@@ -455,6 +487,7 @@ fn shared_lcu_http_client() -> &'static reqwest::Client {
         reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .no_proxy()
+            .timeout(Duration::from_secs(5))
             .build()
             .unwrap_or_default()
     })

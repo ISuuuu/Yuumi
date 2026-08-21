@@ -191,19 +191,18 @@ pub async fn lcu_request(
         return Err(format!("不允许的 API 路径: {}", path));
     }
 
-    // 获取并发许可
-    let semaphore = {
-        let lock = app_state.api_semaphore.read().await;
-        lock.clone()
-    };
-    let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
-
     // 在锁内只提取连接参数（http_client 克隆是 Arc 浅拷贝，代价极低），
     // 尽早释放读锁，避免重试循环期间阻塞 monitor 的重连写锁
     let (port, token, http_client) = {
         let lock = app_state.lcu().await?;
         let lcu = lock.as_ref().unwrap();
         (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+    };
+
+    // 获取并发许可（每轮重试单独 acquire，避免挂起请求占死并发池）
+    let semaphore = {
+        let lock = app_state.api_semaphore.read().await;
+        lock.clone()
     };
 
     let url = format!("https://127.0.0.1:{}{}", port, path);
@@ -234,6 +233,9 @@ pub async fn lcu_request(
     let mut last_err = String::new();
 
     for attempt in 1..=MAX_RETRIES {
+        // 每轮重试单独获取并发许可，挂起请求仅占用单轮 permit，超时释放后不阻塞后续请求
+        let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
+
         // 优先复用基础请求；try_clone 失败（异常 body）时降级为每轮重建
         let req = match base_req.try_clone() {
             Some(req) => req,
