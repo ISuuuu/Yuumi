@@ -98,6 +98,26 @@ impl AppState {
     }
 }
 
+/// 激活主窗口（取消最小化/显示/聚焦）并在配置启用时重新应用云母效果，
+/// 防止窗口长时间隐藏后 Mica 特效失效。托盘菜单与托盘图标点击共用。
+fn activate_main_window_with_mica(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        // 重新应用云母效果以防失效
+        let state = app.state::<AppState>();
+        let is_mica_enabled = state
+            .config
+            .try_read()
+            .map(|cfg| cfg.personalization.mica_enabled)
+            .unwrap_or(false);
+        if is_mica_enabled {
+            let _ = crate::commands::tools::set_mica_effect(app.clone(), true);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 便携版：清理上次更新残留的临时目录（不阻塞）
@@ -253,24 +273,7 @@ pub fn run() {
                         if id == "exit" {
                             app.exit(0);
                         } else {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.unminimize();
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                                // 重新应用云母效果以防失效
-                                let state = app.state::<AppState>();
-                                let is_mica_enabled = {
-                                    if let Ok(cfg) = state.config.try_read() {
-                                        cfg.personalization.mica_enabled
-                                    } else {
-                                        false
-                                    }
-                                };
-                                if is_mica_enabled {
-                                    let _ =
-                                        crate::commands::tools::set_mica_effect(app.clone(), true);
-                                }
-                            }
+                            activate_main_window_with_mica(app);
                             let _ = app.emit("tray-navigate", &id);
                         }
                     },
@@ -282,24 +285,7 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            // 重新应用云母效果以防失效
-                            let state = app.state::<AppState>();
-                            let is_mica_enabled = {
-                                if let Ok(cfg) = state.config.try_read() {
-                                    cfg.personalization.mica_enabled
-                                } else {
-                                    false
-                                }
-                            };
-                            if is_mica_enabled {
-                                let _ = crate::commands::tools::set_mica_effect(app.clone(), true);
-                            }
-                        }
+                        activate_main_window_with_mica(tray.app_handle());
                     }
                 })
                 .build(app)?;
