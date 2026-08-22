@@ -18,16 +18,25 @@ import {
   fetchConfig,
   updateConfig,
 } from "../api/lcu";
-import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
-import LcuImage from "../components/LcuImage.vue";
+import type { SummonerDisplay, MatchDisplay, AppConfig } from "../api/lcu";
+import type {
+  GameDataAssets,
+  MatchDetail,
+  MatchDetailTeam,
+  RawSummoner,
+  RankedStats,
+} from "../types/lcu";
 import LcuOfflineState from "../components/LcuOfflineState.vue";
+import MiniMatchList from "../components/search/MiniMatchList.vue";
+import MatchDetailPanel from "../components/search/MatchDetailPanel.vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useToast } from "../composables/useToast";
 import { runWithConcurrency } from "../utils/runWithConcurrency";
+import type { GameDetail, GameDetailPlayer } from "../types/search";
 
 const store = useLcuStore();
-const { t, te } = useI18n();
+const { t } = useI18n();
 const navigateTo = inject<(page: string) => void>("navigateTo")!;
 const searchName = ref("");
 
@@ -90,11 +99,11 @@ function searchPlayerBySummonerId(summonerId: number, displayName: string) {
 
 // 对局详情相关
 const selectedGameId = ref<number | null>(null);
-const selectedGame = ref<any | null>(null);
+const selectedGame = ref<MatchDetail | null>(null);
 const gameLoading = ref(false);
 const participantRanks = ref<Record<string, string>>({});
 
-const appConfig = ref<any>(null);
+const appConfig = ref<AppConfig | null>(null);
 
 const TIER_MAP: Record<string, string> = {
   NONE: "",
@@ -109,7 +118,7 @@ const TIER_MAP: Record<string, string> = {
   GRANDMASTER: "宗师",
   CHALLENGER: "王者",
 };
-const gameDataAssets = ref<any>(null);
+const gameDataAssets = ref<GameDataAssets | null>(null);
 
 // ─── 对局详情 + 段位内存缓存（避免翻页/重复搜索/重复点选时重复请求）───
 const GAME_DETAIL_TTL = 10 * 60 * 1000;
@@ -119,10 +128,14 @@ interface CacheEntry<T> {
   value: T;
   ts: number;
 }
-const gameDetailCache = new Map<number, CacheEntry<any>>();
+const gameDetailCache = new Map<number, CacheEntry<MatchDetail>>();
 const rankCache = new Map<string, CacheEntry<string>>();
 
-function cacheGet<T>(cache: Map<any, CacheEntry<T>>, key: any, ttl: number): T | null {
+function cacheGet<K, T>(
+  cache: Map<K, CacheEntry<T>>,
+  key: K,
+  ttl: number,
+): T | null {
   const entry = cache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.ts >= ttl) {
@@ -132,7 +145,7 @@ function cacheGet<T>(cache: Map<any, CacheEntry<T>>, key: any, ttl: number): T |
   return entry.value;
 }
 
-function cacheSet<T>(cache: Map<any, CacheEntry<T>>, key: any, value: T) {
+function cacheSet<K, T>(cache: Map<K, CacheEntry<T>>, key: K, value: T) {
   if (cache.size >= CACHE_LIMIT) {
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) cache.delete(oldest);
@@ -239,7 +252,7 @@ onMounted(async () => {
   try {
     unlistenGameDataReady = await listen("game-data-ready", async () => {
       try {
-        gameDataAssets.value = await invoke("get_game_data_assets");
+        gameDataAssets.value = await invoke<GameDataAssets>("get_game_data_assets");
       } catch (e) {
         console.error("收到就绪事件后加载静态资源映射失败:", e);
       }
@@ -261,7 +274,7 @@ watch(
   async (connected) => {
     if (connected) {
       try {
-        gameDataAssets.value = await invoke("get_game_data_assets");
+        gameDataAssets.value = await invoke<GameDataAssets>("get_game_data_assets");
       } catch (e) {
         console.error("加载静态资源数据映射失败:", e);
       }
@@ -325,7 +338,7 @@ async function doSearch(): Promise<boolean> {
 
     if (summonerId) {
       // 通过数字 summonerId 直接查询（从对局详情点击其他玩家时使用）
-      resp = await lcuRequest<any>(
+      resp = await lcuRequest<RawSummoner>(
         "GET",
         `/lol-summoner/v1/summoners/${summonerId}`,
       );
@@ -333,12 +346,12 @@ async function doSearch(): Promise<boolean> {
       const hashIndex = name.indexOf("#");
       const gameName = name.slice(0, hashIndex);
       const tagLine = name.slice(hashIndex + 1);
-      resp = await lcuRequest<any>(
+      resp = await lcuRequest<RawSummoner>(
         "GET",
         `/lol-summoner/v1/alias/lookup?gameName=${encodeURIComponent(gameName)}&tagLine=${encodeURIComponent(tagLine)}`,
       );
     } else {
-      resp = await lcuRequest<any>(
+      resp = await lcuRequest<RawSummoner>(
         "GET",
         `/lol-summoner/v1/summoners?name=${encodeURIComponent(name)}`,
       );
@@ -391,8 +404,8 @@ async function doSearch(): Promise<boolean> {
         await selectMatch(matches.value[0].gameId);
       }
     }
-  } catch (e: any) {
-    error.value = e.toString();
+  } catch (e: unknown) {
+    error.value = String(e);
     summoner.value = null;
     matches.value = [];
     allMatchesSearch.value = [];
@@ -474,9 +487,12 @@ async function loadMatchHistoryList() {
               }
             },
           )
-          .catch((e: any) => {
+          .catch((e: unknown) => {
             console.error("[upload] 批量上传异常:", e);
-            showToast(`上传异常: ${e?.message || e}`, "error");
+            showToast(
+              `上传异常: ${e instanceof Error ? e.message : String(e)}`,
+              "error",
+            );
           });
       } else {
         console.log("[upload] 当前页对局均已上传过，跳过");
@@ -567,7 +583,7 @@ async function selectMatch(gameId: number) {
   try {
     let g = cacheGet(gameDetailCache, gameId, GAME_DETAIL_TTL);
     if (!g) {
-      const resp = await lcuRequest<any>(
+      const resp = await lcuRequest<MatchDetail>(
         "GET",
         `/lol-match-history/v1/games/${gameId}`,
       );
@@ -595,7 +611,7 @@ async function selectMatch(gameId: number) {
 }
 
 // 段位请求独立于详情展示，完成后一次性赋值，避免逐个写入触发多次响应式更新
-async function loadRanksInBackground(g: any, requestId: number) {
+async function loadRanksInBackground(g: MatchDetail, requestId: number) {
   const participants = g.participants || [];
   const identities = g.participantIdentities || [];
 
@@ -622,7 +638,7 @@ async function loadRanksInBackground(g: any, requestId: number) {
       return;
     }
     try {
-      const rResp = await lcuRequest<any>(
+      const rResp = await lcuRequest<RankedStats>(
         "GET",
         `/lol-ranked/v1/ranked-stats/${puuid}`,
       );
@@ -630,10 +646,10 @@ async function loadRanksInBackground(g: any, requestId: number) {
         const queues = rResp.data.queues;
         // 优先单双排，其次灵活排位
         const solo = queues.find(
-          (q: any) => q.queueType === "RANKED_SOLO_5x5",
+          (q) => q.queueType === "RANKED_SOLO_5x5",
         );
         const flex = queues.find(
-          (q: any) => q.queueType === "RANKED_FLEX_SR",
+          (q) => q.queueType === "RANKED_FLEX_SR",
         );
         const activeQueue = solo || flex;
         if (activeQueue && activeQueue.tier && activeQueue.tier !== "NONE") {
@@ -688,19 +704,21 @@ async function handleNextPage() {
 }
 
 // 静态映射查找
-function getSpellUrl(spellId: number) {
+function getSpellUrl(spellId?: number) {
+  if (!spellId) return "";
   const path = gameDataAssets.value?.spells?.[spellId];
   if (!path) return "";
   return path.startsWith("/") ? path : "/" + path;
 }
 
-function getRuneUrl(runeId: number) {
+function getRuneUrl(runeId?: number) {
+  if (!runeId) return "";
   const path = gameDataAssets.value?.runes?.[runeId];
   if (!path) return "";
   return path.startsWith("/") ? path : "/" + path;
 }
 
-function getItemUrl(itemId: number) {
+function getItemUrl(itemId?: number) {
   if (!itemId) return "";
   const mapped = gameDataAssets.value?.items?.[itemId];
   if (mapped) {
@@ -752,8 +770,7 @@ function copyGameId(gameId: number) {
   showToast(`游戏 ID: ${gameId} 已复制到剪贴板`);
 }
 
-// 整理后的对局详情
-const gameDetails = computed(() => {
+const gameDetails = computed<GameDetail | null>(() => {
   if (!selectedGame.value) return null;
   const g = selectedGame.value;
 
@@ -775,8 +792,8 @@ const gameDetails = computed(() => {
     }
   }
 
-  const bluePlayers: any[] = [];
-  const redPlayers: any[] = [];
+  const bluePlayers: GameDetailPlayer[] = [];
+  const redPlayers: GameDetailPlayer[] = [];
 
   if (g.participants) {
     for (const p of g.participants) {
@@ -851,9 +868,11 @@ const gameDetails = computed(() => {
   const redKills = redPlayers.reduce((sum, p) => sum + p.kills, 0);
 
   // 从 teams 数据中提取团队目标统计
-  const teamsData: any[] = g.teams || [];
-  const blueTeamRaw = teamsData.find((t: any) => t.teamId === 100) || {};
-  const redTeamRaw = teamsData.find((t: any) => t.teamId === 200) || {};
+  const teamsData: MatchDetailTeam[] = g.teams || [];
+  const blueTeamRaw =
+    teamsData.find((t) => t.teamId === 100) || ({} as MatchDetailTeam);
+  const redTeamRaw =
+    teamsData.find((t) => t.teamId === 200) || ({} as MatchDetailTeam);
 
   const queueNames: Record<number, string> = {
     400: "征召模式",
@@ -903,7 +922,7 @@ const gameDetails = computed(() => {
     const allPlayers = [...bluePlayers, ...redPlayers];
     const found = allPlayers.find((p) => p.puuid === queriedPuuid);
     if (found) {
-      isQueriedPlayerWin = found.win;
+      isQueriedPlayerWin = found.win ?? false;
       queriedPlayerChampionIconUrl = found.championIconUrl;
     }
   }
@@ -955,24 +974,6 @@ const gameDetails = computed(() => {
     },
   };
 });
-
-function getQueueName(queueId: number, backendName: string): string {
-  const key = `gameModes.${queueId}`;
-  if (te(key)) {
-    const translation = t(key);
-    // 翻译防冲突纠错：如果翻译包含“云顶之弈”或“云顶”，但后端实际名称不含“云顶”相关
-    // 则说明队列 ID 发生冲突，应该降级显示后端解析出的 name
-    if (
-      (translation.includes("云顶") || translation.includes("TFT")) &&
-      !backendName.includes("云顶") &&
-      !backendName.includes("TFT")
-    ) {
-      return backendName;
-    }
-    return translation;
-  }
-  return backendName;
-}
 </script>
 
 <template>
@@ -1082,354 +1083,41 @@ function getQueueName(queueId: number, backendName: string): string {
         <div class="panel-layout">
           <!-- 左侧：迷你对局卡片列表 -->
           <div class="left-match-list-panel">
-            <div v-if="summoner && matches.length > 0" class="mini-match-list">
-              <div
-                v-for="m in filteredMatches"
-                :key="m.gameId"
-                :class="[
-                  'mini-match-card',
-                  m.win ? 'win' : 'lose',
-                  { selected: selectedGameId === m.gameId },
-                ]"
-                @click="selectMatch(m.gameId)"
-              >
-                <div class="mini-avatar">
-                  <LcuImage :src="m.championIconUrl" alt="champ" />
-                </div>
-                <div class="mini-info">
-                  <span class="mini-mode">{{
-                    getQueueName(m.queueId, m.name)
-                  }}</span>
-                  <span class="mini-time-kda">
-                    {{ m.shortTime.split(" ")[0] }} &nbsp;&nbsp;
-                    {{ m.kills }}/<span class="death-red">{{ m.deaths }}</span
-                    >/{{ m.assists }}
-                  </span>
-                </div>
-              </div>
-            </div>
+            <template v-if="summoner && matches.length > 0">
+              <MiniMatchList
+                :matches="filteredMatches"
+                :selected-game-id="selectedGameId"
+                :current-page-num="currentPageNum"
+                :has-more="hasMore"
+                @select="selectMatch"
+                @prev="handlePrevPage"
+                @next="handleNextPage"
+              />
+            </template>
             <!-- 如果没有战绩，左侧展示 10 个等高的骨架空白卡片框 -->
-            <div v-else class="mini-match-list-skeleton">
-              <div
-                v-for="i in 10"
-                :key="i"
-                class="mini-match-card skeleton-card"
-              ></div>
-            </div>
-
-            <!-- 翻页控制 -->
-            <div v-if="summoner && matches.length > 0" class="pagination">
-              <button
-                class="page-btn"
-                @click="handlePrevPage"
-                :disabled="currentPageNum <= 1"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <polyline points="15 18 9 12 15 6" />
-                </svg>
-              </button>
-              <span class="page-num">{{ currentPageNum }}</span>
-              <button
-                class="page-btn"
-                @click="handleNextPage"
-                :disabled="!hasMore"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </button>
-            </div>
-            <!-- 如果没有数据，渲染一个同等高度的空白骨架翻页占位框 -->
-            <div v-else class="pagination-skeleton"></div>
+            <template v-else>
+              <div class="mini-match-list-skeleton">
+                <div
+                  v-for="i in 10"
+                  :key="i"
+                  class="mini-match-card skeleton-card"
+                ></div>
+              </div>
+              <!-- 如果没有数据，渲染一个同等高度的空白骨架翻页占位框 -->
+              <div class="pagination-skeleton"></div>
+            </template>
           </div>
 
           <!-- 右侧：对局详情 -->
-          <div class="right-detail-panel">
-            <div v-if="gameLoading && !gameDetails" class="detail-loading">
-              <div class="loading-spinner"></div>
-            </div>
-
-            <div v-show="gameDetails" class="detail-content">
-              <!-- 头部大 Banner -->
-              <div
-                v-if="gameDetails"
-                :class="['detail-banner', gameDetails.win ? 'win' : 'lose']"
-              >
-                <div class="banner-main">
-                  <div class="banner-map-icon">
-                    <img :src="gameDetails.mapIconUrl" alt="map" />
-                  </div>
-                  <div class="banner-left">
-                    <h2
-                      :class="[
-                        'banner-result',
-                        gameDetails.win ? 'win' : 'lose',
-                      ]"
-                    >
-                      {{
-                        gameDetails.win
-                          ? $t("career.victory")
-                          : $t("career.defeat")
-                      }}
-                    </h2>
-                    <span class="banner-subtext">
-                      {{ $t("maps." + gameDetails.mapId) }} ·
-                      {{
-                        getQueueName(gameDetails.queueId, gameDetails.queueName)
-                      }}
-                      · {{ gameDetails.duration }} · {{ gameDetails.date }} ·
-                      {{ $t("career.gameId") || "Game ID" }}:
-                      {{ gameDetails.gameId }}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  class="copy-btn"
-                  @click="copyGameId(gameDetails.gameId)"
-                  title="复制游戏 ID"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                    <path
-                      d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                    />
-                  </svg>
-                </button>
-              </div>
-
-              <!-- 队伍详细数据 -->
-              <div v-if="gameDetails" class="teams-container">
-                <!-- 胜方 / 败方 -->
-                <div
-                  v-for="team in [gameDetails.blue, gameDetails.red]"
-                  :key="team.win ? 'win' : 'lose'"
-                  :class="['team-block', team.win ? 'win-block' : 'lose-block']"
-                >
-                  <!-- 队头资源概览 -->
-                  <div
-                    :class="[
-                      'team-header-bar',
-                      team.win ? 'win-bar' : 'lose-bar',
-                    ]"
-                  >
-                    <span
-                      :class="[
-                        'team-result-label',
-                        team.win ? 'win-text' : 'lose-text',
-                      ]"
-                    >
-                      {{ team.win ? "胜方" : "败方" }}
-                    </span>
-
-                    <div class="team-objectives">
-                      <span class="obj-item" title="击杀"
-                        ><img class="obj-icon-img" src="/images/kills.png" /> {{ team.kills }}</span
-                      >
-                      <span class="obj-item" title="摧毁防御塔"
-                        ><img class="obj-icon-img" :src="`/images/tower-${team.teamId}.png`" />
-                        {{ team.towerKills }}</span
-                      >
-                      <span class="obj-item" title="摧毁水晶"
-                        ><img class="obj-icon-img" :src="`/images/inhibitor-${team.teamId}.png`" />
-                        {{ team.inhibitorKills }}</span
-                      >
-                      <span class="obj-item" title="击杀纳什男爵"
-                        ><img class="obj-icon-img" :src="`/images/baron-${team.teamId}.png`" />
-                        {{ team.baronKills }}</span
-                      >
-                      <span class="obj-item" title="击杀巨龙"
-                        ><img class="obj-icon-img" :src="`/images/dragon-${team.teamId}.png`" />
-                        {{ team.dragonKills }}</span
-                      >
-                      <span class="obj-item" title="击杀峡谷先锋 / 虚空巢虫"
-                        ><img class="obj-icon-img" :src="`/images/herald-${team.teamId}.png`" />
-                        {{ team.riftHeraldKills }}</span
-                      >
-                    </div>
-
-                    <div class="team-header-spacer"></div>
-
-                    <div class="team-header-right">
-                      <span class="header-items">{{
-                        $t("search.items")
-                      }}</span>
-                      <span class="header-kda">{{ $t("career.kda") }}</span>
-                      <span class="header-cs">{{ $t("search.cs") }}</span>
-                      <span class="header-gold">{{ $t("search.gold") }}</span>
-                      <span class="header-damage">{{
-                        $t("search.damage")
-                      }}</span>
-                    </div>
-                  </div>
-
-                  <!-- 玩家列表 -->
-                  <div class="players-table">
-                    <div
-                      v-for="p in team.players"
-                      :key="p.participantId"
-                      :class="[
-                        'player-row',
-                        {
-                          'highlight-row':
-                            summoner && p.puuid === summoner.puuid,
-                          'win-row': team.win,
-                          'lose-row': !team.win,
-                        },
-                      ]"
-                    >
-                      <!-- 头像及技能/符文 -->
-                      <div class="player-avatar-col">
-                        <div class="row-avatar-box">
-                          <LcuImage
-                            :src="p.championIconUrl"
-                            class="row-avatar"
-                            alt="champ"
-                          />
-                          <span class="row-level-overlay">{{ p.level }}</span>
-                        </div>
-                        <div class="row-spell-rune-row">
-                          <div class="row-spell-col">
-                            <LcuImage
-                              :src="p.spell1Url"
-                              class="row-spell"
-                              alt="s1"
-                            />
-                            <LcuImage
-                              :src="p.spell2Url"
-                              class="row-spell"
-                              alt="s2"
-                            />
-                          </div>
-                          <div
-                            v-if="selectedGame?.queueId !== 2400 && selectedGame?.queueId !== 2450"
-                            class="row-rune"
-                          >
-                            <LcuImage
-                              :src="p.runeUrl"
-                              class="row-rune-img"
-                              alt="rune"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 名字（可点击搜索，机器人除外） -->
-                      <div class="player-name-col">
-                        <span
-                          :class="[
-                            'row-name',
-                            {
-                              'highlight-user':
-                                summoner && p.puuid === summoner.puuid,
-                              'bot-player': !p.summonerId,
-                            },
-                          ]"
-                          @click="
-                            p.summonerId &&
-                            searchPlayerBySummonerId(p.summonerId, p.name)
-                          "
-                          :title="p.summonerId ? `搜索 ${p.name}` : '机器人'"
-                        >
-                          {{ p.name }}
-                        </span>
-                        <span
-                          v-if="participantRanks[p.puuid]"
-                          class="row-rank-badge"
-                          :title="`段位: ${participantRanks[p.puuid]}`"
-                        >
-                          {{ participantRanks[p.puuid] }}
-                        </span>
-                      </div>
-
-                      <div class="player-spacer"></div>
-
-                      <!-- 装备栏 -->
-                      <div class="player-items-col">
-                        <div class="player-items-wrap">
-                          <div
-                            v-if="(selectedGame?.queueId === 2400 || selectedGame?.queueId === 2450) && Boolean(p.augmentIconUrls?.length)"
-                            class="row-augment-grid"
-                          >
-                            <n-tooltip
-                              v-for="(url, idx) in p.augmentIconUrls"
-                              :key="'aug-' + idx"
-                              trigger="hover"
-                              placement="top"
-                            >
-                              <template #trigger>
-                                <div class="row-augment-slot">
-                                  <LcuImage :src="url" class="row-item-img" alt="aug" />
-                                </div>
-                              </template>
-                              <div class="augment-tooltip">
-                                <div class="augment-tooltip-name">{{ p.augmentNames?.[idx] || "海克斯强化" }}</div>
-                              </div>
-                            </n-tooltip>
-                          </div>
-                          <div class="row-items-row">
-                            <div class="row-items-grid">
-                              <div v-for="idx in 6" :key="idx" class="row-item-slot">
-                                <LcuImage v-if="p.items[idx - 1]" :src="p.items[idx - 1]" class="row-item-img" alt="item" />
-                              </div>
-                            </div>
-                            <div class="row-ward-slot">
-                              <LcuImage v-if="p.ward" :src="p.ward" class="row-item-img" alt="ward" />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- KDA -->
-                      <div class="player-kda-col">
-                        <span class="row-kda-text">
-                          {{ p.kills }}/<span class="death-red">{{
-                            p.deaths
-                          }}</span
-                          >/{{ p.assists }}
-                        </span>
-                      </div>
-
-                      <!-- 补兵 -->
-                      <div class="player-cs-col">
-                        <span class="row-cs-text">{{ p.cs }}</span>
-                      </div>
-
-                      <!-- 金币 -->
-                      <div class="player-gold-col">
-                        <span class="row-gold-text">{{
-                          p.gold.toLocaleString()
-                        }}</span>
-                      </div>
-
-                      <!-- 伤害 -->
-                      <div class="player-damage-col">
-                        <span class="row-damage-text">{{
-                          p.damage.toLocaleString()
-                        }}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="!gameDetails && !gameLoading" class="detail-empty"></div>
-          </div>
+          <MatchDetailPanel
+            :details="gameDetails"
+            :loading="gameLoading"
+            :queue-id="selectedGame?.queueId ?? null"
+            :participant-ranks="participantRanks"
+            :my-puuid="summoner?.puuid"
+            @copy="copyGameId"
+            @search-player="searchPlayerBySummonerId"
+          />
         </div>
 
         <!-- 搜索过程中的高斯模糊半透明遮罩 -->
@@ -1780,742 +1468,6 @@ function getQueueName(queueId: number, backendName: string): string {
   animation: fadeInUp 0.45s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
 }
 
-/* 左侧迷你列表 */
-.left-match-list-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  height: 100%;
-}
-
-.mini-match-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.mini-match-card {
-  display: flex;
-  align-items: center;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
-  background: var(--card-bg);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.015);
-}
-
-.mini-match-card:hover {
-  transform: translateY(-1.5px);
-  box-shadow: 0 6px 16px rgba(31, 38, 135, 0.06);
-}
-
-.mini-match-card.win {
-  background-color: var(--win-bg);
-  border-color: var(--win-border);
-}
-
-.mini-match-card.win:hover {
-  background-color: var(--win-bg);
-  box-shadow: 0 6px 16px rgba(34, 197, 94, 0.12);
-}
-
-[data-theme="dark"] .mini-match-card.win:hover {
-  background-color: rgba(34, 197, 94, 0.12);
-}
-
-.mini-match-card.lose {
-  background-color: var(--loss-bg);
-  border-color: var(--loss-border);
-}
-
-.mini-match-card.lose:hover {
-  background-color: var(--loss-bg);
-  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.12);
-}
-
-[data-theme="dark"] .mini-match-card.lose:hover {
-  background-color: rgba(239, 68, 68, 0.12);
-}
-
-.mini-match-card.selected.win {
-  border: 2px solid var(--win-color);
-  box-shadow: 0 0 12px rgba(34, 197, 94, 0.2);
-}
-
-.mini-match-card.selected.lose {
-  border: 2px solid var(--loss-color);
-  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
-}
-
-.mini-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  margin-right: 10px;
-  flex-shrink: 0;
-}
-
-.mini-info {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-}
-
-.mini-mode {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: var(--text-color);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.mini-time-kda {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.death-red {
-  color: var(--death-color, var(--loss-color));
-  font-weight: 600;
-}
-
-/* 分页 */
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  margin-top: 8px;
-  background: var(--card-bg);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  padding: 6px;
-  border-radius: 6px;
-  box-shadow: var(--shadow-sm);
-}
-
-.page-btn {
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--text-color);
-  transition: all 0.2s;
-}
-
-.page-btn:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.03);
-  color: var(--primary-color);
-}
-
-.page-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-.page-btn svg {
-  width: 14px;
-  height: 14px;
-}
-
-.page-num {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--text-color);
-}
-
-/* 右侧详情面板 */
-.right-detail-panel {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  min-height: 640px;
-}
-
-.detail-content {
-  position: relative;
-}
-
-.detail-loading,
-.detail-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 700px;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.04);
-  backdrop-filter: blur(15px);
-  -webkit-backdrop-filter: blur(15px);
-}
-
-.loading-spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid rgba(0, 0, 0, 0.05);
-  border-top-color: var(--primary-color);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin-bottom: 12px;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* 详情 Banner */
-.detail-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  margin: 12px 12px 0 12px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 8px;
-  box-shadow: var(--shadow-sm);
-}
-
-.detail-banner.win {
-  background-color: var(--win-bg);
-  border-color: var(--win-border);
-}
-
-.detail-banner.lose {
-  background-color: var(--loss-bg);
-  border-color: var(--loss-border);
-}
-
-.banner-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.banner-map-icon {
-  width: 54px;
-  height: 54px;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  flex-shrink: 0;
-}
-
-.banner-map-icon img {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.banner-left {
-  display: flex;
-  flex-direction: column;
-}
-
-.banner-result {
-  font-size: 1.25rem;
-  font-weight: 800;
-  margin: 0 0 2px;
-}
-
-.banner-result.win {
-  color: var(--win-color);
-}
-.banner-result.lose {
-  color: var(--loss-color);
-}
-
-.banner-subtext {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.copy-btn {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--text-color);
-  transition: all 0.2s;
-}
-
-.copy-btn:hover {
-  background-color: var(--card-bg);
-}
-
-[data-theme="dark"] .copy-btn:hover {
-  background-color: rgba(30, 41, 59, 0.9);
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-}
-
-.copy-btn svg {
-  width: 14px;
-  height: 14px;
-}
-
-/* 队伍 block */
-.teams-container {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-}
-
-.team-block {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--card-bg);
-  box-shadow: var(--shadow-sm);
-}
-
-.team-block.win-block {
-  border-color: var(--win-border);
-}
-
-.team-block.lose-block {
-  border-color: var(--loss-border);
-}
-
-.team-header-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  font-size: 0.85rem;
-}
-
-.team-header-bar.win-bar {
-  background-color: var(--win-bg);
-  border-bottom: 1px solid var(--win-border);
-}
-
-.team-header-bar.lose-bar {
-  background-color: var(--loss-bg);
-  border-bottom: 1px solid var(--loss-border);
-}
-
-.team-result-label {
-  font-weight: bold;
-}
-.win-text {
-  color: var(--win-color);
-}
-.lose-text {
-  color: var(--loss-color);
-}
-
-.team-objectives {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-muted);
-  font-weight: 500;
-  font-size: 0.8rem;
-}
-
-.obj-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.obj-icon {
-  font-size: 0.85rem;
-}
-
-.obj-icon-img {
-  width: 16px;
-  height: 16px;
-  object-fit: contain;
-  vertical-align: middle;
-}
-
-/* 玩家列表 Table 行 */
-.players-table {
-  display: flex;
-  flex-direction: column;
-}
-
-.player-row {
-  display: flex;
-  align-items: center;
-  padding: 6px 14px;
-  border-bottom: 1px solid var(--border-color);
-  font-size: 0.8rem;
-  color: var(--text-color);
-}
-
-.player-row:last-child {
-  border-bottom: none;
-}
-
-/* 玩家高亮行 */
-.player-row.highlight-row.win-row {
-  background-color: var(--win-bg) !important;
-}
-
-.player-row.highlight-row.lose-row {
-  background-color: var(--loss-bg) !important;
-}
-
-.player-row.highlight-row.win-row .row-name,
-.player-row.highlight-row.win-row .row-kda-text,
-.player-row.highlight-row.win-row .row-kda-text .death-red,
-.player-row.highlight-row.win-row .row-cs-text,
-.player-row.highlight-row.win-row .row-gold-text,
-.player-row.highlight-row.win-row .row-damage-text {
-  color: var(--win-color) !important;
-  font-weight: 800;
-}
-
-.player-row.highlight-row.lose-row .row-name,
-.player-row.highlight-row.lose-row .row-kda-text,
-.player-row.highlight-row.lose-row .row-kda-text .death-red,
-.player-row.highlight-row.lose-row .row-cs-text,
-.player-row.highlight-row.lose-row .row-gold-text,
-.player-row.highlight-row.lose-row .row-damage-text {
-  color: var(--loss-color) !important;
-  font-weight: 800;
-}
-
-/* 1. 头像区 */
-.player-avatar-col {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 120px;
-  flex-shrink: 0;
-}
-
-.row-avatar-box {
-  position: relative;
-  width: 40px;
-  height: 40px;
-  flex-shrink: 0;
-}
-
-.row-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-}
-
-.row-level-overlay {
-  position: absolute;
-  bottom: -2px;
-  right: -2px;
-  width: 14px;
-  height: 14px;
-  line-height: 12px;
-  background: var(--text-color);
-  color: var(--bg-color);
-  border-radius: 50%;
-  font-size: 0.58rem;
-  font-weight: bold;
-  text-align: center;
-  border: 1px solid var(--card-bg);
-}
-
-[data-theme="dark"] .row-level-overlay {
-  background: var(--card-bg);
-  color: var(--text-color);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.row-spell-rune-row {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.row-spell-col {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.row-spell {
-  width: 18px;
-  height: 18px;
-  border-radius: 2px;
-  border: 1px solid var(--border-color);
-}
-
-.row-rune {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-.row-rune-img {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-}
-
-.player-name-col {
-  width: 120px;
-  min-width: 0;
-  padding-right: 6px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.row-rank-badge {
-  display: inline-block;
-  font-size: 10px;
-  color: var(--primary-color);
-  background: rgba(142, 68, 173, 0.08);
-  padding: 1px 4px;
-  border-radius: 4px;
-  margin-top: 2px;
-  align-self: flex-start;
-  font-weight: 500;
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.row-name {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text-color);
-  cursor: pointer;
-  transition: color 0.15s;
-}
-
-.row-name:hover {
-  color: var(--primary-color);
-}
-
-.bot-player {
-  cursor: default;
-  color: var(--text-dimmed);
-}
-
-.bot-player:hover {
-  color: var(--text-dimmed);
-}
-
-.highlight-user {
-  color: #2ecc71 !important;
-  font-weight: 800;
-}
-
-.highlight-user:hover {
-  color: #27ae60 !important;
-}
-
-/* 3. 装备区 */
-.player-items-col {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  min-width: 210px;
-  flex-shrink: 0;
-}
-
-.player-items-wrap {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 3px;
-}
-.row-items-row {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-/* 海克斯强化网格 */
-.row-augment-grid {
-  display: flex;
-  gap: 2px;
-  margin-right: 4px;
-}
-.row-augment-slot {
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  overflow: hidden;
-  border: 1px solid rgba(168, 85, 247, 0.45);
-  background-color: rgba(147, 51, 234, 0.12);
-  transition: all 0.2s ease;
-  cursor: pointer;
-}
-.row-augment-slot:hover {
-  border-color: #c084fc;
-  box-shadow: 0 0 8px rgba(192, 132, 252, 0.6);
-  transform: translateY(-1px) scale(1.05);
-}
-
-.augment-tooltip {
-  max-width: 280px;
-  padding: 8px 10px;
-  text-align: left;
-  border-radius: var(--radius-md);
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-md);
-}
-
-.augment-tooltip-name {
-  font-weight: 600;
-  font-size: 0.85rem;
-  color: var(--text-color);
-  letter-spacing: 0.2px;
-}
-
-.row-items-grid {
-  display: flex;
-  gap: 1px;
-}
-
-.row-item-slot {
-  width: 28px;
-  height: 28px;
-  background: rgba(0, 0, 0, 0.03);
-  border-radius: 3px;
-  overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-.row-item-img {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.row-ward-slot {
-  width: 28px;
-  height: 28px;
-  border-radius: 3px;
-  overflow: hidden;
-  border: 1px solid var(--accent-color, #e6a23c);
-  background-color: rgba(230, 162, 60, 0.03);
-}
-
-/* 4. KDA */
-.player-kda-col {
-  width: 70px;
-  text-align: center;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.row-kda-text {
-  font-size: 0.8rem;
-}
-
-/* 5. 补兵 */
-.player-cs-col {
-  width: 42px;
-  text-align: center;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.row-cs-text {
-  font-size: 0.8rem;
-}
-
-/* 6. 金币 */
-.player-gold-col {
-  width: 55px;
-  text-align: right;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.row-gold-text {
-  font-size: 0.8rem;
-}
-
-/* 7. 伤害 */
-.player-damage-col {
-  width: 60px;
-  text-align: right;
-  font-weight: 700;
-  color: var(--text-color);
-  flex-shrink: 0;
-}
-
-.row-damage-text {
-  font-size: 0.8rem;
-}
-
-.player-spacer,
-.team-header-spacer {
-  flex: 1;
-}
-
-.team-header-right {
-  display: flex;
-  align-items: center;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  padding-right: 2px;
-}
-
-.header-items {
-  min-width: 190px;
-  text-align: center;
-}
-
-.header-kda {
-  width: 70px;
-  text-align: center;
-}
-
-.header-cs {
-  width: 42px;
-  text-align: center;
-}
-
-.header-gold {
-  width: 55px;
-  text-align: right;
-}
-
-.header-damage {
-  width: 60px;
-  text-align: right;
-}
-
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -2603,6 +1555,7 @@ function getQueueName(queueId: number, backendName: string): string {
 .mini-match-card.skeleton-card {
   height: 58px;
   box-sizing: border-box;
+  border-radius: 8px;
   cursor: default;
   pointer-events: none;
   background: rgba(0, 0, 0, 0.015);
