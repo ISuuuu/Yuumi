@@ -595,6 +595,7 @@ onMounted(loadSavedPlayerMap);
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .five-toolbar-content {
