@@ -38,7 +38,7 @@ provideQuickActionsLoading();
     <RestartClientCard />
 
     <!-- 4. 个人主页组 -->
-    <div class="group-header">个人主页</div>
+    <div class="group-header">{{ t("tools_extra.profileGroupTitle") }}</div>
 
     <SignatureCard />
     <ProfileBackgroundCard />

@@ -161,6 +161,11 @@
     "portableUpdateDesc": "便攜版透過 zip 覆蓋方式自動更新，更新後自動重啟",
     "goToReleases": "前往 GitHub 下載",
     "alreadyLatest": "已是最新版本！",
+    "newVersionToast": "發現新版本 v{version}",
+    "downloadStarted": "已開始下載 v{version}",
+    "downloadFailed": "下載失敗: {error}",
+    "updateNow": "立即更新",
+    "currentVersionShort": "（當前 v{version}）",
     "checkUpdateFailed": "檢查更新失敗",
     "httpProxyGroup": "軟體 HTTP 代理",
     "httpProxyDesc": "軟體更新、TFT 數據、OP.GG 及 GitHub 服務存取走此 HTTP 代理通道",
@@ -386,6 +391,8 @@
       "noSkinData": "該英雄暫無皮膚數據",
       "skinLoadFailed": "加載皮膚失敗",
       "pickHeroFirst": "請先選擇英雄以加載皮膚列表",
+      "prevSkin": "上一張",
+      "nextSkin": "下一張",
       "titleModal": "選擇皮膚"
     },
     "rankSpoof": {
@@ -587,6 +594,7 @@
     "clearBadgesConfirm": "確定要清除個人主頁展示的所有挑戰勳章嗎？",
     "clearBorderConfirm": "確定要清除你的召喚師頭像框嗎？",
     "clientGroupTitle": "客戶端",
+    "profileGroupTitle": "個人主頁",
     "fixWindow": "修復客戶端窗口",
     "fixWindowDesc": "修復客戶端錯誤的窗口大小（需要管理員權限）",
     "restartClient": "重啟客戶端",

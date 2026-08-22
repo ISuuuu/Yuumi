@@ -161,6 +161,11 @@
     "portableUpdateDesc": "Portable build updates via zip overwrite and restarts automatically",
     "goToReleases": "Download from GitHub",
     "alreadyLatest": "Already up to date!",
+    "newVersionToast": "New version found: v{version}",
+    "downloadStarted": "Download started: v{version}",
+    "downloadFailed": "Download failed: {error}",
+    "updateNow": "Update Now",
+    "currentVersionShort": "(current v{version})",
     "checkUpdateFailed": "Check update failed",
     "httpProxyGroup": "HTTP Proxy",
     "httpProxyDesc": "Use HTTP proxy for updates, TFT, OP.GG, and GitHub access",
@@ -386,6 +391,8 @@
       "noSkinData": "No skin data for this champion",
       "skinLoadFailed": "Failed to load skins",
       "pickHeroFirst": "Please select a champion first",
+      "prevSkin": "Previous skin",
+      "nextSkin": "Next skin",
       "titleModal": "Select Skin"
     },
     "rankSpoof": {
@@ -586,6 +593,7 @@
     "clearBadgesConfirm": "Are you sure you want to remove all challenges badges from your profile?",
     "clearBorderConfirm": "Are you sure you want to remove your profile border?",
     "clientGroupTitle": "Client",
+    "profileGroupTitle": "Profile",
     "fixWindow": "Fix Client Window",
     "fixWindowDesc": "Fix client resolution/window size issues (Admin rights required)",
     "restartClient": "Restart Client",

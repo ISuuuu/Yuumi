@@ -1,4 +1,4 @@
-import { inject, ref, type Ref } from "vue";
+import { inject, onScopeDispose, ref, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { updateConfig } from "../api/lcu";
 import type { AppConfig } from "../api/lcu";
@@ -38,11 +38,21 @@ export function useSettingsAutoSave() {
           showToast(t("settings.autoSave"));
         }
         skipAutoSaveToast = false;
-      } catch (e) {
+      } catch {
         showToast(t("settings.saveFailed"), "error");
       }
     }, 500);
   }
+
+  // 卸载时若仍有待保存修改，立即落盘（不弹成功提示，失败仍提示），避免防抖中的配置丢失
+  onScopeDispose(() => {
+    if (!saveDebounce) return;
+    clearTimeout(saveDebounce);
+    saveDebounce = null;
+    void updateConfig(config.value!).catch(() => {
+      showToast(t("settings.saveFailed"), "error");
+    });
+  });
 
   return { config, autoSave };
 }

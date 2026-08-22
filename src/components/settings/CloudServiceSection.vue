@@ -83,12 +83,12 @@ onUnmounted(() => {
                 <span :class="['signalr-status-badge', signalrStatus]">
                   {{
                     signalrStatus === "connected"
-                      ? "云端已连接"
+                      ? $t("settings.cloudConnected")
                       : signalrStatus === "connecting"
-                        ? "云端连接中..."
+                        ? $t("settings.cloudConnecting")
                         : signalrStatus === "error"
-                          ? "云端连接失败"
-                          : "云端未连接"
+                          ? $t("settings.cloudConnectFailed")
+                          : $t("settings.cloudDisconnected")
                   }}
                 </span>
               </template>

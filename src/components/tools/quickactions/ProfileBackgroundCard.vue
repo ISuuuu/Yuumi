@@ -265,7 +265,7 @@ async function handleApplyBackground() {
           <button
             class="carousel-nav-btn prev"
             @click="prevSkin"
-            :title="t('titlebar.back')"
+            :title="t('tools.background.prevSkin')"
           >
             <svg
               viewBox="0 0 24 24"
@@ -294,7 +294,7 @@ async function handleApplyBackground() {
           <button
             class="carousel-nav-btn next"
             @click="nextSkin"
-            :title="t('titlebar.back')"
+            :title="t('tools.background.nextSkin')"
           >
             <svg
               viewBox="0 0 24 24"

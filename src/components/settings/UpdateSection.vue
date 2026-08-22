@@ -2,6 +2,7 @@
 import { ref, inject, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useI18n } from "vue-i18n";
 import type { UpdateInfo } from "../UpdateDialog.vue";
 import { useSettingsAutoSave } from "../../composables/useSettingsAutoSave";
 import { useToast } from "../../composables/useToast";
@@ -10,6 +11,8 @@ const props = defineProps<{
   appVersion: string;
   isPortable: boolean;
 }>();
+
+const { t } = useI18n();
 
 const { config, autoSave } = useSettingsAutoSave();
 const { showToast } = useToast();
@@ -50,22 +53,22 @@ async function manualCheckUpdate() {
           },
           true,
         );
-        showToast(`发现新版本 v${result.version}`, "success");
+        showToast(t("settings.newVersionToast", { version: result.version }), "success");
       } else {
-        showToast("已是最新版本！", "success");
+        showToast(t("settings.alreadyLatest"), "success");
       }
     } else {
       const result = await invoke<UpdateInfo | null>("check_update");
       if (result) {
         // 手动检查：直接展开带日志的大弹窗（跳过右下角小气泡）
         showUpdateInfo(result, true);
-        showToast(`已开始下载 v${result.version}`, "success");
+        showToast(t("settings.downloadStarted", { version: result.version }), "success");
       } else {
-        showToast("已是最新版本！", "success");
+        showToast(t("settings.alreadyLatest"), "success");
       }
     }
   } catch (e: unknown) {
-    showToast("检查更新失败: " + String(e), "error");
+    showToast(t("settings.checkUpdateFailed") + ": " + String(e), "error");
   } finally {
     checkingUpdate.value = false;
   }
@@ -85,7 +88,7 @@ async function handleImmediateUpdate() {
       showToast(`已开始下载 v${result.version}`, "success");
     }
   } catch (e: unknown) {
-    showToast("下载失败: " + String(e), "error");
+    showToast(t("settings.downloadFailed", { error: String(e) }), "error");
   } finally {
     immediateUpdating.value = false;
   }
@@ -259,8 +262,12 @@ function goToReleases() {
   <div v-if="hasUpdate && globalUpdateInfo" class="update-available-card">
     <div class="update-available-left">
       <span class="update-available-dot" />
-      <span class="update-available-text">发现新版本 v{{ globalUpdateInfo.version }}</span>
-      <span class="update-available-current">（当前 v{{ globalUpdateInfo.currentVersion }}）</span>
+      <span class="update-available-text">{{
+        $t("settings.newVersionToast", { version: globalUpdateInfo.version })
+      }}</span>
+      <span class="update-available-current">{{
+        $t("settings.currentVersionShort", { version: globalUpdateInfo.currentVersion })
+      }}</span>
     </div>
     <div class="update-available-right">
       <!-- 自动更新开启时提示后台下载中；关闭时展示“立即更新”按钮 -->
@@ -274,7 +281,7 @@ function goToReleases() {
           :loading="immediateUpdating"
           @click="handleImmediateUpdate"
         >
-          立即更新
+          {{ $t("settings.updateNow") }}
         </n-button>
       </template>
     </div>
@@ -294,36 +301,6 @@ function goToReleases() {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-/* ── 检查更新按钮 ── */
-.check-update-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border-radius: 7px;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
-  background: var(--bg-secondary, rgba(255, 255, 255, 0.04));
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s,
-    border-color 0.15s;
-  white-space: nowrap;
-}
-
-.check-update-btn:hover:not(:disabled) {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
-  color: var(--text-primary);
-  border-color: var(--theme-color, #009faa);
-}
-
-.check-update-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 @keyframes spin {

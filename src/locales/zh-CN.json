@@ -161,6 +161,11 @@
     "portableUpdateDesc": "便携版通过 zip 覆盖方式自动更新，更新后自动重启",
     "goToReleases": "前往 GitHub 下载",
     "alreadyLatest": "已是最新版本！",
+    "newVersionToast": "发现新版本 v{version}",
+    "downloadStarted": "已开始下载 v{version}",
+    "downloadFailed": "下载失败: {error}",
+    "updateNow": "立即更新",
+    "currentVersionShort": "（当前 v{version}）",
     "checkUpdateFailed": "检查更新失败",
     "httpProxyGroup": "软件 HTTP 代理",
     "httpProxyDesc": "软件更新、TFT 数据、OP.GG 及 GitHub 服务访问走此 HTTP 代理通道",
@@ -386,6 +391,8 @@
       "noSkinData": "该英雄暂无皮肤数据",
       "skinLoadFailed": "加载皮肤失败",
       "pickHeroFirst": "请先选择英雄以加载皮肤列表",
+      "prevSkin": "上一张",
+      "nextSkin": "下一张",
       "titleModal": "选择皮肤"
     },
     "rankSpoof": {
@@ -587,6 +594,7 @@
     "clearBadgesConfirm": "确定要清除个人主页展示的所有挑战勋章吗？",
     "clearBorderConfirm": "确定要清除你的召唤师头像框吗？",
     "clientGroupTitle": "客户端",
+    "profileGroupTitle": "个人主页",
     "fixWindow": "修复客户端窗口",
     "fixWindowDesc": "修复客户端错误的窗口大小（需要管理员权限）",
     "restartClient": "重启客户端",
