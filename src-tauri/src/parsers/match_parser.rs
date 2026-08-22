@@ -1092,3 +1092,152 @@ pub async fn get_recent_teammates(
 
     Ok(RecentTeammatesResponse { puuid, summoners })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lcu::game_data::{CherryAugmentDetail, GameDataAssets};
+    use serde_json::json;
+
+    #[test]
+    fn dedupe_augment_ids_filters_zero_and_dedupes_in_order() {
+        assert_eq!(dedupe_augment_ids([3, 0, 1, 3, 2, 1]), vec![3, 1, 2]);
+        assert!(dedupe_augment_ids(std::iter::empty()).is_empty());
+    }
+
+    #[test]
+    fn dedupe_augment_ids_truncates_to_five() {
+        assert_eq!(
+            dedupe_augment_ids([1, 2, 3, 4, 5, 6, 7]),
+            vec![1, 2, 3, 4, 5]
+        );
+    }
+
+    #[test]
+    fn extract_augment_ids_merges_augments_and_player_slots() {
+        let stats: LcuMatchStats = serde_json::from_value(json!({
+            "win": true, "kills": 0, "deaths": 0, "assists": 0,
+            "champLevel": 18,
+            "item0": 0, "item1": 0, "item2": 0, "item3": 0,
+            "item4": 0, "item5": 0, "item6": 0, "perk0": 0,
+            "augments": [7010, 0],
+            "playerAugment1": 7018,
+            "playerAugment2": 7027,
+            "playerAugment3": 7010,
+            "playerAugment4": 0,
+            "playerAugment5": 7022
+        }))
+        .unwrap();
+        assert_eq!(extract_augment_ids(&stats), vec![7010, 7018, 7027, 7022]);
+    }
+
+    #[test]
+    fn queue_id_to_opgg_mode_maps_known_queues() {
+        assert_eq!(queue_id_to_opgg_mode(450), "aram");
+        assert_eq!(queue_id_to_opgg_mode(2400), "aram");
+        assert_eq!(queue_id_to_opgg_mode(1700), "arena");
+        assert_eq!(queue_id_to_opgg_mode(1300), "nexus_blitz");
+        assert_eq!(queue_id_to_opgg_mode(900), "urf");
+        assert_eq!(queue_id_to_opgg_mode(420), "ranked");
+        assert_eq!(queue_id_to_opgg_mode(-1), "ranked");
+    }
+
+    fn sample_game(queue_id: i32) -> LcuMatchGame {
+        serde_json::from_value(json!({
+            "gameId": 483_920_751_u64,
+            "gameCreation": 1_705_329_000_000_u64,
+            "gameDuration": 1530_u64,
+            "queueId": queue_id,
+            "participants": [{
+                "championId": 432,
+                "spell1Id": 4,
+                "spell2Id": 12,
+                "stats": {
+                    "win": true,
+                    "kills": 10, "deaths": 2, "assists": 8,
+                    "champLevel": 18,
+                    "item0": 3157, "item1": 3020, "item2": 0, "item3": 0,
+                    "item4": 0, "item5": 0, "item6": 0,
+                    "perk0": 8112,
+                    "totalMinionsKilled": 20,
+                    "neutralMinionsKilled": 12,
+                    "goldEarned": 13500,
+                    "totalDamageDealtToChampions": 28000,
+                    "totalHeal": 1200
+                }
+            }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn to_display_cleans_core_stats() {
+        let mut assets = GameDataAssets::default();
+        assets
+            .spells
+            .insert(4, "/lol-game-data/assets/spell/Summoner_Flash.png".into());
+        assets
+            .items
+            .insert(3157, "/lol-game-data/assets/items/item_3157.png".into());
+        assets.augments.insert(
+            7018,
+            CherryAugmentDetail {
+                id: 7018,
+                name: "".into(),
+                icon_path: "/fe/lol-loot/aug_7018.png".into(),
+            },
+        );
+
+        let mut game = sample_game(450);
+        game.participants[0].stats.player_augment1 = 7018;
+
+        let d = game.to_display(&assets);
+        assert_eq!(d.name, "极地大乱斗");
+        assert_eq!(d.map, "嚎哭深渊");
+        assert_eq!(d.time, "2024-01-15 14:30");
+        assert_eq!(d.duration, "25:30");
+        assert!(d.win);
+        assert!(!d.remake);
+        assert_eq!(d.kda, "9.00");
+        assert_eq!(d.cs, 32);
+        assert_eq!(d.gold, 13500);
+        assert_eq!(
+            d.champion_icon_url,
+            "/lol-game-data/assets/v1/champion-icons/432.png"
+        );
+        // 物品图标：仅 item0 有效（>0 且在资源表中）
+        assert_eq!(d.item_icon_urls.len(), 1);
+        assert_eq!(
+            d.spell1_icon_url,
+            "/lol-game-data/assets/spell/Summoner_Flash.png"
+        );
+        // 海克斯强化：名称为空时兜底
+        assert_eq!(d.augment_names, vec!["海克斯强化"]);
+        assert_eq!(d.augment_icon_urls, vec!["/fe/lol-loot/aug_7018.png"]);
+    }
+
+    #[test]
+    fn to_display_perfect_kda_when_zero_deaths() {
+        let mut game = sample_game(420);
+        game.participants[0].stats.deaths = 0;
+        let d = game.to_display(&GameDataAssets::default());
+        assert_eq!(d.kda, "Perfect");
+        assert_eq!(d.name, "排位单双排");
+        assert_eq!(d.map, "召唤师峡谷");
+    }
+
+    #[test]
+    fn secs_to_str_formats_minutes_and_seconds() {
+        assert_eq!(secs_to_str(1530), "25:30");
+        assert_eq!(secs_to_str(3725), "62:05"); // 不进位小时
+        assert_eq!(secs_to_str(59), "00:59");
+    }
+
+    #[test]
+    fn timestamp_helpers_format_utc() {
+        assert_eq!(timestamp_to_str(1_705_329_000_000), "2024-01-15 14:30");
+        assert_eq!(timestamp_to_short_str(1_705_329_000_000), "01-15 14:30");
+        // 无效时间戳兜底
+        assert_eq!(timestamp_to_str(u64::MAX), "1970-01-01 00:00");
+    }
+}

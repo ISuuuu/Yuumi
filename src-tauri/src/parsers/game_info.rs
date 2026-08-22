@@ -521,3 +521,50 @@ fn parse_rank_from_value(v: &serde_json::Value) -> Option<RankInfo> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_rank_extracts_solo_queue_entry() {
+        let v = json!({
+            "queues": [
+                { "queueType": "RANKED_FLEX_SR", "tier": "GOLD", "rank": "I", "leaguePoints": 33, "wins": 10, "losses": 5 },
+                { "queueType": "RANKED_SOLO_5x5", "tier": "PLATINUM", "rank": "II", "leaguePoints": 75, "wins": 120, "losses": 110 }
+            ]
+        });
+        let rank = parse_rank_from_value(&v).expect("应解析出单双排段位");
+        assert_eq!(rank.tier, "PLATINUM");
+        assert_eq!(rank.rank, "II");
+        assert_eq!(rank.league_points, 75);
+        assert_eq!(rank.wins, 120);
+        assert_eq!(rank.losses, 110);
+    }
+
+    #[test]
+    fn parse_rank_returns_none_without_solo_queue() {
+        let v = json!({
+            "queues": [
+                { "queueType": "RANKED_FLEX_SR", "tier": "GOLD", "rank": "I", "leaguePoints": 33, "wins": 10, "losses": 5 },
+                { "queueType": "RANKED_TFT_DOUBLE_UP", "tier": "SILVER", "rank": "III", "leaguePoints": 0, "wins": 1, "losses": 2 }
+            ]
+        });
+        assert!(parse_rank_from_value(&v).is_none());
+    }
+
+    #[test]
+    fn parse_rank_tolerates_missing_fields() {
+        // 缺失数值字段时回退默认值而非 panic
+        let v = json!({ "queues": [{ "queueType": "RANKED_SOLO_5x5", "tier": "IRON" }] });
+        let rank = parse_rank_from_value(&v).expect("字段缺失也应返回段位骨架");
+        assert_eq!(rank.tier, "IRON");
+        assert_eq!(rank.rank, "");
+        assert_eq!(rank.league_points, 0);
+
+        // 结构不完整（无 queues / 非 JSON 对象）时返回 None
+        assert!(parse_rank_from_value(&json!({})).is_none());
+        assert!(parse_rank_from_value(&json!("not-an-object")).is_none());
+    }
+}
