@@ -12,6 +12,14 @@ export interface ChampionEntry {
   iconPath: string;
 }
 
+/** LCU champion-summary.json / champions.json 的原始条目（仅消费字段子集） */
+interface RawChampionEntry {
+  id: number;
+  name?: string;
+  alias?: string;
+  squarePortraitPath?: string;
+}
+
 // ─── 纯 JS 模块级缓存（不依赖 Vue ref，不会被 HMR 重置）───
 let cachedChampions: ChampionEntry[] | null = null;
 let cachedKeywords: Record<number, string> | null = null;
@@ -42,11 +50,11 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
   const { lcuRequest } = await import("../api/lcu");
 
   let success = false;
-  let rawData: any = null;
+  let rawData: RawChampionEntry[] | Record<string, RawChampionEntry> | null = null;
 
   // 尝试 1: champion-summary.json
   try {
-    const resp = await lcuRequest<any>(
+    const resp = await lcuRequest<RawChampionEntry[] | Record<string, RawChampionEntry>>(
       "GET",
       "/lol-game-data/assets/v1/champion-summary.json",
     );
@@ -64,7 +72,7 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
   // 尝试 2: champions.json
   if (!success) {
     try {
-      const resp = await lcuRequest<any>(
+      const resp = await lcuRequest<RawChampionEntry[] | Record<string, RawChampionEntry>>(
         "GET",
         "/lol-game-data/assets/v1/champions.json",
       );
@@ -81,7 +89,7 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
   }
 
   if (success && rawData) {
-    let list: any[] = [];
+    let list: RawChampionEntry[] = [];
     if (Array.isArray(rawData)) {
       list = rawData;
     } else if (typeof rawData === "object" && rawData !== null) {
@@ -89,10 +97,11 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
     }
 
     if (list.length > 0) {
-      const isEnglish = (i18n.global.locale as any).value === "en_US";
+      const isEnglish =
+        (i18n.global.locale as unknown as { value: string }).value === "en_US";
       cachedChampions = list
-        .filter((c: any) => c && c.id > 0)
-        .map((c: any) => ({
+        .filter((c) => c && c.id > 0)
+        .map((c) => ({
           id: c.id,
           name:
             isEnglish && c.alias ? c.alias : c.name || c.alias || `#${c.id}`,

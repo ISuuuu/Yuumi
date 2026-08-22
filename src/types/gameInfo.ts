@@ -1,9 +1,10 @@
-import type { MatchDisplay } from "../api/lcu";
+import type { MatchDisplay, SummonerDisplay } from "../api/lcu";
+import type { RankedQueueEntry } from "./lcu";
 
 export interface PlayerData {
-  info: any;
+  info: SummonerDisplay | null;
   matches: MatchDisplay[];
-  ranked: { solo: any; flex: any };
+  ranked: { solo: RankedQueueEntry | null; flex: RankedQueueEntry | null };
   loading: boolean;
   avgKda?: number;
   winRate?: number;

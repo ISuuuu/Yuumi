@@ -1,5 +1,8 @@
 <template>
-  <div :style="$attrs.style as any" :class="$attrs.class as any">
+  <div
+    :style="$attrs.style as StyleValue"
+    :class="$attrs.class as ClassValue"
+  >
     <n-color-picker
       :value="pureColor"
       :show-alpha="false"
@@ -48,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useAttrs } from "vue";
+import { computed, useAttrs, type ClassValue, type StyleValue } from "vue";
 
 defineOptions({
   inheritAttrs: false,

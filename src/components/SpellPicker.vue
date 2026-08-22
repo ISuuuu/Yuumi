@@ -17,6 +17,12 @@ interface SpellEntry {
   iconPath: string;
 }
 
+interface RawSummonerSpell {
+  id: number;
+  name?: string;
+  iconPath?: string;
+}
+
 const spells = ref<SpellEntry[]>([]);
 const loading = ref(true);
 const showPicker = ref(false);
@@ -40,7 +46,7 @@ async function loadSpells() {
   if (spells.value.length > 0) return;
   loading.value = true;
   try {
-    const resp = await lcuRequest<any[]>(
+    const resp = await lcuRequest<RawSummonerSpell[]>(
       "GET",
       "/lol-game-data/assets/v1/summoner-spells.json",
     );

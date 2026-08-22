@@ -8,6 +8,7 @@ import {
 } from "../../types/gameInfo";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import type { SavedPlayerMarker } from "../../api/lcu";
+import type { RankedQueueEntry } from "../../types/lcu";
 import LcuImage from "../LcuImage.vue";
 
 const props = defineProps<{
@@ -70,7 +71,7 @@ function getWinRateClass(rate: number | undefined): string {
   return "wr-low";
 }
 
-function formatRank(q: any): string {
+function formatRank(q?: RankedQueueEntry | null): string {
   if (!q || !q.tier || q.tier === "NONE") return "";
   const tier = TIER_MAP.value[q.tier] || q.tier;
   const div = q.rank && q.rank !== "NA" ? q.rank : "";

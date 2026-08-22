@@ -278,8 +278,8 @@ export function useLoot() {
     try {
       openableLoots.value = await fetchOpenableLoots();
       lootFetched.value = true;
-    } catch (e: any) {
-      lootError.value = e.toString();
+    } catch (e: unknown) {
+      lootError.value = String(e);
       console.error("获取战利品列表失败:", e);
     } finally {
       lootLoading.value = false;
@@ -292,8 +292,8 @@ export function useLoot() {
     try {
       rawLootInventory.value = await fetchLootInventory();
       await updateEssenceBalances();
-    } catch (e: any) {
-      inventoryError.value = t("tools.lootManager.loadFailed", { error: e.toString() });
+    } catch (e: unknown) {
+      inventoryError.value = t("tools.lootManager.loadFailed", { error: String(e) });
       console.error("获取碎片库存失败:", e);
     } finally {
       isInventoryLoading.value = false;
@@ -399,9 +399,9 @@ export function useLoot() {
 
     try {
       await smartOpenAllLoots(batches);
-    } catch (e: any) {
+    } catch (e: unknown) {
       isOpening.value = false;
-      showToast(t("tools.lootOpener.openFailed", { error: e.toString() }), "error");
+      showToast(t("tools.lootOpener.openFailed", { error: String(e) }), "error");
     }
   }
 
@@ -470,11 +470,11 @@ export function useLoot() {
 
     try {
       await batchOpenLoots(loot.recipeName, ingredients, openQuantity.value);
-    } catch (e: any) {
+    } catch (e: unknown) {
       isOpening.value = false;
       const errorMsg = isFragment
-        ? t("tools.lootOpener.forgingFailed", { error: e.toString() }) || `合成失败: ${e.toString()}`
-        : t("tools.lootOpener.openFailed", { error: e.toString() });
+        ? t("tools.lootOpener.forgingFailed", { error: String(e) }) || `合成失败: ${String(e)}`
+        : t("tools.lootOpener.openFailed", { error: String(e) });
       showToast(errorMsg, "error");
     }
   }
@@ -567,9 +567,9 @@ export function useLoot() {
     try {
       await disenchantLoot(payload);
       selectedLootIds.value = [];
-    } catch (e: any) {
+    } catch (e: unknown) {
       isOpening.value = false;
-      showToast(t("tools.lootManager.disenchantFailed", { error: e.toString() }), "error");
+      showToast(t("tools.lootManager.disenchantFailed", { error: String(e) }), "error");
     }
   }
 
@@ -676,9 +676,9 @@ export function useLoot() {
     try {
       await upgradeLoot(payload);
       selectedLootIds.value = [];
-    } catch (e: any) {
+    } catch (e: unknown) {
       isOpening.value = false;
-      showToast(t("tools.lootManager.upgradeFailed", { error: e.toString() }), "error");
+      showToast(t("tools.lootManager.upgradeFailed", { error: String(e) }), "error");
     }
   }
 
@@ -751,9 +751,9 @@ export function useLoot() {
     try {
       await rerollLoot(finalLootIdsToReroll);
       selectedLootIds.value = [];
-    } catch (e: any) {
+    } catch (e: unknown) {
       isOpening.value = false;
-      showToast(t("tools.lootManager.rerollFailed", { error: e.toString() }), "error");
+      showToast(t("tools.lootManager.rerollFailed", { error: String(e) }), "error");
     }
   }
 

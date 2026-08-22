@@ -13,6 +13,16 @@ const loading = ref(false);
 const spectateSummonerName = ref("");
 const spectateMethod = ref<"LCU" | "CMD">("LCU");
 
+interface FriendPresenceEntry {
+  puuid?: string;
+  id?: string;
+  lol?: { gameId?: number | string };
+}
+
+interface LobbyInfo {
+  gameConfig?: { id?: number | string };
+}
+
 // 观战启动
 async function handleSpectate() {
   if (!spectateSummonerName.value.trim()) return;
@@ -28,7 +38,7 @@ async function handleSpectate() {
       showToast(t("tools.spectate.startedCmd"));
     } else {
       // LCU API 方式：通过 LCU 接口进行好友/对局观战
-      const summonerResp = await lcuRequest<any>(
+      const summonerResp = await lcuRequest<{ puuid: string }>(
         "GET",
         `/lol-summoner/v1/summoners?name=${encodeURIComponent(name)}`,
       );
@@ -40,13 +50,13 @@ async function handleSpectate() {
 
       // 1. 安全地从全量好友列表中匹配目标 puuid 提取对局 ID
       let gameIdFromFriend = "";
-      const friendsResp = await lcuRequest<any[]>(
+      const friendsResp = await lcuRequest<FriendPresenceEntry[]>(
         "GET",
         "/lol-chat/v1/friends",
       );
       if (friendsResp.success && Array.isArray(friendsResp.data)) {
         const friend = friendsResp.data.find(
-          (f: any) => f.puuid === puuid || f.id === puuid,
+          (f) => f.puuid === puuid || f.id === puuid,
         );
         const rawGameId = friend?.lol?.gameId;
         if (
@@ -61,7 +71,7 @@ async function handleSpectate() {
 
       // 2. 从 Lobby 大厅中匹配当前自定义房间的对局 ID
       let gameIdFromLobby = "";
-      const lobbyResp = await lcuRequest<any>("GET", "/lol-lobby/v2/lobby");
+      const lobbyResp = await lcuRequest<LobbyInfo>("GET", "/lol-lobby/v2/lobby");
       if (lobbyResp.success && lobbyResp.data) {
         const config = lobbyResp.data.gameConfig;
         if (
@@ -79,7 +89,7 @@ async function handleSpectate() {
       const targetGameId = gameIdFromFriend || gameIdFromLobby || name;
 
       // 4. 发送 LCU 观战启动请求
-      const resp = await lcuRequest<any>(
+      const resp = await lcuRequest<unknown>(
         "POST",
         "/lol-spectator/v1/spectate/launch",
         {
@@ -104,7 +114,7 @@ async function handleSpectate() {
             params: { summoner_name: name },
           });
           showToast(t("tools.spectate.fallbackCmd"), "success");
-        } catch (cmdErr: any) {
+        } catch (cmdErr: unknown) {
           console.error("CMD 兜底观战亦告失败:", cmdErr);
           showToast(
             t("tools.spectate.failed", {
@@ -117,7 +127,7 @@ async function handleSpectate() {
         }
       }
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     showToast(t("tools.spectate.error", { error: cleanError(e) }), "error");
   } finally {
     loading.value = false;

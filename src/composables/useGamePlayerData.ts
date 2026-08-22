@@ -1,5 +1,5 @@
 import { ref, computed, watch, onMounted, type Ref } from "vue";
-import { useLcuStore } from "../store/lcuStore";
+import { useLcuStore, type ChampSelectPlayer } from "../store/lcuStore";
 import {
   getGameflowPhase,
   getChampSelectSession,
@@ -11,13 +11,23 @@ import {
   type MatchDisplay,
   type AppConfig,
 } from "../api/lcu";
-import type { PlayerData, PremadePlayerLike } from "../types/gameInfo";
+import type {
+  PlayerData,
+  PremadePlayerLike,
+} from "../types/gameInfo";
+import type {
+  GameflowParticipant,
+  GameflowSession,
+  RankedQueueEntry,
+  RankedStats,
+} from "../types/lcu";
+import type { SummonerDisplay } from "../api/lcu";
 import { computePremadeColors } from "./usePremadeGroup";
 import { lazySetItem } from "../utils/lazyStorage";
 import { runWithConcurrency } from "../utils/runWithConcurrency";
 
 // ── 排位数据缓存（puuid → { data, timestamp }），带 LRU / 容量上限保护，避免内存泄露
-const rankCache = new Map<string, { data: any; timestamp: number }>();
+const rankCache = new Map<string, { data: RankedStats; timestamp: number }>();
 const RANK_CACHE_TTL = 5 * 60 * 1000; // 5 分钟
 const RANK_CACHE_MAX_SIZE = 100; // 最多缓存 100 个玩家的排位信息
 
@@ -31,7 +41,7 @@ function getRankFromCache(puuid: string) {
   return cached.data;
 }
 
-function setRankToCache(puuid: string, data: any) {
+function setRankToCache(puuid: string, data: RankedStats) {
   if (rankCache.size >= RANK_CACHE_MAX_SIZE) {
     const firstKey = rankCache.keys().next().value;
     if (firstKey) rankCache.delete(firstKey);
@@ -59,17 +69,17 @@ function clearReserveDataFromStorage() {
 }
 
 // ── gameflow session 短期缓存，避免同一流程中多次请求同一端点
-let cachedSession: { data: any; timestamp: number } | null = null;
+let cachedSession: { data: GameflowSession; timestamp: number } | null = null;
 const SESSION_CACHE_TTL = 30 * 1000; // 30 秒
 let currentGameflowSessionRequestId = 0; // 用于防并发竞态的请求标识计数器
 
-async function fetchSessionCached(): Promise<any | null> {
+async function fetchSessionCached(): Promise<GameflowSession | null> {
   const now = Date.now();
   if (cachedSession && now - cachedSession.timestamp < SESSION_CACHE_TTL) {
     return cachedSession.data;
   }
   try {
-    const resp = await lcuRequest<any>("GET", "/lol-gameflow/v1/session");
+    const resp = await lcuRequest<GameflowSession>("GET", "/lol-gameflow/v1/session");
     if (resp.success && resp.data) {
       cachedSession = { data: resp.data, timestamp: now };
       return resp.data;
@@ -160,26 +170,26 @@ export function useGamePlayerData(
       const savedPlayerData = localStorage.getItem("yuumi_last_game_player_data");
       const savedPremadeMy = localStorage.getItem("yuumi_last_premade_colors_my");
       const savedPremadeTheir = localStorage.getItem("yuumi_last_premade_colors_their");
-      let any = false;
+      let hasRestored = false;
       if (savedMyTeam) {
         const parsed = JSON.parse(savedMyTeam);
         if (Array.isArray(parsed) && parsed.length > 0) {
           gameflowMyTeam.value = parsed;
-          any = true;
+          hasRestored = true;
         }
       }
       if (savedTheirTeam) {
         const parsed = JSON.parse(savedTheirTeam);
         if (Array.isArray(parsed) && parsed.length > 0) {
           gameflowTheirTeam.value = parsed;
-          any = true;
+          hasRestored = true;
         }
       }
       if (savedPlayerData) {
         const parsed = JSON.parse(savedPlayerData);
         if (parsed && Object.keys(parsed).length > 0) {
           playerData.value = parsed;
-          any = true;
+          hasRestored = true;
         }
       }
       if (savedPremadeMy) {
@@ -202,7 +212,7 @@ export function useGamePlayerData(
       } else if (gameflowTheirTeam.value.length > 0) {
         premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
       }
-      return any;
+      return hasRestored;
     } catch {
       return false;
     }
@@ -287,7 +297,7 @@ export function useGamePlayerData(
         const { teamOne, teamTwo } = data.gameData;
         if (teamOne && teamTwo && teamOne.length > 0 && teamTwo.length > 0) {
           const isTeamOne = teamOne.some(
-            (p: any) =>
+            (p) =>
               (currentSummonerId.value && p.summonerId === currentSummonerId.value) ||
               (currentSummonerPuuid.value && p.puuid === currentSummonerPuuid.value),
           );
@@ -304,7 +314,7 @@ export function useGamePlayerData(
       if (
         Object.keys(premadeColorsMy.value).length === 0 &&
         store.champSelectSession?.myTeam?.some(
-          (p: any) => p.teamParticipantId !== undefined || p.partyId !== undefined,
+          (p) => p.teamParticipantId !== undefined || p.partyId !== undefined,
         )
       ) {
         premadeColorsMy.value = computePremadeColors(
@@ -314,7 +324,7 @@ export function useGamePlayerData(
       if (
         Object.keys(premadeColorsTheir.value).length === 0 &&
         store.champSelectSession?.theirTeam?.some(
-          (p: any) => p.teamParticipantId !== undefined || p.partyId !== undefined,
+          (p) => p.teamParticipantId !== undefined || p.partyId !== undefined,
         )
       ) {
         premadeColorsTheir.value = computePremadeColors(
@@ -358,7 +368,7 @@ export function useGamePlayerData(
     };
 
     try {
-      const resp = await lcuRequest<any>(
+      const resp = await lcuRequest<SummonerDisplay>(
         "GET",
         `/lol-summoner/v1/summoners/${summonerId}`,
       );
@@ -382,21 +392,21 @@ export function useGamePlayerData(
           : Promise.resolve([]),
         info.puuid
           ? (() => {
-              const cached = getRankFromCache(info.puuid);
+              const cached = getRankFromCache(info.puuid!);
               if (cached) {
                 return Promise.resolve({ success: true, data: cached });
               }
-              return lcuRequest<any>(
+              return lcuRequest<RankedStats>(
                 "GET",
                 `/lol-ranked/v1/ranked-stats/${info.puuid}`,
               ).then((rResp) => {
                 if (rResp.success && rResp.data) {
-                  setRankToCache(info.puuid, rResp.data);
+                  setRankToCache(info.puuid!, rResp.data);
                 }
                 return rResp;
               });
             })()
-          : Promise.resolve({ success: false } as any),
+          : Promise.resolve({ success: false as const }),
       ]);
 
       const isCurrentPlayer =
@@ -415,16 +425,16 @@ export function useGamePlayerData(
       }
       matches = matches.slice(0, 10);
 
-      let solo = null,
-        flex = null;
+      let solo: RankedQueueEntry | null = null,
+        flex: RankedQueueEntry | null = null;
       if (rankedResp.success && rankedResp.data?.queues) {
         solo =
           rankedResp.data.queues.find(
-            (q: any) => q.queueType === "RANKED_SOLO_5x5",
+            (q) => q.queueType === "RANKED_SOLO_5x5",
           ) || null;
         flex =
           rankedResp.data.queues.find(
-            (q: any) => q.queueType === "RANKED_FLEX_SR",
+            (q) => q.queueType === "RANKED_FLEX_SR",
           ) || null;
       }
 
@@ -533,7 +543,10 @@ export function useGamePlayerData(
     });
   }
 
-  async function processTeamData(teamOne: any[], teamTwo: any[]) {
+  async function processTeamData(
+    teamOne: GameflowParticipant[],
+    teamTwo: GameflowParticipant[],
+  ) {
     if (!currentSummonerId.value && !currentSummonerPuuid.value) {
       try {
         const s = await fetchCurrentSummoner();
@@ -545,7 +558,7 @@ export function useGamePlayerData(
     }
 
     const isTeamOne = teamOne.some(
-      (p: any) =>
+      (p) =>
         (currentSummonerId.value && p.summonerId === currentSummonerId.value) ||
         (currentSummonerPuuid.value && p.puuid === currentSummonerPuuid.value),
     );
@@ -566,16 +579,20 @@ export function useGamePlayerData(
       }
     }
 
-    gameflowMyTeam.value = allyTeam.map((p: any) => ({
-      ...p,
-      cellId: p.summonerId,
-      displayName: p.summonerName || p.displayName,
-    }));
-    gameflowTheirTeam.value = enemyTeam.map((p: any) => ({
-      ...p,
-      cellId: p.summonerId,
-      displayName: p.summonerName || p.displayName,
-    }));
+    gameflowMyTeam.value = allyTeam.map(
+      (p): PremadePlayerLike => ({
+        ...p,
+        cellId: p.summonerId,
+        displayName: p.summonerName || p.displayName,
+      }),
+    );
+    gameflowTheirTeam.value = enemyTeam.map(
+      (p): PremadePlayerLike => ({
+        ...p,
+        cellId: p.summonerId,
+        displayName: p.summonerName || p.displayName,
+      }),
+    );
 
     premadeColorsMy.value = computePremadeColors(allyTeam);
     premadeColorsTheir.value = computePremadeColors(enemyTeam);
@@ -585,10 +602,10 @@ export function useGamePlayerData(
     const background = activeTab.value === "my" ? enemyTeam : allyTeam;
 
     await runWithConcurrency(visible, 3, (p) =>
-      loadPlayerData(p.summonerId, p.summonerId),
+      p.summonerId ? loadPlayerData(p.summonerId, p.summonerId) : Promise.resolve(),
     );
     void runWithConcurrency(background, 3, (p) =>
-      loadPlayerData(p.summonerId, p.summonerId),
+      p.summonerId ? loadPlayerData(p.summonerId, p.summonerId) : Promise.resolve(),
     )
       .then(() => {
         // 双方 10 人信息加载完毕，立即保存完整对局
@@ -661,7 +678,7 @@ export function useGamePlayerData(
           if (reqId !== currentGameflowSessionRequestId) return;
 
           const rt = retryData?.gameData;
-          if (rt?.teamOne?.length > 0 && rt?.teamTwo?.length > 0) {
+          if (rt?.teamOne?.length && rt.teamTwo?.length) {
             return processTeamData(rt.teamOne, rt.teamTwo);
           }
           retried++;
@@ -727,12 +744,14 @@ export function useGamePlayerData(
 
   // 团队内容签名：成员 cellId + 英雄 ID。session 高频事件中仅倒计时变化时签名不变，跳过无效重载
   let lastSessionTeamSig = "";
-  const teamSig = (team: any[]) =>
-    (team || []).map((p: any) => `${p.cellId}:${p.championId || p.championPickIntent || 0}`).join(",");
+  const teamSig = (team: ChampSelectPlayer[]) =>
+    (team || [])
+      .map((p) => `${p.cellId}:${p.championId || p.championPickIntent || 0}`)
+      .join(",");
 
   watch(
     () => store.champSelectSession,
-    (session: any) => {
+    (session) => {
       if (session && store.gamePhase === "ChampSelect") {
         const myTeam = session.myTeam || [];
         const theirTeam = session.theirTeam || [];

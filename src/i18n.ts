@@ -41,21 +41,24 @@ export async function setLocale(lang: string) {
   const targetLocale = getLocaleFromConfig(lang);
   if (!loadedLocales.has(targetLocale)) {
     try {
-      let messages: any;
-      if (targetLocale === "zh_TW") {
-        messages = await import("./locales/zh-TW.json");
-      } else if (targetLocale === "en_US") {
-        messages = await import("./locales/en-US.json");
-      }
+      // Vite 动态导入 JSON 的运行时模块形状为 { default: 语言包对象 }，TS 无法推断其 default 导出
+      const raw: unknown =
+        targetLocale === "zh_TW"
+          ? await import("./locales/zh-TW.json")
+          : targetLocale === "en_US"
+            ? await import("./locales/en-US.json")
+            : undefined;
+      const messages = (raw as { default?: typeof zh_CN } | undefined)?.default;
       if (messages) {
-        i18n.global.setLocaleMessage(targetLocale, messages.default);
+        i18n.global.setLocaleMessage(targetLocale, messages);
         loadedLocales.add(targetLocale);
       }
     } catch (e) {
       console.warn(`[i18n] 加载语言包 ${targetLocale} 失败:`, e);
     }
   }
-  (i18n.global.locale as any).value = targetLocale;
+  // 与 championCache.ts 同款收敛：Composer 的 locale 被推断为字面量类型，需还原为可写字符串
+  (i18n.global.locale as unknown as { value: string }).value = targetLocale;
 }
 
 export default i18n;

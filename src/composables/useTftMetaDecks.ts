@@ -62,6 +62,19 @@ let cachedMetadata: {
   gameStatCounts?: number;
   gameStatDateTime?: string;
 } | null = null;
+
+/** fetch_tft_meta_decks 返回的 MCP 原始 payload（含附加的名称/图标映射） */
+interface TftMetaDecksPayload {
+  metadata?: { gameStatCounts?: number; gameStatDateTime?: string };
+  data?: TftMetaDeck[];
+  decks?: TftMetaDeck[];
+  trait_name_map?: Record<string, string>;
+  champion_icon_map?: Record<string, string>;
+  champion_name_map?: Record<string, string>;
+  item_name_map?: Record<string, string>;
+  item_icon_map?: Record<string, string>;
+}
+
 let traitNameMap: Record<string, string> = {};
 let championIconMap: Record<string, string> = {};
 let championNameMap: Record<string, string> = {};
@@ -201,7 +214,7 @@ export function useTftMetaDecks() {
     error.value = "";
 
     try {
-      const raw = await invoke<any>("fetch_tft_meta_decks");
+      const raw = await invoke<TftMetaDecksPayload>("fetch_tft_meta_decks");
       if (raw?.metadata) {
         cachedMetadata = raw.metadata;
         metadata.value = raw.metadata;
@@ -248,7 +261,7 @@ export function useTftMetaDecks() {
       }
       cachedDecks = list;
       decks.value = list;
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("加载 TFT 热门阵容失败:", e);
       error.value = e?.toString() || "加载阵容数据失败";
     } finally {

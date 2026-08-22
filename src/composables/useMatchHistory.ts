@@ -7,13 +7,14 @@ import {
   lcuRequest,
 } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
+import type { RankDisplaySource, RankedQueueEntry, RankedStats } from "../types/lcu";
 import { lazySetItem } from "../utils/lazyStorage";
 
 // 模块作用域内存缓存单例
 let cachedSummoner: SummonerDisplay | null = null;
 let cachedMatches: MatchDisplay[] = [];
 let cachedRecentMatches: MatchDisplay[] = [];
-let cachedRankedQueues: any[] = [];
+let cachedRankedQueues: RankedQueueEntry[] = [];
 let lastFetchedTime = 0;
 
 export function useMatchHistory() {
@@ -22,7 +23,7 @@ export function useMatchHistory() {
   const summoner = ref<SummonerDisplay | null>(null);
   const matches = ref<MatchDisplay[]>([]);
   const recentMatches = ref<MatchDisplay[]>([]);
-  const rankedQueues = ref<any[]>([]);
+  const rankedQueues = ref<RankedQueueEntry[]>([]);
   const loading = ref(false);
   const error = ref("");
   const copied = ref(false);
@@ -166,8 +167,8 @@ export function useMatchHistory() {
         cachedRecentMatches = recentMatches.value;
         lastFetchedTime = Date.now();
       }
-    } catch (e: any) {
-      error.value = e.toString();
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
     } finally {
       loading.value = false;
     }
@@ -175,7 +176,7 @@ export function useMatchHistory() {
 
   async function loadRankedStats(puuid: string) {
     try {
-      const resp = await lcuRequest<any>(
+      const resp = await lcuRequest<RankedStats>(
         "GET",
         `/lol-ranked/v1/ranked-stats/${puuid}`,
       );
@@ -247,19 +248,19 @@ export function useMatchHistory() {
     showQueueDropdown.value = false;
   }
 
-  function formatRank(queue: any) {
+  function formatRank(queue: RankDisplaySource | null) {
     if (!queue || !queue.tier || queue.tier === "NONE") return "--";
     const tierCn = TIER_MAP[queue.tier] || queue.tier;
     const division = queue.rank === "NA" ? "" : " " + queue.rank;
     return `${tierCn}${division}`;
   }
 
-  function formatHighestRank(queue: any) {
+  function formatHighestRank(queue: RankDisplaySource | null) {
     if (!queue || !queue.highestTier || queue.highestTier === "NONE") return "--";
     return TIER_MAP[queue.highestTier] || queue.highestTier;
   }
 
-  function formatPrevSeasonRank(queue: any) {
+  function formatPrevSeasonRank(queue: RankDisplaySource | null) {
     if (!queue || !queue.previousSeasonEndTier || queue.previousSeasonEndTier === "NONE") return "--";
     return TIER_MAP[queue.previousSeasonEndTier] || queue.previousSeasonEndTier;
   }

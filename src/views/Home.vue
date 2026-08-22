@@ -16,7 +16,9 @@ const selectedPath = ref<string>("");
 async function loadConnectionDetails() {
   if (store.isConnected) {
     try {
-      const details = await invoke<any>("get_lcu_connection_info");
+      const details = await invoke<{ pid: number; port: number }>(
+        "get_lcu_connection_info",
+      );
       connectionDetails.value = details;
     } catch (e) {
       console.error("加载连接信息失败:", e);
@@ -45,7 +47,7 @@ async function loadPaths() {
 async function handleLaunchClient() {
   try {
     await invoke("launch_lol_client", { path: selectedPath.value || null });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.warn("启动客户端失败:", e);
   }
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from "vue";
-import { useLcuStore } from "../store/lcuStore";
+import { useLcuStore, type BenchChampion, type ChampSelectTimer } from "../store/lcuStore";
 import { lcuRequest, fetchConfig } from "../api/lcu";
 import LcuImage from "../components/LcuImage.vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -39,7 +39,7 @@ function stopTimeTicker() {
 // 仅当保护期计算需要 currentNow 时（timer 缺失或未满 15 秒）才运行时钟，
 // 满保护期后停止 100ms 定时器，避免持续驱动全组件重渲染
 function syncTimeTicker() {
-  const timer = store.champSelectSession?.timer as any;
+  const timer = store.champSelectSession?.timer;
   if (
     timer &&
     typeof timer.totalTimeInPhase === "number" &&
@@ -96,7 +96,7 @@ onUnmounted(() => {
 // 获取当前大乱斗板凳席的英雄
 const benchChampions = computed(() => {
   const rawList = store.champSelectSession?.benchChampions || [];
-  return rawList.filter((c: any) => c && c.championId);
+  return rawList.filter((c) => c && c.championId);
 });
 
 // 获取当前玩家在该选人会话中可用的英雄 ID 列表
@@ -170,7 +170,9 @@ let swapVerifyTimer: number | undefined;
 const FIRST_STAGE_PROTECT_MS = 15000;
 
 // 计算板凳英雄的状态，供 UI 置灰与 tooltip 提示使用
-const getProtectionState = (champ: any): { clickable: boolean; reason: string } => {
+const getProtectionState = (
+  champ: BenchChampion,
+): { clickable: boolean; reason: string } => {
   const cid = Number(champ.championId);
 
   if (!isPickable(cid)) {
@@ -182,7 +184,7 @@ const getProtectionState = (champ: any): { clickable: boolean; reason: string } 
     return { clickable: true, reason: "点击秒抢" };
   }
 
-  const timer = store.champSelectSession?.timer as any;
+  const timer = store.champSelectSession?.timer as ChampSelectTimer | undefined;
   const phase = timer?.phase || "";
 
   // 使用官方 session.timer 精准计算已过去的时间
@@ -213,7 +215,7 @@ const getProtectionState = (champ: any): { clickable: boolean; reason: string } 
 
 // 聚合保护态到展示列表，避免模板内对同一 champ 多次调用 getProtectionState
 const benchDisplay = computed(() =>
-  benchChampions.value.map((c: any) => {
+  benchChampions.value.map((c) => {
     const st = getProtectionState(c);
     return { champ: c, clickable: st.clickable, reason: st.reason };
   }),
@@ -231,7 +233,7 @@ function showHint(msg: string) {
 }
 
 // 点击选择/抢下板凳席英雄
-async function swapChampion(champ: any) {
+async function swapChampion(champ: BenchChampion) {
   const cid = Number(champ.championId);
   
   if (!isPickable(cid)) {
@@ -313,7 +315,7 @@ watch(
 
     // 从session持续更新我的历史英雄（含换下退至板凳席的旧英雄追踪）
     const myPlayer = session.myTeam?.find(
-      (p: any) => Number(p.cellId) === Number(session.localPlayerCellId)
+      (p) => Number(p.cellId) === Number(session.localPlayerCellId)
     );
     const myCid = Number(myPlayer?.championId || myPlayer?.championPickIntent || 0);
 

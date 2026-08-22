@@ -150,7 +150,7 @@ async function installPending() {
       await invoke("install_pending_update");
     }
     // 两个命令都会重启/退出应用，不会走到这里
-  } catch (e: any) {
+  } catch (e: unknown) {
     errorMsg.value = String(e);
     installing.value = false;
     isMinimized.value = false;
@@ -182,7 +182,7 @@ async function installNow() {
     } else {
       await invoke("install_update");
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     errorMsg.value = String(e);
     installing.value = false;
     isMinimized.value = false;
@@ -207,7 +207,7 @@ function restore() {
 
 function openReleasePage() {
   openUrl("https://github.com/ISuuuu/Yuumi/releases/latest").catch(
-    (err: any) => {
+    (err: unknown) => {
       console.error("Failed to open release page:", err);
     },
   );

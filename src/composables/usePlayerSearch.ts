@@ -1,13 +1,23 @@
 import { inject, type Ref } from "vue";
 import type { PlayerData } from "../types/gameInfo";
 
+/** 可点击跳转搜索的玩家名称载体（PremadePlayerLike / SummonerDisplay 等的结构子集） */
+export interface PlayerNameLike {
+  displayName?: string;
+  summonerName?: string;
+  tagLine?: string;
+}
+
 export function usePlayerSearch() {
   const navigateSearchPayload = inject<
     Ref<{ name: string; gameId: number | null } | null>
   >("navigateSearchPayload");
   const navigateTo = inject<(page: string) => void>("navigateTo");
 
-  function getPlayerSearchName(player: any, playerData?: PlayerData): string {
+  function getPlayerSearchName(
+    player: PlayerNameLike,
+    playerData?: PlayerData,
+  ): string {
     const info = playerData?.info;
     const gameName =
       info?.gameName ||
@@ -25,7 +35,7 @@ export function usePlayerSearch() {
 
   function handleNameClick(
     e: MouseEvent,
-    player: any,
+    player: PlayerNameLike,
     playerData?: PlayerData,
   ) {
     e.stopPropagation();

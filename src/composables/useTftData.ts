@@ -127,7 +127,7 @@ export function useTftData() {
 
       rankedStats.value = rankData;
       summary.value = historyData;
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("加载 TFT 数据失败:", e);
       error.value = e?.toString() || "加载 TFT 数据失败";
     } finally {
@@ -180,7 +180,7 @@ export function useTftAugments() {
       });
       cachedAugments = data || [];
       augments.value = cachedAugments;
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("[TftAugments] 加载海克斯强化数据异常失败:", e);
       error.value = e?.toString() || "加载海克斯强化数据失败";
     } finally {

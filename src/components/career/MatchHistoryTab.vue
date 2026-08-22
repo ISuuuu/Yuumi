@@ -4,6 +4,7 @@ import { useLcuStore } from "../../store/lcuStore";
 import { useI18n } from "vue-i18n";
 import { fetchRecentTeammates, fetchConfig } from "../../api/lcu";
 import type { SummonerDisplay, MatchDisplay, RecentTeammate } from "../../api/lcu";
+import type { RankDisplaySource, RankedQueueEntry } from "../../types/lcu";
 import LcuImage from "../LcuImage.vue";
 import { NPopover, NSpin } from "naive-ui";
 
@@ -15,7 +16,7 @@ const mh = inject<{
   summoner: Ref<SummonerDisplay | null>;
   matches: Ref<MatchDisplay[]>;
   recentMatches: Ref<MatchDisplay[]>;
-  rankedQueues: Ref<any[]>;
+  rankedQueues: Ref<RankedQueueEntry[]>;
   loading: Ref<boolean>;
   loadSummoner: (force?: boolean) => Promise<void>;
   loadCareerData: (puuid: string, sync?: boolean) => Promise<void>;
@@ -104,19 +105,19 @@ function selectQueue(id: number | null) {
   showQueueDropdown.value = false;
 }
 
-function formatRank(queue: any) {
+function formatRank(queue: RankDisplaySource | null) {
   if (!queue || !queue.tier || queue.tier === "NONE") return "--";
   const tierCn = TIER_MAP[queue.tier] || queue.tier;
   const division = queue.rank === "NA" ? "" : " " + queue.rank;
   return `${tierCn}${division}`;
 }
 
-function formatHighestRank(queue: any) {
+function formatHighestRank(queue: RankDisplaySource | null) {
   if (!queue || !queue.highestTier || queue.highestTier === "NONE") return "--";
   return TIER_MAP[queue.highestTier] || queue.highestTier;
 }
 
-function formatPrevSeasonRank(queue: any) {
+function formatPrevSeasonRank(queue: RankDisplaySource | null) {
   if (!queue || !queue.previousSeasonEndTier || queue.previousSeasonEndTier === "NONE") return "--";
   return TIER_MAP[queue.previousSeasonEndTier] || queue.previousSeasonEndTier;
 }
