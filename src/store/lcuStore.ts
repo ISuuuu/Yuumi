@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 
+/** LCU gameflow 全部已知阶段（/lol-gameflow/v1/gameflow-phase） */
 export type GamePhase =
   | "None"
   | "Lobby"
@@ -11,8 +12,13 @@ export type GamePhase =
   | "ChampSelect"
   | "GameStart"
   | "InProgress"
+  | "Reconnect"
+  | "WatchInProgress"
+  | "WaitingForStats"
+  | "PreEndOfGame"
   | "EndOfGame"
-  | string;
+  | "TerminatedInSeries"
+  | "TerminatedByError";
 
 export interface ChampSelectAction {
   actorCellId: number;
@@ -28,6 +34,9 @@ export interface ChampSelectPlayer {
   championId: number;
   championPickIntent: number;
   assignedPosition: string;
+  /** 预组队标识（同队小队共享同一 ID） */
+  teamParticipantId?: number | string;
+  partyId?: number | string;
 }
 
 export interface ChampSelectBans {
@@ -48,6 +57,8 @@ export interface ChampSelectTrade {
 export interface ChampSelectTimer {
   adjustedTimeLeftInPhase: number;
   phase: string;
+  /** 本阶段总时长（部分事件载荷中缺失） */
+  totalTimeInPhase?: number;
 }
 
 export interface BenchChampion {
@@ -80,7 +91,7 @@ export interface ReadyCheckSession {
 export interface LcuWebSocketEvent {
   uri: string;
   eventType: string;
-  data: any;
+  data: unknown;
 }
 
 export const useLcuStore = defineStore("lcu", () => {
@@ -169,7 +180,7 @@ export const useLcuStore = defineStore("lcu", () => {
     champSelectSession.value = v;
     if (v) {
       const myPlayer = v.myTeam?.find(
-        (p: any) => Number(p.cellId) === Number(v.localPlayerCellId)
+        (p) => Number(p.cellId) === Number(v.localPlayerCellId)
       );
       if (myPlayer) {
         const cid = Number(myPlayer.championId || myPlayer.championPickIntent || 0);
@@ -273,11 +284,18 @@ export async function initLcuListeners() {
     }
 
     if (uri.startsWith("/lol-gameflow/v1/gameflow-phase")) {
-      store.setGamePhase(data);
+      if (typeof data === "string") store.setGamePhase(data as GamePhase);
     } else if (uri.startsWith("/lol-champ-select/v1/session")) {
-      store.setChampSelectSession(data);
+      store.setChampSelectSession(
+        data && typeof data === "object" ? (data as ChampSelectSession) : null,
+      );
     } else if (uri.startsWith("/lol-champ-select/v1/current-champion")) {
-      const cid = Number(typeof data === "object" ? data?.championId || data?.id : data);
+      const cid = Number(
+        typeof data === "object" && data !== null
+          ? (data as { championId?: number; id?: number }).championId ||
+              (data as { championId?: number; id?: number }).id
+          : data,
+      );
       if (cid > 0) {
         store.addHistoricalChampion(cid);
         if (import.meta.env.DEV) {
@@ -285,7 +303,9 @@ export async function initLcuListeners() {
         }
       }
     } else if (uri.startsWith("/lol-matchmaking/v1/ready-check")) {
-      store.setReadyCheck(data);
+      store.setReadyCheck(
+        data && typeof data === "object" ? (data as ReadyCheckSession) : null,
+      );
     }
   });
 

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { GamePhase, ChampSelectSession } from "../store/lcuStore";
 
 /** lol_path 列表中的特殊标记：表示该条目为「启动 WeGame」而非真实客户端路径（与 Rust 侧 config::WEGAME_MARKER 保持一致） */
 export const WEGAME_MARKER = "WeGame";
@@ -256,11 +257,11 @@ export const fetchLcuAssets = (paths: string[]) =>
 
 /** 获取游戏阶段 */
 export const getGameflowPhase = () =>
-  lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase");
+  lcuRequest<GamePhase>("GET", "/lol-gameflow/v1/gameflow-phase");
 
 /** 获取选人会话 */
 export const getChampSelectSession = () =>
-  lcuRequest<any>("GET", "/lol-champ-select/v1/session");
+  lcuRequest<ChampSelectSession>("GET", "/lol-champ-select/v1/session");
 
 /** 接受匹配 */
 export const acceptMatch = () =>
