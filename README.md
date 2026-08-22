@@ -44,7 +44,11 @@ pnpm tauri build    # 构建生产包
 
 # 代码格式化与规范自测（提交前建议自测）
 pnpm run format     # 自动修复并对齐 Rust 后端代码格式
-pnpm run check-all  # 执行完整自测（包含类型检查、格式校验及 clippy 静态分析，集成于 git pre-commit 钩子）
+pnpm type-check     # Vue / TS 类型检查
+pnpm test:rust      # Rust 单元测试 (cargo test)
+pnpm run check-all  # 执行完整自测（格式校验、类型检查及 clippy 静态分析，集成于 git pre-commit 钩子）
+
+# CI 质量门禁：GitHub Actions 会执行前端类型检查/构建、cargo clippy -D warnings 与 cargo test
 ```
 
 ## 项目结构
@@ -57,15 +61,19 @@ Yuumi/
 │   │   ├── tft/          # 云顶之弈模块（段位卡片/战绩卡片/详情弹窗/OP.GG阵容推荐/海克斯百科）
 │   │   ├── gameinfo/     # 对局信息模块（玩家卡片/战绩列/对局阶段）
 │   │   ├── career/       # 生涯战绩模块（召唤师信息/战绩页签）
-│   │   ├── tools/        # 工具箱模块（自定义房间/符文配置/自动流程卡片/观战/战利品批量处理）
+│   │   ├── search/       # 战绩查询模块（战绩列表项/迷你列表/对局详情面板）
+│   │   ├── settings/     # 设置页功能区块（个性化/云端服务/更新/关于等，含共享样式与自动保存 hook）
+│   │   ├── opgg/         # OP.GG 弹窗子组件（筛选栏/梯度榜/出装攻略面板 + 共享格式化工具）
+│   │   ├── tools/        # 工具箱模块（自定义房间/符文配置/自动流程卡片/观战/战利品批量处理，quickactions/ 为快捷操作子卡片）
 │   │   ├── layout/       # 布局与自定义标题栏
 │   │   ├── NoticePopup.vue  # 更新日志弹窗
 │   │   ├── UpdateDialog.vue # 自动更新弹窗（下载/安装新版本）
 │   │   └── LcuOfflineState.vue # 统一 LCU 离线未连接状态
-│   ├── composables/      # 组合式 hooks（useLcuAsset/useToast/usePlayerSearch/useTftData/useLoot/useAutoSaveConfig 等）
+│   ├── types/            # 共享类型定义（LCU 原始响应/战绩查询/OP.GG/对局信息视图模型）
+│   ├── composables/      # 组合式 hooks（useLcuAsset/useToast/usePlayerSearch/useTftData/useLoot/useSettingsAutoSave 等）
 │   ├── api/              # LCU API 封装 + Tauri IPC 调用
 │   ├── store/            # Pinia 全局状态
-│   ├── utils/            # 工具函数（主题色等）
+│   ├── utils/            # 工具函数（主题色/队列名映射/英雄缓存/并发控制等）
 │   ├── i18n.ts           # 多语言配置
 │   ├── main.ts           # 主窗口入口
 │   └── opgg.ts           # OP.GG 独立窗口入口
