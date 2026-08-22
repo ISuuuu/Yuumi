@@ -2,9 +2,10 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import type { AppConfig } from "../api/lcu";
 import { setLocale } from "../i18n";
 import OpggModal from "./OpggModal.vue";
-import NaiveUIBridge from "./NaiveUIBridge.vue";
+import NaiveApiCapture from "./NaiveApiCapture.vue";
 
 function handleClose() {
   getCurrentWindow().close();
@@ -20,7 +21,7 @@ document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
 onMounted(async () => {
   // 同步语言配置
   try {
-    const config: any = await invoke("get_config");
+    const config = await invoke<AppConfig>("get_config");
     if (config?.Personalization?.Language) {
       setLocale(config.Personalization.Language);
     }
@@ -48,7 +49,7 @@ onMounted(async () => {
   <n-config-provider>
     <n-message-provider>
       <n-dialog-provider>
-        <NaiveUIBridge />
+        <NaiveApiCapture />
         <OpggModal @close="handleClose" />
       </n-dialog-provider>
     </n-message-provider>

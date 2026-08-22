@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed, provide, defineAsyncComponent } from "vue";
-import { useLcuStore, initLcuListeners } from "./store/lcuStore";
+import { useLcuStore, initLcuListeners, type ChampSelectSession } from "./store/lcuStore";
 import { storeToRefs } from "pinia";
-import { fetchCurrentSummoner, lcuRequest, fetchConfig } from "./api/lcu";
+import { fetchCurrentSummoner, getGameflowPhase, lcuRequest, fetchConfig } from "./api/lcu";
 import {
   updateThemeColor,
   updateDeathColor,
@@ -18,7 +18,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { SummonerDisplay, AppConfig } from "./api/lcu";
 import { darkTheme, type GlobalThemeOverrides } from "naive-ui";
-import NaiveUIBridge from "./components/NaiveUIBridge.vue";
+import NaiveApiCapture from "./components/NaiveApiCapture.vue";
+import { useToast, getCapturedDialog } from "./composables/useToast";
 import Home from "./views/Home.vue";
 import Career from "./views/Career.vue";
 import Search from "./views/Search.vue";
@@ -51,7 +52,7 @@ function applyMicaEffect(enabled: boolean) {
   } else {
     root.removeAttribute("data-mica");
   }
-  invoke("set_mica_effect", { enabled }).catch((e: any) =>
+  invoke("set_mica_effect", { enabled }).catch((e: unknown) =>
     console.warn("应用云母效果失败:", e),
   );
 }
@@ -130,21 +131,8 @@ provide("showUpdateInfo", (info: UpdateInfo, expanded = false) => {
 // 是否为便携版（决定更新弹窗走 zip 覆盖方案）
 const isPortable = ref(false);
 
-// Toast 通知（通过 Naive UI Message API）
-function showToast(message: string, type: "success" | "error" = "success") {
-  try {
-    const msg = (window as any).$message;
-    if (msg) {
-      if (type === "error") {
-        msg.error(message);
-      } else {
-        msg.success(message);
-      }
-    }
-  } catch (e) {
-    console.warn("[Toast] Naive UI message not available yet:", e);
-  }
-}
+// Toast 通知（通过 Naive UI Message API；App.vue 位于 Provider 之上，由捕获实例提供）
+const { showToast } = useToast();
 
 // 用于 Career → Search 跳转的共享状态
 const navigateSearchPayload = ref<{
@@ -247,7 +235,7 @@ onMounted(async () => {
     // 检查配置加载时是否有错误（如配置文件损坏已自动恢复）
     const configErr = await invoke<null | string>("get_config_load_error");
     if (configErr) {
-      const dialog = (window as any).$dialog;
+      const dialog = getCapturedDialog();
       if (dialog) {
         dialog.error({
           title: "配置文件异常",
@@ -261,7 +249,7 @@ onMounted(async () => {
     }
     const cfg = appConfig.value;
     if (cfg?.General?.EnableStartLolWithApp) {
-      invoke("launch_lol_client").catch((e: any) =>
+      invoke("launch_lol_client").catch((e: unknown) =>
         console.warn("自动启动 LOL 失败:", e),
       );
     }
@@ -394,11 +382,11 @@ async function loadLcuState() {
   // 步骤 1/2/3/5 互不依赖，并行请求以减少启动延迟
   const [summonerResp, _platformResp, phaseResp, cfg] = await Promise.allSettled([
     fetchCurrentSummoner(),
-    lcuRequest<any>(
+    lcuRequest<string>(
       "GET",
       "/lol-platform-config/v1/namespaces/LoginPlatformLocalization/platformId",
     ),
-    lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase"),
+    getGameflowPhase(),
     appConfig.value ? Promise.resolve(appConfig.value) : fetchConfig(),
   ]);
 
@@ -423,7 +411,7 @@ async function loadLcuState() {
   // 4. 选人 Session（依赖步骤 3 的结果）
   if (store.gamePhase === "ChampSelect") {
     try {
-      const sessionResp = await lcuRequest<any>(
+      const sessionResp = await lcuRequest<ChampSelectSession>(
         "GET",
         "/lol-champ-select/v1/session",
       );
@@ -672,7 +660,7 @@ async function reconnectWithRetry(maxAttempts = 5) {
 function handleReconnect() {
   initLcuListeners();
   // 先查询当前游戏阶段，按情况处理
-  lcuRequest<string>("GET", "/lol-gameflow/v1/gameflow-phase")
+  getGameflowPhase()
     .then(async (resp) => {
       if (!resp.success) {
         showToast("LCU 未连接，请先启动英雄联盟客户端", "success");
@@ -731,7 +719,7 @@ async function handleClose() {
   >
     <n-message-provider>
       <n-dialog-provider>
-        <NaiveUIBridge />
+        <NaiveApiCapture />
 
         <!-- 如果是悬浮窗窗口，仅渲染悬浮窗组件 -->
         <div v-if="isOverlayWindow" class="overlay-container">
