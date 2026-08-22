@@ -1,0 +1,102 @@
+.group-header {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin: 1.8rem 0 0.6rem 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.card-item {
+  background: var(--settings-card-bg);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--settings-card-border);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  box-shadow: var(--shadow-sm);
+  transition:
+    box-shadow 0.25s cubic-bezier(0.25, 0.8, 0.25, 1),
+    border-color 0.25s,
+    background-color 0.25s,
+    transform 0.2s;
+  position: relative;
+}
+.card-item.has-dropdown-open {
+  z-index: 20;
+}
+.card-item:hover {
+  border-color: var(--settings-card-border-hover);
+  background-color: var(--settings-card-bg-hover);
+  box-shadow: var(--card-glow-hover);
+  transform: translateY(-1px);
+}
+
+/* 底部分隔线 — 卡片组内用细线分隔 */
+.card-item.border-bottom {
+  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--settings-separator);
+  margin-bottom: 0;
+}
+.card-item.border-bottom + .card-item {
+  border-radius: 0;
+  margin-top: 0;
+}
+.card-item.border-bottom + .card-item:last-child {
+  border-radius: 0 0 12px 12px;
+}
+/* removed */
+.card-item.border-bottom + .card-item:last-child {
+  border-radius: 0 0 12px 12px;
+}
+/* removed */
+/* 分组最后的卡片恢复圆角 */
+.card-item.border-bottom:last-of-type {
+  border-radius: 0 0 12px 12px;
+  border-bottom: 1px solid var(--settings-separator);
+}
+/* removed */
+
+.card-left {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.card-title {
+  font-size: 0.88rem;
+  font-weight: bold;
+  color: var(--text-color);
+  margin: 0;
+}
+.card-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.card-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+.status-preview {
+  font-size: 0.78rem;
+  color: var(--text-dimmed);
+  margin-right: 10px;
+}
+.status-preview.truncate {
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.reset-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
