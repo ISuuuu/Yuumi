@@ -21,12 +21,12 @@ const ASSET_BATCH_CONCURRENCY: usize = 8;
 /// 资源缓存有效期：7 天
 const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
-/// CDN 兜底下载共用的 HTTP 客户端（进程级复用，避免每次请求重建 TLS 连接）
+/// CDN 兜底下载共用的 HTTP 客户端（进程级复用，避免每次请求重建 TLS 连接）。
+/// 仅访问公共 CDN（raw.communitydragon.org），证书有效，不做忽略校验。
 fn cdn_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
             .timeout(Duration::from_secs(10))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
