@@ -59,5 +59,11 @@ jobs:
       - name: Frontend type check & build
         run: pnpm build
 
+      - name: Rust lint (clippy)
+        run: cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+      - name: Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - name: Rust release compile (preheat cache for release tags)
         run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml
