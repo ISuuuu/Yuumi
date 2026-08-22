@@ -36,7 +36,7 @@ export default defineConfig(async () => ({
       },
       output: {
         manualChunks: {
-          "vue-vendor": ["vue", "vue-router", "pinia"],
+          "vue-vendor": ["vue", "pinia"],
           "naive-ui": ["naive-ui"],
           "i18n": ["vue-i18n"],
         },
