@@ -447,10 +447,16 @@ impl AppConfig {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
+        // 先写临时文件再原子替换，避免进程在写入中途崩溃导致配置文件截断损坏
+        let tmp_path = path.with_extension("json.tmp");
         match serde_json::to_string_pretty(self) {
             Ok(text) => {
-                if let Err(e) = std::fs::write(&path, text) {
-                    log::error!("写入配置文件失败: {}", e);
+                if let Err(e) = std::fs::write(&tmp_path, text) {
+                    log::error!("写入配置临时文件失败: {}", e);
+                    return;
+                }
+                if let Err(e) = std::fs::rename(&tmp_path, &path) {
+                    log::error!("替换配置文件失败: {}", e);
                 }
             }
             Err(e) => {

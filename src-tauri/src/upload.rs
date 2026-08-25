@@ -133,6 +133,10 @@ pub fn remove_pending_upload(app_handle: &AppHandle, game_id: u64) {
 
 // ─── 上传队列管理器 ───
 
+/// 单条暂存上传的最大自动尝试次数。
+/// 超过后（如服务器永久拒绝的 4xx 死信）不再自动重试，避免每局结束/启动时反复空传。
+const MAX_UPLOAD_RETRY_COUNT: u32 = 10;
+
 /// 本地去重异步上传队列状态机。
 /// 内部维护 `mpsc::channel` + `HashSet<u64>` 去重 + 后台 Worker。
 #[derive(Clone)]
@@ -204,6 +208,14 @@ impl UploadQueue {
         let mut set = self.enqueued.lock().await;
         for item in pending_items {
             let game_id = item.game_id;
+            if item.retry_count >= MAX_UPLOAD_RETRY_COUNT {
+                log::debug!(
+                    "对局 {} 上传已尝试 {} 次，超过上限，跳过自动重试",
+                    game_id,
+                    item.retry_count
+                );
+                continue;
+            }
             if !set.contains(&game_id) {
                 set.insert(game_id);
                 let _ = self.tx.try_send(UploadTask::Pending(Box::new(item)));

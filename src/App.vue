@@ -305,7 +305,7 @@ function toggleSidebar() {
 
 async function openOpggWindow() {
   if (!store.isConnected) {
-    showToast("LCU 未连接，请先启动英雄联盟客户端", "success");
+    showToast(t("common.lcuNotConnected"), "warning");
     return;
   }
   const existing = await WebviewWindow.getByLabel("opgg");
@@ -663,7 +663,7 @@ function handleReconnect() {
   getGameflowPhase()
     .then(async (resp) => {
       if (!resp.success) {
-        showToast("LCU 未连接，请先启动英雄联盟客户端", "success");
+        showToast(t("common.lcuNotConnected"), "warning");
         return;
       }
       const phase = resp.data;
@@ -679,7 +679,7 @@ function handleReconnect() {
         } else {
           showToast(
             t("common.reconnectFailed") + ": " + (r.error || ""),
-            "success",
+            "error",
           );
         }
       } else {

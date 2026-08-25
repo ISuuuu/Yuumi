@@ -671,7 +671,9 @@ pub async fn backfill_saved_player_identity(
 pub async fn export_tagged_players_to_json_file(
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    with_db(app_state.inner(), |conn| {
+    // 先短暂持锁读出数据，再在不持数据库锁的阻塞线程里弹文件对话框与写盘，
+    // 避免模态框打开期间阻塞其他数据库操作
+    let data: Vec<SavedPlayerDto> = with_db(app_state.inner(), |conn| {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {} FROM saved_players WHERE tag IS NOT NULL AND tag != ''",
@@ -683,7 +685,11 @@ pub async fn export_tagged_players_to_json_file(
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
+        Ok(data)
+    })
+    .await?;
 
+    tauri::async_runtime::spawn_blocking(move || {
         let file = rfd::FileDialog::new()
             .set_title("导出标记玩家")
             .add_filter("JSON", &["json"])
@@ -697,6 +703,7 @@ pub async fn export_tagged_players_to_json_file(
         Ok(Some(path.to_string_lossy().to_string()))
     })
     .await
+    .map_err(|e| format!("导出任务异常终止: {}", e))?
 }
 
 /// 从用户选择的 JSON 文件导入标记玩家。返回导入数量（取消则 0）。
@@ -704,18 +711,27 @@ pub async fn export_tagged_players_to_json_file(
 pub async fn import_tagged_players_from_json_file(
     app_state: tauri::State<'_, AppState>,
 ) -> Result<u32, String> {
-    with_db(app_state.inner(), |conn| {
+    // 先在不持数据库锁的阻塞线程里弹文件对话框并解析，再短暂持锁批量写入，
+    // 避免模态框打开期间阻塞其他数据库操作
+    let records: Vec<SavedPlayerDto> = tauri::async_runtime::spawn_blocking(|| {
         let file = rfd::FileDialog::new()
             .set_title("导入标记玩家")
             .add_filter("JSON", &["json"])
             .pick_file();
         let Some(path) = file else {
-            return Ok(0);
+            return Ok(Vec::new());
         };
         let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        let records: Vec<SavedPlayerDto> =
-            serde_json::from_str(&content).map_err(|e| e.to_string())?;
+        serde_json::from_str(&content).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("导入任务异常终止: {}", e))??;
 
+    if records.is_empty() {
+        return Ok(0);
+    }
+
+    with_db(app_state.inner(), move |conn| {
         let mut count = 0u32;
         for r in records {
             let result = conn.execute(

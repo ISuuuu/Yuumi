@@ -743,16 +743,24 @@ pub async fn update_summoner_info(summoner: serde_json::Value) {
 }
 
 pub async fn send_event(event_type: &str, data: serde_json::Value) -> Result<(), String> {
-    let tx_lock = SIGNALR_TX.lock().await;
-    if let Some(tx) = tx_lock.as_ref() {
-        tx.send(SignalrCommand::SendEvent {
-            event_type: event_type.to_string(),
-            data,
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    } else {
-        Err("SignalR 未连接".to_string())
+    // 锁内仅克隆发送端，避免通道满时跨 await 持锁阻塞 get_signalr_status 等其他调用方
+    let tx = SIGNALR_TX.lock().await.as_ref().cloned();
+    let Some(tx) = tx else {
+        return Err("SignalR 未连接".to_string());
+    };
+    // 用 try_send 丢弃积压事件而非无限排队：这些是实时状态类事件，只有最新快照有意义，
+    // 远端卡顿时丢弃过密中间帧（与 BP Session 通道同一策略），同时避免调用方任务无限堆积
+    match tx.try_send(SignalrCommand::SendEvent {
+        event_type: event_type.to_string(),
+        data,
+    }) {
+        Ok(()) => Ok(()),
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            log::warn!("[SignalR] 事件通道已满，丢弃事件: {}", event_type);
+            Ok(())
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            Err("SignalR 连接已关闭".to_string())
+        }
     }
 }

@@ -97,6 +97,8 @@ struct ChampionSelection {
     is_summoner_spell_set: bool,
     is_champion_picked_completed: bool,
     _opgg_show_champion_id: i32,
+    /// 已调度延迟禁人的 action id（防止高频 session 事件重复调度）
+    ban_scheduled_action_id: Option<i32>,
 }
 
 // ─── OPGG 事件数据 ───
@@ -534,7 +536,7 @@ async fn do_auto_ban(
     app_handle: &AppHandle,
     session: &ChampSelectSession,
     cfg: &FunctionsConfig,
-    _selection: &mut ChampionSelection,
+    selection: &mut ChampionSelection,
 ) {
     if !cfg.enable_auto_ban_champion {
         return;
@@ -587,37 +589,60 @@ async fn do_auto_ban(
         return;
     }
 
-    let champion_id = candidates[0];
     let action_id = action.id;
 
-    // 延迟禁人放入后台任务（版本号取消机制），不阻塞 BP 主循环
+    // 延迟禁人放入后台任务，不阻塞 BP 主循环。
+    // 注意：同一 action 只允许调度一次 —— 选人阶段 session 事件高频推送，
+    // 若每次事件都重新调度，每次 fetch_add 产生的任务版本号会把上一个待执行的
+    // 禁人任务作废，导致延迟禁人被无限顺延直至动作超时失效。
     if cfg.auto_ban_delay > 0.0 {
+        if selection.ban_scheduled_action_id == Some(action_id) {
+            return;
+        }
+        selection.ban_scheduled_action_id = Some(action_id);
+
         let delay = cfg.auto_ban_delay;
-        let current_id = {
-            let state = app_handle.state::<crate::AppState>();
-            state
-                .bp_task_id
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                + 1
-        };
+        let candidates = candidates.clone();
         let app_handle = app_handle.clone();
         crate::spawn_log_panic(async move {
             tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
 
-            {
-                let state = app_handle.state::<crate::AppState>();
-                if state.bp_task_id.load(std::sync::atomic::Ordering::SeqCst) != current_id {
-                    log::info!("后台禁人任务已失效 (版本不匹配)，退出");
-                    return;
-                }
+            // 延迟结束后重取会话：秒退/阶段结束时拿不到会话，或动作已完成/失效时直接放弃。
+            // 因此无需依赖任务版本号取消机制（版本号会被交换/锁定等任务的调度互相作废）。
+            let fresh_session = match lcu_get_session(&app_handle).await {
+                Some(s) => s,
+                None => return,
+            };
+            let still_active = fresh_session.actions.iter().flatten().any(|a| {
+                a.id == action_id
+                    && a.actor_cell_id == cell_id
+                    && a.action_type == "ban"
+                    && a.is_in_progress
+                    && !a.completed
+            });
+            if !still_active {
+                return;
             }
+
+            // 过滤延迟期间新出现的禁用英雄，取第一个仍可选的候选
+            let new_bans: Vec<i32> = fresh_session
+                .bans
+                .my_team_bans
+                .iter()
+                .chain(fresh_session.bans.their_team_bans.iter())
+                .copied()
+                .collect();
+            let champion_id = match candidates.iter().find(|c| !new_bans.contains(c)) {
+                Some(c) => *c,
+                None => return,
+            };
 
             log::info!("自动禁用英雄: {}", champion_id);
             lcu_patch_action(&app_handle, action_id, champion_id, true).await;
         });
     } else {
-        log::info!("自动禁用英雄: {}", champion_id);
-        lcu_patch_action(app_handle, action_id, champion_id, true).await;
+        log::info!("自动禁用英雄: {}", candidates[0]);
+        lcu_patch_action(app_handle, action_id, candidates[0], true).await;
     }
 }
 

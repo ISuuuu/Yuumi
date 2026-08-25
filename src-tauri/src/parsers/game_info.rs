@@ -178,8 +178,7 @@ async fn fetch_player_summary(
                 .games
                 .games
                 .iter()
-                .filter(|g| !g.participants.is_empty())
-                .map(|g| g.to_display(assets))
+                .filter_map(|g| g.to_display(assets))
                 .collect();
 
             let (k, d, a, w) = games.iter().fold((0, 0, 0, 0), |(k, d, a, w), g| {

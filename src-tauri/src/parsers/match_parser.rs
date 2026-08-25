@@ -171,9 +171,13 @@ fn resolve_augment_details(
 }
 
 impl LcuMatchGame {
-    /// 将 LCU 原始对局数据清洗为前端展示结构
-    pub fn to_display(&self, assets: &crate::lcu::game_data::GameDataAssets) -> MatchDisplay {
-        let participant = &self.participants[0];
+    /// 将 LCU 原始对局数据清洗为前端展示结构。
+    /// 无参与者时返回 None（不依赖调用方先做非空过滤，杜绝索引越界）。
+    pub fn to_display(
+        &self,
+        assets: &crate::lcu::game_data::GameDataAssets,
+    ) -> Option<MatchDisplay> {
+        let participant = self.participants.first()?;
         let stats = &participant.stats;
 
         let cs =
@@ -230,7 +234,7 @@ impl LcuMatchGame {
         let augment_ids = extract_augment_ids(stats);
         let (augment_icon_urls, augment_names) = resolve_augment_details(&augment_ids, assets);
 
-        MatchDisplay {
+        Some(MatchDisplay {
             queue_id: self.queue_id,
             game_id: self.game_id,
             time,
@@ -264,7 +268,7 @@ impl LcuMatchGame {
             augment_ids,
             augment_icon_urls,
             augment_names,
-        }
+        })
     }
 }
 
@@ -498,8 +502,7 @@ pub async fn get_match_history(
         .games
         .games
         .iter()
-        .filter(|g| !g.participants.is_empty())
-        .map(|g| g.to_display(&assets))
+        .filter_map(|g| g.to_display(&assets))
         .collect();
 
     Ok(displays)
@@ -1191,7 +1194,7 @@ mod tests {
         let mut game = sample_game(450);
         game.participants[0].stats.player_augment1 = 7018;
 
-        let d = game.to_display(&assets);
+        let d = game.to_display(&assets).unwrap();
         assert_eq!(d.name, "极地大乱斗");
         assert_eq!(d.map, "嚎哭深渊");
         assert_eq!(d.time, "2024-01-15 14:30");
@@ -1220,10 +1223,17 @@ mod tests {
     fn to_display_perfect_kda_when_zero_deaths() {
         let mut game = sample_game(420);
         game.participants[0].stats.deaths = 0;
-        let d = game.to_display(&GameDataAssets::default());
+        let d = game.to_display(&GameDataAssets::default()).unwrap();
         assert_eq!(d.kda, "Perfect");
         assert_eq!(d.name, "排位单双排");
         assert_eq!(d.map, "召唤师峡谷");
+    }
+
+    #[test]
+    fn to_display_returns_none_without_participants() {
+        let mut game = sample_game(420);
+        game.participants.clear();
+        assert!(game.to_display(&GameDataAssets::default()).is_none());
     }
 
     #[test]

@@ -4,10 +4,20 @@ use tokio::time::{sleep, Duration};
 
 use crate::config::FunctionsConfig;
 use crate::lcu::client::lcu_request;
+use std::sync::Arc;
 
 /// 创建预设大厅后 LCU 会瞬时闪回 None（Lobby→None 抖动）的防抖窗口。
 /// 该窗口内出现的 None 视为抖动，不重置建厅状态，避免重复建厅把玩家踢出小队。
 const LOBBY_FLICKER_WINDOW: std::time::Duration = std::time::Duration::from_millis(2000);
+
+/// 自动创建大厅的共享状态（建厅重试在后台任务中执行，需跨任务共享标志）
+#[derive(Default)]
+struct LobbyState {
+    created: bool,
+    last_create: Option<std::time::Instant>,
+}
+
+type LobbyStateHandle = Arc<std::sync::Mutex<LobbyState>>;
 
 // ─── 游戏流程事件 ───
 
@@ -74,10 +84,8 @@ pub fn start(
     upload_trigger: crate::upload::UploadTrigger,
 ) {
     crate::spawn_log_panic(async move {
-        let mut lobby_created = false;
         let mut last_phase = get_current_phase(&app_handle).await.unwrap_or_default();
-        // 上次成功创建预设大厅的时间（用于识别创建后的 Lobby→None 抖动）
-        let mut last_lobby_create: Option<std::time::Instant> = None;
+        let lobby_state: LobbyStateHandle = Arc::default();
         let mut upload_trigger = upload_trigger;
         let mut ready_check_accepted = false; // 跟踪是否已接受匹配
         let mut honored = false; // 跟踪当前对局是否已自动荣誉点赞（防 WS 重复推送刷屏）
@@ -103,9 +111,8 @@ pub fn start(
                         &app_handle,
                         &phase,
                         &cfg,
-                        &mut lobby_created,
+                        &lobby_state,
                         &mut last_phase,
-                        &mut last_lobby_create,
                         &mut upload_trigger,
                     )
                     .await;
@@ -140,15 +147,12 @@ pub fn start(
                 }
                 GameflowEvent::ResetLobbyState => {
                     log::info!("收到重置大厅创建状态指令，重置为 false");
-                    lobby_created = false;
+                    {
+                        let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+                        lobby.created = false;
+                    }
                     if last_phase == "None" && cfg.enable_auto_create_lobby {
-                        try_create_default_lobby(
-                            &app_handle,
-                            &cfg,
-                            &mut lobby_created,
-                            &mut last_lobby_create,
-                        )
-                        .await;
+                        try_create_default_lobby(app_handle.clone(), &cfg, lobby_state.clone());
                     }
                 }
                 GameflowEvent::HonorBallot(ballot) => {
@@ -172,9 +176,8 @@ async fn handle_phase_change(
     app_handle: &AppHandle,
     phase: &str,
     cfg: &FunctionsConfig,
-    lobby_created: &mut bool,
+    lobby_state: &LobbyStateHandle,
     last_phase: &mut String,
-    last_lobby_create: &mut Option<std::time::Instant>,
     upload_trigger: &mut crate::upload::UploadTrigger,
 ) {
     log::info!("游戏阶段: {}", phase);
@@ -193,13 +196,15 @@ async fn handle_phase_change(
     // 若此时也重置标志会立刻再次建厅，重复 POST 会把玩家踢出小队（"你已被移出小队"）。
     // 因此距上次建厅不足防抖窗口内出现的 None 视为抖动，跳过重置。
     if phase == "None" {
-        let within_flicker = last_lobby_create
+        let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+        let within_flicker = lobby
+            .last_create
             .map(|t| t.elapsed() < LOBBY_FLICKER_WINDOW)
             .unwrap_or(false);
         if within_flicker {
             log::debug!("忽略 Lobby→None 抖动（距上次建厅不足防抖窗口），保留建厅状态");
         } else {
-            *lobby_created = false;
+            lobby.created = false;
         }
     }
     *last_phase = phase.to_string();
@@ -213,9 +218,9 @@ async fn handle_phase_change(
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    // 空闲状态 → 自动创建预设大厅
+    // 空闲状态 → 自动创建预设大厅（重试循环在后台任务中执行，不阻塞事件循环）
     if phase == "None" && cfg.enable_auto_create_lobby {
-        try_create_default_lobby(app_handle, cfg, lobby_created, last_lobby_create).await;
+        try_create_default_lobby(app_handle.clone(), cfg, lobby_state.clone());
     }
 
     // 游戏进行中 → 自动重连（指数退避，最多 5 次）
@@ -276,69 +281,74 @@ async fn handle_phase_change(
     upload_trigger.on_phase_change(phase, app_handle).await;
 }
 
-/// 自动创建预设大厅（对应 Python `_tryCreateDefaultLobby`）
-async fn try_create_default_lobby(
-    app_handle: &AppHandle,
+/// 自动创建预设大厅（对应 Python `_tryCreateDefaultLobby`）。
+/// 重试循环放入后台任务执行，避免最长约 1 分钟的重试阻塞 gameflow 事件主循环。
+fn try_create_default_lobby(
+    app_handle: AppHandle,
     cfg: &FunctionsConfig,
-    lobby_created: &mut bool,
-    last_lobby_create: &mut Option<std::time::Instant>,
+    lobby_state: LobbyStateHandle,
 ) {
-    if *lobby_created {
-        return;
+    // 已建成或已在建厅重试中则跳过（占位防止后续事件重复启动建厅任务）
+    {
+        let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+        if lobby.created {
+            return;
+        }
+        lobby.created = true;
     }
 
     let queue_id = cfg.default_game_mode;
-    log::info!("自动创建预设大厅: queueId={}", queue_id);
+    crate::spawn_log_panic(async move {
+        log::info!("自动创建预设大厅: queueId={}", queue_id);
 
-    let state = app_handle.state::<crate::AppState>();
-    let app_state = state.inner();
+        let state = app_handle.state::<crate::AppState>();
+        let app_state = state.inner();
 
-    for attempt in 0..30 {
-        // 检查 LCU 是否仍然连接
-        if app_state.lcu_client.read().await.as_ref().is_none() {
-            log::info!("LCU 已断开，停止创建大厅");
-            return;
-        }
-
-        // 检查当前阶段是否仍为 None
-        if let Ok(serde_json::Value::String(phase)) =
-            lcu_request(app_state, "GET", "/lol-gameflow/v1/gameflow-phase", None).await
-        {
-            if !matches!(
-                phase.as_str(),
-                "None" | "" | "WaitingForStats" | "PreEndOfGame"
-            ) {
-                log::info!("当前阶段为 {}，跳过创建大厅", phase);
-                *lobby_created = true;
+        for attempt in 0..30 {
+            // 检查 LCU 是否仍然连接
+            if app_state.lcu_client.read().await.as_ref().is_none() {
+                log::info!("LCU 已断开，停止创建大厅");
                 return;
             }
-        }
 
-        // 尝试创建大厅
-        let body = serde_json::json!({ "queueId": queue_id });
-        match lcu_request(app_state, "POST", "/lol-lobby/v2/lobby", Some(body)).await {
-            Ok(_) => {
-                log::info!("预设大厅创建成功 (尝试 {})", attempt + 1);
-                *lobby_created = true;
-                *last_lobby_create = Some(std::time::Instant::now());
-                return;
-            }
-            Err(e) => {
-                if e.contains("409") {
-                    log::info!("创建大厅返回 409 (Conflict)，可能已在房间中，停止重试");
-                    *lobby_created = true;
-                    *last_lobby_create = Some(std::time::Instant::now());
+            // 检查当前阶段是否仍为 None
+            if let Ok(serde_json::Value::String(phase)) =
+                lcu_request(app_state, "GET", "/lol-gameflow/v1/gameflow-phase", None).await
+            {
+                if !matches!(
+                    phase.as_str(),
+                    "None" | "" | "WaitingForStats" | "PreEndOfGame"
+                ) {
+                    log::info!("当前阶段为 {}，跳过创建大厅", phase);
                     return;
                 }
-                log::warn!("创建大厅失败: {}，重试中...", e);
             }
+
+            // 尝试创建大厅
+            let body = serde_json::json!({ "queueId": queue_id });
+            match lcu_request(app_state, "POST", "/lol-lobby/v2/lobby", Some(body)).await {
+                Ok(_) => {
+                    log::info!("预设大厅创建成功 (尝试 {})", attempt + 1);
+                    let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+                    lobby.last_create = Some(std::time::Instant::now());
+                    return;
+                }
+                Err(e) => {
+                    if e.contains("409") {
+                        log::info!("创建大厅返回 409 (Conflict)，可能已在房间中，停止重试");
+                        let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+                        lobby.last_create = Some(std::time::Instant::now());
+                        return;
+                    }
+                    log::warn!("创建大厅失败: {}，重试中...", e);
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    }
-
-    log::warn!("创建预设大厅：30 次重试均失败");
-    *lobby_created = true;
+        log::warn!("创建预设大厅：30 次重试均失败");
+    });
 }
 
 /// 异步执行延迟接受匹配任务，不阻塞主事件循环。
