@@ -41,6 +41,19 @@ const currentChampId = computed(
   () => props.player?.championId || props.player?.championPickIntent || 0,
 );
 
+// 头像左侧胜率竖条：>50 绿、<50 红；偏离 50 越大条越高颜色越深（2胜8负与8胜2负等高异色）
+const wrBar = computed(() => {
+  const rate = props.playerData?.winRate;
+  if (rate === undefined) return null;
+  const diff = Math.abs(rate - 50);
+  const strength = Math.min(diff, 20) / 20; // 0 ~ 1
+  return {
+    clazz: rate >= 50 ? "win" : "lose",
+    opacity: Number((0.3 + strength * 0.7).toFixed(2)),
+    fillHeight: 50 + diff,
+  };
+});
+
 function getQueueName(queueId: number, backendName: string): string {
   const key = `gameModes.${queueId}`;
   if (te(key)) {
@@ -127,6 +140,17 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
       "
     >
       <div class="col-header-top">
+        <!-- 头像左侧胜率竖条（全部战绩十列视图） -->
+        <span
+          v-if="compact && wrBar"
+          :class="['wr-bar', wrBar.clazz]"
+          :title="`${$t('career.winRate')} ${playerData?.winRate}%`"
+        >
+          <span
+            class="wr-bar-fill"
+            :style="{ height: `${wrBar.fillHeight}%`, opacity: wrBar.opacity }"
+          ></span>
+        </span>
         <!-- 选人阶段英雄头像 -->
         <div class="col-champ-wrapper">
           <LcuImage
@@ -271,6 +295,7 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 
 /* ─── 列头部 ─── */
 .col-header {
+  position: relative;
   height: 48px;
   padding: 5px 8px;
   border-bottom: 1px solid var(--border-color);
@@ -280,6 +305,36 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   align-items: center;
   box-sizing: border-box;
   transition: all 0.2s ease-in-out;
+}
+
+/* ─── 头像左侧胜率竖条（高度随头像行撑满，自底向上填充） ─── */
+.wr-bar {
+  position: relative;
+  align-self: stretch;
+  width: 4px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: var(--border-color);
+  overflow: hidden;
+}
+.wr-bar-fill {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  transition: height 0.3s ease-in-out;
+}
+.wr-bar.win .wr-bar-fill {
+  background: #10b981;
+}
+.wr-bar.lose .wr-bar-fill {
+  background: #f87171;
+}
+.wr-bar.win .wr-bar-fill {
+  background: var(--win-color);
+}
+.wr-bar.lose .wr-bar-fill {
+  background: var(--loss-color);
 }
 .col-header.premade-header:hover {
   filter: brightness(1.08);
