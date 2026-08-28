@@ -54,6 +54,7 @@ const RESERVE_TEAM_KEYS = [
   "yuumi_last_gameflow_my_team",
   "yuumi_last_gameflow_their_team",
   "yuumi_last_game_player_data",
+  "yuumi_last_game_loaded_count",
   "yuumi_last_premade_colors_my",
   "yuumi_last_premade_colors_their",
 ];
@@ -139,10 +140,24 @@ export function useGamePlayerData(
 
   // ── 保留对局数据写入：只要有队伍数据且包含玩家数据就落盘保存对局快照
   function writeReserveData() {
-    if (
-      gameflowMyTeam.value.length === 0 ||
-      Object.keys(playerData.value).length === 0
-    ) {
+    const loadedCount = Object.values(playerData.value).filter(
+      (d) => d.info !== null,
+    ).length;
+    if (gameflowMyTeam.value.length === 0 || loadedCount === 0) {
+      return;
+    }
+    // 防止选人阶段部分加载的数据覆盖上一局更完整的快照：
+    // 真实对局阶段始终写入保证时效性；其余阶段仅在新快照数据规模不缩水时覆盖
+    let savedLoadedCount = 0;
+    try {
+      savedLoadedCount =
+        Number(localStorage.getItem("yuumi_last_game_loaded_count")) || 0;
+    } catch {
+      /* ignore */
+    }
+    const inRealGame =
+      store.gamePhase === "GameStart" || store.gamePhase === "InProgress";
+    if (!inRealGame && loadedCount < savedLoadedCount) {
       return;
     }
     lazySetItem("yuumi_last_game_player_data", playerData.value);
@@ -150,6 +165,7 @@ export function useGamePlayerData(
     lazySetItem("yuumi_last_gameflow_their_team", gameflowTheirTeam.value);
     lazySetItem("yuumi_last_premade_colors_my", premadeColorsMy.value);
     lazySetItem("yuumi_last_premade_colors_their", premadeColorsTheir.value);
+    lazySetItem("yuumi_last_game_loaded_count", loadedCount);
   }
 
   // ── 从 localStorage 恢复保留数据（有数据即恢复，直到新对局开始）

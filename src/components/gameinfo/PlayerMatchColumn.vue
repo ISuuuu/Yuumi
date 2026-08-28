@@ -46,7 +46,7 @@ const wrBar = computed(() => {
   const rate = props.playerData?.winRate;
   if (rate === undefined) return null;
   const diff = Math.abs(rate - 50);
-  const strength = Math.min(diff, 50) / 50; // 0 ~ 1
+  const strength = diff / 50; // 0 ~ 1
   return {
     clazz: rate >= 50 ? "win" : "lose",
     opacity: Number((0.3 + strength * 0.7).toFixed(2)),

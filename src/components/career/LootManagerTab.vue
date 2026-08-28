@@ -222,9 +222,9 @@ onUnmounted(() => {
           <n-select
             v-model:value="filterOwned"
             :options="[
-              { label: '全部', value: 'ALL' },
-              { label: '已拥有', value: 'OWNED' },
-              { label: '未拥有', value: 'NOT_OWNED' },
+              { label: $t('tools.lootManager.filterOwnedAll'), value: 'ALL' },
+              { label: $t('tools.lootManager.filterOwnedYes'), value: 'OWNED' },
+              { label: $t('tools.lootManager.filterOwnedNo'), value: 'NOT_OWNED' },
             ]"
             size="small"
             style="width: 110px"

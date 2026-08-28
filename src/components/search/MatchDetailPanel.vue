@@ -636,8 +636,7 @@ function queueName(queueId: number, backendName: string): string {
 }
 
 .row-rank-badge {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
   font-size: 10px;
   line-height: 1.2;
   color: var(--primary-color);
@@ -646,7 +645,10 @@ function queueName(queueId: number, backendName: string): string {
   border-radius: 4px;
   font-weight: 500;
   white-space: nowrap;
-  flex-shrink: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .row-name {
