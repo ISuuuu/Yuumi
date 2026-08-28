@@ -150,6 +150,8 @@ pub async fn get_openable_loots(
             .to_string();
         if name.eq_ignore_ascii_case("chest_128") {
             name = "英雄魔法引擎".to_string();
+        } else if name.eq_ignore_ascii_case("chest_129") {
+            name = "荣耀英雄魔法引擎".to_string();
         }
         let count = item.get("count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let mut tile_path = item
@@ -390,6 +392,8 @@ pub async fn batch_open_loots(
                                         "CHEST_champion_mastery" => "成就传送门".to_string(),
                                         "CHEST_generic" => "海克斯科技传送门".to_string(),
                                         "CHEST_premium" => "杰作宝箱".to_string(),
+                                        "chest_128" | "CHEST_128" => "英雄魔法引擎".to_string(),
+                                        "chest_129" | "CHEST_129" => "荣耀英雄魔法引擎".to_string(),
                                         "CURRENCY_mythic" => "神话精萃".to_string(),
                                         _ => {
                                             if !loot_id.is_empty() {
@@ -523,6 +527,8 @@ pub async fn smart_open_all_loots(
                                             "CHEST_champion_mastery" => "成就传送门",
                                             "CHEST_generic" => "海克斯科技传送门",
                                             "CHEST_premium" => "杰作宝箱",
+                                            "chest_128" | "CHEST_128" => "英雄魔法引擎",
+                                            "chest_129" | "CHEST_129" => "荣耀英雄魔法引擎",
                                             "CURRENCY_mythic" => "神话精萃",
                                             _ => "",
                                         }
@@ -914,6 +920,8 @@ pub async fn get_loot_inventory(app_state: State<'_, AppState>) -> Result<Vec<Lo
             item_desc = "杰作钥匙".to_string();
         } else if item_desc.eq_ignore_ascii_case("chest_128") {
             item_desc = "英雄魔法引擎".to_string();
+        } else if item_desc.eq_ignore_ascii_case("chest_129") {
+            item_desc = "荣耀英雄魔法引擎".to_string();
         }
         let value = item.get("value").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let disenchant_value = item

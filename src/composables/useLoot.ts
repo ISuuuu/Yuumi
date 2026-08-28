@@ -102,6 +102,8 @@ export function useLoot() {
     if (id === "CHEST_promotion") return "宝箱";
     if (id === "CHEST_champion_mastery" || id === "CHEST_generic" || id === "CHEST_hextech") return "海克斯科技宝箱";
     if (id === "CHEST_premium") return "杰作宝箱";
+    if (id.toLowerCase() === "chest_128" || name.toLowerCase() === "chest_128") return "英雄魔法引擎";
+    if (id.toLowerCase() === "chest_129" || name.toLowerCase() === "chest_129") return "荣耀英雄魔法引擎";
     if (id === "MATERIAL_key_fragment") return "钥匙碎片";
     if (id === "MATERIAL_key") return "海克斯科技钥匙";
     if (id === "MATERIAL_key_premium") return "杰作钥匙";
