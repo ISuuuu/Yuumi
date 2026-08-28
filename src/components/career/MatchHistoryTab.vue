@@ -34,6 +34,7 @@ const showQueueDropdown = ref(false);
 const loadingTeammates = ref(false);
 const recentTeammates = ref<RecentTeammate[]>([]);
 let currentTeammatePuuid = "";
+let lastCalculatedGameIds = "";
 
 const QUEUE_OPTIONS = [
   { id: null, label: "全部" },
@@ -185,16 +186,20 @@ function getKdaClass(kda: string): string {
 async function calculateRecentTeammates() {
   if (!summoner.value?.puuid || recentMatches.value.length === 0) {
     recentTeammates.value = [];
+    lastCalculatedGameIds = "";
     return;
   }
   const targetPuuid = summoner.value.puuid;
+  const gameIds = recentMatches.value.map((m) => m.gameId);
+  const gameIdsKey = `${targetPuuid}_${gameIds.join(",")}`;
+
   currentTeammatePuuid = targetPuuid;
   loadingTeammates.value = true;
   try {
-    const gameIds = recentMatches.value.map((m) => m.gameId);
     const resp = await fetchRecentTeammates(gameIds, targetPuuid);
     if (currentTeammatePuuid === targetPuuid) {
       recentTeammates.value = resp.summoners || [];
+      lastCalculatedGameIds = gameIdsKey;
     }
   } catch (err) {
     console.error("计算最近队友失败:", err);
@@ -205,6 +210,19 @@ async function calculateRecentTeammates() {
     if (currentTeammatePuuid === targetPuuid) {
       loadingTeammates.value = false;
     }
+  }
+}
+
+function handleTeammatesPopoverShow(show: boolean) {
+  if (!show) return;
+  const currentKey = summoner.value?.puuid
+    ? `${summoner.value.puuid}_${recentMatches.value.map((m) => m.gameId).join(",")}`
+    : "";
+  if (
+    !loadingTeammates.value &&
+    (recentTeammates.value.length === 0 || lastCalculatedGameIds !== currentKey)
+  ) {
+    calculateRecentTeammates();
   }
 }
 
@@ -252,6 +270,17 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener("click", onDocClick);
 });
+
+// 召唤师变更时清空队友缓存
+watch(
+  () => summoner.value?.puuid,
+  (newPuuid, oldPuuid) => {
+    if (newPuuid !== oldPuuid) {
+      recentTeammates.value = [];
+      lastCalculatedGameIds = "";
+    }
+  },
+);
 
 // 对局结束后自动刷新战绩列表（召唤师数据由 Career.vue 统一刷新）
 watch(
@@ -422,6 +451,7 @@ watch(
           placement="bottom-start"
           scrollable
           class="recent-teammates-popover"
+          @update:show="handleTeammatesPopoverShow"
           style="
             max-height: 400px;
             width: 420px;
