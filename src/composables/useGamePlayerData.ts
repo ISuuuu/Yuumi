@@ -137,20 +137,12 @@ export function useGamePlayerData(
   const currentQueueId = ref<number | null>(null);
   const isTftMode = ref(false);
 
-  // ── 保留对局数据写入：仅在双方队伍（10 人）完整就绪时才落盘保存为完整对局快照
+  // ── 保留对局数据写入：只要有队伍数据且包含玩家数据就落盘保存对局快照
   function writeReserveData() {
-    const players = [...gameflowMyTeam.value, ...gameflowTheirTeam.value];
-    const hasCompletePlayerData =
-      gameflowMyTeam.value.length === 5 &&
-      gameflowTheirTeam.value.length === 5 &&
-      players.every((player) => {
-        const playerId = player.summonerId ?? player.cellId;
-        if (!playerId || playerId <= 0) return false;
-        const data = playerData.value[playerId];
-        return data !== undefined && !data.loading && data.info !== null;
-      });
-
-    if (!hasCompletePlayerData) {
+    if (
+      gameflowMyTeam.value.length === 0 ||
+      Object.keys(playerData.value).length === 0
+    ) {
       return;
     }
     lazySetItem("yuumi_last_game_player_data", playerData.value);
@@ -354,8 +346,12 @@ export function useGamePlayerData(
     loading.value = false;
   }
 
-  async function loadPlayerData(cellId: number, summonerId: number) {
-    if (!summonerId) return;
+  async function loadPlayerData(
+    cellId: number,
+    summonerId: number,
+    playerPuuid?: string,
+  ) {
+    if (!summonerId && !playerPuuid) return;
 
     const existing = playerData.value[cellId];
     if (existing?.info) return;
@@ -368,11 +364,26 @@ export function useGamePlayerData(
     };
 
     try {
-      const resp = await lcuRequest<SummonerDisplay>(
-        "GET",
-        `/lol-summoner/v1/summoners/${summonerId}`,
-      );
-      if (!resp.success || !resp.data) {
+      let info: SummonerDisplay | null = null;
+      if (summonerId) {
+        const resp = await lcuRequest<SummonerDisplay>(
+          "GET",
+          `/lol-summoner/v1/summoners/${summonerId}`,
+        );
+        if (resp.success && resp.data) {
+          info = resp.data;
+        }
+      }
+      if (!info && playerPuuid) {
+        const resp = await lcuRequest<SummonerDisplay>(
+          "GET",
+          `/lol-summoner/v2/summoners/puuid/${playerPuuid}`,
+        );
+        if (resp.success && resp.data) {
+          info = resp.data;
+        }
+      }
+      if (!info) {
         playerData.value[cellId] = {
           info: null,
           matches: [],
@@ -381,7 +392,6 @@ export function useGamePlayerData(
         };
         return;
       }
-      const info = resp.data;
 
       const filterEnabled = appConfig.value?.Functions?.GameInfoFilter ?? false;
       const maxMatches = filterEnabled ? 50 : 10;
@@ -526,21 +536,26 @@ export function useGamePlayerData(
     await runWithConcurrency(visible, 3, (p) => {
       const cid = p.cellId ?? p.summonerId;
       const sid = p.summonerId ?? p.cellId;
-      if (cid !== undefined && sid !== undefined) {
-        return loadPlayerData(cid, sid);
+      if (cid !== undefined && (sid !== undefined || p.puuid)) {
+        return loadPlayerData(cid, sid ?? 0, p.puuid);
       }
       return Promise.resolve();
     });
     void runWithConcurrency(background, 3, (p) => {
       const cid = p.cellId ?? p.summonerId;
       const sid = p.summonerId ?? p.cellId;
-      if (cid !== undefined && sid !== undefined) {
-        return loadPlayerData(cid, sid);
+      if (cid !== undefined && (sid !== undefined || p.puuid)) {
+        return loadPlayerData(cid, sid ?? 0, p.puuid);
       }
       return Promise.resolve();
-    }).catch((err) => {
-      console.debug("[GameInfo] 后台队伍数据预加载失败:", err);
-    });
+    })
+      .then(() => {
+        writeReserveData();
+      })
+      .catch((err) => {
+        console.debug("[GameInfo] 后台队伍数据预加载失败:", err);
+        writeReserveData();
+      });
   }
 
   async function processTeamData(
@@ -701,15 +716,14 @@ export function useGamePlayerData(
   watch(isGameActive, (active) => {
     if (!active) {
       // 离开游戏活跃状态（回到 Lobby / EndOfGame 等）：
-      const hasFull10Players =
+      const hasPlayerData =
         gameflowMyTeam.value.length > 0 &&
-        gameflowTheirTeam.value.length > 0 &&
         Object.keys(playerData.value).length > 0;
-      if (hasFull10Players) {
-        // 内存中已有刚打完的 10 人完整对局，确保落盘
+      if (hasPlayerData) {
+        // 内存中已有刚打完的对局，确保落盘
         writeReserveData();
       } else {
-        // 否则（如中途启动或选人秒退离开），尝试从 localStorage 恢复上一次完整的 10 人对局快照
+        // 否则（如中途启动或选人秒退离开），尝试从 localStorage 恢复上一次对局快照
         restoreReserveDataFromLocalStorage();
       }
     } else {
