@@ -626,33 +626,32 @@ function queueName(queueId: number, backendName: string): string {
 }
 
 .player-name-col {
-  width: 120px;
+  max-width: 140px;
   min-width: 0;
   padding-right: 6px;
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: center;
+  gap: 4px;
 }
 
 .row-rank-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   font-size: 10px;
+  line-height: 1.2;
   color: var(--primary-color);
   background: rgba(142, 68, 173, 0.08);
   padding: 1px 4px;
   border-radius: 4px;
-  margin-top: 2px;
-  align-self: flex-start;
   font-weight: 500;
-  max-width: 100%;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
 }
 
 .row-name {
   display: block;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
