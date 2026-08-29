@@ -657,6 +657,11 @@ fn spawn_cache_current_game(app_handle: AppHandle) {
             .map(|q| q as i32)
             .unwrap_or(0);
 
+        // 云顶对局不录入路人集（queueId 与前端 MatchHistoryTab 的 TFT_QUEUES 保持一致）
+        if matches!(queue_id, 1090 | 1100 | 1130 | 1160) {
+            return;
+        }
+
         let mut targets: Vec<(i64, i32, String)> = Vec::new();
         for team in ["teamOne", "teamTwo"] {
             let Some(arr) = game_data.get(team).and_then(|v| v.as_array()) else {
