@@ -674,7 +674,7 @@ fn spawn_aram_team_side(app_handle: AppHandle, visible_to_team: bool) {
         // 发送报边消息；visible_to_team 为 false 时使用 celebration 类型（本地私密广播，队友不可见）
         let message = if visible_to_team {
             serde_json::json!({
-                "body": format!("本局我方在{}", side_name),
+                "body": format!("[LOLYuumi] 本局我方在{}", side_name),
                 "type": "chat"
             })
         } else {
