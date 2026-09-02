@@ -381,19 +381,19 @@ export function useGamePlayerData(
 
     try {
       let info: SummonerDisplay | null = null;
-      if (summonerId) {
+      if (playerPuuid) {
         const resp = await lcuRequest<SummonerDisplay>(
           "GET",
-          `/lol-summoner/v1/summoners/${summonerId}`,
+          `/lol-summoner/v2/summoners/puuid/${playerPuuid}`,
         );
         if (resp.success && resp.data) {
           info = resp.data;
         }
       }
-      if (!info && playerPuuid) {
+      if (!info && summonerId) {
         const resp = await lcuRequest<SummonerDisplay>(
           "GET",
-          `/lol-summoner/v2/summoners/puuid/${playerPuuid}`,
+          `/lol-summoner/v1/summoners/${summonerId}`,
         );
         if (resp.success && resp.data) {
           info = resp.data;

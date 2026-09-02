@@ -10,7 +10,10 @@ use crate::{build_auth_header, AppState};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GamePlayerInfo {
+    #[serde(default)]
     pub summoner_id: u64,
+    #[serde(default)]
+    pub puuid: Option<String>,
     #[serde(default)]
     pub champion_id: i32,
 }
@@ -130,18 +133,40 @@ async fn fetch_player_summary(
     current_summoner_id: u64,
     assets: &crate::lcu::game_data::GameDataAssets,
 ) -> Option<PlayerGameSummary> {
-    // 1. 获取召唤师信息
-    let summoner_url = format!("{}/lol-summoner/v1/summoners/{}", base, player.summoner_id);
-    let summoner: LcuSummonerById = http
-        .get(&summoner_url)
-        .header("Authorization", auth)
-        .send()
-        .await
-        .ok()?
-        .json()
-        .await
-        .ok()?;
+    // 1. 获取召唤师信息（优先 summonerId，其次 puuid）
+    let mut summoner: Option<LcuSummonerById> = None;
+    if player.summoner_id > 0 {
+        let summoner_url = format!("{}/lol-summoner/v1/summoners/{}", base, player.summoner_id);
+        if let Ok(resp) = http
+            .get(&summoner_url)
+            .header("Authorization", auth)
+            .send()
+            .await
+        {
+            if let Ok(data) = resp.json::<LcuSummonerById>().await {
+                summoner = Some(data);
+            }
+        }
+    }
+    if summoner.is_none() {
+        if let Some(ref puuid) = player.puuid {
+            if !puuid.is_empty() {
+                let summoner_url = format!("{}/lol-summoner/v2/summoners/puuid/{}", base, puuid);
+                if let Ok(resp) = http
+                    .get(&summoner_url)
+                    .header("Authorization", auth)
+                    .send()
+                    .await
+                {
+                    if let Ok(data) = resp.json::<LcuSummonerById>().await {
+                        summoner = Some(data);
+                    }
+                }
+            }
+        }
+    }
 
+    let summoner = summoner?;
     let puuid = summoner.puuid?;
     let name = summoner.display_name.unwrap_or_default();
     let level = summoner.summoner_level.unwrap_or(0);

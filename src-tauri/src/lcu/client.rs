@@ -268,13 +268,14 @@ pub async fn lcu_request(
                     return serde_json::from_str(&text)
                         .map_err(|e| format!("JSON 解析失败: {}", e));
                 } else {
-                    // 对于非选人阶段请求选人接口产生的常规 404 返回，降级为 debug 日志防止刷屏爆红
+                    // 对于非选人阶段请求选人接口、或按 puuid 查找未命名召唤师产生的常规 404 返回，降级为 debug 日志防止刷屏爆红
                     if status.as_u16() == 404
                         && (path.contains("pickable-champion-ids")
-                            || path.contains("/lol-champ-select/v1/session"))
+                            || path.contains("/lol-champ-select/v1/session")
+                            || path.contains("/lol-summoner/v2/summoners/puuid/"))
                     {
                         log::debug!(
-                            "LCU API 常规未激活提示: {} {}, 状态码: {}, 响应: {}",
+                            "LCU API 常规未激活/未找到提示: {} {}, 状态码: {}, 响应: {}",
                             method,
                             path,
                             status.as_u16(),
