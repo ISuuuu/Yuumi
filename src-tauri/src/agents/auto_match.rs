@@ -674,12 +674,12 @@ fn spawn_aram_team_side(app_handle: AppHandle, visible_to_team: bool) {
         // 发送报边消息；visible_to_team 为 false 时使用 celebration 类型（本地私密广播，队友不可见）
         let message = if visible_to_team {
             serde_json::json!({
-                "body": format!("[LOLYuumi] 本局我方在{}", side_name),
+                "body": format!("[leagueyuumi] 本局我方在{}", side_name),
                 "type": "chat"
             })
         } else {
             serde_json::json!({
-                "body": format!("[LOLYuumi] 本局我方在{}", side_name),
+                "body": format!("[leagueyuumi] 本局我方在{}", side_name),
                 "type": "celebration"
             })
         };
@@ -1036,7 +1036,7 @@ fn spawn_tag_reminder(app_handle: AppHandle) {
                     }
 
                     let message = serde_json::json!({
-                        "body": format!("[LOLYuumi] 玩家 {} 已被标记：{}", name, tag),
+                        "body": format!("[leagueyuumi] 玩家 {} 已被标记：{}", name, tag),
                         "type": "celebration"
                     });
                     let path = format!("/lol-chat/v1/conversations/{}/messages", conv_id);
