@@ -2,6 +2,8 @@
 
 Yuumi 是一款轻量的英雄联盟客户端辅助工具，通过 LCU API 实现战绩查询、对局分析、自动化操作等功能。
 
+> **Tags / 关键词**: `rustyuumi` `rust-yuumi` `yuumi` `lol` `league-of-legends` `lcu` `tauri` `vue3`
+
 ## 功能
 
 - **战绩查询** — 搜索任意召唤师，查看对局历史与详情（支持 10 人数据、经典模式、海克斯大乱斗/经典海斗战绩及海克斯强化解析）
