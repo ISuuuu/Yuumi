@@ -60,15 +60,40 @@ const {
 );
 
 function getPlayerData(p: PremadePlayerLike, idx: number) {
-  const key = p.cellId ?? p.summonerId ?? idx;
-  return playerData.value[key];
+  if (p.cellId !== undefined && playerData.value[p.cellId]) {
+    return playerData.value[p.cellId];
+  }
+  if (p.summonerId && playerData.value[p.summonerId]) {
+    return playerData.value[p.summonerId];
+  }
+  if (playerData.value[idx]) {
+    return playerData.value[idx];
+  }
+  return undefined;
 }
-
-// 10 列并排模式：两队列合并渲染（我方在前，敌方在后）
-const allPlayers = computed(() => [...myTeam.value, ...theirTeam.value]);
 
 // 保存玩家映射：puuid → { tag, encounterCount }，用于玩家卡片旁标记"曾同局"
 const savedPlayerMap = ref<Record<string, SavedPlayerMarker>>({});
+
+// 敌方队伍是否已公开可用（选人阶段敌方通常不可见）
+const isTheirTeamRevealed = computed(() => {
+  if (theirTeam.value.length === 0) return false;
+  if (store.gamePhase === "ChampSelect") {
+    return theirTeam.value.some(
+      (p: PremadePlayerLike) => Boolean(p.summonerId || p.puuid),
+    );
+  }
+  return true;
+});
+
+// 10 列并排模式：两队列合并渲染（我方在前，敌方在后）
+// 选人阶段敌方信息尚未公开时，10 列模式也不展示敌方占位，只展示我方
+const allPlayers = computed(() => {
+  if (!isTheirTeamRevealed.value) {
+    return myTeam.value;
+  }
+  return [...myTeam.value, ...theirTeam.value];
+});
 
 // in-flight 去重：挂载/连接/选人等多触发源同时到达时只发一次查询
 let savedPlayerMapInflight: Promise<void> | null = null;
@@ -134,7 +159,7 @@ onMounted(loadSavedPlayerMap);
             :class="['tab-btn', { active: activeTab === 'their' }]"
             @click="activeTab = 'their'"
           >
-            {{ $t("gameInfo.theirTeam", { count: theirTeam.length }) }}
+            {{ $t("gameInfo.theirTeam", { count: isTheirTeamRevealed ? theirTeam.length : 0 }) }}
           </button>
         </div>
 
@@ -149,6 +174,7 @@ onMounted(loadSavedPlayerMap);
             :premade-card-style="getPremadeCardStyle(p, activeTab)"
             :saved-map="savedPlayerMap"
             :displayed-puuids="displayedPuuids"
+            :index="i"
           />
           <div v-if="currentTeam.length === 0" class="tip">
             {{ $t("gameInfo.noTeamData") }}
@@ -159,8 +185,8 @@ onMounted(loadSavedPlayerMap);
       <!-- 右侧：5 列/10 列战绩 -->
       <div class="right-panel">
         <div class="view-toolbar">
-          <!-- 10 列视图且双方队伍均有数据：左右精准 50% 对称阵营与组队信息 -->
-          <template v-if="viewMode === 'ten' && theirTeam.length > 0">
+          <!-- 10 列视图且双方队伍均有数据且敌方已公开：左右精准 50% 对称阵营与组队信息 -->
+          <template v-if="viewMode === 'ten' && isTheirTeamRevealed">
             <!-- 我方区域（占左侧 50%） -->
             <div class="ten-toolbar-left">
               <span class="side-pill ally-pill">
@@ -331,8 +357,8 @@ onMounted(loadSavedPlayerMap);
                 </div>
               </div>
 
-              <!-- VS 分隔指示与敌方组队区（仅当敌方有数据时显示） -->
-              <template v-if="theirTeam.length > 0">
+              <!-- VS 分隔指示与敌方组队区（仅当敌方有数据且已公开时显示） -->
+              <template v-if="isTheirTeamRevealed">
                 <!-- VS 分隔指示 -->
                 <span class="side-vs">VS</span>
 
@@ -373,11 +399,11 @@ onMounted(loadSavedPlayerMap);
                   <span
                     class="side-pill enemy-pill clickable-pill"
                     :class="{ 'active-pill': activeTab === 'their' }"
-                    :title="$t('gameInfo.theirTeam', { count: theirTeam.length })"
+                    :title="$t('gameInfo.theirTeam', { count: isTheirTeamRevealed ? theirTeam.length : 0 })"
                     @click="activeTab = 'their'"
                   >
                     <span class="pill-dot"></span>
-                    {{ $t("gameInfo.theirTeam", { count: theirTeam.length }) }}
+                    {{ $t("gameInfo.theirTeam", { count: isTheirTeamRevealed ? theirTeam.length : 0 }) }}
                   </span>
                 </div>
               </template>
@@ -417,7 +443,7 @@ onMounted(loadSavedPlayerMap);
 
         <div
           class="columns-container"
-          :class="{ 'columns-ten': viewMode === 'ten' && theirTeam.length > 0 }"
+          :class="{ 'columns-ten': viewMode === 'ten' && isTheirTeamRevealed }"
         >
           <PlayerMatchColumn
             v-for="(p, i) in (viewMode === 'ten' ? allPlayers : currentTeam)"
@@ -426,10 +452,10 @@ onMounted(loadSavedPlayerMap);
             :player-data="getPlayerData(p, i)"
             :index="i"
             :app-config="appConfig"
-            :compact="viewMode === 'ten' && theirTeam.length > 0"
+            :compact="viewMode === 'ten' && isTheirTeamRevealed"
             :side="viewMode === 'ten' ? (i < myTeam.length ? 'ally' : 'enemy') : (activeTab === 'my' ? 'ally' : 'enemy')"
             :premade-idx="getPremadeIdx(p, viewMode === 'ten' ? (i < myTeam.length ? 'my' : 'their') : activeTab)"
-            :class="{ 'team-separator': viewMode === 'ten' && theirTeam.length > 0 && i === myTeam.length }"
+            :class="{ 'team-separator': viewMode === 'ten' && isTheirTeamRevealed && i === myTeam.length }"
           />
         </div>
       </div>

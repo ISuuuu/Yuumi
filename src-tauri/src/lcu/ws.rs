@@ -44,6 +44,7 @@ fn session_throttle_allowed() -> bool {
 /// 等同于 Python LcuWebSocket 里 subscribes 的 uri 过滤。
 const WATCHED_URIS: &[&str] = &[
     "/lol-gameflow/v1/gameflow-phase",
+    "/lol-gameflow/v1/session",
     "/lol-champ-select/v1/session",
     "/lol-champ-select/v1/current-champion",
     "/lol-matchmaking/v1/ready-check",

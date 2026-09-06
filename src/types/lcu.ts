@@ -47,6 +47,9 @@ export interface GameflowParticipant {
   displayName?: string;
   /** 游戏内昵称（进游戏后与 displayName 可能不同） */
   summonerName?: string;
+  gameName?: string;
+  tagLine?: string;
+  profileIconId?: number;
   championId?: number;
   cellId?: number;
   teamParticipantId?: number | string | null;

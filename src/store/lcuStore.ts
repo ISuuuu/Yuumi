@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import type { GameflowSession } from "../types/lcu";
 
 /** LCU gameflow 全部已知阶段（/lol-gameflow/v1/gameflow-phase） */
 export type GamePhase =
@@ -34,6 +35,9 @@ export interface ChampSelectPlayer {
   championId: number;
   championPickIntent: number;
   assignedPosition: string;
+  summonerId?: number;
+  puuid?: string;
+  displayName?: string;
   /** 预组队标识（同队小队共享同一 ID） */
   teamParticipantId?: number | string;
   partyId?: number | string;
@@ -99,6 +103,7 @@ export const useLcuStore = defineStore("lcu", () => {
   const wsConnected = ref(false);
   const gamePhase = ref<GamePhase>("None");
   const champSelectSession = ref<ChampSelectSession | null>(null);
+  const gameflowSession = ref<GameflowSession | null>(null);
   const readyCheck = ref<ReadyCheckSession | null>(null);
   // lcu-client-started 事件计数器，用于触发 App.vue 重新加载状态
   const connectionVersion = ref(0);
@@ -175,6 +180,12 @@ export const useLcuStore = defineStore("lcu", () => {
       champSelectSession.value = null;
       clearHistoricalChampions();
     }
+    if (v === "Lobby" || v === "None" || v === "Matchmaking") {
+      gameflowSession.value = null;
+    }
+  }
+  function setGameflowSession(v: GameflowSession | null) {
+    gameflowSession.value = v;
   }
   function setChampSelectSession(v: ChampSelectSession | null) {
     champSelectSession.value = v;
@@ -208,6 +219,7 @@ export const useLcuStore = defineStore("lcu", () => {
     wsConnected,
     gamePhase,
     champSelectSession,
+    gameflowSession,
     readyCheck,
     connectionVersion,
     currentPage,
@@ -219,6 +231,7 @@ export const useLcuStore = defineStore("lcu", () => {
     setWsConnected,
     setGamePhase,
     setChampSelectSession,
+    setGameflowSession,
     setReadyCheck,
     setCurrentPage,
     setSearchQuery,
@@ -285,6 +298,10 @@ export async function initLcuListeners() {
 
     if (uri.startsWith("/lol-gameflow/v1/gameflow-phase")) {
       if (typeof data === "string") store.setGamePhase(data as GamePhase);
+    } else if (uri.startsWith("/lol-gameflow/v1/session")) {
+      store.setGameflowSession(
+        data && typeof data === "object" ? (data as GameflowSession) : null,
+      );
     } else if (uri.startsWith("/lol-champ-select/v1/session")) {
       store.setChampSelectSession(
         data && typeof data === "object" ? (data as ChampSelectSession) : null,

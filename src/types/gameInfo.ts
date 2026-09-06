@@ -6,6 +6,7 @@ export interface PlayerData {
   matches: MatchDisplay[];
   ranked: { solo: RankedQueueEntry | null; flex: RankedQueueEntry | null };
   loading: boolean;
+  matchHistoryHidden?: boolean;
   avgKda?: number;
   winRate?: number;
   winCount?: number;
@@ -29,6 +30,9 @@ export interface PremadePlayerLike {
   championPickIntent?: number;
   displayName?: string;
   summonerName?: string;
+  gameName?: string;
+  tagLine?: string;
+  profileIconId?: number;
   puuid?: string;
 }
 
@@ -52,6 +56,44 @@ export interface PremadeColor {
 
 export function getChampionIcon(id: number): string {
   return id > 0 ? `/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
+}
+
+export interface ChampSelectActionLike {
+  actorCellId: number;
+  championId: number;
+  completed?: boolean;
+  isInProgress?: boolean;
+  type: string;
+}
+
+export interface ChampSelectSessionLike {
+  actions?: ChampSelectActionLike[][];
+  myTeam?: Array<{ cellId: number; championId?: number; championPickIntent?: number }>;
+}
+
+/**
+ * 解析玩家当前选择/锁定的英雄 ID（选人阶段动作与预选兜底）
+ */
+export function resolvePlayerChampionId(
+  player?: PremadePlayerLike,
+  session?: ChampSelectSessionLike | null,
+): number {
+  if (!player) return 0;
+  if (player.championId && player.championId > 0) return player.championId;
+  if (player.championPickIntent && player.championPickIntent > 0) return player.championPickIntent;
+
+  if (session?.actions && player.cellId !== undefined) {
+    const cid = player.cellId;
+    for (const group of session.actions) {
+      for (const act of group) {
+        if (act.actorCellId === cid && act.type === "pick" && act.championId > 0) {
+          return act.championId;
+        }
+      }
+    }
+  }
+
+  return 0;
 }
 
 // 预组队颜色方案（鲜明优雅的半透明组队背景色）

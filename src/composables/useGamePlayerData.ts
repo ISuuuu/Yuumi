@@ -15,6 +15,7 @@ import type {
   PlayerData,
   PremadePlayerLike,
 } from "../types/gameInfo";
+import { resolvePlayerChampionId } from "../types/gameInfo";
 import type {
   GameflowParticipant,
   GameflowSession,
@@ -322,7 +323,8 @@ export function useGamePlayerData(
       if (
         Object.keys(premadeColorsMy.value).length === 0 &&
         store.champSelectSession?.myTeam?.some(
-          (p) => p.teamParticipantId !== undefined || p.partyId !== undefined,
+          (p: ChampSelectPlayer) =>
+            p.teamParticipantId !== undefined || p.partyId !== undefined,
         )
       ) {
         premadeColorsMy.value = computePremadeColors(
@@ -332,7 +334,8 @@ export function useGamePlayerData(
       if (
         Object.keys(premadeColorsTheir.value).length === 0 &&
         store.champSelectSession?.theirTeam?.some(
-          (p) => p.teamParticipantId !== undefined || p.partyId !== undefined,
+          (p: ChampSelectPlayer) =>
+            p.teamParticipantId !== undefined || p.partyId !== undefined,
         )
       ) {
         premadeColorsTheir.value = computePremadeColors(
@@ -348,7 +351,12 @@ export function useGamePlayerData(
     loading.value = true;
     try {
       const phaseResp = await getGameflowPhase();
-      if (phaseResp.success && phaseResp.data) store.setGamePhase(phaseResp.data);
+      if (phaseResp.success && phaseResp.data) {
+        store.setGamePhase(phaseResp.data);
+        if (phaseResp.data === "InProgress" || phaseResp.data === "GameStart") {
+          loadFromGameflowSession();
+        }
+      }
     } catch {
       /* ignore */
     }
@@ -366,8 +374,9 @@ export function useGamePlayerData(
     cellId: number,
     summonerId: number,
     playerPuuid?: string,
+    fallbackPlayer?: PremadePlayerLike,
   ) {
-    if (!summonerId && !playerPuuid) return;
+    if (!summonerId && !playerPuuid && !fallbackPlayer) return;
 
     const existing = playerData.value[cellId];
     if (existing?.info) return;
@@ -399,49 +408,118 @@ export function useGamePlayerData(
           info = resp.data;
         }
       }
+      if (!info && (fallbackPlayer?.displayName || fallbackPlayer?.gameName)) {
+        const queryName = fallbackPlayer.gameName || fallbackPlayer.displayName;
+        if (queryName) {
+          try {
+            const resp = await lcuRequest<SummonerDisplay>(
+              "GET",
+              `/lol-summoner/v1/summoners?name=${encodeURIComponent(queryName)}`,
+            );
+            if (resp.success && resp.data) {
+              info = resp.data;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      let matchHistoryHidden = false;
+
       if (!info) {
-        playerData.value[cellId] = {
-          info: null,
-          matches: [],
-          ranked: { solo: null, flex: null },
-          loading: false,
-        };
-        return;
+        // 在选人阶段，只有当玩家明确为敌方队伍且尚未公开身份时，才属于敌方等待
+        const isEnemy = store.champSelectSession?.theirTeam?.some(
+          (t) => (t.cellId !== undefined && t.cellId === cellId) || (t.summonerId && t.summonerId === summonerId),
+        );
+        const isChampSelectEnemyWaiting =
+          store.gamePhase === "ChampSelect" &&
+          isEnemy &&
+          !playerPuuid &&
+          !summonerId &&
+          !fallbackPlayer?.puuid &&
+          !fallbackPlayer?.summonerId;
+
+        if (fallbackPlayer && !isChampSelectEnemyWaiting) {
+          const fallbackDisplayName =
+            fallbackPlayer.displayName ||
+            (fallbackPlayer.gameName
+              ? fallbackPlayer.tagLine
+                ? `${fallbackPlayer.gameName}#${fallbackPlayer.tagLine}`
+                : fallbackPlayer.gameName
+              : fallbackPlayer.summonerName) ||
+            `玩家${cellId + 1}`;
+          const iconId = fallbackPlayer.profileIconId ?? 29;
+          info = {
+            accountId: 0,
+            summonerId: summonerId || 0,
+            puuid: playerPuuid || fallbackPlayer.puuid || "",
+            displayName: fallbackDisplayName,
+            gameName: fallbackPlayer.gameName || fallbackDisplayName,
+            tagLine: fallbackPlayer.tagLine || "",
+            profileIconId: iconId,
+            profileIconUrl: `/lol-game-data/assets/v1/profile-icons/${iconId}.jpg`,
+            summonerLevel: 0,
+            percentCompleteForNextLevel: 0,
+            xpSinceLastLevel: 0,
+            xpUntilNextLevel: 0,
+          };
+          matchHistoryHidden = true;
+        } else {
+          playerData.value[cellId] = {
+            info: null,
+            matches: [],
+            ranked: { solo: null, flex: null },
+            loading: false,
+          };
+          return;
+        }
+      }
+
+      const safeInfo = info;
+      if (!safeInfo.profileIconUrl && (safeInfo.profileIconId !== undefined || safeInfo.profileIconId !== null)) {
+        safeInfo.profileIconUrl = `/lol-game-data/assets/v1/profile-icons/${safeInfo.profileIconId ?? 29}.jpg`;
       }
 
       const filterEnabled = appConfig.value?.Functions?.GameInfoFilter ?? false;
       const maxMatches = filterEnabled ? 50 : 10;
 
       const [rawMatches, rankedResp] = await Promise.all([
-        info.puuid
-          ? fetchMatchHistory(info.puuid, 0, maxMatches)
-          : Promise.resolve([]),
-        info.puuid
+        safeInfo.puuid
+          ? fetchMatchHistory(safeInfo.puuid, 0, maxMatches).catch((e) => {
+              matchHistoryHidden = true;
+              console.debug(`[GameInfo] 战绩拉取失败/已隐藏 (puuid: ${safeInfo.puuid}):`, e);
+              return [] as MatchDisplay[];
+            })
+          : Promise.resolve([] as MatchDisplay[]),
+        safeInfo.puuid
           ? (() => {
-              const cached = getRankFromCache(info.puuid!);
+              const cached = getRankFromCache(safeInfo.puuid);
               if (cached) {
                 return Promise.resolve({ success: true, data: cached });
               }
               return lcuRequest<RankedStats>(
                 "GET",
-                `/lol-ranked/v1/ranked-stats/${info.puuid}`,
-              ).then((rResp) => {
-                if (rResp.success && rResp.data) {
-                  setRankToCache(info.puuid!, rResp.data);
-                }
-                return rResp;
-              });
+                `/lol-ranked/v1/ranked-stats/${safeInfo.puuid}`,
+              )
+                .then((rResp) => {
+                  if (rResp.success && rResp.data) {
+                    setRankToCache(safeInfo.puuid, rResp.data);
+                  }
+                  return rResp;
+                })
+                .catch(() => ({ success: false as const }));
             })()
           : Promise.resolve({ success: false as const }),
       ]);
 
       const isCurrentPlayer =
         summonerId === currentSummonerId.value ||
-        (!!info.puuid && info.puuid === currentSummonerPuuid.value);
+        (!!safeInfo.puuid && safeInfo.puuid === currentSummonerPuuid.value);
 
       let matches: MatchDisplay[] = rawMatches;
-      if (info.puuid && isCurrentPlayer) {
-        matches = mergeMatchesWithCache(info.puuid, rawMatches);
+      if (safeInfo.puuid && isCurrentPlayer) {
+        matches = mergeMatchesWithCache(safeInfo.puuid, rawMatches);
       }
 
       if (filterEnabled && currentQueueId.value !== null) {
@@ -464,16 +542,18 @@ export function useGamePlayerData(
           ) || null;
       }
 
-      let avgKda = 0;
-      let winRate = 0;
-      let winCount = 0;
-      let lossesCount = 0;
+      let avgKda: number | undefined = undefined;
+      let winRate: number | undefined = undefined;
+      let winCount: number | undefined = undefined;
+      let lossesCount: number | undefined = undefined;
 
       if (matches && matches.length > 0) {
         let totalKills = 0;
         let totalDeaths = 0;
         let totalAssists = 0;
         let remakeCount = 0;
+        let currentWinCount = 0;
+        let currentLossesCount = 0;
 
         matches.forEach((m: MatchDisplay) => {
           if (m.remake) {
@@ -483,28 +563,30 @@ export function useGamePlayerData(
             totalDeaths += m.deaths ?? 0;
             totalAssists += m.assists ?? 0;
             if (m.win) {
-              winCount++;
+              currentWinCount++;
             } else {
-              lossesCount++;
+              currentLossesCount++;
             }
           }
         });
 
+        winCount = currentWinCount;
+        lossesCount = currentLossesCount;
         const validMatches = matches.length - remakeCount;
         winRate =
-          validMatches > 0 ? Math.round((winCount / validMatches) * 100) : 0;
+          validMatches > 0 ? Math.round((currentWinCount / validMatches) * 100) : 0;
         const deathsForCalc = totalDeaths === 0 ? 1 : totalDeaths;
         avgKda = (totalKills + totalAssists) / deathsForCalc;
       }
 
       let fateFlag: "ally" | "enemy" | null = null;
       let recentlyChampionName = "";
-      if (currentSummonerId.value && matches.length > 0 && !isCurrentPlayer) {
+      if (currentSummonerId.value && matches.length > 0 && !isCurrentPlayer && safeInfo.puuid) {
         try {
           const lastGameId = matches[0].gameId;
           const fateInfo = await fetchPlayerFateInfo(
             lastGameId,
-            info.puuid,
+            safeInfo.puuid,
             currentSummonerId.value,
           );
           if (fateInfo) {
@@ -516,11 +598,12 @@ export function useGamePlayerData(
         }
       }
 
-      playerData.value[cellId] = {
-        info,
+      const dataObj: PlayerData = {
+        info: safeInfo,
         matches,
         ranked: { solo, flex },
         loading: false,
+        matchHistoryHidden,
         avgKda,
         winRate,
         winCount,
@@ -528,14 +611,24 @@ export function useGamePlayerData(
         fateFlag,
         recentlyChampionName,
       };
+      playerData.value[cellId] = dataObj;
+      if (summonerId && summonerId !== cellId) {
+        playerData.value[summonerId] = dataObj;
+      }
       debouncedSavePlayerData();
     } catch {
-      playerData.value[cellId] = {
-        info: null,
+      const existingInfo = playerData.value[cellId]?.info;
+      const dataObj: PlayerData = {
+        info: existingInfo || null,
         matches: [],
         ranked: { solo: null, flex: null },
         loading: false,
+        matchHistoryHidden: true,
       };
+      playerData.value[cellId] = dataObj;
+      if (summonerId && summonerId !== cellId) {
+        playerData.value[summonerId] = dataObj;
+      }
     }
   }
 
@@ -545,15 +638,24 @@ export function useGamePlayerData(
     if (my.length === 0 && their.length === 0) return;
     await updateCurrentQueueId();
 
+    const filterValidPlayers = (team: PremadePlayerLike[], isEnemy: boolean) => {
+      if (store.gamePhase === "ChampSelect" && isEnemy) {
+        // 选人阶段敌方队伍若无有效身份（无 puuid 且 summonerId === 0），不请求
+        return team.filter((p) => Boolean(p.puuid || p.summonerId));
+      }
+      return team;
+    };
+
+    const isMyVisible = activeTab.value === "my";
     // 先加载当前可见队伍，再后台加载另一队，避免请求风暴
-    const visible = activeTab.value === "my" ? my : their;
-    const background = activeTab.value === "my" ? their : my;
+    const visible = filterValidPlayers(isMyVisible ? my : their, !isMyVisible);
+    const background = filterValidPlayers(isMyVisible ? their : my, isMyVisible);
 
     await runWithConcurrency(visible, 3, (p) => {
       const cid = p.cellId ?? p.summonerId;
       const sid = p.summonerId ?? p.cellId;
       if (cid !== undefined && (sid !== undefined || p.puuid)) {
-        return loadPlayerData(cid, sid ?? 0, p.puuid);
+        return loadPlayerData(cid, sid ?? 0, p.puuid, p);
       }
       return Promise.resolve();
     });
@@ -561,7 +663,7 @@ export function useGamePlayerData(
       const cid = p.cellId ?? p.summonerId;
       const sid = p.summonerId ?? p.cellId;
       if (cid !== undefined && (sid !== undefined || p.puuid)) {
-        return loadPlayerData(cid, sid ?? 0, p.puuid);
+        return loadPlayerData(cid, sid ?? 0, p.puuid, p);
       }
       return Promise.resolve();
     })
@@ -601,42 +703,59 @@ export function useGamePlayerData(
         if (
           p.summonerId &&
           p.cellId !== undefined &&
-          p.cellId !== p.summonerId &&
           playerData.value[p.cellId]
         ) {
           playerData.value[p.summonerId] = playerData.value[p.cellId];
-          delete playerData.value[p.cellId];
         }
       }
     }
 
-    gameflowMyTeam.value = allyTeam.map(
-      (p): PremadePlayerLike => ({
+    const mapParticipant = (
+      p: GameflowParticipant,
+      idx: number,
+      offset: number,
+    ): PremadePlayerLike => {
+      const resolvedName =
+        p.gameName
+          ? p.tagLine
+            ? `${p.gameName}#${p.tagLine}`
+            : p.gameName
+          : p.summonerName || p.displayName || "";
+      const stableCellId =
+        p.cellId !== undefined && p.cellId >= 0 ? p.cellId : offset + idx;
+      return {
         ...p,
-        cellId: p.summonerId,
-        displayName: p.summonerName || p.displayName,
-      }),
+        cellId: stableCellId,
+        summonerId: p.summonerId,
+        puuid: p.puuid,
+        gameName: p.gameName,
+        tagLine: p.tagLine,
+        profileIconId: p.profileIconId,
+        displayName: resolvedName,
+      };
+    };
+
+    gameflowMyTeam.value = allyTeam.map((p, idx) =>
+      mapParticipant(p, idx, 0),
     );
-    gameflowTheirTeam.value = enemyTeam.map(
-      (p): PremadePlayerLike => ({
-        ...p,
-        cellId: p.summonerId,
-        displayName: p.summonerName || p.displayName,
-      }),
+    gameflowTheirTeam.value = enemyTeam.map((p, idx) =>
+      mapParticipant(p, idx, 5),
     );
 
-    premadeColorsMy.value = computePremadeColors(allyTeam);
-    premadeColorsTheir.value = computePremadeColors(enemyTeam);
+    premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
+    premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
 
     // 先加载当前可见队伍，再后台加载另一队，避免一次性并发请求过多
-    const visible = activeTab.value === "my" ? allyTeam : enemyTeam;
-    const background = activeTab.value === "my" ? enemyTeam : allyTeam;
+    const visible =
+      activeTab.value === "my" ? gameflowMyTeam.value : gameflowTheirTeam.value;
+    const background =
+      activeTab.value === "my" ? gameflowTheirTeam.value : gameflowMyTeam.value;
 
     await runWithConcurrency(visible, 3, (p) =>
-      p.summonerId ? loadPlayerData(p.summonerId, p.summonerId) : Promise.resolve(),
+      loadPlayerData(p.cellId ?? 0, p.summonerId ?? 0, p.puuid, p),
     );
     void runWithConcurrency(background, 3, (p) =>
-      p.summonerId ? loadPlayerData(p.summonerId, p.summonerId) : Promise.resolve(),
+      loadPlayerData(p.cellId ?? 0, p.summonerId ?? 0, p.puuid, p),
     )
       .then(() => {
         // 双方 10 人信息加载完毕，立即保存完整对局
@@ -754,7 +873,7 @@ export function useGamePlayerData(
 
   watch(
     () => store.gamePhase,
-    (phase: string) => {
+    (phase: string, oldPhase?: string) => {
       if (phase !== "InProgress" && phase !== "GameStart") {
         isTftMode.value = false;
       }
@@ -767,16 +886,44 @@ export function useGamePlayerData(
         // 选人阶段不立即清空 localStorage，避免秒退导致已有完整对局丢失
         refreshState();
       }
-      if (phase === "InProgress" || phase === "GameStart")
+      if (phase === "InProgress" || phase === "GameStart") {
+        // 从选人阶段进入载入或游戏时，必须立即清空旧 session 缓存与选人残留
+        cachedSession = null;
+        if (oldPhase === "ChampSelect") {
+          gameflowMyTeam.value = [];
+          gameflowTheirTeam.value = [];
+          playerData.value = {};
+        }
         loadFromGameflowSession();
+      }
+    },
+    { immediate: true },
+  );
+
+  // 监听 WebSocket 推送的 gameflowSession 变化，对局就绪即刻自动解析
+  watch(
+    () => store.gameflowSession,
+    (session) => {
+      if (!session?.gameData) return;
+      if (store.gamePhase !== "InProgress" && store.gamePhase !== "GameStart") return;
+      const { teamOne, teamTwo } = session.gameData;
+      if (teamOne?.length && teamTwo?.length) {
+        // 如果当前尚未加载或者队伍为空，立即加载
+        if (gameflowMyTeam.value.length === 0 || gameflowTheirTeam.value.length === 0) {
+          processTeamData(teamOne, teamTwo);
+        }
+      }
     },
   );
 
-  // 团队内容签名：成员 cellId + 英雄 ID。session 高频事件中仅倒计时变化时签名不变，跳过无效重载
+  // 团队内容签名：成员 cellId + 英雄 ID（包含锁定、预选及 actions 挑选）。session 高频事件中仅倒计时变化时签名不变，跳过无效重载
   let lastSessionTeamSig = "";
-  const teamSig = (team: ChampSelectPlayer[]) =>
+  const teamSig = (team: ChampSelectPlayer[], session?: any) =>
     (team || [])
-      .map((p) => `${p.cellId}:${p.championId || p.championPickIntent || 0}`)
+      .map((p) => {
+        const champId = resolvePlayerChampionId(p, session);
+        return `${p.cellId}:${champId}`;
+      })
       .join(",");
 
   watch(
@@ -785,7 +932,7 @@ export function useGamePlayerData(
       if (session && store.gamePhase === "ChampSelect") {
         const myTeam = session.myTeam || [];
         const theirTeam = session.theirTeam || [];
-        const sig = teamSig(myTeam) + "|" + teamSig(theirTeam);
+        const sig = teamSig(myTeam, session) + "|" + teamSig(theirTeam, session);
         if (sig === lastSessionTeamSig) return;
         lastSessionTeamSig = sig;
 

@@ -5,9 +5,11 @@ import type { MatchDisplay, AppConfig } from "../../api/lcu";
 import {
   PREMADE_COLORS,
   getChampionIcon,
+  resolvePlayerChampionId,
   type PlayerData,
   type PremadePlayerLike,
 } from "../../types/gameInfo";
+import { useLcuStore } from "../../store/lcuStore";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import LcuImage from "../LcuImage.vue";
 
@@ -21,6 +23,7 @@ const props = defineProps<{
   premadeIdx?: number;
 }>();
 
+const store = useLcuStore();
 const { t, te } = useI18n();
 const { getPlayerSearchName, handleNameClick } = usePlayerSearch();
 
@@ -37,8 +40,8 @@ const colHeaderStyle = computed(() => {
   };
 });
 
-const currentChampId = computed(
-  () => props.player?.championId || props.player?.championPickIntent || 0,
+const currentChampId = computed(() =>
+  resolvePlayerChampionId(props.player, store.champSelectSession),
 );
 
 // 头像左侧胜率竖条：>50 绿、<50 红；50% 时高度为 0，100% 胜率或 0% 胜率（100%败率）时完全填充
@@ -151,13 +154,25 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
             :style="{ height: `${wrBar.fillHeight}%`, opacity: wrBar.opacity }"
           ></span>
         </span>
-        <!-- 选人阶段英雄头像 -->
+        <!-- 选人阶段/对局中英雄头像，兜底召唤师头像 -->
         <div class="col-champ-wrapper">
           <LcuImage
             v-if="currentChampId > 0"
             :src="getChampionIcon(currentChampId)"
             class="col-champ-avatar"
             alt="champ"
+          />
+          <LcuImage
+            v-else-if="playerData?.info?.profileIconUrl"
+            :src="playerData.info.profileIconUrl"
+            class="col-champ-avatar"
+            alt="summoner"
+          />
+          <LcuImage
+            v-else-if="player.profileIconId"
+            :src="`/lol-game-data/assets/v1/profile-icons/${player.profileIconId}.jpg`"
+            class="col-champ-avatar"
+            alt="summoner"
           />
           <div v-else class="col-champ-avatar col-champ-avatar-empty">?</div>
         </div>
@@ -173,6 +188,8 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
                 playerData?.info?.gameName ||
                 playerData?.info?.displayName ||
                 player.displayName ||
+                player.gameName ||
+                player.summonerName ||
                 `玩家${index + 1}`
               }}
             </span>
@@ -197,9 +214,16 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
             </span>
           </div>
 
+          <!-- 战绩隐藏标识 -->
+          <div
+            v-if="playerData?.matchHistoryHidden"
+            class="col-summary"
+          >
+            <span class="summary-hidden">{{ $t("gameInfo.matchHistoryHidden") }}</span>
+          </div>
           <!-- 几胜几负统计（不显示胜率） -->
           <div
-            v-if="playerData?.winCount !== undefined"
+            v-else-if="playerData?.winCount !== undefined"
             class="col-summary"
           >
             <span class="summary-counts">
@@ -265,6 +289,20 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- 战绩隐藏或空记录占位 -->
+    <template v-else>
+      <div class="col-empty">
+        <div class="col-empty-icon">{{ playerData?.matchHistoryHidden ? '🔒' : '📭' }}</div>
+        <div class="col-empty-text">
+          {{
+            playerData?.matchHistoryHidden
+              ? $t("gameInfo.matchHistoryHidden")
+              : $t("gameInfo.noMatchHistory")
+          }}
         </div>
       </div>
     </template>
@@ -448,6 +486,14 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 .summary-losses {
   color: var(--loss-color);
   font-weight: 700;
+}
+.summary-hidden {
+  color: var(--text-dimmed);
+  font-size: 0.58rem;
+  font-weight: 600;
+  background: var(--border-color);
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 /* ─── 加载中状态 ─── */
@@ -789,5 +835,33 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 }
 .compact .cm-date {
   font-size: 0.46rem;
+}
+
+/* ─── 战绩隐藏/空数据状态 ─── */
+.col-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 8px;
+  padding: 16px 8px;
+  color: var(--text-dimmed);
+}
+.col-empty-icon {
+  font-size: 1.5rem;
+  opacity: 0.7;
+}
+.col-empty-text {
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-align: center;
+  line-height: 1.4;
+}
+.compact .col-empty-icon {
+  font-size: 1.2rem;
+}
+.compact .col-empty-text {
+  font-size: 0.64rem;
 }
 </style>

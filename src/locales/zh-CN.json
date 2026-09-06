@@ -651,6 +651,8 @@
     "awaitingLoad": "进入选人阶段后将自动加载对局信息",
     "winRateSuffix": "% 胜率",
     "noTeamData": "暂无队伍数据",
+    "matchHistoryHidden": "战绩已隐藏",
+    "noMatchHistory": "暂无对局记录",
     "showAll": "全部战绩",
     "showTeam": "按队伍",
     "launchLolPrompt": "请先启动英雄联盟客户端"

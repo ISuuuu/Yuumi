@@ -3,9 +3,11 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   getChampionIcon,
+  resolvePlayerChampionId,
   type PlayerData,
   type PremadePlayerLike,
 } from "../../types/gameInfo";
+import { useLcuStore } from "../../store/lcuStore";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import type { SavedPlayerMarker } from "../../api/lcu";
 import type { RankedQueueEntry } from "../../types/lcu";
@@ -19,10 +21,16 @@ const props = defineProps<{
   premadeCardStyle: Record<string, string>;
   savedMap?: Record<string, SavedPlayerMarker>;
   displayedPuuids?: Set<string>;
+  index?: number;
 }>();
 
+const store = useLcuStore();
 const { t } = useI18n();
 const { getPlayerSearchName, handleNameClick } = usePlayerSearch();
+
+const resolvedChampId = computed(() =>
+  resolvePlayerChampionId(props.player, store.champSelectSession),
+);
 
 // 该玩家是否为"保存的玩家"（曾同局），取 tag 与相遇次数；
 // 本局正在显示的玩家不算"历史"，不展示徽章
@@ -105,16 +113,26 @@ function formatRank(q?: RankedQueueEntry | null): string {
           />
         </svg>
         <div class="avatar-container-mini">
-          <!-- 选人阶段：选了英雄或预选了英雄才显示英雄头像 -->
-          <template v-if="player.championId || player.championPickIntent">
+          <!-- 选人阶段/对局中：选了英雄或预选了英雄优先显示英雄头像，否则兜底显示召唤师头像 -->
+          <template v-if="resolvedChampId > 0">
             <LcuImage
-              :src="
-                getChampionIcon(
-                  player.championId || player.championPickIntent || 0,
-                )
-              "
+              :src="getChampionIcon(resolvedChampId)"
               class="profile-avatar-mini"
               alt="champ"
+            />
+          </template>
+          <template v-else-if="playerData?.info?.profileIconUrl">
+            <LcuImage
+              :src="playerData.info.profileIconUrl"
+              class="profile-avatar-mini"
+              alt="summoner"
+            />
+          </template>
+          <template v-else-if="player.profileIconId">
+            <LcuImage
+              :src="`/lol-game-data/assets/v1/profile-icons/${player.profileIconId}.jpg`"
+              class="profile-avatar-mini"
+              alt="summoner"
             />
           </template>
           <template v-else>
@@ -144,7 +162,9 @@ function formatRank(q?: RankedQueueEntry | null): string {
             playerData?.info?.gameName ||
             playerData?.info?.displayName ||
             player.displayName ||
-            "未知"
+            player.gameName ||
+            player.summonerName ||
+            $t("gameInfo.playerIndex", { index: (index ?? 0) + 1 })
           }}</span>
           <span
             v-if="playerData?.fateFlag"
@@ -174,7 +194,16 @@ function formatRank(q?: RankedQueueEntry | null): string {
 
       <div
         class="pc-row pc-winrate-row"
-        v-if="playerData?.winRate !== undefined"
+        v-if="playerData?.matchHistoryHidden"
+      >
+        <span class="pc-hidden-badge-clean">
+          {{ $t("gameInfo.matchHistoryHidden") }}
+        </span>
+      </div>
+
+      <div
+        class="pc-row pc-winrate-row"
+        v-else-if="playerData?.winRate !== undefined"
       >
         <span
           :class="[
@@ -428,6 +457,14 @@ function formatRank(q?: RankedQueueEntry | null): string {
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--text-muted);
+}
+.pc-hidden-badge-clean {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-dimmed);
+  background: var(--border-color);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 .pc-kda-text {
   font-size: 0.72rem;
