@@ -32,14 +32,20 @@
     "None": "空閒",
     "Lobby": "房間組隊中",
     "Matchmaking": "匹配中",
+    "CheckedIntoTournament": "錦標賽簽到",
     "ReadyCheck": "確認對局",
     "ChampSelect": "選擇英雄",
     "GameStart": "遊戲加載",
+    "FailedToLaunch": "啟動失敗",
     "InProgress": "遊戲中",
-    "EndOfGame": "對局結束",
-    "PreEndOfGame": "結算中",
+    "Reconnect": "重新連接",
     "WaitingForStats": "等待數據",
-    "Reconnect": "重新連接"
+    "PreEndOfGame": "結算中",
+    "EndOfGame": "對局結束",
+    "TerminatedInError": "對局異常終止",
+    "TerminatedByError": "對局異常終止",
+    "TerminatedInSeries": "系列賽終止",
+    "WatchInProgress": "觀戰中"
   },
   "settings": {
     "langTitle": "語言",

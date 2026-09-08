@@ -102,7 +102,7 @@ const noticeVisible = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
 const platformId = ref("");
 const mapSideLabel = ref(""); // 蓝色方/红色方
-const { t } = useI18n();
+const { t, te } = useI18n();
 
 // 检测当前是否是悬浮窗窗口（bench-overlay）
 const isOverlayWindow = ref(
@@ -537,7 +537,7 @@ watch(gamePhase, (phase: string) => {
   }
 
   // 更新窗口标题栏显示游戏状态
-  const label = t("phase." + phase);
+  const label = te("phase." + phase) ? t("phase." + phase) : phase;
   const title = label ? `Yuumi · ${label}` : "Yuumi";
   const setTitle = (t: string) =>
     getCurrentWindow()
@@ -686,7 +686,9 @@ function handleReconnect() {
         showToast(
           t("common.lcuReset") +
             " (" +
-            (t("phase." + (phase ?? "")) || phase) +
+            (te("phase." + (phase ?? ""))
+              ? t("phase." + (phase ?? ""))
+              : (phase ?? "")) +
             ")",
         );
       }

@@ -32,14 +32,20 @@
     "None": "Idle",
     "Lobby": "Lobby",
     "Matchmaking": "Matchmaking",
+    "CheckedIntoTournament": "Tournament Check-In",
     "ReadyCheck": "Ready Check",
     "ChampSelect": "Champ Select",
     "GameStart": "Game Start",
+    "FailedToLaunch": "Failed to Launch",
     "InProgress": "In Progress",
-    "EndOfGame": "End of Game",
-    "PreEndOfGame": "Ending",
+    "Reconnect": "Reconnecting",
     "WaitingForStats": "Waiting for Stats",
-    "Reconnect": "Reconnecting"
+    "PreEndOfGame": "Ending",
+    "EndOfGame": "End of Game",
+    "TerminatedInError": "Terminated with Error",
+    "TerminatedByError": "Terminated with Error",
+    "TerminatedInSeries": "Terminated in Series",
+    "WatchInProgress": "Spectating"
   },
   "settings": {
     "langTitle": "Language",

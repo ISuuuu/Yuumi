@@ -14,7 +14,7 @@ const emit = defineEmits<{
   close: [];
 }>();
 
-const { t: $t } = useI18n();
+const { t: $t, te: $te } = useI18n();
 const store = useLcuStore();
 </script>
 
@@ -45,7 +45,7 @@ const store = useLcuStore();
           v-if="store.isConnected && gamePhase !== 'None'"
           class="titlebar-phase"
         >
-          · {{ $t("phase." + gamePhase)
+          · {{ ($te("phase." + gamePhase) ? $t("phase." + gamePhase) : gamePhase)
           }}<span v-if="mapSideLabel"> - {{ mapSideLabel }}</span>
         </span>
       </span>

@@ -9,9 +9,11 @@ export type GamePhase =
   | "None"
   | "Lobby"
   | "Matchmaking"
+  | "CheckedIntoTournament"
   | "ReadyCheck"
   | "ChampSelect"
   | "GameStart"
+  | "FailedToLaunch"
   | "InProgress"
   | "Reconnect"
   | "WatchInProgress"
@@ -19,7 +21,8 @@ export type GamePhase =
   | "PreEndOfGame"
   | "EndOfGame"
   | "TerminatedInSeries"
-  | "TerminatedByError";
+  | "TerminatedByError"
+  | "TerminatedInError";
 
 export interface ChampSelectAction {
   actorCellId: number;
@@ -176,7 +179,7 @@ export const useLcuStore = defineStore("lcu", () => {
     if (v === "ChampSelect" && prev !== "ChampSelect") {
       // 刚进入新的选人阶段，清空上一局的历史记录
       clearHistoricalChampions();
-    } else if (v === "InProgress" || v === "EndOfGame" || v === "Lobby" || v === "None") {
+    } else if (v === "EndOfGame" || v === "Lobby" || v === "None") {
       champSelectSession.value = null;
       clearHistoricalChampions();
     }
@@ -188,6 +191,10 @@ export const useLcuStore = defineStore("lcu", () => {
     gameflowSession.value = v;
   }
   function setChampSelectSession(v: ChampSelectSession | null) {
+    if (!v && (gamePhase.value === "GameStart" || gamePhase.value === "InProgress")) {
+      // 游戏中或加载中，绝不将选人会话冲空
+      return;
+    }
     champSelectSession.value = v;
     if (v) {
       const myPlayer = v.myTeam?.find(
@@ -303,9 +310,12 @@ export async function initLcuListeners() {
         data && typeof data === "object" ? (data as GameflowSession) : null,
       );
     } else if (uri.startsWith("/lol-champ-select/v1/session")) {
-      store.setChampSelectSession(
-        data && typeof data === "object" ? (data as ChampSelectSession) : null,
-      );
+      // 只有在选人阶段才接受 session 更新；选人结束后（如 GameStart/InProgress）忽略 LCU 推送的 null/清理包，避免选人上下文被冲掉
+      if (store.gamePhase === "ChampSelect" || !data) {
+        store.setChampSelectSession(
+          data && typeof data === "object" ? (data as ChampSelectSession) : null,
+        );
+      }
     } else if (uri.startsWith("/lol-champ-select/v1/current-champion")) {
       const cid = Number(
         typeof data === "object" && data !== null
