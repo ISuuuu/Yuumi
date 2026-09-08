@@ -54,8 +54,8 @@ pub fn start(
             })
             .await;
             // 增量刷新进程列表，避免每 2 秒全量重建带来的 CPU 和内存开销；
-            // 第二参数传 false 代表若进程在系统中已不存在，则从进程列表中移除，杜绝内存泄漏和死进程残留
-            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, false);
+            // 第二参数传 true 代表若进程在系统中已不存在，则从进程列表中移除，杜绝内存泄漏和死进程残留
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
             // 优先尝试从 lockfile 获取，备用从进程参数获取，最后 WMIC 兜底（需管理员）
             // WMIC 每轮 spawn 子进程开销大，仅在连续多轮未命中时降频调用

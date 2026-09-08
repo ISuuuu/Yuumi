@@ -33,15 +33,27 @@ pub fn sgp_base_url(server_lower: &str) -> String {
     }
 }
 
-/// 获取进程级复用的 SGP HTTP 客户端（自签证书 + 不走代理 + 超时）
+/// 获取进程级复用的外网 SGP HTTP 客户端（正常校验 TLS 证书 + 不走代理 + 超时）
 pub fn get_sgp_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
             .no_proxy()
             .user_agent("RiotClient/78.0.1.1352 (Windows;10;co;red)")
             .timeout(SGP_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+/// 专用于访问本地 LCU 端口获取 token 的客户端（允许自签证书 + 不走代理）
+fn get_local_lcu_token_client() -> &'static reqwest::Client {
+    static LOCAL_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    LOCAL_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .no_proxy()
+            .timeout(Duration::from_secs(10))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
     })
@@ -83,7 +95,7 @@ async fn get_sgp_token_impl(port: u16, auth: &str, force_refresh: bool) -> Resul
     }
 
     let token_url = format!("https://127.0.0.1:{}/entitlements/v1/token", port);
-    let token_resp = get_sgp_client()
+    let token_resp = get_local_lcu_token_client()
         .get(&token_url)
         .header("Authorization", auth)
         .send()

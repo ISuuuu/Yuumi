@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { marked } from "marked";
+import { renderMarkdown } from "../utils/markdown";
 
 export interface UpdateInfo {
   version: string;
@@ -76,15 +76,11 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-// 更新日志 Markdown 渲染（完整展示，不截断）
+// 更新日志 Markdown 渲染（完整展示，不截断，且经过安全净化）
 const notesHtml = computed(() => {
   const raw = props.updateInfo?.notes?.trim();
   if (!raw) return "<p style='color:var(--text-tertiary)'>暂无更新说明</p>";
-  try {
-    return marked.parse(raw) as string;
-  } catch {
-    return `<pre style="white-space:pre-wrap;word-break:break-word;margin:0">${raw.replace(/</g, "&lt;")}</pre>`;
-  }
+  return renderMarkdown(raw);
 });
 
 // ─── 事件监听 ───

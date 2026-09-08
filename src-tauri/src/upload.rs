@@ -184,12 +184,10 @@ impl UploadQueue {
             log::debug!("对局 {} 已在上传队列中，跳过", game_id);
             return;
         }
-        set.insert(game_id);
-        drop(set);
-
         if let Err(e) = self.tx.try_send(UploadTask::GameId(game_id)) {
             log::warn!("推入上传队列失败: {}", e);
         } else {
+            set.insert(game_id);
             log::info!("对局 {} 已加入上传队列", game_id);
         }
     }
@@ -217,8 +215,11 @@ impl UploadQueue {
                 continue;
             }
             if !set.contains(&game_id) {
-                set.insert(game_id);
-                let _ = self.tx.try_send(UploadTask::Pending(Box::new(item)));
+                if let Err(e) = self.tx.try_send(UploadTask::Pending(Box::new(item))) {
+                    log::warn!("对局 {} 重新入队失败: {}", game_id, e);
+                } else {
+                    set.insert(game_id);
+                }
             }
         }
     }
@@ -1528,11 +1529,7 @@ async fn batch_upload_by_ids(
             Ok(resp) => {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                let preview = if body.len() > 200 {
-                    &body[..200]
-                } else {
-                    &body
-                };
+                let preview: String = body.chars().take(200).collect();
                 total_failed += chunk.len() as u32;
                 error_msg = Some(format!("HTTP {}: {}", status, preview));
                 log::warn!("批量上传第 {} 批 HTTP 错误 {}: {}", i + 1, status, preview);

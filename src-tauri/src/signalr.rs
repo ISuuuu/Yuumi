@@ -83,10 +83,12 @@ static CURRENT_SUMMONER_NAME: tokio::sync::Mutex<String> =
 
 /// 停止 SignalR Hub 连接
 pub async fn stop() {
-    let mut cancel_lock = SIGNALR_CANCEL_TX.lock().await;
-    if let Some(tx) = cancel_lock.take() {
-        let _ = tx.send(true);
-        log::info!("[SignalR] 已向后台任务发送停止信号");
+    {
+        let mut cancel_lock = SIGNALR_CANCEL_TX.lock().await;
+        if let Some(tx) = cancel_lock.take() {
+            let _ = tx.send(true);
+            log::info!("[SignalR] 已向后台任务发送停止信号");
+        }
     }
     let mut tx_lock = SIGNALR_TX.lock().await;
     *tx_lock = None;
@@ -95,12 +97,12 @@ pub async fn stop() {
 /// 获取当前连接状态
 #[tauri::command]
 pub async fn get_signalr_status() -> Result<String, String> {
-    let tx_lock = SIGNALR_TX.lock().await;
-    if tx_lock.is_some() {
+    let is_connected = SIGNALR_TX.lock().await.is_some();
+    if is_connected {
         Ok("connected".to_string())
     } else {
-        let cancel_lock = SIGNALR_CANCEL_TX.lock().await;
-        if cancel_lock.is_some() {
+        let is_connecting = SIGNALR_CANCEL_TX.lock().await.is_some();
+        if is_connecting {
             Ok("connecting".to_string())
         } else {
             Ok("disconnected".to_string())

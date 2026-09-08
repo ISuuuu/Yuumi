@@ -69,18 +69,18 @@ pub async fn get_game_player_summaries(
     // 如果资源尚未加载完成，且 LCU 已连接，进行等待以防止解析出来的图片/装备路径为空（最多等 5 秒）
     crate::lcu::client::wait_for_game_data(app_state.inner()).await;
 
-    // 锁内只提取连接参数与资源快照（Arc 共享，避免 10 人任务各自深拷贝），
+    // 锁内只提取连接参数（http_client 克隆是 Arc 浅拷贝），
     // 尽早释放读锁，避免并发查询期间阻塞 monitor 重连
-    let (auth, base, http_client, assets) = {
+    let (auth, base, http_client) = {
         let lock = app_state.lcu().await?;
         let lcu = lock.as_ref().unwrap();
         (
             build_auth_header(&lcu.token),
             format!("https://127.0.0.1:{}", lcu.port),
             lcu.http_client.clone(),
-            Arc::new(app_state.game_data.read().await.clone()),
         )
     };
+    let assets = Arc::new(app_state.game_data.read().await.clone());
 
     // 复用全局并发信号量（由配置 ApiConcurrencyNumber 控制），
     // 限制同时打向 LCU 的玩家查询数量，避免 10 人并发造成请求风暴

@@ -172,7 +172,6 @@ const ALLOWED_API_PREFIXES: &[&str] = &[
     "/lol-spectator/",
     "/lol-patch/",
     "/riotclient/",
-    "/entitlements/",
     "/system/",
 ];
 

@@ -353,7 +353,7 @@ fn try_create_default_lobby(
 
 /// 异步执行延迟接受匹配任务，不阻塞主事件循环。
 fn spawn_auto_accept(app_handle: AppHandle, delay_secs: u32) {
-    tokio::spawn(async move {
+    crate::spawn_log_panic(async move {
         if delay_secs > 0 {
             log::info!("将在 {} 秒后自动接受匹配...", delay_secs);
             tokio::time::sleep(std::time::Duration::from_secs(delay_secs as u64)).await;
@@ -454,7 +454,7 @@ pub async fn lcu_post(app_handle: &AppHandle, path: &str) -> bool {
 
 /// 收到荣誉投票后异步执行点赞，不阻塞主事件循环。
 fn spawn_auto_honor(app_handle: AppHandle, ballot: HonorBallot) {
-    tokio::spawn(async move {
+    crate::spawn_log_panic(async move {
         // 过滤掉人机
         let allies: Vec<&HonorEligiblePlayer> = ballot
             .eligible_allies
@@ -503,7 +503,7 @@ fn spawn_auto_honor(app_handle: AppHandle, ballot: HonorBallot) {
 
 /// 收到邀请列表后异步处理，不阻塞主事件循环。
 fn spawn_handle_invitations(app_handle: AppHandle, invitations: Vec<ReceivedInvitation>) {
-    tokio::spawn(async move {
+    crate::spawn_log_panic(async move {
         let state = app_handle.state::<crate::AppState>();
         let app_state = state.inner();
 
@@ -535,7 +535,7 @@ fn spawn_handle_invitations(app_handle: AppHandle, invitations: Vec<ReceivedInvi
 
 /// 延迟后执行"再来一局"，不阻塞主事件循环。
 fn spawn_auto_play_again(app_handle: AppHandle, delay: Duration) {
-    tokio::spawn(async move {
+    crate::spawn_log_panic(async move {
         sleep(delay).await;
         log::info!("自动再来一局");
         lcu_post(&app_handle, "/lol-lobby/v2/play-again").await;
@@ -590,7 +590,7 @@ async fn wait_for_champ_select_conv_id(
 
 /// 进入选人阶段后检测并播报我方队伍边（大乱斗/匹配/排位通用），不阻塞主事件循环。
 fn spawn_aram_team_side(app_handle: AppHandle, visible_to_team: bool) {
-    tokio::spawn(async move {
+    crate::spawn_log_panic(async move {
         let state = app_handle.state::<crate::AppState>();
         let app_state = state.inner();
 
@@ -753,7 +753,7 @@ async fn get_self_puuid(app_state: &crate::AppState) -> String {
 
 /// 进入对局阶段后缓存本局信息（gameId/queueId/玩家列表），供对局结束记录相遇
 fn spawn_cache_current_game(app_handle: AppHandle) {
-    tokio::spawn(async move {
+    crate::spawn_log_panic(async move {
         let state = app_handle.state::<crate::AppState>();
         let app_state = state.inner();
 
@@ -888,7 +888,7 @@ fn spawn_cache_current_game(app_handle: AppHandle) {
 
 /// 对局结束后记录所有相遇玩家（自动录入保存的玩家）
 fn spawn_record_encountered_players(app_handle: AppHandle) {
-    tokio::spawn(async move {
+    crate::spawn_log_panic(async move {
         let state = app_handle.state::<crate::AppState>();
         let app_state = state.inner();
 
@@ -925,7 +925,7 @@ fn spawn_record_encountered_players(app_handle: AppHandle) {
 
 /// 选人阶段对带标记的玩家发送聊天提醒
 fn spawn_tag_reminder(app_handle: AppHandle) {
-    tokio::spawn(async move {
+    crate::spawn_log_panic(async move {
         let state = app_handle.state::<crate::AppState>();
         let app_state = state.inner();
 

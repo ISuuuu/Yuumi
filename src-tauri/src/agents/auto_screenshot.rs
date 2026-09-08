@@ -264,7 +264,7 @@ pub fn start(app_handle: AppHandle) {
                                             let player_name_clone = player_name.clone();
                                             let custom_save_path = cfg.screenshot_save_path.clone();
                                             // 异步执行截图，静默进行，绝不阻塞轮询事件循环
-                                            tokio::spawn(async move {
+                                            crate::spawn_log_panic(async move {
                                                 if let Err(e) = execute_screenshot(
                                                     app_clone,
                                                     &player_name_clone,

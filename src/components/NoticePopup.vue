@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { renderMarkdown } from "../utils/markdown";
 
 const emit = defineEmits<{
   close: [];
@@ -16,16 +17,6 @@ const loading = ref(true);
 const hasError = ref(false);
 let dismissTimer: ReturnType<typeof setTimeout> | null = null;
 
-async function renderMarkdown(md: string): Promise<string> {
-  try {
-    const { marked } = await import("marked");
-    return marked.parse(md) as string;
-  } catch (e) {
-    console.error("[NoticePopup] 解析 Markdown 失败:", e);
-    return md;
-  }
-}
-
 async function fetchNotice() {
   loading.value = true;
   hasError.value = false;
@@ -33,7 +24,7 @@ async function fetchNotice() {
     const text = await invoke<string>("fetch_github_text", {
       url: NOTICE_URL,
     });
-    noticeHtml.value = await renderMarkdown(text);
+    noticeHtml.value = renderMarkdown(text);
     console.log("[NoticePopup] 成功拉取 GitHub 公告");
   } catch (err) {
     console.warn("[NoticePopup] 拉取 GitHub 公告失败:", err);

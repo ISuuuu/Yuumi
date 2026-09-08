@@ -2,6 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { renderMarkdown } from "../../utils/markdown";
 
 const props = defineProps<{
   appVersion: string;
@@ -71,11 +72,10 @@ async function fetchReleaseHistory() {
     const releases = await invoke<
       { tag: string; publishedAt: string; body: string }[]
     >("get_release_changelog", { currentVersion: props.appVersion });
-    const { marked } = await import("marked");
     versionHistory.value = releases.map((rel) => ({
       tag: rel.tag,
       date: formatDate(rel.publishedAt),
-      html: marked.parse(rel.body || "") as string,
+      html: renderMarkdown(rel.body || ""),
     }));
     console.log("[Settings] 成功获取版本更新日志");
   } catch (err) {

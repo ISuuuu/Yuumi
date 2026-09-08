@@ -868,7 +868,6 @@ fn extract_augments_from_value(root: &serde_json::Value) -> Vec<TftAugmentInfo> 
 async fn fetch_cdragon_zh_cn(proxy: Option<&str>) -> Option<serde_json::Value> {
     let cdn_url = "https://raw.communitydragon.org/latest/cdragon/tft/zh_cn.json";
     let mut builder = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .timeout(std::time::Duration::from_secs(60));
 
