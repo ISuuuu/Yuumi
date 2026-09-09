@@ -28,9 +28,14 @@ const store = useLcuStore();
 const { t } = useI18n();
 const { getPlayerSearchName, handleNameClick } = usePlayerSearch();
 
-const resolvedChampId = computed(() =>
-  resolvePlayerChampionId(props.player, store.champSelectSession),
-);
+const resolvedChampId = computed(() => {
+  const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
+  if (fromResolver > 0) return fromResolver;
+  if (props.playerData?.championId && props.playerData.championId > 0) {
+    return props.playerData.championId;
+  }
+  return 0;
+});
 
 // 该玩家是否为"保存的玩家"（曾同局），取 tag 与相遇次数；
 // 本局正在显示的玩家不算"历史"，不展示徽章

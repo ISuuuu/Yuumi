@@ -56,6 +56,10 @@ export interface GameflowParticipant {
   partyId?: number | string | null;
   /** 分路：top / jungle / middle / bottom / utility */
   assignedPosition?: string;
+  bot?: boolean;
+  isBot?: boolean;
+  botChampionId?: number;
+  botName?: string;
 }
 
 /** /lol-gameflow/v1/session 的队列信息 */

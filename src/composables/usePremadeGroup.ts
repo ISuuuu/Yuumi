@@ -45,7 +45,7 @@ export function computePremadeColors(
 export function buildPremadeGroups(
   team: PremadePlayerLike[],
   colors: Record<number, number>,
-  playerDataMap: Record<number, PlayerData>,
+  playerDataMap: Record<string | number, PlayerData>,
 ): PremadeGroup[] {
   if (!team || team.length === 0 || !colors) return [];
   const map: Record<number, PremadeMember[]> = {};
@@ -92,7 +92,7 @@ export function usePremadeGroup(
   theirTeam: Ref<PremadePlayerLike[]>,
   sessionAllyTeam: Ref<PremadePlayerLike[]>,
   sessionEnemyTeam: Ref<PremadePlayerLike[]>,
-  playerData: Ref<Record<number, PlayerData>>,
+  playerData: Ref<Record<string | number, PlayerData>>,
   premadeColorsMy: Ref<Record<number, number>>,
   premadeColorsTheir: Ref<Record<number, number>>,
 ) {

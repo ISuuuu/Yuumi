@@ -60,6 +60,9 @@ const {
 );
 
 function getPlayerData(p: PremadePlayerLike, idx: number) {
+  if (p.puuid && playerData.value[p.puuid]) {
+    return playerData.value[p.puuid];
+  }
   if (p.cellId !== undefined && playerData.value[p.cellId]) {
     return playerData.value[p.cellId];
   }
@@ -69,18 +72,39 @@ function getPlayerData(p: PremadePlayerLike, idx: number) {
   if (playerData.value[idx]) {
     return playerData.value[idx];
   }
+  // 若按真实 stableCellId 或 idx 索引均未直接命中（如 5 列切 Tab 或 10 列合并展示时）：
+  // 尝试在 playerData 中按队员已知身份（puuid / summonerId / displayName）遍历反查
+  for (const key of Object.keys(playerData.value)) {
+    const d = playerData.value[key];
+    if (!d?.info) continue;
+    if (p.puuid && d.info.puuid && d.info.puuid === p.puuid) return d;
+    if (p.summonerId && d.info.summonerId && d.info.summonerId === p.summonerId) return d;
+    const pName = p.displayName || p.gameName || p.summonerName;
+    const dName = d.info.displayName || d.info.gameName;
+    if (pName && dName && pName === dName) return d;
+  }
   return undefined;
 }
 
 // 保存玩家映射：puuid → { tag, encounterCount }，用于玩家卡片旁标记"曾同局"
 const savedPlayerMap = ref<Record<string, SavedPlayerMarker>>({});
 
-// 敌方队伍是否已公开可用（选人阶段敌方通常不可见）
+// 敌方队伍是否已公开可用（选人阶段敌方通常不可见；自定义/人机模式公开可见）
 const isTheirTeamRevealed = computed(() => {
   if (theirTeam.value.length === 0) return false;
   if (store.gamePhase === "ChampSelect") {
     return theirTeam.value.some(
-      (p: PremadePlayerLike) => Boolean(p.summonerId || p.puuid),
+      (p: PremadePlayerLike) =>
+        Boolean(
+          p.summonerId ||
+          p.puuid ||
+          p.championId ||
+          p.botChampionId ||
+          p.bot ||
+          p.isBot ||
+          p.displayName ||
+          p.summonerName,
+        ),
     );
   }
   return true;

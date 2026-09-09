@@ -7,6 +7,7 @@ export interface PlayerData {
   ranked: { solo: RankedQueueEntry | null; flex: RankedQueueEntry | null };
   loading: boolean;
   matchHistoryHidden?: boolean;
+  championId?: number;
   avgKda?: number;
   winRate?: number;
   winCount?: number;
@@ -34,6 +35,10 @@ export interface PremadePlayerLike {
   tagLine?: string;
   profileIconId?: number;
   puuid?: string;
+  bot?: boolean;
+  isBot?: boolean;
+  botChampionId?: number;
+  botName?: string;
 }
 
 export type PremadeTarget = number | PremadePlayerLike;
@@ -68,7 +73,8 @@ export interface ChampSelectActionLike {
 
 export interface ChampSelectSessionLike {
   actions?: ChampSelectActionLike[][];
-  myTeam?: Array<{ cellId: number; championId?: number; championPickIntent?: number }>;
+  myTeam?: Array<{ cellId: number; championId?: number; championPickIntent?: number; puuid?: string; summonerId?: number }>;
+  theirTeam?: Array<{ cellId: number; championId?: number; championPickIntent?: number; puuid?: string; summonerId?: number }>;
 }
 
 /**
@@ -80,6 +86,7 @@ export function resolvePlayerChampionId(
 ): number {
   if (!player) return 0;
   if (player.championId && player.championId > 0) return player.championId;
+  if (player.botChampionId && player.botChampionId > 0) return player.botChampionId;
   if (player.championPickIntent && player.championPickIntent > 0) return player.championPickIntent;
 
   if (session?.actions && player.cellId !== undefined) {
@@ -90,6 +97,21 @@ export function resolvePlayerChampionId(
           return act.championId;
         }
       }
+    }
+  }
+
+  // 兜底从 session.myTeam 或 session.theirTeam 中查找（若 cellId 一致或 puuid 一致）
+  if (session) {
+    const allMembers = [...(session.myTeam || []), ...(session.theirTeam || [])];
+    const match = allMembers.find(
+      (m) =>
+        (player.puuid && m.puuid === player.puuid) ||
+        (player.cellId !== undefined && m.cellId === player.cellId) ||
+        (player.summonerId && m.summonerId === player.summonerId),
+    );
+    if (match) {
+      if (match.championId && match.championId > 0) return match.championId;
+      if (match.championPickIntent && match.championPickIntent > 0) return match.championPickIntent;
     }
   }
 

@@ -40,9 +40,14 @@ const colHeaderStyle = computed(() => {
   };
 });
 
-const currentChampId = computed(() =>
-  resolvePlayerChampionId(props.player, store.champSelectSession),
-);
+const currentChampId = computed(() => {
+  const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
+  if (fromResolver > 0) return fromResolver;
+  if (props.playerData?.championId && props.playerData.championId > 0) {
+    return props.playerData.championId;
+  }
+  return 0;
+});
 
 // 头像左侧胜率竖条：>50 绿、<50 红；50% 时高度为 0，100% 胜率或 0% 胜率（100%败率）时完全填充
 const wrBar = computed(() => {
@@ -295,14 +300,10 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 
     <!-- 战绩隐藏或空记录占位 -->
     <template v-else>
-      <div class="col-empty">
-        <div class="col-empty-icon">{{ playerData?.matchHistoryHidden ? '🔒' : '📭' }}</div>
+      <div v-if="!playerData?.matchHistoryHidden" class="col-empty">
+        <div class="col-empty-icon">📭</div>
         <div class="col-empty-text">
-          {{
-            playerData?.matchHistoryHidden
-              ? $t("gameInfo.matchHistoryHidden")
-              : $t("gameInfo.noMatchHistory")
-          }}
+          {{ $t("gameInfo.noMatchHistory") }}
         </div>
       </div>
     </template>
