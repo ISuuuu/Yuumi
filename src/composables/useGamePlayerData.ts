@@ -399,10 +399,19 @@ export function useGamePlayerData(
       (summonerId ? playerData.value[summonerId] : undefined) ||
       (playerPuuid ? playerData.value[playerPuuid] : undefined);
     if (existing?.info && !existing.loading) {
-      playerData.value[cellId] = existing;
-      if (summonerId) playerData.value[summonerId] = existing;
-      if (playerPuuid) playerData.value[playerPuuid] = existing;
-      return;
+      // 防止选人阶段敌方占位数据（空 puuid / cellId 兜底 summonerId）在进入对局后
+      // 污染真实玩家信息：若当前持有真实 puuid 且与已有数据的 puuid 不一致，强制重新加载
+      const puuidMismatch =
+        Boolean(playerPuuid && playerPuuid.trim() !== "") &&
+        Boolean(existing.info.puuid && existing.info.puuid.trim() !== "") &&
+        existing.info.puuid !== playerPuuid;
+      if (!puuidMismatch) {
+        playerData.value[cellId] = existing;
+        if (summonerId) playerData.value[summonerId] = existing;
+        if (playerPuuid) playerData.value[playerPuuid] = existing;
+        return;
+      }
+      // puuid 不匹配，继续往下加载真实数据
     }
 
     // 机器人/电脑玩家本地极速识别，无需请求 LCU API，避免 404 和延迟
@@ -986,10 +995,18 @@ export function useGamePlayerData(
           playerData.value[key].championId = p.championId;
         }
         if (p.summonerId && p.summonerId !== key && !playerData.value[p.summonerId]) {
-          playerData.value[p.summonerId] = playerData.value[key];
+          // 防止选人阶段占位数据（cellId 充当 summonerId）污染真实 summonerId 键
+          const existingSid = playerData.value[key]?.info?.summonerId;
+          if (!existingSid || existingSid === p.summonerId || existingSid === key) {
+            playerData.value[p.summonerId] = playerData.value[key];
+          }
         }
         if (p.puuid && !playerData.value[p.puuid]) {
-          playerData.value[p.puuid] = playerData.value[key];
+          // 防止选人阶段空 puuid 占位数据污染真实 puuid 键
+          const existingPuuid = playerData.value[key]?.info?.puuid;
+          if (!existingPuuid || existingPuuid === p.puuid) {
+            playerData.value[p.puuid] = playerData.value[key];
+          }
         }
       }
     };
