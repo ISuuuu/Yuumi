@@ -80,3 +80,8 @@ opt-level = 3
 lto = false
 strip = true
 panic = "abort"
+
+# MSVC 链接 cdylib/staticlib 时必然生成 .dll.lib/.exp 导入库，
+# 新版 rustc 默认 warn(linker_messages) 刷屏，无害，此处全局允许。
+[lints.rust]
+linker_messages = "allow"
