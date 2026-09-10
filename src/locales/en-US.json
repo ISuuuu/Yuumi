@@ -661,7 +661,8 @@
     "noMatchHistory": "No Matches",
     "showAll": "All players",
     "showTeam": "By team",
-    "launchLolPrompt": "Please launch the League of Legends client first"
+    "launchLolPrompt": "Please launch the League of Legends client first",
+    "playerIndex": "Player {index}"
   },
   "career": {
     "summonerInfo": "Summoner Info",

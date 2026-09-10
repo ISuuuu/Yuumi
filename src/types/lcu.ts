@@ -67,12 +67,16 @@ export interface GameflowQueue {
   id: number;
   /** 游戏模式标识，如 MATCHED_GAME / TFT / ARAM */
   gameMode?: string;
+  /** 自定义对局标识 */
+  isCustom?: boolean;
 }
 
 /** /lol-gameflow/v1/session 的游戏数据 */
 export interface GameflowGameData {
   queue: GameflowQueue;
   teamOne?: GameflowParticipant[];
+  /** 对局 ID：InProgress 精简恢复时校验落盘快照归属 */
+  gameId?: number;
   teamTwo?: GameflowParticipant[];
 }
 

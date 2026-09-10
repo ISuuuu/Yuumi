@@ -661,7 +661,8 @@
     "noMatchHistory": "暫無對局記錄",
     "showAll": "全部戰績",
     "showTeam": "按隊伍",
-    "launchLolPrompt": "請先啟動英雄聯盟客戶端"
+    "launchLolPrompt": "請先啟動英雄聯盟客戶端",
+    "playerIndex": "玩家 {index}"
   },
   "career": {
     "summonerInfo": "召喚師信息",

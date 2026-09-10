@@ -50,6 +50,46 @@ function setRankToCache(puuid: string, data: RankedStats) {
   rankCache.set(puuid, { data, timestamp: Date.now() });
 }
 
+// ── 无身份占位槽的前英雄 ID 继承：仅无身份占位可继承，实名异队数据严禁串用
+function inheritPlaceholderChampion(
+  entry: PlayerData | undefined,
+  cellId: number,
+): number {
+  const champ = entry?.championId ?? 0;
+  if (!champ || champ <= 0) return 0;
+  const ePuuid = entry?.info?.puuid ?? "";
+  const eSid = entry?.info?.summonerId ?? 0;
+  if (ePuuid) return 0;
+  if (eSid && eSid !== cellId) return 0;
+  return champ;
+}
+
+// ── 新号判定上限：空战绩 + 等级在此之下视为从未打过的新号，不标隐藏
+export const NEW_PLAYER_MAX_LEVEL = 30;
+
+// ── 身份门禁（canonical）：incoming 的真实身份键与条目是否冲突。
+// puuid 非空即真实；summonerId 仅在非 0 且不等于 cell 槽位时视为真实
+// （选人/对局切换时 cellId 会被充作 sid 兜底，不可参与比对）。
+// 条目侧同理：info 缺失（loading 占位）或 sid 恰为 cell 槽位都视为无身份，不构成冲突。
+// 注意这是“宽松版”（无冲突即兼容）：seed 预填充与视图层核验直接用它；
+// loadPlayerData 复用已加载项时另需 finished 包装（loading 占位不可复用，占位→真实必须重拉）。
+export function isIdentityCompatible(
+  entry: PlayerData | undefined,
+  incoming: { puuid?: string; summonerId?: number; cellId?: number },
+): boolean {
+  if (!entry?.info) return true;
+  const cell = incoming.cellId ?? -1;
+  const inPuuid = (incoming.puuid || "").trim();
+  const inSid = incoming.summonerId || 0;
+  const inSidReal = Boolean(inSid) && inSid !== cell;
+  const ePuuid = (entry.info.puuid || "").trim();
+  const eRawSid = entry.info.summonerId || 0;
+  const eSid = eRawSid === cell ? 0 : eRawSid;
+  if (inPuuid && ePuuid && inPuuid !== ePuuid) return false;
+  if (inSidReal && eSid && inSid !== eSid) return false;
+  return true;
+}
+
 // ── 保留对局数据 localStorage：持续保留上一局数据，直到新对局开始（ChampSelect 时清理）
 const RESERVE_TEAM_KEYS = [
   "yuumi_last_gameflow_my_team",
@@ -58,6 +98,8 @@ const RESERVE_TEAM_KEYS = [
   "yuumi_last_game_loaded_count",
   "yuumi_last_premade_colors_my",
   "yuumi_last_premade_colors_their",
+  "yuumi_last_game_id",
+  "yuumi_last_game_team_count",
 ];
 
 function clearReserveDataFromStorage() {
@@ -144,6 +186,9 @@ export function useGamePlayerData(
   const isTftMode = ref(false);
 
   // ── 保留对局数据写入：只要有队伍数据且包含玩家数据就落盘保存对局快照
+  // 当前对局 gameId：InProgress 精简 session 恢复整局时校验落盘快照归属，防串到上一局
+  const currentGameId = ref<number | null>(null);
+
   function writeReserveData() {
     const loadedCount = Object.values(playerData.value).filter(
       (d) => d.info !== null,
@@ -165,12 +210,32 @@ export function useGamePlayerData(
     if (!inRealGame && loadedCount < savedLoadedCount) {
       return;
     }
+    // 同一局内禁止用更瘦的快照覆盖落盘：InProgress 阶段 LCU 会把 gameflow 队伍精简到仅剩自己，
+    // 刷新后残缺 session 回写不得毒化 GameStart 时落盘的完整快照
+    const currentTotal = gameflowMyTeam.value.length + gameflowTheirTeam.value.length;
+    if (currentGameId.value) {
+      let savedGameId = 0;
+      let savedTotal = 0;
+      try {
+        savedGameId = Number(localStorage.getItem("yuumi_last_game_id")) || 0;
+        savedTotal = Number(localStorage.getItem("yuumi_last_game_team_count")) || 0;
+      } catch {
+        /* ignore */
+      }
+      if (savedGameId === currentGameId.value && savedTotal > 0 && currentTotal < savedTotal) {
+        return;
+      }
+    }
     lazySetItem("yuumi_last_game_player_data", playerData.value);
     lazySetItem("yuumi_last_gameflow_my_team", gameflowMyTeam.value);
     lazySetItem("yuumi_last_gameflow_their_team", gameflowTheirTeam.value);
     lazySetItem("yuumi_last_premade_colors_my", premadeColorsMy.value);
     lazySetItem("yuumi_last_premade_colors_their", premadeColorsTheir.value);
     lazySetItem("yuumi_last_game_loaded_count", loadedCount);
+    if (currentGameId.value) {
+      lazySetItem("yuumi_last_game_id", currentGameId.value);
+      lazySetItem("yuumi_last_game_team_count", currentTotal);
+    }
   }
 
   // ── 从 localStorage 恢复保留数据（有数据即恢复，直到新对局开始）
@@ -244,6 +309,7 @@ export function useGamePlayerData(
     if (isGameActive.value) {
       if (gameflowMyTeam.value.length > 0) return gameflowMyTeam.value;
       if (store.champSelectSession?.myTeam && store.champSelectSession.myTeam.length > 0) {
+        // LCU 原生归属：myTeam（含自定义人机）即我方，直接返回（人机由下游按 bot 处理）
         return store.champSelectSession.myTeam;
       }
       if (champSelectTeamSnapshot.value.length > 0) {
@@ -256,8 +322,12 @@ export function useGamePlayerData(
   const theirTeam = computed(() => {
     if (isGameActive.value) {
       if (gameflowTheirTeam.value.length > 0) return gameflowTheirTeam.value;
-      if (store.champSelectSession?.theirTeam && store.champSelectSession.theirTeam.length > 0) {
-        return store.champSelectSession.theirTeam;
+      if (store.champSelectSession?.theirTeam) {
+        // LCU 原生归属：theirTeam 即敌方；空占位（无任何身份）丢弃，避免幽灵列
+        const real = (store.champSelectSession.theirTeam || []).filter(
+          (p) => p.isHumanoid || p.puuid || p.summonerId || p.championId,
+        );
+        if (real.length > 0) return real;
       }
       if (champSelectTheirTeamSnapshot.value.length > 0) {
         return champSelectTheirTeamSnapshot.value;
@@ -378,13 +448,25 @@ export function useGamePlayerData(
     }
     try {
       const sessionResp = await getChampSelectSession();
-      if (sessionResp.success && sessionResp.data)
+      if (sessionResp.success && sessionResp.data) {
         store.setChampSelectSession(sessionResp.data);
+      }
     } catch {
       /* ignore */
     }
     loading.value = false;
   }
+
+  // 拉取窗口 / 拉取失败 / 异常兜底三处的英雄保留：fallback 自带优先，
+  // 否则仅继承无身份占位的（实名异队数据严禁串用），保证加载中头像不断档
+  const resolveCarryChampionId = (
+    fallbackPlayer: PremadePlayerLike | undefined,
+    cellId: number,
+  ): number =>
+    fallbackPlayer?.championId ||
+    fallbackPlayer?.botChampionId ||
+    inheritPlaceholderChampion(playerData.value[cellId], cellId) ||
+    0;
 
   async function loadPlayerData(
     cellId: number,
@@ -394,30 +476,39 @@ export function useGamePlayerData(
   ) {
     if (!summonerId && !playerPuuid && !fallbackPlayer) return;
 
-    const existing =
-      playerData.value[cellId] ||
-      (summonerId ? playerData.value[summonerId] : undefined) ||
-      (playerPuuid ? playerData.value[playerPuuid] : undefined);
-    if (existing?.info && !existing.loading) {
-      // 防止选人阶段敌方占位数据（空 puuid / cellId 兜底 summonerId）在进入对局后
-      // 污染真实玩家信息：若当前持有真实 puuid 且与已有数据的 puuid 不一致，强制重新加载
-      const puuidMismatch =
-        Boolean(playerPuuid && playerPuuid.trim() !== "") &&
-        Boolean(existing.info.puuid && existing.info.puuid.trim() !== "") &&
-        existing.info.puuid !== playerPuuid;
-      if (!puuidMismatch) {
-        playerData.value[cellId] = existing;
-        if (summonerId) playerData.value[summonerId] = existing;
-        if (playerPuuid) playerData.value[playerPuuid] = existing;
-        return;
-      }
-      // puuid 不匹配，继续往下加载真实数据
+    // 身份优先查找：puuid → summonerId → cellId。cell 槽在选人/对局切换或顺序变化时
+    // 可能残留异队旧数据，身份键优先才能命中同一玩家的已加载项，避免误杀重拉
+    const candidates = [
+      playerPuuid ? playerData.value[playerPuuid] : undefined,
+      summonerId ? playerData.value[summonerId] : undefined,
+      playerData.value[cellId],
+    ];
+    const incoming = { puuid: playerPuuid, summonerId, cellId };
+    const reusable = candidates.find((e) => {
+      // 仅已加载项可复用（loading 占位不可复用，必须走真实拉取）
+      if (!e?.info || e.loading) return false;
+      // 占位（空 puuid / cellId 兜底 sid）→真实身份必须强制重载
+      const ePuuid = (e.info.puuid || "").trim();
+      const eSid = e.info.summonerId || 0;
+      if (incoming.puuid && !ePuuid) return false;
+      if (incoming.summonerId && incoming.summonerId !== cellId && (!eSid || eSid === cellId)) return false;
+      return isIdentityCompatible(e, incoming);
+    });
+    if (reusable) {
+      playerData.value[cellId] = reusable;
+      if (summonerId) playerData.value[summonerId] = reusable;
+      if (playerPuuid) playerData.value[playerPuuid] = reusable;
+      return;
     }
+    // 无可复用的同身份已加载项，继续往下加载真实数据
 
     // 机器人/电脑玩家本地极速识别，无需请求 LCU API，避免 404 和延迟
+    // （含自定义对局人机 isHumanoid，其 bot 标记在 ChampSelect 快照合并时补齐，
+    //  此处直接识别 isHumanoid 以覆盖 computed/快照尚未就绪的窗口期）
     const isBotPlayer =
       Boolean(fallbackPlayer?.bot) ||
       Boolean(fallbackPlayer?.isBot) ||
+      Boolean((fallbackPlayer as PremadePlayerLike & { isHumanoid?: boolean })?.isHumanoid) ||
       Boolean(fallbackPlayer?.botChampionId) ||
       Boolean(fallbackPlayer?.displayName?.includes("电脑")) ||
       Boolean(fallbackPlayer?.summonerName?.includes("电脑")) ||
@@ -465,6 +556,8 @@ export function useGamePlayerData(
       matches: [],
       ranked: { solo: null, flex: null },
       loading: true,
+      // 拉取窗口内保留英雄，避免加载中头像空白（仅继承无身份占位的）
+      championId: resolveCarryChampionId(fallbackPlayer, cellId),
     };
 
     try {
@@ -550,6 +643,8 @@ export function useGamePlayerData(
             matches: [],
             ranked: { solo: null, flex: null },
             loading: false,
+            // 拉取失败也保留所选英雄，只展示头像与隐藏标识，不留空白列
+            championId: resolveCarryChampionId(fallbackPlayer, cellId),
           };
           return;
         }
@@ -568,8 +663,12 @@ export function useGamePlayerData(
           ? fetchMatchHistory(safeInfo.puuid, 0, maxMatches)
               .then((res) => {
                 if (!res || res.length === 0) {
-                  // 如果接口返回空列表（未抛错），对局中隐藏战绩常返回空
-                  matchHistoryHidden = true;
+                  // 空列表有两种可能：隐藏战绩，或从未打过的新号。
+                  // 对局中隐藏战绩常返回空，但新号一定是低等级（30 级以下），新号不标隐藏
+                  const lvl = safeInfo.summonerLevel ?? 0;
+                  if (!(lvl > 0 && lvl < NEW_PLAYER_MAX_LEVEL)) {
+                    matchHistoryHidden = true;
+                  }
                 }
                 return res || [];
               })
@@ -718,7 +817,8 @@ export function useGamePlayerData(
         ranked: { solo: null, flex: null },
         loading: false,
         matchHistoryHidden: true,
-        championId: fallbackPlayer?.championId || fallbackPlayer?.botChampionId || 0,
+        // 异常兜底也保留所选英雄，不留空白列
+        championId: resolveCarryChampionId(fallbackPlayer, cellId),
       };
       playerData.value[cellId] = dataObj;
       if (summonerId && summonerId !== cellId) {
@@ -739,6 +839,7 @@ export function useGamePlayerData(
     const filterValidPlayers = (team: PremadePlayerLike[], isEnemy: boolean) => {
       if (store.gamePhase === "ChampSelect" && isEnemy) {
         // 选人阶段敌方队伍若无有效身份且非人机，不请求
+        //（敌方人机含原生 isHumanoid 标记，同样放行走 bot 本地占位）
         return team.filter(
           (p) =>
             Boolean(
@@ -747,6 +848,7 @@ export function useGamePlayerData(
               p.bot ||
               p.isBot ||
               p.botChampionId ||
+              (p as PremadePlayerLike & { isHumanoid?: boolean }).isHumanoid ||
               p.displayName ||
               p.summonerName,
             ),
@@ -935,23 +1037,38 @@ export function useGamePlayerData(
       };
     };
 
-    gameflowMyTeam.value = allyTeam.map((p, idx) =>
-      mapParticipant(p, idx, 0, false),
-    );
-    gameflowTheirTeam.value = enemyTeam.map((p, idx) =>
+    const mappedMy = allyTeam.map((p, idx) => mapParticipant(p, idx, 0, false));
+    const mappedTheir = enemyTeam.map((p, idx) =>
       mapParticipant(p, idx, 5, true),
     );
+    // LCU 会话偶发残缺（如加载瞬间有人尚未连入）：新队伍更短时保留已有更全的，
+    // 不让整列消失；人数补齐后由 gameflowSession 监听触发重处理
+    if (mappedMy.length >= gameflowMyTeam.value.length) {
+      gameflowMyTeam.value = mappedMy;
+    } else {
+      console.debug(`[GameInfo] 忽略残缺队伍快照: 我方新 ${mappedMy.length} 人 / 已有 ${gameflowMyTeam.value.length} 人`);
+    }
+    if (mappedTheir.length >= gameflowTheirTeam.value.length) {
+      gameflowTheirTeam.value = mappedTheir;
+    } else {
+      console.debug(`[GameInfo] 忽略残缺队伍快照: 敌方新 ${mappedTheir.length} 人 / 已有 ${gameflowTheirTeam.value.length} 人`);
+    }
 
     // 为双方队员预填充基础占位，避免后台异步请求完成前界面出现空白
     const seedInitialPlayerData = (players: PremadePlayerLike[]) => {
       for (const p of players) {
         const key = p.cellId ?? 0;
         const isBot = Boolean(p.bot || p.isBot || p.botChampionId);
-        // 如果已有选人阶段完整加载的数据，保留并继承
-        const existing =
-          playerData.value[key] ||
-          (p.summonerId ? playerData.value[p.summonerId] : undefined) ||
-          (p.puuid ? playerData.value[p.puuid] : undefined);
+        // 如果已有选人阶段完整加载的数据，保留并继承。
+        // 身份优先查找：puuid → summonerId → cellId。选人/对局顺序变化时同 cell 槽
+        // 可能残留异队旧数据，身份键优先才能命中同一玩家的已加载项，避免误杀重拉
+        const byPuuid = p.puuid ? playerData.value[p.puuid] : undefined;
+        const bySid = p.summonerId ? playerData.value[p.summonerId] : undefined;
+        const byCell = playerData.value[key];
+        const incoming = { puuid: p.puuid, summonerId: p.summonerId, cellId: key };
+        const existing = [byPuuid, bySid, byCell].find((e) =>
+          isIdentityCompatible(e, incoming),
+        );
         if (existing) {
           // 若 gameflow 带来了新的 championId（加载中阶段可获取），始终更新
           if (p.championId && p.championId > 0) {
@@ -961,6 +1078,15 @@ export function useGamePlayerData(
           if (p.summonerId) playerData.value[p.summonerId] = existing;
           if (p.puuid) playerData.value[p.puuid] = existing;
           continue;
+        }
+        // cell 槽被异队旧数据占据：清槽后按新身份重建，避免把我方 info/matches 挂到敌方 key 上。
+        // 若被清的是无身份占位且带有英雄 ID，先继承给 p，保证加载中英雄不断档
+        if (byCell) {
+          if (!p.championId || p.championId <= 0) {
+            const carried = inheritPlaceholderChampion(byCell, key);
+            if (carried > 0) p.championId = carried;
+          }
+          delete playerData.value[key];
         }
         if (!playerData.value[key]) {
           const fallbackName =
@@ -991,8 +1117,6 @@ export function useGamePlayerData(
             championId: p.championId,
           };
           playerData.value[key] = placeholder;
-        } else if (p.championId && (!playerData.value[key].championId || playerData.value[key].championId! <= 0)) {
-          playerData.value[key].championId = p.championId;
         }
         if (p.summonerId && p.summonerId !== key && !playerData.value[p.summonerId]) {
           // 防止选人阶段占位数据（cellId 充当 summonerId）污染真实 summonerId 键
@@ -1086,6 +1210,27 @@ export function useGamePlayerData(
       const { teamOne, teamTwo } = data.gameData;
       const t1 = teamOne || [];
       const t2 = teamTwo || [];
+      const liveGameId = data.gameData.gameId ?? null;
+      if (liveGameId) currentGameId.value = liveGameId;
+      // InProgress 阶段 LCU 会把 gameflow 队伍精简到仅剩自己：内存已空（多半是刷新重载）且
+      // 落盘有同 gameId 完整快照时，先恢复整局再走正常流程（长度守卫会保住更全的一方）
+      // 自定义对局（queue.isCustom:true）人数不定，不能用 sessionTotal < 5 判断是否残缺，跳过此保护
+      const sessionTotal = t1.length + t2.length;
+      const isCustomGame = data.gameData.queue?.isCustom === true;
+      if (
+        liveGameId &&
+        !isCustomGame &&
+        sessionTotal > 0 &&
+        sessionTotal < 5 &&
+        gameflowMyTeam.value.length + gameflowTheirTeam.value.length === 0
+      ) {
+        try {
+          const savedId = Number(localStorage.getItem("yuumi_last_game_id")) || 0;
+          if (savedId === liveGameId) restoreReserveDataFromLocalStorage();
+        } catch {
+          /* ignore */
+        }
+      }
       if (t1.length === 0 && t2.length === 0) {
         let retried = 0;
         const maxRetries = 10;
@@ -1117,6 +1262,17 @@ export function useGamePlayerData(
       }
 
       if (t1.length === 0 || t2.length === 0) {
+        // 自定义对局（人机游戏）teamTwo 可能永远为空，无需重试，直接处理。
+        // 人机位于我方（myTeam 快照），敌方快照的人机位同样计入；queue.isCustom 缺失时以此兜底
+        const snapshotHasBots =
+          champSelectTheirTeamSnapshot.value.some((p) => p.bot || p.isBot) ||
+          champSelectTeamSnapshot.value.some((p) => p.bot || p.isBot);
+        if (isCustomGame || snapshotHasBots) {
+          if (reqId !== currentGameflowSessionRequestId) return;
+          await processTeamData(t1, t2);
+          loading.value = false;
+          return;
+        }
         // 若其中一队为空，给它短暂重试机会（最多 3 次，每次 1 秒），若依然只有单边（如自定义单边练习），直接处理已有队伍，不阻塞
         let retried = 0;
         let currentT1 = t1;
@@ -1194,6 +1350,7 @@ export function useGamePlayerData(
         isTftMode.value = false;
       }
       if (phase === "ChampSelect") {
+        currentGameId.value = null;
         gameflowMyTeam.value = [];
         gameflowTheirTeam.value = [];
         playerData.value = {};
@@ -1216,11 +1373,19 @@ export function useGamePlayerData(
     () => store.gameflowSession,
     (session) => {
       if (!session?.gameData) return;
+      if (session.gameData.gameId) currentGameId.value = session.gameData.gameId;
       if (store.gamePhase !== "InProgress" && store.gamePhase !== "GameStart") return;
       const { teamOne, teamTwo } = session.gameData;
       if ((teamOne && teamOne.length > 0) || (teamTwo && teamTwo.length > 0)) {
-        // 如果当前尚未加载或者队伍为空，立即加载
-        if (gameflowMyTeam.value.length === 0 || gameflowTheirTeam.value.length === 0) {
+        // 队伍为空时加载；会话人数增长（如残缺会话补齐）时重处理，补回缺失的列
+        const sessionTotal = (teamOne?.length ?? 0) + (teamTwo?.length ?? 0);
+        const currentTotal =
+          gameflowMyTeam.value.length + gameflowTheirTeam.value.length;
+        if (
+          gameflowMyTeam.value.length === 0 ||
+          gameflowTheirTeam.value.length === 0 ||
+          (currentTotal > 0 && sessionTotal > currentTotal)
+        ) {
           processTeamData(teamOne || [], teamTwo || []);
         }
       }
@@ -1241,8 +1406,28 @@ export function useGamePlayerData(
     () => store.champSelectSession,
     (session) => {
       if (session && store.gamePhase === "ChampSelect") {
-        const myTeam = session.myTeam || [];
-        const theirTeam = session.theirTeam || [];
+        const rawMyTeam = session.myTeam || [];
+        const rawTheirTeam = session.theirTeam || [];
+
+        // 队伍归属以 LCU 原生语义为准：myTeam（含自定义人机 isHumanoid）= 我方，
+        // theirTeam = 敌方。人机仅标记为 bot（下游走本地占位，不请求 LCU 战绩接口），不改变归属。
+        const flagBots = (list: ChampSelectPlayer[]): ChampSelectPlayer[] =>
+          list.map((p) =>
+            p.isHumanoid && !p.bot && !p.isBot ? { ...p, bot: true, isBot: true } : p,
+          );
+        // 自定义会话（敌方 cell 可能与我方共用编号空间）：敌方快照需重映射到 5+ 稳定区间隔离
+        const isCustomSession =
+          session.isCustomGame === true ||
+          rawMyTeam.some((p) => p.isHumanoid) ||
+          rawTheirTeam.some((p) => p.isHumanoid);
+        const myTeam = flagBots(rawMyTeam);
+        // theirTeam 的空占位（puuid/summonerId/championId 全空）直接丢弃，避免幽灵列
+        const theirTeam = flagBots(
+          rawTheirTeam.filter(
+            (p) => p.isHumanoid || p.puuid || p.summonerId || p.championId,
+          ),
+        );
+
         const sig = teamSig(myTeam, session) + "|" + teamSig(theirTeam, session);
         if (sig === lastSessionTeamSig) return;
         lastSessionTeamSig = sig;
@@ -1277,10 +1462,15 @@ export function useGamePlayerData(
           myTeam,
           champSelectTeamSnapshot.value,
         );
-        champSelectTheirTeamSnapshot.value = mergeSnapshot(
+        // 自定义会话敌方 cell 可能与我方共用编号空间：重映射到 5+ 稳定区间隔离
+        //（merge 内部仍用原始 cellId + puuid 匹配，快照输出后再重映射，保证跨帧稳定）
+        const mergedTheir = mergeSnapshot(
           theirTeam,
           champSelectTheirTeamSnapshot.value,
         );
+        champSelectTheirTeamSnapshot.value = isCustomSession
+          ? mergedTheir.map((p, idx) => ({ ...p, cellId: 5 + idx }))
+          : mergedTheir;
 
         loading.value = false;
         error.value = "";

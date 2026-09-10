@@ -44,6 +44,11 @@ export interface ChampSelectPlayer {
   /** 预组队标识（同队小队共享同一 ID） */
   teamParticipantId?: number | string;
   partyId?: number | string;
+  /** 自定义对局中的人机（电脑）标识：LCU 把人机放在 myTeam 里并标记 isHumanoid:true */
+  isHumanoid?: boolean;
+  /** 人机标记（自定义对局识别后补齐，gameInfo 按 bot 走本地占位） */
+  bot?: boolean;
+  isBot?: boolean;
 }
 
 export interface ChampSelectBans {
@@ -85,6 +90,8 @@ export interface ChampSelectSession {
   benchEnabled: boolean;
   benchChampions: BenchChampion[];
   queueId?: number;
+  /** 自定义对局标识（LCU 在 session 根对象上设置此字段） */
+  isCustomGame?: boolean;
 }
 
 export interface ReadyCheckSession {

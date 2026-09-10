@@ -7,10 +7,11 @@ import { querySavedPlayersMap } from "../api/lcu";
 import {
   PREMADE_COLORS,
   getChampionIcon,
+  type PlayerData,
   type PremadePlayerLike,
 } from "../types/gameInfo";
 import { usePremadeGroup } from "../composables/usePremadeGroup";
-import { useGamePlayerData } from "../composables/useGamePlayerData";
+import { useGamePlayerData, isIdentityCompatible } from "../composables/useGamePlayerData";
 import PlayerCard from "../components/gameinfo/PlayerCard.vue";
 import LcuOfflineState from "../components/LcuOfflineState.vue";
 import PlayerMatchColumn from "../components/gameinfo/PlayerMatchColumn.vue";
@@ -59,19 +60,33 @@ const {
   premadeColorsTheir,
 );
 
+// 选人阶段敌我 cellId 会碰撞：直接按 key 命中可能拿到异队旧数据，
+// 必须先核验身份，不一致就跳过（宁可显示占位，也不显示别人的 ID 和战绩）
+function isSameIdentity(p: PremadePlayerLike, d: PlayerData | undefined): boolean {
+  if (!d) return false;
+  if (!d.info) return true; // 加载中占位：保留原行为（显示 loading）
+  // 匿名查询（选人敌方未公开）不得借用任何实名数据
+  const dSidReal = d.info.summonerId && d.info.summonerId !== p.cellId ? d.info.summonerId : 0;
+  if (!p.puuid && !p.summonerId && (d.info.puuid || dSidReal)) return false;
+  return isIdentityCompatible(d, { puuid: p.puuid, summonerId: p.summonerId, cellId: p.cellId });
+}
+
 function getPlayerData(p: PremadePlayerLike, idx: number) {
-  if (p.puuid && playerData.value[p.puuid]) {
-    return playerData.value[p.puuid];
+  // 身份优先查找：puuid → summonerId → cellId（与数据层顺序一致，身份键优先命中同一玩家）
+  if (p.puuid) {
+    const byPuuid = playerData.value[p.puuid];
+    if (byPuuid && isSameIdentity(p, byPuuid)) return byPuuid;
   }
-  if (p.cellId !== undefined && playerData.value[p.cellId]) {
-    return playerData.value[p.cellId];
+  if (p.summonerId) {
+    const bySid = playerData.value[p.summonerId];
+    if (bySid && isSameIdentity(p, bySid)) return bySid;
   }
-  if (p.summonerId && playerData.value[p.summonerId]) {
-    return playerData.value[p.summonerId];
+  if (p.cellId !== undefined) {
+    const byCell = playerData.value[p.cellId];
+    if (byCell && isSameIdentity(p, byCell)) return byCell;
   }
-  if (playerData.value[idx]) {
-    return playerData.value[idx];
-  }
+  const byIdx = playerData.value[idx];
+  if (byIdx && isSameIdentity(p, byIdx)) return byIdx;
   // 若按真实 stableCellId 或 idx 索引均未直接命中（如 5 列切 Tab 或 10 列合并展示时）：
   // 尝试在 playerData 中按队员已知身份（puuid / summonerId / displayName）遍历反查
   for (const key of Object.keys(playerData.value)) {
@@ -152,7 +167,9 @@ watch(() => store.gamePhase, (phase) => {
 });
 watch(() => store.isConnected, () => loadSavedPlayerMap());
 watch(currentSummonerPuuid, () => loadSavedPlayerMap());
-onMounted(loadSavedPlayerMap);
+onMounted(() => {
+  loadSavedPlayerMap();
+});
 </script>
 
 <template>

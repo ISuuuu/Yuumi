@@ -89,25 +89,25 @@ export function resolvePlayerChampionId(
   if (player.botChampionId && player.botChampionId > 0) return player.botChampionId;
   if (player.championPickIntent && player.championPickIntent > 0) return player.championPickIntent;
 
+  // 从 actions 中查找该玩家的 pick（cellId 直接用原值查，仅适用于 session 原始 cellId 0..N）
   if (session?.actions && player.cellId !== undefined) {
-    const cid = player.cellId;
     for (const group of session.actions) {
       for (const act of group) {
-        if (act.actorCellId === cid && act.type === "pick" && act.championId > 0) {
+        if (act.actorCellId === player.cellId && act.type === "pick" && act.championId > 0) {
           return act.championId;
         }
       }
     }
   }
 
-  // 兜底从 session.myTeam 或 session.theirTeam 中查找（若 cellId 一致或 puuid 一致）
+  // 兜底从 session 成员中查找（puuid/summonerId 优先，cellId 辅助）
   if (session) {
     const allMembers = [...(session.myTeam || []), ...(session.theirTeam || [])];
     const match = allMembers.find(
       (m) =>
         (player.puuid && m.puuid === player.puuid) ||
-        (player.cellId !== undefined && m.cellId === player.cellId) ||
-        (player.summonerId && m.summonerId === player.summonerId),
+        (player.summonerId && m.summonerId === player.summonerId) ||
+        (player.cellId !== undefined && m.cellId === player.cellId),
     );
     if (match) {
       if (match.championId && match.championId > 0) return match.championId;

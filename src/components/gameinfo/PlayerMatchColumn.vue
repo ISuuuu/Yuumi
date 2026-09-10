@@ -300,7 +300,13 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 
     <!-- 战绩隐藏或空记录占位 -->
     <template v-else>
-      <div v-if="!playerData?.matchHistoryHidden" class="col-empty">
+      <div v-if="playerData?.matchHistoryHidden" class="col-empty">
+        <div class="col-empty-icon">🔒</div>
+        <div class="col-empty-text">
+          {{ $t("gameInfo.matchHistoryHidden") }}
+        </div>
+      </div>
+      <div v-else class="col-empty">
         <div class="col-empty-icon">📭</div>
         <div class="col-empty-text">
           {{ $t("gameInfo.noMatchHistory") }}
