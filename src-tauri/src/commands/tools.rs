@@ -297,6 +297,10 @@ fn launch_wegame(configured_path: Option<&str>) -> Result<(), String> {
 fn spawn_executable(exe: &Path, args: &[&str]) -> Result<(), String> {
     let mut cmd = std::process::Command::new(exe);
     cmd.args(args);
+    // 隔离子进程标准流：避免其（及其孙进程，如 WeGame 调用的 curl）输出混入 Yuumi 控制台/日志
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
     // 关键：设置启动工作目录为 exe 所在的父目录，防止 DLL 加载或配置读取报拒绝访问错误 (os error 5)
     if let Some(parent) = exe.parent() {
         cmd.current_dir(parent);
