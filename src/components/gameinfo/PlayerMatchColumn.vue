@@ -306,7 +306,7 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
             </span>
           </div>
 
-          <!-- 全部战绩(10列)模式下：纯粹展示熟练度等级与点数 -->
+          <!-- 全部战绩(10列)模式下：优先展示熟练度等级与点数，若无熟练度则展示段位兜底，避免该行空白 -->
           <template v-if="compact">
             <div
               v-if="masteryDetail"
@@ -316,6 +316,13 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
             >
               <span class="col-mastery-badge">Lv.{{ masteryDetail.level }}</span>
               <span class="col-mastery-pts">{{ masteryDetail.formattedPoints }}</span>
+            </div>
+            <div
+              v-else-if="rankSummary"
+              class="col-mastery-row"
+              :title="rankSummary"
+            >
+              <span class="col-rank-tag">{{ rankSummary }}</span>
             </div>
           </template>
 

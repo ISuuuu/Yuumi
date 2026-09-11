@@ -1320,21 +1320,24 @@ export function useGamePlayerData(
       const t2 = teamTwo || [];
       const liveGameId = data.gameData.gameId ?? null;
       if (liveGameId) currentGameId.value = liveGameId;
-      // InProgress 阶段 LCU 会把 gameflow 队伍精简到仅剩自己：内存已空（多半是刷新重载）且
-      // 落盘有同 gameId 完整快照时，先恢复整局再走正常流程（长度守卫会保住更全的一方）
-      // 自定义对局（queue.isCustom:true）人数不定，不能用 sessionTotal < 5 判断是否残缺，跳过此保护
+      // InProgress 阶段 LCU 会把 gameflow 队伍精简（甚至只剩我方或单边）：
+      // 当落盘有同 gameId 的完整快照，且当前队伍为空或当前队伍少于落盘人数或当前 session 少于落盘人数时，
+      // 先从快照恢复整局数据，后续逻辑中的长度守卫与 identity 合并会保留更全的数据，防止敌方丢失
       const sessionTotal = t1.length + t2.length;
       const isCustomGame = data.gameData.queue?.isCustom === true;
-      if (
-        liveGameId &&
-        !isCustomGame &&
-        sessionTotal > 0 &&
-        sessionTotal < 5 &&
-        gameflowMyTeam.value.length + gameflowTheirTeam.value.length === 0
-      ) {
+      if (liveGameId && !isCustomGame) {
         try {
           const savedId = Number(localStorage.getItem("yuumi_last_game_id")) || 0;
-          if (savedId === liveGameId) restoreReserveDataFromLocalStorage();
+          const savedTotal = Number(localStorage.getItem("yuumi_last_game_team_count")) || 0;
+          const currentTotal = gameflowMyTeam.value.length + gameflowTheirTeam.value.length;
+          if (
+            savedId === liveGameId &&
+            (currentTotal === 0 ||
+              gameflowTheirTeam.value.length === 0 ||
+              (savedTotal > 0 && (sessionTotal < savedTotal || currentTotal < savedTotal)))
+          ) {
+            restoreReserveDataFromLocalStorage();
+          }
         } catch {
           /* ignore */
         }
@@ -1529,14 +1532,8 @@ export function useGamePlayerData(
           rawMyTeam.some((p) => p.isHumanoid) ||
           rawTheirTeam.some((p) => p.isHumanoid);
         const myTeam = flagBots(rawMyTeam);
-        // theirTeam 的空占位（puuid/summonerId/championId 全空）直接丢弃，避免幽灵列
-        const theirTeam = flagBots(
-          rawTheirTeam.filter(
-            (p) => p.isHumanoid || p.puuid || p.summonerId || p.championId,
-          ),
-        );
-
-        const sig = teamSig(myTeam, session) + "|" + teamSig(theirTeam, session);
+        const theirTeamPlayers = flagBots(rawTheirTeam);
+        const sig = teamSig(myTeam, session) + "|" + teamSig(theirTeamPlayers, session);
         if (sig === lastSessionTeamSig) return;
         lastSessionTeamSig = sig;
 
@@ -1570,10 +1567,9 @@ export function useGamePlayerData(
           myTeam,
           champSelectTeamSnapshot.value,
         );
-        // 自定义会话敌方 cell 可能与我方共用编号空间：重映射到 5+ 稳定区间隔离
-        //（merge 内部仍用原始 cellId + puuid 匹配，快照输出后再重映射，保证跨帧稳定）
+        // 增量合并敌方快照：自定义会话映射到 5+ 稳定区间；常规会话保持原 cellId 空间
         const mergedTheir = mergeSnapshot(
-          theirTeam,
+          theirTeamPlayers,
           champSelectTheirTeamSnapshot.value,
         );
         champSelectTheirTeamSnapshot.value = isCustomSession
@@ -1616,7 +1612,7 @@ export function useGamePlayerData(
       }
     }
 
-    if (!isGameActive.value && appConfig.value?.Functions?.EnableReserveGameinfo) {
+    if (appConfig.value?.Functions?.EnableReserveGameinfo) {
       if (restoreReserveDataFromLocalStorage()) {
         if (Object.keys(premadeColorsMy.value).length === 0 && gameflowMyTeam.value.length > 0)
           premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
