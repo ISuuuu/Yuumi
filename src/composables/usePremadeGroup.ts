@@ -5,7 +5,6 @@ import {
   type PremadeGroup,
   type PremadeMember,
   type PremadePlayerLike,
-  type PremadeRow,
   type PremadeTarget,
 } from "../types/gameInfo";
 
@@ -159,53 +158,6 @@ export function usePremadeGroup(
     );
   });
 
-  // 是否有任何组队信息
-  const hasAnyPremadeInfo = computed(() => {
-    return (
-      myPremadeGroups.value.length > 0 || theirPremadeGroups.value.length > 0
-    );
-  });
-
-  /** 逐行交错配对我方与敌方组队（优先保证友方显示在第一行，人数 >= 4 独占一行） */
-  const premadeRows = computed<PremadeRow[]>(() => {
-    const my = [...myPremadeGroups.value];
-    const their = [...theirPremadeGroups.value];
-    const rows: PremadeRow[] = [];
-
-    let mIdx = 0;
-    let tIdx = 0;
-
-    while (mIdx < my.length || tIdx < their.length) {
-      const mGroup = my[mIdx];
-      const tGroup = their[tIdx];
-
-      if (mGroup) {
-        // 我方组队 >= 4 人时，我方独占一行
-        if (mGroup.members.length >= 4) {
-          rows.push({ ally: mGroup });
-          mIdx++;
-        } else {
-          // 我方组队 < 4 人，如果敌方组队也 < 4 人，则同行并排展示
-          if (tGroup && tGroup.members.length < 4) {
-            rows.push({ ally: mGroup, enemy: tGroup });
-            mIdx++;
-            tIdx++;
-          } else {
-            // 如果敌方无组队或敌方组队 >= 4 人，优先将我方安排在当前行
-            rows.push({ ally: mGroup });
-            mIdx++;
-          }
-        }
-      } else if (tGroup) {
-        // 我方组队处理完毕，仅剩敌方组队
-        rows.push({ enemy: tGroup });
-        tIdx++;
-      }
-    }
-
-    return rows;
-  });
-
   return {
     premadeColorsMy,
     premadeColorsTheir,
@@ -213,7 +165,5 @@ export function usePremadeGroup(
     getPremadeCardStyle,
     myPremadeGroups,
     theirPremadeGroups,
-    hasAnyPremadeInfo,
-    premadeRows,
   };
 }

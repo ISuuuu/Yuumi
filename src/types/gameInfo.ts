@@ -48,11 +48,6 @@ export interface PremadeGroup {
   members: PremadeMember[];
 }
 
-export interface PremadeRow {
-  ally?: PremadeGroup;
-  enemy?: PremadeGroup;
-}
-
 export interface PremadeColor {
   border: string;
   bg: string;
