@@ -195,7 +195,7 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
                 player.displayName ||
                 player.gameName ||
                 player.summonerName ||
-                `玩家${index + 1}`
+                $t("gameInfo.playerIndex", { index: index + 1 })
               }}
             </span>
             <span

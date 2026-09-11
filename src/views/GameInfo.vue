@@ -85,8 +85,12 @@ function getPlayerData(p: PremadePlayerLike, idx: number) {
     const byCell = playerData.value[p.cellId];
     if (byCell && isSameIdentity(p, byCell)) return byCell;
   }
-  const byIdx = playerData.value[idx];
-  if (byIdx && isSameIdentity(p, byIdx)) return byIdx;
+  // 仅在明确为我方队伍且未设置 cellId 时，才允许尝试索引兜底，防止 5 列敌方队伍（idx 0..4）误查我方槽位
+  const isAlly = (myTeam.value as PremadePlayerLike[]).includes(p);
+  if (isAlly && p.cellId === undefined) {
+    const byIdx = playerData.value[idx];
+    if (byIdx && isSameIdentity(p, byIdx)) return byIdx;
+  }
   // 若按真实 stableCellId 或 idx 索引均未直接命中（如 5 列切 Tab 或 10 列合并展示时）：
   // 尝试在 playerData 中按队员已知身份（puuid / summonerId / displayName）遍历反查
   for (const key of Object.keys(playerData.value)) {
@@ -136,16 +140,6 @@ const allPlayers = computed(() => {
 
 // in-flight 去重：挂载/连接/选人等多触发源同时到达时只发一次查询
 let savedPlayerMapInflight: Promise<void> | null = null;
-
-// 当前对局正在显示的玩家 puuid 集合（本局玩家不算"历史"）
-const displayedPuuids = computed(() => {
-  const set = new Set<string>();
-  for (const cellId in playerData.value) {
-    const puuid = playerData.value[cellId]?.info?.puuid;
-    if (puuid) set.add(puuid);
-  }
-  return set;
-});
 
 async function loadSavedPlayerMap() {
   const puuid = currentSummonerPuuid.value;
@@ -214,7 +208,7 @@ onMounted(() => {
             :active-tab="activeTab"
             :premade-card-style="getPremadeCardStyle(p, activeTab)"
             :saved-map="savedPlayerMap"
-            :displayed-puuids="displayedPuuids"
+            :self-puuid="currentSummonerPuuid"
             :index="i"
           />
           <div v-if="currentTeam.length === 0" class="tip">
@@ -621,9 +615,6 @@ onMounted(() => {
   flex-shrink: 0;
   min-height: 44px;
   box-sizing: border-box;
-}
-.toolbar-placeholder {
-  flex: 1;
 }
 
 /* 10 列视图阵营指示与组队芯片 */

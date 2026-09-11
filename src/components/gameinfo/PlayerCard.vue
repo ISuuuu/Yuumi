@@ -20,7 +20,7 @@ const props = defineProps<{
   activeTab: "my" | "their";
   premadeCardStyle: Record<string, string>;
   savedMap?: Record<string, SavedPlayerMarker>;
-  displayedPuuids?: Set<string>;
+  selfPuuid?: string;
   index?: number;
 }>();
 
@@ -37,12 +37,12 @@ const resolvedChampId = computed(() => {
   return 0;
 });
 
-// 该玩家是否为"保存的玩家"（曾同局），取 tag 与相遇次数；
-// 本局正在显示的玩家不算"历史"，不展示徽章
+// 该玩家是否为"保存的玩家"（曾同局/打了标签），取 tag 与相遇次数；
+// 当前登录召唤师自身不展示曾同局徽章
 const savedInfo = computed(() => {
   const puuid = props.playerData?.info?.puuid;
   if (!puuid || !props.savedMap) return undefined;
-  if (props.displayedPuuids?.has(puuid)) return undefined;
+  if (props.selfPuuid && puuid === props.selfPuuid) return undefined;
   return props.savedMap[puuid];
 });
 

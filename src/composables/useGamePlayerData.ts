@@ -476,6 +476,9 @@ export function useGamePlayerData(
   ) {
     if (!summonerId && !playerPuuid && !fallbackPlayer) return;
 
+    // 防止 cellId 误传为 summonerId（如 0..9 的 cellId）
+    const realSummonerId = summonerId && summonerId !== cellId ? summonerId : 0;
+
     // 身份优先查找：puuid → summonerId → cellId。cell 槽在选人/对局切换或顺序变化时
     // 可能残留异队旧数据，身份键优先才能命中同一玩家的已加载项，避免误杀重拉
     const candidates = [
@@ -483,7 +486,7 @@ export function useGamePlayerData(
       summonerId ? playerData.value[summonerId] : undefined,
       playerData.value[cellId],
     ];
-    const incoming = { puuid: playerPuuid, summonerId, cellId };
+    const incoming = { puuid: playerPuuid, summonerId: realSummonerId, cellId };
     const reusable = candidates.find((e) => {
       // 仅已加载项可复用（loading 占位不可复用，必须走真实拉取）
       if (!e?.info || e.loading) return false;
@@ -491,12 +494,12 @@ export function useGamePlayerData(
       const ePuuid = (e.info.puuid || "").trim();
       const eSid = e.info.summonerId || 0;
       if (incoming.puuid && !ePuuid) return false;
-      if (incoming.summonerId && incoming.summonerId !== cellId && (!eSid || eSid === cellId)) return false;
+      if (incoming.summonerId && (!eSid || eSid === cellId)) return false;
       return isIdentityCompatible(e, incoming);
     });
     if (reusable) {
       playerData.value[cellId] = reusable;
-      if (summonerId) playerData.value[summonerId] = reusable;
+      if (realSummonerId) playerData.value[realSummonerId] = reusable;
       if (playerPuuid) playerData.value[playerPuuid] = reusable;
       return;
     }
@@ -512,7 +515,7 @@ export function useGamePlayerData(
       Boolean(fallbackPlayer?.botChampionId) ||
       Boolean(fallbackPlayer?.displayName?.includes("电脑")) ||
       Boolean(fallbackPlayer?.summonerName?.includes("电脑")) ||
-      (!summonerId && !playerPuuid && Boolean(fallbackPlayer?.displayName || fallbackPlayer?.summonerName));
+      (!realSummonerId && !playerPuuid && Boolean(fallbackPlayer?.displayName || fallbackPlayer?.summonerName));
 
     if (isBotPlayer && fallbackPlayer) {
       const botName =
@@ -524,7 +527,7 @@ export function useGamePlayerData(
       const iconId = fallbackPlayer.profileIconId ?? 29;
       const botInfo: SummonerDisplay = {
         accountId: 0,
-        summonerId: summonerId || 0,
+        summonerId: realSummonerId || 0,
         puuid: playerPuuid || "",
         displayName: botName,
         gameName: botName,
@@ -545,7 +548,7 @@ export function useGamePlayerData(
         championId: fallbackPlayer.championId || fallbackPlayer.botChampionId || 0,
       };
       playerData.value[cellId] = botDataObj;
-      if (summonerId && summonerId !== cellId) playerData.value[summonerId] = botDataObj;
+      if (realSummonerId) playerData.value[realSummonerId] = botDataObj;
       if (playerPuuid) playerData.value[playerPuuid] = botDataObj;
       debouncedSavePlayerData();
       return;
@@ -571,10 +574,10 @@ export function useGamePlayerData(
           info = resp.data;
         }
       }
-      if (!info && summonerId) {
+      if (!info && realSummonerId) {
         const resp = await lcuRequest<SummonerDisplay>(
           "GET",
-          `/lol-summoner/v1/summoners/${summonerId}`,
+          `/lol-summoner/v1/summoners/${realSummonerId}`,
         );
         if (resp.success && resp.data) {
           info = resp.data;
@@ -602,13 +605,13 @@ export function useGamePlayerData(
       if (!info) {
         // 在选人阶段，只有当玩家明确为敌方队伍且尚未公开身份时，才属于敌方等待
         const isEnemy = store.champSelectSession?.theirTeam?.some(
-          (t) => (t.cellId !== undefined && t.cellId === cellId) || (t.summonerId && t.summonerId === summonerId),
+          (t) => (t.cellId !== undefined && t.cellId === cellId) || (t.summonerId && t.summonerId === realSummonerId),
         );
         const isChampSelectEnemyWaiting =
           store.gamePhase === "ChampSelect" &&
           isEnemy &&
           !playerPuuid &&
-          !summonerId &&
+          !realSummonerId &&
           !fallbackPlayer?.puuid &&
           !fallbackPlayer?.summonerId;
 
@@ -624,7 +627,7 @@ export function useGamePlayerData(
           const iconId = fallbackPlayer.profileIconId ?? 29;
           info = {
             accountId: 0,
-            summonerId: summonerId || 0,
+            summonerId: realSummonerId || 0,
             puuid: playerPuuid || fallbackPlayer.puuid || "",
             displayName: fallbackDisplayName,
             gameName: fallbackPlayer.gameName || fallbackDisplayName,
@@ -863,18 +866,18 @@ export function useGamePlayerData(
     const background = filterValidPlayers(isMyVisible ? their : my, isMyVisible);
 
     await runWithConcurrency(visible, 3, (p) => {
-      const cid = p.cellId ?? p.summonerId;
-      const sid = p.summonerId ?? p.cellId;
-      if (cid !== undefined && (sid !== undefined || p.puuid)) {
-        return loadPlayerData(cid, sid ?? 0, p.puuid, p);
+      const cid = p.cellId ?? p.summonerId ?? 0;
+      const sid = p.summonerId ?? 0;
+      if (cid !== undefined && (sid || p.puuid || p.displayName || p.summonerName)) {
+        return loadPlayerData(cid, sid, p.puuid, p);
       }
       return Promise.resolve();
     });
     void runWithConcurrency(background, 3, (p) => {
-      const cid = p.cellId ?? p.summonerId;
-      const sid = p.summonerId ?? p.cellId;
-      if (cid !== undefined && (sid !== undefined || p.puuid)) {
-        return loadPlayerData(cid, sid ?? 0, p.puuid, p);
+      const cid = p.cellId ?? p.summonerId ?? 0;
+      const sid = p.summonerId ?? 0;
+      if (cid !== undefined && (sid || p.puuid || p.displayName || p.summonerName)) {
+        return loadPlayerData(cid, sid, p.puuid, p);
       }
       return Promise.resolve();
     })
