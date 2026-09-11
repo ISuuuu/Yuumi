@@ -662,7 +662,19 @@
     "showAll": "全部战绩",
     "showTeam": "按队伍",
     "launchLolPrompt": "请先启动英雄联盟客户端",
-    "playerIndex": "玩家 {index}"
+    "playerIndex": "玩家 {index}",
+    "masteryLevel": "Lv.{level}",
+    "masteryPoints": "{points}分",
+    "masteryBadge": "英雄熟练度",
+    "masteryTooltip": "英雄熟练度: Lv.{level} ({points} 点数)\nLv.0 为未玩过，Lv.10+ 为深度专精",
+    "topChampion": "招牌",
+    "topChampionTitle": "招牌/绝活英雄 (熟练度排名前三且≥1万分，或累计≥10万分)",
+    "practicing": "练英雄",
+    "practicingTitle": "练英雄/新手状态 (熟练度≤1级或点数<5000，近期少用或初次尝试)",
+    "firstPlay": "初学",
+    "winStreak": "{count}连胜",
+    "lossStreak": "{count}连败",
+    "rankedGamesStats": "{games}场 {rate}%"
   },
   "career": {
     "summonerInfo": "召唤师信息",
@@ -672,6 +684,7 @@
     "kda": "KDA",
     "recentMatches": "近期战绩",
     "gamesCount": "{count} 场",
+    "games": "场",
     "level": "等级: {lvl}",
     "loading": "正在加载战绩数据...",
     "empty": "暂无历史战绩数据",

@@ -662,7 +662,19 @@
     "showAll": "All players",
     "showTeam": "By team",
     "launchLolPrompt": "Please launch the League of Legends client first",
-    "playerIndex": "Player {index}"
+    "playerIndex": "Player {index}",
+    "masteryLevel": "Lv.{level}",
+    "masteryPoints": "{points} pts",
+    "masteryBadge": "Champion Mastery",
+    "masteryTooltip": "Champion Mastery: Lv.{level} ({points} pts)\nLv.0: Unplayed, Lv.10+: High Mastery",
+    "topChampion": "Signature",
+    "topChampionTitle": "Signature Champion (Top 3 mastery & ≥10k pts, or ≥100k pts)",
+    "practicing": "Practicing",
+    "practicingTitle": "Practicing / Beginner (Mastery ≤Lv.1 or <5k pts)",
+    "firstPlay": "Novice",
+    "winStreak": "{count}W Streak",
+    "lossStreak": "{count}L Streak",
+    "rankedGamesStats": "{games}G {rate}%"
   },
   "career": {
     "summonerInfo": "Summoner Info",
@@ -672,6 +684,7 @@
     "kda": "KDA",
     "recentMatches": "Recent Matches",
     "gamesCount": "{count} Games",
+    "games": " games",
     "level": "Lvl: {lvl}",
     "loading": "Loading career data...",
     "empty": "No match history available",

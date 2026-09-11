@@ -67,7 +67,6 @@ declare module 'vue' {
     PersonalizationSection: typeof import('./components/settings/PersonalizationSection.vue')['default']
     PlayerCard: typeof import('./components/gameinfo/PlayerCard.vue')['default']
     PlayerMatchColumn: typeof import('./components/gameinfo/PlayerMatchColumn.vue')['default']
-    PremadeLegend: typeof import('./components/gameinfo/PremadeLegend.vue')['default']
     ProfileBackgroundCard: typeof import('./components/tools/quickactions/ProfileBackgroundCard.vue')['default']
     RankSpoofCard: typeof import('./components/tools/quickactions/RankSpoofCard.vue')['default']
     RestartClientCard: typeof import('./components/tools/quickactions/RestartClientCard.vue')['default']

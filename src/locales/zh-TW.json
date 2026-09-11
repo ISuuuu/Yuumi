@@ -662,7 +662,19 @@
     "showAll": "全部戰績",
     "showTeam": "按隊伍",
     "launchLolPrompt": "請先啟動英雄聯盟客戶端",
-    "playerIndex": "玩家 {index}"
+    "playerIndex": "玩家 {index}",
+    "masteryLevel": "Lv.{level}",
+    "masteryPoints": "{points}分",
+    "masteryBadge": "英雄熟練度",
+    "masteryTooltip": "英雄熟練度: Lv.{level} ({points} 點數)\nLv.0 為未玩過，Lv.10+ 為深度專精",
+    "topChampion": "招牌",
+    "topChampionTitle": "招牌/絕活英雄 (熟練度排名前三且≥1萬分，或累計≥10萬分)",
+    "practicing": "練英雄",
+    "practicingTitle": "練英雄/新手狀態 (熟練度≤1級或點數<5000，近期少用或初次嘗試)",
+    "firstPlay": "初學",
+    "winStreak": "{count}連勝",
+    "lossStreak": "{count}連敗",
+    "rankedGamesStats": "{games}場 {rate}%"
   },
   "career": {
     "summonerInfo": "召喚師信息",
@@ -672,6 +684,7 @@
     "kda": "KDA",
     "recentMatches": "近期戰績",
     "gamesCount": "{count} 場",
+    "games": "場",
     "level": "等級: {lvl}",
     "loading": "正在加載戰績數據...",
     "empty": "暫無歷史戰績數據",

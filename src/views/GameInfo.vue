@@ -478,7 +478,7 @@ onMounted(() => {
 
         <div
           class="columns-container"
-          :class="{ 'columns-ten': viewMode === 'ten' && isTheirTeamRevealed }"
+          :class="{ 'columns-ten': viewMode === 'ten' }"
         >
           <PlayerMatchColumn
             v-for="(p, i) in (viewMode === 'ten' ? allPlayers : currentTeam)"
@@ -487,7 +487,7 @@ onMounted(() => {
             :player-data="getPlayerData(p, i)"
             :index="i"
             :app-config="appConfig"
-            :compact="viewMode === 'ten' && isTheirTeamRevealed"
+            :compact="viewMode === 'ten'"
             :side="viewMode === 'ten' ? (i < myTeam.length ? 'ally' : 'enemy') : (activeTab === 'my' ? 'ally' : 'enemy')"
             :premade-idx="getPremadeIdx(p, viewMode === 'ten' ? (i < myTeam.length ? 'my' : 'their') : activeTab)"
             :class="{ 'team-separator': viewMode === 'ten' && isTheirTeamRevealed && i === myTeam.length }"
@@ -531,7 +531,7 @@ onMounted(() => {
 /* 左右分栏 */
 .game-layout {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 260px 1fr;
   gap: 16px;
   flex: 1;
   min-height: 0;

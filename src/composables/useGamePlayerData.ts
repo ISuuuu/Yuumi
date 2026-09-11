@@ -14,6 +14,8 @@ import {
 import type {
   PlayerData,
   PremadePlayerLike,
+  ChampionMasteryItem,
+  StreakInfo,
 } from "../types/gameInfo";
 import { resolvePlayerChampionId } from "../types/gameInfo";
 import type {
@@ -48,6 +50,29 @@ function setRankToCache(puuid: string, data: RankedStats) {
     if (firstKey) rankCache.delete(firstKey);
   }
   rankCache.set(puuid, { data, timestamp: Date.now() });
+}
+
+// ── 英雄熟练度数据缓存（puuid → { data, timestamp }）
+const masteryCache = new Map<string, { data: ChampionMasteryItem[]; timestamp: number }>();
+const MASTERY_CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+const MASTERY_CACHE_MAX_SIZE = 100;
+
+function getMasteryFromCache(puuid: string) {
+  const cached = masteryCache.get(puuid);
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp >= MASTERY_CACHE_TTL) {
+    masteryCache.delete(puuid);
+    return null;
+  }
+  return cached.data;
+}
+
+function setMasteryToCache(puuid: string, data: ChampionMasteryItem[]) {
+  if (masteryCache.size >= MASTERY_CACHE_MAX_SIZE) {
+    const firstKey = masteryCache.keys().next().value;
+    if (firstKey) masteryCache.delete(firstKey);
+  }
+  masteryCache.set(puuid, { data, timestamp: Date.now() });
 }
 
 // ── 无身份占位槽的前英雄 ID 继承：仅无身份占位可继承，实名异队数据严禁串用
@@ -661,7 +686,7 @@ export function useGamePlayerData(
       const filterEnabled = appConfig.value?.Functions?.GameInfoFilter ?? false;
       const maxMatches = filterEnabled ? 50 : 10;
 
-      const [rawMatches, rankedResp] = await Promise.all([
+      const [rawMatches, rankedResp, masteryData] = await Promise.all([
         safeInfo.puuid
           ? fetchMatchHistory(safeInfo.puuid, 0, maxMatches)
               .then((res) => {
@@ -700,6 +725,62 @@ export function useGamePlayerData(
                 .catch(() => ({ success: false as const }));
             })()
           : Promise.resolve({ success: false as const }),
+        safeInfo.puuid
+          ? (async () => {
+              const cached = getMasteryFromCache(safeInfo.puuid);
+              if (cached && cached.length > 0) {
+                return cached;
+              }
+              const isMe =
+                summonerId === currentSummonerId.value ||
+                (!!safeInfo.puuid && safeInfo.puuid === currentSummonerPuuid.value);
+
+              // 优先按 puuid 查询
+              let mResp = await lcuRequest<any>(
+                "GET",
+                `/lol-champion-mastery/v1/${safeInfo.puuid}/champion-mastery`,
+              );
+
+              // 若是当前玩家且按 puuid 失败，降级到 local-player
+              if ((!mResp.success || !mResp.data) && isMe) {
+                mResp = await lcuRequest<any>(
+                  "GET",
+                  "/lol-champion-mastery/v1/local-player/champion-mastery",
+                );
+              }
+
+              // 如果仍未成功，尝试按 summonerId 查询
+              if ((!mResp.success || !mResp.data) && summonerId) {
+                mResp = await lcuRequest<any>(
+                  "GET",
+                  `/lol-champion-mastery/v1/summoners/${summonerId}/champion-mastery`,
+                );
+              }
+
+              console.log(`[Mastery] 玩家 ${safeInfo.gameName || safeInfo.displayName} (puuid: ${safeInfo.puuid}, isMe: ${isMe}) 熟练度接口返回:`, {
+                success: mResp.success,
+                count: Array.isArray(mResp.data) ? mResp.data.length : 0,
+                sample: Array.isArray(mResp.data) && mResp.data.length > 0 ? mResp.data[0] : mResp.data,
+                error: mResp.error,
+              });
+
+              if (mResp.success && Array.isArray(mResp.data)) {
+                // 统一数据格式兼容（championId, championLevel, championPoints）
+                const normalized: ChampionMasteryItem[] = mResp.data.map((item: any) => ({
+                  championId: Number(item.championId ?? item.champion_id ?? 0),
+                  championLevel: Number(item.championLevel ?? item.masteryLevel ?? item.level ?? 0),
+                  championPoints: Number(item.championPoints ?? item.points ?? item.score ?? 0),
+                  highestGrade: item.highestGrade ?? item.highest_grade,
+                  championPointsSinceLastLevel: item.championPointsSinceLastLevel,
+                  championPointsUntilNextLevel: item.championPointsUntilNextLevel,
+                  tokensEarned: item.tokensEarned,
+                }));
+                setMasteryToCache(safeInfo.puuid, normalized);
+                return normalized;
+              }
+              return [] as ChampionMasteryItem[];
+            })()
+          : Promise.resolve([] as ChampionMasteryItem[]),
       ]);
 
       const isCurrentPlayer =
@@ -768,6 +849,28 @@ export function useGamePlayerData(
         avgKda = (totalKills + totalAssists) / deathsForCalc;
       }
 
+      let streak: StreakInfo | null = null;
+      if (matches && matches.length > 0) {
+        const validStreakMatches = matches.filter((m) => !m.remake);
+        if (validStreakMatches.length > 0) {
+          const firstWin = validStreakMatches[0].win;
+          let count = 0;
+          for (const m of validStreakMatches) {
+            if (m.win === firstWin) {
+              count++;
+            } else {
+              break;
+            }
+          }
+          if (count >= 2) {
+            streak = {
+              type: firstWin ? "win" : "loss",
+              count,
+            };
+          }
+        }
+      }
+
       let fateFlag: "ally" | "enemy" | null = null;
       let recentlyChampionName = "";
       if (currentSummonerId.value && matches.length > 0 && !isCurrentPlayer && safeInfo.puuid) {
@@ -800,6 +903,8 @@ export function useGamePlayerData(
         lossesCount,
         fateFlag,
         recentlyChampionName,
+        masteries: masteryData,
+        streak,
       };
       playerData.value[cellId] = dataObj;
       if (summonerId && summonerId !== cellId) {

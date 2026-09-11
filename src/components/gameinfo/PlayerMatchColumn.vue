@@ -6,6 +6,7 @@ import {
   PREMADE_COLORS,
   getChampionIcon,
   resolvePlayerChampionId,
+  getPlayerMasteryDetail,
   type PlayerData,
   type PremadePlayerLike,
 } from "../../types/gameInfo";
@@ -47,6 +48,43 @@ const currentChampId = computed(() => {
     return props.playerData.championId;
   }
   return 0;
+});
+
+const masteryDetail = computed(() => {
+  return getPlayerMasteryDetail(props.playerData, currentChampId.value);
+});
+
+const TIER_SHORT_MAP: Record<string, string> = {
+  IRON: "铁",
+  BRONZE: "铜",
+  SILVER: "银",
+  GOLD: "金",
+  PLATINUM: "铂",
+  EMERALD: "翡",
+  DIAMOND: "钻",
+  MASTER: "大师",
+  GRANDMASTER: "宗师",
+  CHALLENGER: "王者",
+};
+
+const rankSummary = computed(() => {
+  const solo = props.playerData?.ranked?.solo;
+  if (solo && solo.tier && solo.tier !== "NONE") {
+    const total = (solo.wins || 0) + (solo.losses || 0);
+    const wr = total > 0 ? Math.round(((solo.wins || 0) / total) * 100) : 0;
+    const tName = TIER_SHORT_MAP[solo.tier] || solo.tier.slice(0, 2);
+    const rName = solo.rank && solo.rank !== "NA" ? solo.rank : "";
+    return total > 0 ? `${tName}${rName} ${wr}%` : `${tName}${rName}`;
+  }
+  const flex = props.playerData?.ranked?.flex;
+  if (flex && flex.tier && flex.tier !== "NONE") {
+    const total = (flex.wins || 0) + (flex.losses || 0);
+    const wr = total > 0 ? Math.round(((flex.wins || 0) / total) * 100) : 0;
+    const tName = TIER_SHORT_MAP[flex.tier] || flex.tier.slice(0, 2);
+    const rName = flex.rank && flex.rank !== "NA" ? flex.rank : "";
+    return total > 0 ? `${tName}${rName} ${wr}%` : `${tName}${rName}`;
+  }
+  return "";
 });
 
 // 头像左侧胜率竖条：>50 绿、<50 红；50% 时高度为 0，100% 胜率或 0% 胜率（100%败率）时完全填充
@@ -148,38 +186,87 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
       "
     >
       <div class="col-header-top">
-        <!-- 头像左侧胜率竖条（全部战绩十列视图） -->
-        <span
-          v-if="compact && wrBar"
-          :class="['wr-bar', wrBar.clazz]"
-          :title="`${$t('career.winRate')} ${playerData?.winRate}%`"
-        >
-          <span
-            class="wr-bar-fill"
-            :style="{ height: `${wrBar.fillHeight}%`, opacity: wrBar.opacity }"
-          ></span>
-        </span>
-        <!-- 选人阶段/对局中英雄头像，兜底召唤师头像 -->
-        <div class="col-champ-wrapper">
-          <LcuImage
-            v-if="currentChampId > 0"
-            :src="getChampionIcon(currentChampId)"
-            class="col-champ-avatar"
-            alt="champ"
-          />
-          <LcuImage
-            v-else-if="playerData?.info?.profileIconUrl"
-            :src="playerData.info.profileIconUrl"
-            class="col-champ-avatar"
-            alt="summoner"
-          />
-          <LcuImage
-            v-else-if="player.profileIconId"
-            :src="`/lol-game-data/assets/v1/profile-icons/${player.profileIconId}.jpg`"
-            class="col-champ-avatar"
-            alt="summoner"
-          />
-          <div v-else class="col-champ-avatar col-champ-avatar-empty">?</div>
+        <!-- 头像列（含头像、胜率竖条、全部战绩下的头像下方胜负统计） -->
+        <div class="col-avatar-col">
+          <div class="col-avatar-row">
+            <!-- 头像左侧胜率竖条（全部战绩十列视图） -->
+            <span
+              v-if="compact && wrBar"
+              :class="['wr-bar', wrBar.clazz]"
+              :title="`${$t('career.winRate')} ${playerData?.winRate}%`"
+            >
+              <span
+                class="wr-bar-fill"
+                :style="{ height: `${wrBar.fillHeight}%`, opacity: wrBar.opacity }"
+              ></span>
+            </span>
+            <!-- 选人阶段/对局中英雄头像，兜底召唤师头像 -->
+            <div
+              class="col-champ-wrapper"
+              :class="{ 'top-champ-ring': compact && masteryDetail?.isTopChampion }"
+            >
+              <LcuImage
+                v-if="currentChampId > 0"
+                :src="getChampionIcon(currentChampId)"
+                class="col-champ-avatar"
+                alt="champ"
+              />
+              <LcuImage
+                v-else-if="playerData?.info?.profileIconUrl"
+                :src="playerData.info.profileIconUrl"
+                class="col-champ-avatar"
+                alt="summoner"
+              />
+              <LcuImage
+                v-else-if="player.profileIconId"
+                :src="`/lol-game-data/assets/v1/profile-icons/${player.profileIconId}.jpg`"
+                class="col-champ-avatar"
+                alt="summoner"
+              />
+              <div v-else class="col-champ-avatar col-champ-avatar-empty">?</div>
+
+              <!-- 招牌角标 / 练英雄微角标（仅全部战绩十列视图下显示） -->
+              <template v-if="compact">
+                <span
+                  v-if="masteryDetail?.isTopChampion"
+                  class="col-champ-star"
+                  :title="$t('gameInfo.topChampion')"
+                >
+                  <svg class="col-star-svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                  </svg>
+                </span>
+                <span
+                  v-else-if="masteryDetail?.isPracticing"
+                  class="col-champ-practice"
+                  :title="$t('gameInfo.practicing')"
+                >
+                  练
+                </span>
+              </template>
+            </div>
+          </div>
+
+          <!-- 全部战绩十列视图：几胜几负移到头像下方 -->
+          <div
+            v-if="compact"
+            class="col-avatar-summary"
+          >
+            <span
+              v-if="playerData?.matchHistoryHidden"
+              class="summary-hidden"
+              :title="$t('gameInfo.matchHistoryHidden')"
+            >
+              {{ $t("gameInfo.matchHistoryHidden") }}
+            </span>
+            <span
+              v-else-if="playerData?.winCount !== undefined"
+              class="summary-counts"
+            >
+              <span class="summary-wins">{{ playerData.winCount }}{{ $t("career.win") }}</span>
+              <span class="summary-losses">{{ playerData.lossesCount }}{{ $t("career.lose") }}</span>
+            </span>
+          </div>
         </div>
 
         <div class="col-header-info">
@@ -219,23 +306,42 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
             </span>
           </div>
 
-          <!-- 战绩隐藏标识 -->
-          <div
-            v-if="playerData?.matchHistoryHidden"
-            class="col-summary"
-          >
-            <span class="summary-hidden">{{ $t("gameInfo.matchHistoryHidden") }}</span>
-          </div>
-          <!-- 几胜几负统计（不显示胜率） -->
-          <div
-            v-else-if="playerData?.winCount !== undefined"
-            class="col-summary"
-          >
-            <span class="summary-counts">
-              <span class="summary-wins">{{ playerData.winCount }}{{ $t("career.win") }}</span>
-              <span class="summary-losses">{{ playerData.lossesCount }}{{ $t("career.lose") }}</span>
-            </span>
-          </div>
+          <!-- 全部战绩(10列)模式下：纯粹展示熟练度等级与点数 -->
+          <template v-if="compact">
+            <div
+              v-if="masteryDetail"
+              class="col-mastery-row"
+              :class="{ 'is-top': masteryDetail.isTopChampion }"
+              :title="$t('gameInfo.masteryTooltip', { level: masteryDetail.level, points: masteryDetail.points.toLocaleString() })"
+            >
+              <span class="col-mastery-badge">Lv.{{ masteryDetail.level }}</span>
+              <span class="col-mastery-pts">{{ masteryDetail.formattedPoints }}</span>
+            </div>
+          </template>
+
+          <!-- 按队伍(5列)模式：保持原有结构 -->
+          <template v-else>
+            <!-- 战绩隐藏标识 -->
+            <div
+              v-if="playerData?.matchHistoryHidden"
+              class="col-summary"
+            >
+              <span class="summary-hidden">{{ $t("gameInfo.matchHistoryHidden") }}</span>
+            </div>
+            <!-- 几胜几负统计 + 排位段位/胜率概览 -->
+            <div
+              v-else-if="playerData?.winCount !== undefined"
+              class="col-summary"
+            >
+              <span class="summary-counts">
+                <span class="summary-wins">{{ playerData.winCount }}{{ $t("career.win") }}</span>
+                <span class="summary-losses">{{ playerData.lossesCount }}{{ $t("career.lose") }}</span>
+              </span>
+              <span v-if="rankSummary" class="col-rank-tag" :title="rankSummary">
+                {{ rankSummary }}
+              </span>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -391,11 +497,29 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   width: 100%;
   min-width: 0;
 }
+.col-avatar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+.col-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  position: relative;
+}
 .col-champ-wrapper {
   position: relative;
   width: 28px;
   height: 28px;
   flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+}
+.col-champ-wrapper.top-champ-ring .col-champ-avatar {
+  border-color: rgba(245, 158, 11, 0.7);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.35);
 }
 .col-champ-avatar {
   width: 28px;
@@ -405,6 +529,7 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   border: 1.5px solid rgba(255, 255, 255, 0.4);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
   display: block;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .col-champ-avatar-empty {
   display: flex;
@@ -420,6 +545,43 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   border: 1.5px solid var(--border-color);
   box-sizing: border-box;
 }
+.col-champ-star {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #f59e0b;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  z-index: 2;
+}
+.col-star-svg {
+  width: 7.5px;
+  height: 7.5px;
+}
+.col-champ-practice {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #f43f5e;
+  color: #fff;
+  font-size: 0.52rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  z-index: 2;
+  line-height: 1;
+}
 
 .col-header-info {
   display: flex;
@@ -432,7 +594,7 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 .name-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
   width: 100%;
 }
@@ -457,6 +619,75 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   background: rgba(191, 36, 42, 0.15);
   color: #f87171;
   border: 1px solid rgba(248, 113, 113, 0.4);
+}
+
+.col-streak-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.52rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 2.5px;
+  flex-shrink: 0;
+}
+.col-streak-badge.win {
+  background: rgba(249, 115, 22, 0.14);
+  color: #ea580c;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+.col-streak-badge.loss {
+  background: rgba(59, 130, 246, 0.14);
+  color: #2563eb;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+.col-streak-svg {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+.col-mastery-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.58rem;
+  line-height: 1;
+  margin: 1px 0;
+}
+.col-mastery-badge {
+  font-weight: 800;
+  color: var(--text-color);
+  background: var(--hover-bg-strong);
+  border: 1px solid var(--border-color);
+  padding: 0 3px;
+  border-radius: 2px;
+}
+.col-mastery-row.is-top .col-mastery-badge {
+  color: #d97706;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+.col-mastery-pts {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.col-role-badge {
+  font-size: 0.52rem;
+  font-weight: 700;
+  padding: 0 3px;
+  border-radius: 2px;
+}
+.col-role-badge.top {
+  background: rgba(234, 179, 8, 0.15);
+  color: #b45309;
+  border: 1px solid rgba(234, 179, 8, 0.35);
+}
+.col-role-badge.practice {
+  background: rgba(100, 116, 139, 0.12);
+  color: var(--text-muted);
+  border: 1px solid rgba(100, 116, 139, 0.25);
 }
 
 .col-name {
@@ -493,6 +724,16 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 .summary-losses {
   color: var(--loss-color);
   font-weight: 700;
+}
+.col-rank-tag {
+  color: var(--text-muted);
+  font-size: 0.58rem;
+  font-weight: 600;
+  margin-left: 2px;
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .summary-hidden {
   color: var(--text-dimmed);
@@ -763,29 +1004,104 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   border-top-width: 3px;
 }
 .compact .col-header {
-  height: 42px;
-  padding: 4px 6px;
+  height: 50px;
+  padding: 3px 4px;
+}
+.compact .col-header-top {
+  gap: 4px;
+}
+.compact .col-avatar-row {
+  height: 26px;
+  gap: 2.5px;
+}
+.compact .wr-bar {
+  width: 3px;
 }
 .compact .col-champ-wrapper {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
 }
 .compact .col-champ-avatar {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 5px;
 }
 .compact .col-champ-avatar-empty {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 5px;
   font-size: 0.65rem;
+}
+.compact .col-avatar-summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-top: 2px;
+  line-height: 1;
+}
+.compact .col-avatar-summary .summary-counts {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5px;
+  font-size: 0.54rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+.compact .col-avatar-summary .summary-wins {
+  color: var(--win-color);
+  font-weight: 700;
+}
+.compact .col-avatar-summary .summary-losses {
+  color: var(--loss-color);
+  font-weight: 700;
+}
+.compact .col-avatar-summary .summary-hidden {
+  font-size: 0.48rem;
+  padding: 0.5px 2px;
+  white-space: nowrap;
+  max-width: 36px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .compact .col-name {
   font-size: 0.72rem;
 }
+.compact .col-streak-badge {
+  font-size: 0.52rem;
+  padding: 0.5px 3px;
+  gap: 1.5px;
+}
+.compact .col-streak-svg {
+  width: 7.5px;
+  height: 7.5px;
+}
+.compact .col-mastery-row {
+  display: flex;
+  align-items: center;
+  margin: 1px 0 0;
+  gap: 2.5px;
+  font-size: 0.62rem;
+  line-height: 1;
+  min-width: 0;
+}
+.compact .col-mastery-badge {
+  padding: 0.5px 2.5px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  border-radius: 2px;
+  flex-shrink: 0;
+  letter-spacing: -0.2px;
+}
+.compact .col-mastery-pts {
+  font-size: 0.6rem;
+  font-weight: 600;
+  flex-shrink: 0;
+  letter-spacing: -0.2px;
+}
 .compact .col-summary {
-  font-size: 0.54rem;
+  font-size: 0.52rem;
 }
 .compact .summary-counts {
   gap: 3px;

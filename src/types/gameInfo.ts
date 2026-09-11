@@ -14,6 +14,23 @@ export interface PlayerData {
   lossesCount?: number;
   fateFlag?: "ally" | "enemy" | null;
   recentlyChampionName?: string;
+  masteries?: ChampionMasteryItem[];
+  streak?: StreakInfo | null;
+}
+
+export interface ChampionMasteryItem {
+  championId: number;
+  championLevel: number;
+  championPoints: number;
+  highestGrade?: string;
+  championPointsSinceLastLevel?: number;
+  championPointsUntilNextLevel?: number;
+  tokensEarned?: number;
+}
+
+export interface StreakInfo {
+  type: "win" | "loss";
+  count: number;
 }
 
 export interface PremadeMember {
@@ -85,10 +102,17 @@ export function resolvePlayerChampionId(
   if (player.championPickIntent && player.championPickIntent > 0) return player.championPickIntent;
 
   // 从 actions 中查找该玩家的 pick（cellId 直接用原值查，仅适用于 session 原始 cellId 0..N）
+  // 注意：未轮到该玩家或该动作未完成(completed: false)且不在进行中时，
+  // session actions 预填的 championId 可能残留默认值或上一次意图，只有 completed 或 isInProgress 才代表真实选择
   if (session?.actions && player.cellId !== undefined) {
     for (const group of session.actions) {
       for (const act of group) {
-        if (act.actorCellId === player.cellId && act.type === "pick" && act.championId > 0) {
+        if (
+          act.actorCellId === player.cellId &&
+          act.type === "pick" &&
+          act.championId > 0 &&
+          (act.completed || act.isInProgress)
+        ) {
           return act.championId;
         }
       }
@@ -141,3 +165,60 @@ export const PREMADE_COLORS: PremadeColor[] = [
     dot: "#a855f7",
   }, // 幽紫 / 水晶
 ];
+
+export function formatMasteryPoints(points: number): string {
+  if (points >= 1000000) {
+    return `${(points / 1000000).toFixed(1)}M`;
+  }
+  if (points >= 10000) {
+    return `${(points / 10000).toFixed(1)}w`;
+  }
+  if (points >= 1000) {
+    return `${(points / 1000).toFixed(1)}k`;
+  }
+  return points.toString();
+}
+
+export interface ChampionMasteryDetail {
+  level: number;
+  points: number;
+  formattedPoints: string;
+  highestGrade?: string;
+  isTopChampion: boolean;
+  isPracticing: boolean;
+  topChampions: ChampionMasteryItem[];
+}
+
+export function getPlayerMasteryDetail(
+  playerData?: PlayerData,
+  targetChampId?: number,
+): ChampionMasteryDetail | null {
+  if (!playerData?.masteries || !Array.isArray(playerData.masteries) || !targetChampId || targetChampId <= 0) {
+    return null;
+  }
+  // 如果当前玩家的数据还未返回或列表为空，不展示假的 0 级
+  if (playerData.masteries.length === 0) {
+    return null;
+  }
+
+  const topChampions = playerData.masteries.slice(0, 3);
+  const current = playerData.masteries.find((m) => Number(m.championId) === Number(targetChampId));
+  
+  // 如果该玩家的熟练度列表中根本没有该英雄，说明该英雄完全没碰过（0场 0点）
+  const level = Number(current?.championLevel ?? 0);
+  const points = Number(current?.championPoints ?? 0);
+  const isTopChampion =
+    (topChampions.some((t) => Number(t.championId) === Number(targetChampId)) && points >= 10000) ||
+    points >= 100000;
+  const isPracticing = !isTopChampion && (level <= 1 || points < 5000);
+
+  return {
+    level,
+    points,
+    formattedPoints: formatMasteryPoints(points),
+    highestGrade: current?.highestGrade,
+    isTopChampion,
+    isPracticing,
+    topChampions,
+  };
+}
