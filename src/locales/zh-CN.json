@@ -701,6 +701,7 @@
     "prevSeason": "上赛季结算",
     "type": "类型",
     "refresh": "刷新",
+    "backToMe": "返回我的生涯",
     "historyBtn": "历史战绩",
     "recentGamesTitle": "近期对局（最近 {count} 场）",
     "recentTeammates": "最近队友",

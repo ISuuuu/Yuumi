@@ -12,6 +12,9 @@ export function usePlayerSearch() {
   const navigateSearchPayload = inject<
     Ref<{ name: string; gameId: number | null } | null>
   >("navigateSearchPayload");
+  const navigateCareerPayload = inject<
+    Ref<{ puuid: string } | null>
+  >("navigateCareerPayload");
   const navigateTo = inject<(page: string) => void>("navigateTo");
 
   function getPlayerSearchName(
@@ -49,8 +52,28 @@ export function usePlayerSearch() {
     }
   }
 
+  function handleCareerClick(
+    e: MouseEvent,
+    player: PlayerNameLike & { puuid?: string },
+    playerData?: PlayerData,
+  ) {
+    e.stopPropagation();
+    const puuid = playerData?.info?.puuid || player?.puuid;
+    if (puuid && puuid !== "00000000-0000-0000-0000-000000000000") {
+      if (navigateCareerPayload) {
+        navigateCareerPayload.value = { puuid };
+      }
+      if (navigateTo) {
+        navigateTo("career");
+      }
+      return;
+    }
+    handleNameClick(e, player, playerData);
+  }
+
   return {
     getPlayerSearchName,
     handleNameClick,
+    handleCareerClick,
   };
 }

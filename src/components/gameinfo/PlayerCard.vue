@@ -26,7 +26,7 @@ const props = defineProps<{
 
 const store = useLcuStore();
 const { t } = useI18n();
-const { getPlayerSearchName, handleNameClick } = usePlayerSearch();
+const { getPlayerSearchName, handleCareerClick } = usePlayerSearch();
 
 const resolvedChampId = computed(() => {
   const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
@@ -194,8 +194,8 @@ const soloStats = computed(() => {
         <div class="pc-row pc-name-row">
           <span
             class="name-text"
-            :title="getPlayerSearchName(player, playerData) ? `${$t('nav.search')} ${getPlayerSearchName(player, playerData)}` : undefined"
-            @click="(e) => handleNameClick(e, player, playerData)"
+            :title="getPlayerSearchName(player, playerData) ? `${$t('nav.career')} ${getPlayerSearchName(player, playerData)}` : undefined"
+            @click="(e) => handleCareerClick(e, player, playerData)"
           >{{
             playerData?.info?.gameName ||
             playerData?.info?.displayName ||
@@ -257,7 +257,7 @@ const soloStats = computed(() => {
         <!-- 第 2 行：单双排位段位（包含品质色高亮 + LP + 全赛季战绩） -->
         <div class="pc-row pc-rank-row">
           <template v-if="soloTier && soloTier !== 'NONE'">
-            <span :class="['tier-text', soloTier]">{{ soloTierName }} {{ soloDivision }}</span>
+            <span :class="['tier-text', soloTier]">{{ soloTierName }}{{ soloDivision ? ' ' + soloDivision : '' }}</span>
             <span v-if="soloLp" class="tier-lp">{{ soloLp }}</span>
             <span v-if="soloStats" class="rank-winrate-stats">
               <span class="stats-divider">·</span>

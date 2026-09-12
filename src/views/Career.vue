@@ -13,14 +13,16 @@ const currentTab = ref("matches");
 
 const {
   summoner, matches, recentMatches, rankedQueues, loading, copied,
-  loadSummoner, loadCareerData, loadRankedStats, refreshSummonerOnly,
+  isViewingOther, loadSummoner, loadCareerSummoner, backToMyCareer,
+  loadCareerData, loadRankedStats, refreshSummonerOnly,
   copyRiotId, clearCache, fetchMatchHistoryWithFallback,
 } = useMatchHistory();
 
 // 向子组件 provide 共享的 composable 状态（避免重复实例化）
 provide("matchHistoryState", {
   summoner, matches, recentMatches, rankedQueues, loading,
-  loadSummoner, loadCareerData, loadRankedStats,
+  isViewingOther, loadSummoner, loadCareerSummoner, backToMyCareer,
+  loadCareerData, loadRankedStats,
   clearCache, fetchMatchHistoryWithFallback,
 });
 
@@ -56,7 +58,29 @@ watch(
 const navigateSearchPayload = inject<
   Ref<{ name: string; gameId: number | null } | null>
 >("navigateSearchPayload")!;
+const navigateCareerPayload = inject<
+  Ref<{ puuid: string } | null>
+>("navigateCareerPayload");
 const navigateTo = inject<(page: string) => void>("navigateTo");
+
+watch(
+  () => navigateCareerPayload?.value,
+  (payload) => {
+    if (payload?.puuid) {
+      loadCareerSummoner(payload.puuid);
+      currentTab.value = "matches";
+    } else if (payload && payload.puuid === "") {
+      backToMyCareer();
+    }
+  },
+  { immediate: true },
+);
+
+watch(isViewingOther, (other) => {
+  if (other && currentTab.value === "loot") {
+    currentTab.value = "matches";
+  }
+});
 
 // 游戏静态资源就绪事件：若当前战绩缺少技能/装备图标，则自动重新拉取
 // （首次连接时 game_data 可能尚未就绪，导致 parse 出的图标 URL 为空）
@@ -149,7 +173,19 @@ function refreshSummoner() {
         </div>
 
         <div class="header-actions">
-          <button class="action-btn" @click="loadSummoner(true)" :disabled="loading">
+          <button
+            v-if="isViewingOther"
+            class="action-btn back-to-me-btn"
+            @click="backToMyCareer"
+            :disabled="loading"
+          >
+            {{ $t("career.backToMe") }}
+          </button>
+          <button
+            class="action-btn"
+            @click="isViewingOther && summoner?.puuid ? loadCareerSummoner(summoner.puuid, true) : loadSummoner(true)"
+            :disabled="loading"
+          >
             {{ $t("career.refresh") }}
           </button>
           <button class="action-btn" @click="goToHistory" :disabled="loading">
@@ -158,8 +194,8 @@ function refreshSummoner() {
         </div>
       </div>
 
-      <!-- Tab 导航栏 -->
-      <div v-if="summoner" class="career-tabs">
+      <!-- Tab 导航栏（仅在查看自己且有战利品等多页签时显示） -->
+      <div v-if="summoner && !isViewingOther" class="career-tabs">
         <div
           :class="['career-tab-item', { active: currentTab === 'matches' }]"
           @click="currentTab = 'matches'"
@@ -437,6 +473,17 @@ function refreshSummoner() {
   background: var(--card-bg-hover);
   color: var(--text-color);
   border-color: var(--primary-color);
+}
+
+.back-to-me-btn {
+  background: var(--primary-color-alpha-10);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.back-to-me-btn:hover {
+  background: var(--primary-color);
+  color: #fff;
 }
 
 .action-btn:disabled {

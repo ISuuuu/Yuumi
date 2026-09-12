@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inject, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import LcuImage from "../LcuImage.vue";
 import type { GameDetail } from "../../types/search";
@@ -18,6 +19,26 @@ const emit = defineEmits<{
 }>();
 
 const { t, te } = useI18n();
+
+const navigateCareerPayload = inject<
+  Ref<{ puuid: string } | null>
+>("navigateCareerPayload");
+const navigateTo = inject<(page: string) => void>("navigateTo");
+
+function handlePlayerClick(p: { puuid: string; summonerId: number; name: string }) {
+  if (p.puuid && p.puuid !== "00000000-0000-0000-0000-000000000000") {
+    if (navigateCareerPayload) {
+      navigateCareerPayload.value = { puuid: p.puuid };
+    }
+    if (navigateTo) {
+      navigateTo("career");
+    }
+    return;
+  }
+  if (p.summonerId) {
+    emit("search-player", p.summonerId, p.name);
+  }
+}
 
 function queueName(queueId: number, backendName: string): string {
   return getQueueName(queueId, backendName, { t, te });
@@ -178,7 +199,7 @@ function queueName(queueId: number, backendName: string): string {
                 </div>
               </div>
 
-              <!-- 名字（可点击搜索，机器人除外） -->
+              <!-- 名字（可点击跳转生涯，机器人除外） -->
               <div class="player-name-col">
                 <span
                   :class="[
@@ -190,9 +211,9 @@ function queueName(queueId: number, backendName: string): string {
                   ]"
                   @click="
                     p.summonerId &&
-                    emit('search-player', p.summonerId, p.name)
+                    handlePlayerClick(p)
                   "
-                  :title="p.summonerId ? `搜索 ${p.name}` : '机器人'"
+                  :title="p.summonerId ? `${$t('nav.career')} ${p.name}` : '机器人'"
                 >
                   {{ p.name }}
                 </span>

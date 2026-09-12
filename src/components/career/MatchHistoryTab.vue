@@ -18,14 +18,17 @@ const mh = inject<{
   recentMatches: Ref<MatchDisplay[]>;
   rankedQueues: Ref<RankedQueueEntry[]>;
   loading: Ref<boolean>;
+  isViewingOther: Ref<boolean>;
   loadSummoner: (force?: boolean) => Promise<void>;
+  loadCareerSummoner: (puuid: string, force?: boolean) => Promise<void>;
+  backToMyCareer: () => Promise<void>;
   loadCareerData: (puuid: string, sync?: boolean) => Promise<void>;
   loadRankedStats: (puuid: string) => Promise<void>;
   clearCache: () => void;
   fetchMatchHistoryWithFallback: (puuid: string, beg: number, end: number, sync?: boolean) => Promise<MatchDisplay[]>;
 }>("matchHistoryState")!;
 
-const { summoner, matches, recentMatches, rankedQueues, loading } = mh;
+const { summoner, matches, recentMatches, rankedQueues, loading, loadCareerSummoner } = mh;
 
 // ─── 本地 UI 状态（仅本组件使用）───
 const careerGamesNumber = ref(20);
@@ -109,18 +112,22 @@ function selectQueue(id: number | null) {
 function formatRank(queue: RankDisplaySource | null) {
   if (!queue || !queue.tier || queue.tier === "NONE") return "--";
   const tierCn = TIER_MAP[queue.tier] || queue.tier;
-  const division = queue.rank === "NA" ? "" : " " + queue.rank;
+  const division = !queue.rank || queue.rank === "NA" ? "" : " " + queue.rank;
   return `${tierCn}${division}`;
 }
 
 function formatHighestRank(queue: RankDisplaySource | null) {
   if (!queue || !queue.highestTier || queue.highestTier === "NONE") return "--";
-  return TIER_MAP[queue.highestTier] || queue.highestTier;
+  const tierCn = TIER_MAP[queue.highestTier] || queue.highestTier;
+  const division = !queue.highestRank || queue.highestRank === "NA" ? "" : " " + queue.highestRank;
+  return `${tierCn}${division}`;
 }
 
 function formatPrevSeasonRank(queue: RankDisplaySource | null) {
   if (!queue || !queue.previousSeasonEndTier || queue.previousSeasonEndTier === "NONE") return "--";
-  return TIER_MAP[queue.previousSeasonEndTier] || queue.previousSeasonEndTier;
+  const tierCn = TIER_MAP[queue.previousSeasonEndTier] || queue.previousSeasonEndTier;
+  const division = !queue.previousSeasonEndRank || queue.previousSeasonEndRank === "NA" ? "" : " " + queue.previousSeasonEndRank;
+  return `${tierCn}${division}`;
 }
 
 function getSpellIcon(m: MatchDisplay, slot: 1 | 2): string {
@@ -241,9 +248,13 @@ function goToMatchDetail(gameId: number) {
   navigateSearchPayload.value = { name: fullName, gameId };
 }
 
-function handleClickTeammate(name: string) {
+function handleClickTeammate(tm: RecentTeammate) {
+  if (tm.puuid) {
+    loadCareerSummoner(tm.puuid);
+    return;
+  }
   if (navigateSearchPayload) {
-    navigateSearchPayload.value = { name, gameId: -1 };
+    navigateSearchPayload.value = { name: tm.name, gameId: -1 };
   }
   if (navigateTo) {
     navigateTo("search");
@@ -476,7 +487,7 @@ watch(
                 v-for="tm in recentTeammates"
                 :key="tm.puuid"
                 class="teammate-card"
-                @click="handleClickTeammate(tm.name)"
+                @click="handleClickTeammate(tm)"
               >
                 <div class="teammate-avatar">
                   <LcuImage :src="tm.icon" />

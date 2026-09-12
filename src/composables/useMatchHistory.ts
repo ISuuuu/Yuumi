@@ -2,6 +2,7 @@ import { ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   fetchCurrentSummoner,
+  fetchSummonerByPuuid,
   fetchMatchHistory,
   fetchMatchHistorySgp,
   lcuRequest,
@@ -21,6 +22,14 @@ export function useMatchHistory() {
   const { t, te } = useI18n();
 
   const summoner = ref<SummonerDisplay | null>(null);
+  const currentLoginPuuid = ref<string>("");
+  const isViewingOther = computed(() => {
+    return (
+      !!currentLoginPuuid.value &&
+      !!summoner.value?.puuid &&
+      summoner.value.puuid !== currentLoginPuuid.value
+    );
+  });
   const matches = ref<MatchDisplay[]>([]);
   const recentMatches = ref<MatchDisplay[]>([]);
   const rankedQueues = ref<RankedQueueEntry[]>([]);
@@ -145,6 +154,7 @@ export function useMatchHistory() {
     const now = Date.now();
     if (!forceRefresh && cachedSummoner && now - lastFetchedTime < 20000) {
       summoner.value = cachedSummoner;
+      currentLoginPuuid.value = cachedSummoner.puuid;
       rankedQueues.value = cachedRankedQueues;
       matches.value = cachedMatches;
       recentMatches.value = cachedRecentMatches;
@@ -156,6 +166,7 @@ export function useMatchHistory() {
     try {
       summoner.value = await fetchCurrentSummoner();
       if (summoner.value?.puuid) {
+        currentLoginPuuid.value = summoner.value.puuid;
         await Promise.all([
           loadRankedStats(summoner.value.puuid),
           loadCareerData(summoner.value.puuid),
@@ -172,6 +183,35 @@ export function useMatchHistory() {
     } finally {
       loading.value = false;
     }
+  }
+
+  async function loadCareerSummoner(targetPuuid?: string, forceRefresh = false) {
+    if (!targetPuuid || (currentLoginPuuid.value && targetPuuid === currentLoginPuuid.value)) {
+      await loadSummoner(forceRefresh);
+      return;
+    }
+
+    loading.value = true;
+    error.value = "";
+    try {
+      const targetSummoner = await fetchSummonerByPuuid(targetPuuid);
+      if (!targetSummoner) {
+        throw new Error("获取召唤师信息失败");
+      }
+      summoner.value = targetSummoner;
+      await Promise.all([
+        loadRankedStats(targetPuuid),
+        loadCareerData(targetPuuid),
+      ]);
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function backToMyCareer() {
+    await loadSummoner(false);
   }
 
   async function loadRankedStats(puuid: string) {
@@ -192,9 +232,11 @@ export function useMatchHistory() {
   // 对局结束后仅刷新召唤师头部数据（等级等），不重复拉取战绩。
   // 战绩刷新由 MatchHistoryTab 的重试逻辑统一负责，避免双重请求。
   async function refreshSummonerOnly() {
+    if (isViewingOther.value) return;
     try {
       summoner.value = await fetchCurrentSummoner();
       if (summoner.value?.puuid) {
+        currentLoginPuuid.value = summoner.value.puuid;
         cachedSummoner = summoner.value;
         lastFetchedTime = Date.now();
       }
@@ -251,18 +293,22 @@ export function useMatchHistory() {
   function formatRank(queue: RankDisplaySource | null) {
     if (!queue || !queue.tier || queue.tier === "NONE") return "--";
     const tierCn = TIER_MAP[queue.tier] || queue.tier;
-    const division = queue.rank === "NA" ? "" : " " + queue.rank;
+    const division = !queue.rank || queue.rank === "NA" ? "" : " " + queue.rank;
     return `${tierCn}${division}`;
   }
 
   function formatHighestRank(queue: RankDisplaySource | null) {
     if (!queue || !queue.highestTier || queue.highestTier === "NONE") return "--";
-    return TIER_MAP[queue.highestTier] || queue.highestTier;
+    const tierCn = TIER_MAP[queue.highestTier] || queue.highestTier;
+    const division = !queue.highestRank || queue.highestRank === "NA" ? "" : " " + queue.highestRank;
+    return `${tierCn}${division}`;
   }
 
   function formatPrevSeasonRank(queue: RankDisplaySource | null) {
     if (!queue || !queue.previousSeasonEndTier || queue.previousSeasonEndTier === "NONE") return "--";
-    return TIER_MAP[queue.previousSeasonEndTier] || queue.previousSeasonEndTier;
+    const tierCn = TIER_MAP[queue.previousSeasonEndTier] || queue.previousSeasonEndTier;
+    const division = !queue.previousSeasonEndRank || queue.previousSeasonEndRank === "NA" ? "" : " " + queue.previousSeasonEndRank;
+    return `${tierCn}${division}`;
   }
 
   async function copyRiotId() {
@@ -338,6 +384,8 @@ export function useMatchHistory() {
   return {
     // 状态
     summoner,
+    currentLoginPuuid,
+    isViewingOther,
     matches,
     recentMatches,
     rankedQueues,
@@ -355,6 +403,8 @@ export function useMatchHistory() {
 
     // 方法
     loadSummoner,
+    loadCareerSummoner,
+    backToMyCareer,
     loadCareerData,
     loadRankedStats,
     refreshSummonerOnly,

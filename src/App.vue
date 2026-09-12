@@ -142,6 +142,13 @@ const navigateSearchPayload = ref<{
 
 provide("navigateSearchPayload", navigateSearchPayload);
 
+// 用于跳转到 Career 查看指定召唤师的共享状态
+const navigateCareerPayload = ref<{
+  puuid: string;
+} | null>(null);
+
+provide("navigateCareerPayload", navigateCareerPayload);
+
 const isSystemDark = ref(
   window.matchMedia("(prefers-color-scheme: dark)").matches,
 );
@@ -286,6 +293,9 @@ function navigate(page: string) {
   if (page === "notice") {
     noticeVisible.value = true;
     return;
+  }
+  if (page === "career") {
+    navigateCareerPayload.value = { puuid: "" };
   }
   if (currentPage.value !== page) {
     pageHistory.push(currentPage.value);
@@ -473,6 +483,13 @@ watch(
 watch(navigateSearchPayload, (payload) => {
   if (payload && payload.gameId !== null) {
     currentPage.value = "search";
+  }
+});
+
+// 监听跳转到 Career
+watch(navigateCareerPayload, (payload) => {
+  if (payload?.puuid) {
+    currentPage.value = "career";
   }
 });
 

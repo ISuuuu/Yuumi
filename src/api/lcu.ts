@@ -182,6 +182,32 @@ async function doFetchCurrentSummoner(
   throw new Error("获取召唤师信息失败");
 }
 
+/** 根据 puuid 获取召唤师信息（通过 LCU v2 接口） */
+export async function fetchSummonerByPuuid(
+  puuid: string,
+): Promise<SummonerDisplay | null> {
+  const resp = await lcuRequest<Partial<SummonerDisplay>>(
+    "GET",
+    `/lol-summoner/v2/summoners/puuid/${puuid}`,
+  );
+  if (!resp.success || !resp.data) return null;
+  const data = resp.data;
+  return {
+    accountId: data.accountId ?? 0,
+    displayName: data.displayName ?? "",
+    gameName: data.gameName ?? "",
+    tagLine: data.tagLine ?? "",
+    percentCompleteForNextLevel: data.percentCompleteForNextLevel ?? 0,
+    profileIconId: data.profileIconId ?? 29,
+    puuid: data.puuid ?? puuid,
+    summonerId: data.summonerId ?? 0,
+    summonerLevel: data.summonerLevel ?? 0,
+    xpSinceLastLevel: data.xpSinceLastLevel ?? 0,
+    xpUntilNextLevel: data.xpUntilNextLevel ?? 0,
+    profileIconUrl: `/lol-game-data/assets/v1/profile-icons/${data.profileIconId ?? 29}.jpg`,
+  };
+}
+
 /** 获取战绩列表（Rust 解析层清洗后） */
 export const fetchMatchHistory = (
   puuid: string,
