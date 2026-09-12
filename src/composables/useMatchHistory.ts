@@ -3,8 +3,7 @@ import { useI18n } from "vue-i18n";
 import {
   fetchCurrentSummoner,
   fetchSummonerByPuuid,
-  fetchMatchHistory,
-  fetchMatchHistorySgp,
+  fetchMatchHistorySmart,
   lcuRequest,
 } from "../api/lcu";
 import type { SummonerDisplay, MatchDisplay } from "../api/lcu";
@@ -127,27 +126,9 @@ export function useMatchHistory() {
     endIndex: number,
     isGameEndSync = false,
   ): Promise<MatchDisplay[]> {
-    let raw = await fetchMatchHistory(puuid, begIndex, endIndex);
-    const prevLatestId =
-      recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
-    const latestId = raw[0]?.gameId ?? null;
-
-    const shouldFallback =
-      raw.length === 0 ||
-      (isGameEndSync && prevLatestId && latestId === prevLatestId);
-
-    if (shouldFallback) {
-      try {
-        const sgpRaw = await fetchMatchHistorySgp(puuid, begIndex, endIndex);
-        if (sgpRaw && sgpRaw.length > 0) {
-          console.log("[Career] LCU 战绩未更新，已降级 SGP 加速拉取新战绩");
-          raw = sgpRaw;
-        }
-      } catch (e) {
-        console.warn("[Career] SGP 战绩降级/加速获取失败:", e);
-      }
-    }
-    return raw;
+    return fetchMatchHistorySmart(puuid, begIndex, endIndex, {
+      forceSgp: isGameEndSync,
+    });
   }
 
   async function loadSummoner(forceRefresh = false) {

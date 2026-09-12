@@ -42,15 +42,11 @@ watch(
 
 // 对局结束后自动刷新召唤师头部数据（战绩刷新由 MatchHistoryTab 统一负责）
 watch(
-  () => store.gamePhase,
-  async (phase: string, oldPhase: string | undefined) => {
-    if (!summoner.value?.puuid) return;
-    const gamePhases = ["InProgress", "GameStart", "ChampSelect", "ReadyCheck", "PreEndOfGame"];
-    const endPhases = ["EndOfGame", "Lobby", "None"];
-    if (gamePhases.includes(oldPhase ?? "") && endPhases.includes(phase ?? "")) {
-      await new Promise((r) => setTimeout(r, 2000));
-      await refreshSummonerOnly();
-    }
+  () => store.gameEndedTrigger,
+  async (trigger) => {
+    if (!trigger || !summoner.value?.puuid) return;
+    await new Promise((r) => setTimeout(r, 2000));
+    await refreshSummonerOnly();
   },
 );
 

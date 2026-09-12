@@ -3,7 +3,7 @@ import { useLcuStore, type ChampSelectPlayer } from "../store/lcuStore";
 import {
   getGameflowPhase,
   getChampSelectSession,
-  fetchMatchHistory,
+  fetchMatchHistorySmart,
   fetchCurrentSummoner,
   lcuRequest,
   fetchConfig,
@@ -688,7 +688,7 @@ export function useGamePlayerData(
 
       const [rawMatches, rankedResp, masteryData] = await Promise.all([
         safeInfo.puuid
-          ? fetchMatchHistory(safeInfo.puuid, 0, maxMatches)
+          ? fetchMatchHistorySmart(safeInfo.puuid, 0, maxMatches)
               .then((res) => {
                 if (!res || res.length === 0) {
                   // 空列表有两种可能：隐藏战绩，或从未打过的新号。

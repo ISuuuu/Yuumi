@@ -642,9 +642,12 @@ pub async fn get_match_history_sgp(
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-        let participant = participants
-            .iter()
-            .find(|p| p.get("puuid").and_then(|v| v.as_str()) == Some(&puuid));
+        let participant = participants.iter().find(|p| {
+            p.get("puuid")
+                .and_then(|v| v.as_str())
+                .map(|p_str| p_str.eq_ignore_ascii_case(&puuid))
+                .unwrap_or(false)
+        });
 
         let Some(participant) = participant else {
             continue;
@@ -672,7 +675,22 @@ pub async fn get_match_history_sgp(
             .get("spell2Id")
             .and_then(|v| v.as_i64())
             .unwrap_or(0) as i32;
-        let perk0 = stats.get("perk0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let perk0 = stats
+            .get("perk0")
+            .and_then(|v| v.as_i64())
+            .or_else(|| {
+                participant
+                    .get("perks")
+                    .and_then(|p| p.get("styles"))
+                    .and_then(|s| s.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|s0| s0.get("selections"))
+                    .and_then(|sel| sel.as_array())
+                    .and_then(|sel_arr| sel_arr.first())
+                    .and_then(|sel0| sel0.get("perk"))
+                    .and_then(|v| v.as_i64())
+            })
+            .unwrap_or(0) as i32;
         let total_minions = stats
             .get("totalMinionsKilled")
             .and_then(|v| v.as_i64())

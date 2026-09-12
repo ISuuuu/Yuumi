@@ -117,6 +117,11 @@ export const useLcuStore = defineStore("lcu", () => {
   const readyCheck = ref<ReadyCheckSession | null>(null);
   // lcu-client-started 事件计数器，用于触发 App.vue 重新加载状态
   const connectionVersion = ref(0);
+  // 对局结束触发器（时间戳），用于跨组件通知战绩刷新与缓存失效
+  const gameEndedTrigger = ref(0);
+  // 新对局开始触发器（时间戳，如进入选人阶段）
+  const newGameStartedTrigger = ref(0);
+  let hadInGame = false;
 
   // 共享的状态用于页面跳转和跨页面数据传递
   const currentPage = ref("home");
@@ -176,17 +181,40 @@ export const useLcuStore = defineStore("lcu", () => {
 
   function setConnected(v: boolean) {
     isConnected.value = v;
+    if (!v) {
+      hadInGame = false;
+    }
   }
   function setWsConnected(v: boolean) {
     wsConnected.value = v;
+    if (!v) {
+      hadInGame = false;
+    }
   }
   function setGamePhase(v: GamePhase) {
     const prev = gamePhase.value;
     gamePhase.value = v;
+
+    if (v === "GameStart" || v === "InProgress") {
+      hadInGame = true;
+    } else if (
+      hadInGame &&
+      (v === "WaitingForStats" ||
+        v === "PreEndOfGame" ||
+        v === "EndOfGame" ||
+        v === "Lobby" ||
+        v === "None")
+    ) {
+      hadInGame = false;
+      gameEndedTrigger.value = Date.now();
+      console.log(`[LCU Store] 对局结束检测触发 (${prev} → ${v})`);
+    }
+
     if (v === "ChampSelect" && prev !== "ChampSelect") {
-      // 刚进入新的选人阶段，清空上一局的历史记录
+      // 刚进入新的选人阶段，清空上一局的历史记录并通知新对局开始
       clearHistoricalChampions();
-    } else if (v === "EndOfGame" || v === "Lobby" || v === "None") {
+      newGameStartedTrigger.value = Date.now();
+    } else if (v === "EndOfGame" || v === "Lobby" || v === "None" || v === "WaitingForStats") {
       champSelectSession.value = null;
       clearHistoricalChampions();
     }
@@ -236,6 +264,8 @@ export const useLcuStore = defineStore("lcu", () => {
     gameflowSession,
     readyCheck,
     connectionVersion,
+    gameEndedTrigger,
+    newGameStartedTrigger,
     currentPage,
     searchQuery,
     selectedGameId,
@@ -344,8 +374,10 @@ export async function initLcuListeners() {
   });
 
   // 对局结束自动上传成功事件（由 Rust UploadQueue worker 触发）
+  // 此时官方服务器已完整结算该对局，触发战绩刷新通知
   await listen<{ gameId: number }>("upload-success", (event) => {
     console.log(`[lcuStore] upload-success: gameId=${event.payload.gameId}`);
+    store.gameEndedTrigger = Date.now();
   });
 
   console.log("[lcuStore] all listeners registered");

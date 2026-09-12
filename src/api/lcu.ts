@@ -227,6 +227,61 @@ export const fetchMatchHistorySgp = (
     endIndex,
   });
 
+/**
+ * 智能获取战绩列表：
+ * 优先请求 LCU 本地接口，并针对首页（begIndex === 0）同时尝试 SGP（腾讯国服实时战绩服务）合并。
+ * 解决打完一局后 LCU 本地 matches 接口存在数分钟滞后导致最新一局无法及时显示的问题。
+ */
+export async function fetchMatchHistorySmart(
+  puuid: string,
+  begIndex = 0,
+  endIndex = 19,
+  options?: {
+    forceSgp?: boolean;
+  },
+): Promise<MatchDisplay[]> {
+  const isHomePage = begIndex === 0;
+
+  // 1. 发起 LCU 请求
+  const lcuPromise = fetchMatchHistory(puuid, begIndex, endIndex).catch((e) => {
+    console.warn(`[fetchMatchHistorySmart] LCU 拉取战绩失败 (puuid: ${puuid}):`, e);
+    return [] as MatchDisplay[];
+  });
+
+  // 非首屏拉取不并发 SGP（翻页由 Search.vue 的 loadMoreMatches 自行按需 fallback）
+  if (!isHomePage && !options?.forceSgp) {
+    return lcuPromise;
+  }
+
+  // 2. 首屏拉取时：同时拉取 SGP 前 10 场实时权威对局进行合并
+  const sgpCount = Math.min(Math.max(endIndex - begIndex, 0), 9);
+  const sgpPromise = fetchMatchHistorySgp(puuid, begIndex, begIndex + sgpCount).catch((e) => {
+    console.debug(`[fetchMatchHistorySmart] SGP 战绩获取跳过或失败:`, e);
+    return [] as MatchDisplay[];
+  });
+
+  const [lcuMatches, sgpMatches] = await Promise.all([lcuPromise, sgpPromise]);
+
+  if (!sgpMatches || sgpMatches.length === 0) {
+    return lcuMatches;
+  }
+  if (!lcuMatches || lcuMatches.length === 0) {
+    return sgpMatches;
+  }
+
+  // 3. 按 gameId 去重合并并按 timeStamp 倒序排列
+  const map = new Map<number, MatchDisplay>();
+  for (const m of lcuMatches) {
+    map.set(m.gameId, m);
+  }
+  for (const m of sgpMatches) {
+    map.set(m.gameId, m);
+  }
+
+  const merged = Array.from(map.values()).sort((a, b) => b.timeStamp - a.timeStamp);
+  return merged.slice(0, endIndex - begIndex + 1);
+}
+
 export interface RecentTeammate {
   name: string;
   puuid: string;

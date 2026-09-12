@@ -293,51 +293,71 @@ watch(
   },
 );
 
-// 对局结束后自动刷新战绩列表（召唤师数据由 Career.vue 统一刷新）
+// 对局结束后或新对局开始时自动刷新战绩列表（召唤师数据由 Career.vue 统一刷新）
+let isGameEndSyncing = false;
 watch(
-  () => store.gamePhase,
-  async (phase: string, oldPhase: string | undefined) => {
-    if (!summoner.value?.puuid) return;
-    const gamePhases = [
-      "InProgress", "GameStart", "ChampSelect", "ReadyCheck", "PreEndOfGame",
-    ];
-    const endPhases = ["EndOfGame", "Lobby", "None"];
-    if (
-      gamePhases.includes(oldPhase ?? "") &&
-      endPhases.includes(phase ?? "")
-    ) {
-      const puuid = summoner.value.puuid;
-      const prevLatestId =
-        recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
-      console.log(
-        `[Career] 对局结束 (${oldPhase} → ${phase})，等待 LCU 同步并重试刷新`,
-      );
+  () => store.gameEndedTrigger,
+  async (trigger) => {
+    if (!trigger || !summoner.value?.puuid || isGameEndSyncing) return;
+    isGameEndSyncing = true;
+    const puuid = summoner.value.puuid;
+    const prevLatestId =
+      recentMatches.value[0]?.gameId ?? matches.value[0]?.gameId ?? null;
+    console.log(
+      `[Career] 对局结束信号触发，开始快速拉取最新战绩，当前最新 gameId:`,
+      prevLatestId,
+    );
 
-      await new Promise((r) => setTimeout(r, 2000));
+    try {
+      // 立即尝试首次拉取（SGP 权威接口通常在结算时已存在该对局）
+      await mh.loadCareerData(puuid, true);
+      const firstId = matches.value[0]?.gameId ?? null;
+      if (firstId && firstId !== prevLatestId) {
+        console.log(`[Career] 立即同步成功，已更新最新对局 ${firstId}`);
+        await calculateRecentTeammates();
+        return;
+      }
 
-      for (let attempt = 0; attempt < 5; attempt++) {
-        if (attempt > 0) {
-          await new Promise((r) => setTimeout(r, 3000));
-        }
+      // 若首次拉取未刷新，等待 1.5 秒后以更密集间隔（1.5s、2s、3s、3s）重试
+      const retryDelays = [1500, 2000, 3000, 3000];
+      for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+        await new Promise((r) => setTimeout(r, retryDelays[attempt]));
         try {
           await mh.loadCareerData(puuid, true);
           const latestId = matches.value[0]?.gameId ?? null;
           if (latestId && latestId !== prevLatestId) {
             console.log(
-              `[Career] 第 ${attempt + 1} 次重试时已发现新对局 ${latestId}`,
+              `[Career] 第 ${attempt + 1} 次重试已检测到新对局 ${latestId}`,
             );
             await calculateRecentTeammates();
             return;
           }
           console.log(
-            `[Career] 第 ${attempt + 1} 次刷新：尚未发现新对局，继续等待`,
+            `[Career] 第 ${attempt + 1} 次重试尚未发现新对局，继续等待`,
           );
         } catch (e) {
-          console.warn(`[Career] 第 ${attempt + 1} 次刷新失败:`, e);
+          console.warn(`[Career] 第 ${attempt + 1} 次刷新重试失败:`, e);
         }
       }
       await mh.loadRankedStats(puuid);
       await calculateRecentTeammates();
+    } finally {
+      isGameEndSyncing = false;
+    }
+  },
+);
+
+// 新对局开始时（例如进入BP阶段），重置缓存并拉取最新战绩，避免仍停留在上一把更早的战绩
+watch(
+  () => store.newGameStartedTrigger,
+  async (trigger) => {
+    if (!trigger || !summoner.value?.puuid) return;
+    console.log("[Career] 检测到新对局开始，静默刷新最新战绩");
+    try {
+      await mh.loadCareerData(summoner.value.puuid, false);
+      await calculateRecentTeammates();
+    } catch (e) {
+      console.warn("[Career] 新对局静默刷新战绩失败:", e);
     }
   },
 );
