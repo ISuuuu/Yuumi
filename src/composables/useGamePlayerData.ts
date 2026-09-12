@@ -75,6 +75,64 @@ function setMasteryToCache(puuid: string, data: ChampionMasteryItem[]) {
   masteryCache.set(puuid, { data, timestamp: Date.now() });
 }
 
+export async function fetchPlayerMastery(
+  puuid?: string,
+  summonerId?: number,
+  isMe?: boolean,
+): Promise<ChampionMasteryItem[]> {
+  if (!puuid && !summonerId) return [];
+
+  if (puuid) {
+    const cached = getMasteryFromCache(puuid);
+    if (cached && cached.length > 0) {
+      return cached;
+    }
+  }
+
+  // 1. 优先按 puuid 查询
+  let mResp: { success: boolean; data?: any; error?: any } = { success: false };
+  if (puuid) {
+    mResp = await lcuRequest<any>(
+      "GET",
+      `/lol-champion-mastery/v1/${puuid}/champion-mastery`,
+    );
+  }
+
+  // 2. 若是当前玩家且按 puuid 失败（或无 puuid），降级到 local-player
+  if ((!mResp.success || !mResp.data) && isMe) {
+    mResp = await lcuRequest<any>(
+      "GET",
+      "/lol-champion-mastery/v1/local-player/champion-mastery",
+    );
+  }
+
+  // 3. 如果仍未成功，尝试按 summonerId 查询
+  if ((!mResp.success || !mResp.data) && summonerId) {
+    mResp = await lcuRequest<any>(
+      "GET",
+      `/lol-champion-mastery/v1/summoners/${summonerId}/champion-mastery`,
+    );
+  }
+
+  if (mResp.success && Array.isArray(mResp.data)) {
+    const normalized: ChampionMasteryItem[] = mResp.data.map((item: any) => ({
+      championId: Number(item.championId ?? item.champion_id ?? 0),
+      championLevel: Number(item.championLevel ?? item.masteryLevel ?? item.level ?? 0),
+      championPoints: Number(item.championPoints ?? item.points ?? item.score ?? 0),
+      highestGrade: item.highestGrade ?? item.highest_grade,
+      championPointsSinceLastLevel: item.championPointsSinceLastLevel,
+      championPointsUntilNextLevel: item.championPointsUntilNextLevel,
+      tokensEarned: item.tokensEarned,
+    }));
+    if (puuid) {
+      setMasteryToCache(puuid, normalized);
+    }
+    return normalized;
+  }
+
+  return [];
+}
+
 // ── 无身份占位槽的前英雄 ID 继承：仅无身份占位可继承，实名异队数据严禁串用
 function inheritPlaceholderChampion(
   entry: PlayerData | undefined,
@@ -264,6 +322,50 @@ export function useGamePlayerData(
   }
 
   // ── 从 localStorage 恢复保留数据（有数据即恢复，直到新对局开始）
+  let isBackfillingMasteries = false;
+  function backfillMissingMasteries() {
+    if (isBackfillingMasteries) return;
+    const entries = Object.values(playerData.value);
+    const needBackfill = entries.filter(
+      (e) =>
+        e &&
+        e.info &&
+        !e.loading &&
+        (!e.masteries || e.masteries.length === 0) &&
+        (e.info.puuid || e.info.summonerId),
+    );
+    if (needBackfill.length === 0) return;
+
+    isBackfillingMasteries = true;
+    // 异步排队后台拉取，每人间隔 100ms，避免突发并发
+    Promise.allSettled(
+      needBackfill.map((p, idx) =>
+        new Promise<void>((resolve) => {
+          setTimeout(async () => {
+            try {
+              const puuid = p.info?.puuid;
+              const sid = p.info?.summonerId;
+              const isMe =
+                sid === currentSummonerId.value ||
+                (!!puuid && puuid === currentSummonerPuuid.value);
+              const m = await fetchPlayerMastery(puuid, sid, isMe);
+              if (m && m.length > 0) {
+                p.masteries = m;
+              }
+            } catch {
+              /* ignore */
+            } finally {
+              resolve();
+            }
+          }, idx * 100);
+        }),
+      ),
+    ).finally(() => {
+      isBackfillingMasteries = false;
+      debouncedSavePlayerData();
+    });
+  }
+
   function restoreReserveDataFromLocalStorage(): boolean {
     try {
       const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
@@ -293,6 +395,8 @@ export function useGamePlayerData(
         if (parsed && Object.keys(parsed).length > 0) {
           playerData.value = parsed;
           hasRestored = true;
+          // 异步检查并补齐缺少熟练度的玩家（例如旧版本保留的数据）
+          backfillMissingMasteries();
         }
       }
       if (savedPremadeMy) {
@@ -526,6 +630,25 @@ export function useGamePlayerData(
       playerData.value[cellId] = reusable;
       if (realSummonerId) playerData.value[realSummonerId] = reusable;
       if (playerPuuid) playerData.value[playerPuuid] = reusable;
+
+      // 如果复用的条目缺少熟练度（如旧版缓存或部分加载异常），后台静默异步补填
+      if ((!reusable.masteries || reusable.masteries.length === 0) && (playerPuuid || realSummonerId)) {
+        const targetPuuid = playerPuuid || reusable.info?.puuid;
+        const targetSid = realSummonerId || reusable.info?.summonerId;
+        const isMe =
+          targetSid === currentSummonerId.value ||
+          (!!targetPuuid && targetPuuid === currentSummonerPuuid.value);
+        fetchPlayerMastery(targetPuuid, targetSid, isMe)
+          .then((m) => {
+            if (m && m.length > 0) {
+              reusable.masteries = m;
+              debouncedSavePlayerData();
+            }
+          })
+          .catch(() => {
+            /* ignore */
+          });
+      }
       return;
     }
     // 无可复用的同身份已加载项，继续往下加载真实数据
@@ -725,62 +848,12 @@ export function useGamePlayerData(
                 .catch(() => ({ success: false as const }));
             })()
           : Promise.resolve({ success: false as const }),
-        safeInfo.puuid
-          ? (async () => {
-              const cached = getMasteryFromCache(safeInfo.puuid);
-              if (cached && cached.length > 0) {
-                return cached;
-              }
-              const isMe =
-                summonerId === currentSummonerId.value ||
-                (!!safeInfo.puuid && safeInfo.puuid === currentSummonerPuuid.value);
-
-              // 优先按 puuid 查询
-              let mResp = await lcuRequest<any>(
-                "GET",
-                `/lol-champion-mastery/v1/${safeInfo.puuid}/champion-mastery`,
-              );
-
-              // 若是当前玩家且按 puuid 失败，降级到 local-player
-              if ((!mResp.success || !mResp.data) && isMe) {
-                mResp = await lcuRequest<any>(
-                  "GET",
-                  "/lol-champion-mastery/v1/local-player/champion-mastery",
-                );
-              }
-
-              // 如果仍未成功，尝试按 summonerId 查询
-              if ((!mResp.success || !mResp.data) && summonerId) {
-                mResp = await lcuRequest<any>(
-                  "GET",
-                  `/lol-champion-mastery/v1/summoners/${summonerId}/champion-mastery`,
-                );
-              }
-
-              console.log(`[Mastery] 玩家 ${safeInfo.gameName || safeInfo.displayName} (puuid: ${safeInfo.puuid}, isMe: ${isMe}) 熟练度接口返回:`, {
-                success: mResp.success,
-                count: Array.isArray(mResp.data) ? mResp.data.length : 0,
-                sample: Array.isArray(mResp.data) && mResp.data.length > 0 ? mResp.data[0] : mResp.data,
-                error: mResp.error,
-              });
-
-              if (mResp.success && Array.isArray(mResp.data)) {
-                // 统一数据格式兼容（championId, championLevel, championPoints）
-                const normalized: ChampionMasteryItem[] = mResp.data.map((item: any) => ({
-                  championId: Number(item.championId ?? item.champion_id ?? 0),
-                  championLevel: Number(item.championLevel ?? item.masteryLevel ?? item.level ?? 0),
-                  championPoints: Number(item.championPoints ?? item.points ?? item.score ?? 0),
-                  highestGrade: item.highestGrade ?? item.highest_grade,
-                  championPointsSinceLastLevel: item.championPointsSinceLastLevel,
-                  championPointsUntilNextLevel: item.championPointsUntilNextLevel,
-                  tokensEarned: item.tokensEarned,
-                }));
-                setMasteryToCache(safeInfo.puuid, normalized);
-                return normalized;
-              }
-              return [] as ChampionMasteryItem[];
-            })()
-          : Promise.resolve([] as ChampionMasteryItem[]),
+        fetchPlayerMastery(
+          safeInfo.puuid,
+          summonerId,
+          summonerId === currentSummonerId.value ||
+            (!!safeInfo.puuid && safeInfo.puuid === currentSummonerPuuid.value),
+        ),
       ]);
 
       const isCurrentPlayer =
