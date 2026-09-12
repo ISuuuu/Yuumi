@@ -13,6 +13,8 @@ import { useLcuStore } from "../store/lcuStore";
 import {
   fetchMatchHistory,
   fetchMatchHistorySgp,
+  fetchMatchHistorySmart,
+  fetchCurrentSummoner,
   lcuRequest,
   batchUploadMatches,
   fetchConfig,
@@ -73,15 +75,21 @@ async function onUploadToggle(val: boolean) {
 }
 const uploadedGameIds = ref(new Set<number>());
 
-const filteredMatches = computed(() => {
-  if (selectedQueue.value === -1) return matches.value;
-  return matches.value.filter(
+// 游戏模式筛选后的全量列表
+const allFilteredMatches = computed(() => {
+  if (selectedQueue.value === -1) return allMatchesSearch.value;
+  return allMatchesSearch.value.filter(
     (m: MatchDisplay) => m.queueId === selectedQueue.value,
   );
 });
 
 function selectQueue(id: number) {
   selectedQueue.value = id;
+  currentPageNum.value = 1;
+  loadMatchHistoryList();
+  if (matches.value.length > 0) {
+    selectMatch(matches.value[0].gameId);
+  }
 }
 
 // 点击对局中的其他召唤师名称 → 在当前页面搜索（用 summonerId 避免 400/404/422 错误）
@@ -285,6 +293,23 @@ watch(
   { immediate: true },
 );
 
+// 监听对局结束：若当前搜索的是自己（当前登录玩家），自动重搜刷新最新战绩
+watch(
+  () => store.gameEndedTrigger,
+  async (trigger) => {
+    if (!trigger || !summoner.value?.puuid) return;
+    try {
+      const currentSummoner = await fetchCurrentSummoner();
+      if (currentSummoner?.puuid && summoner.value.puuid === currentSummoner.puuid) {
+        console.log("[Search] 对局结束，检测到当前查看本人战绩，自动刷新战绩列表");
+        await doSearch();
+      }
+    } catch {
+      // 忽略检查异常
+    }
+  },
+);
+
 // 监听 Career → Search 跳转：自动填入名称并搜索，然后选中指定对局
 watch(
   navigateSearchPayload,
@@ -435,29 +460,30 @@ async function loadMatchHistoryList() {
 
     // 首次加载一波 + 翻到尽头时增量拉取
     if (allMatchesSearch.value.length === 0) {
-      // 首次加载: 仅向 LCU 拉取 0~INITIAL_BATCH-1（共 20 条，够看前 2 页，不触发 SGP）
-      const raw = await fetchMatchHistory(
+      // 首次加载: 并发智能合并 LCU + SGP 战绩（国服下如果 LCU 本地接口刚打完未同步，可秒级拉取 SGP 最新一把）
+      const raw = await fetchMatchHistorySmart(
         summoner.value.puuid,
         0,
         INITIAL_BATCH - 1,
       );
       console.log(`[Search] 首次加载: raw.length=${raw.length}`);
       allMatchesSearch.value = raw;
-      loadedGameIndex.value = INITIAL_BATCH;
+      loadedGameIndex.value = Math.max(INITIAL_BATCH, raw.length);
     } else if (
       currentPageNum.value >= 2 &&
-      end + matchesPerPage * PREFETCH_PAGES >= allMatchesSearch.value.length
+      end + matchesPerPage * PREFETCH_PAGES >= allFilteredMatches.value.length
     ) {
       // 用户翻到第 2 页或更后页时，若剩余数据不足则提前后台预取后续数据
       schedulePrefetchMatches();
     }
 
-    // 从全量数据中切片当前页
-    matches.value = allMatchesSearch.value.slice(beg, end);
-    hasMore.value = allMatchesSearch.value.length > end;
+    // 从筛选后的全量数据中切片当前页（保证每页都是精确的 10 条）
+    matches.value = allFilteredMatches.value.slice(beg, end);
+    // 只要当前筛选总数大于 end，就允许向后翻页
+    hasMore.value = allFilteredMatches.value.length > end;
 
     console.log(
-      `[Search] 第${currentPageNum.value}页: gameId=${matches.value[0]?.gameId}, 共${matches.value.length}条, allMatches=${allMatchesSearch.value.length}, hasMore=${hasMore.value}`,
+      `[Search] 第${currentPageNum.value}页: gameId=${matches.value[0]?.gameId}, 共${matches.value.length}条, allFiltered=${allFilteredMatches.value.length}, hasMore=${hasMore.value}`,
     );
 
     // 自动批量上传当前页对局（去重 + fire-and-forget）
@@ -557,6 +583,13 @@ async function loadMoreMatches() {
       console.log(
         `[Search] 新增${newGames.length}条, 总计${allMatchesSearch.value.length}条`,
       );
+
+      // 若当前页因为之前数据不足导致切片不满 10 条，收到新数据后自动补满当前页
+      if (matches.value.length < matchesPerPage) {
+        const beg = (currentPageNum.value - 1) * matchesPerPage;
+        const end = beg + matchesPerPage;
+        matches.value = allFilteredMatches.value.slice(beg, end);
+      }
     } else {
       console.log(`[Search] 无新增数据`);
     }
@@ -565,7 +598,7 @@ async function loadMoreMatches() {
 
     // 后台预取完成后刷新 hasMore，避免翻页按钮状态过期
     const currentEnd = currentPageNum.value * matchesPerPage;
-    hasMore.value = allMatchesSearch.value.length > currentEnd;
+    hasMore.value = allFilteredMatches.value.length > currentEnd;
   } catch (e) {
     console.warn("[Search] 增量加载失败:", e);
   } finally {
@@ -693,7 +726,26 @@ async function handleNextPage() {
   if (!hasMore.value || pageSwitching.value || searching.value) return;
   pageSwitching.value = true;
   try {
-    currentPageNum.value++;
+    const targetPage = currentPageNum.value + 1;
+    const requiredCount = targetPage * matchesPerPage;
+
+    // 如果当前缓存里的数据不够填满下一页，等待增量拉取完成
+    while (allFilteredMatches.value.length < requiredCount) {
+      const prevCount = allMatchesSearch.value.length;
+      await loadMoreMatches();
+      // 如果尝试拉取后总数没有增加，说明已经触达接口最底层尽头
+      if (allMatchesSearch.value.length === prevCount) {
+        break;
+      }
+    }
+
+    // 如果尝试拉取后依然没有下一页的数据（例如确实打完所有对局了），不翻页
+    if (allFilteredMatches.value.length <= (targetPage - 1) * matchesPerPage) {
+      hasMore.value = false;
+      return;
+    }
+
+    currentPageNum.value = targetPage;
     await loadMatchHistoryList();
     if (matches.value.length > 0) {
       selectMatch(matches.value[0].gameId);
@@ -1083,9 +1135,9 @@ const gameDetails = computed<GameDetail | null>(() => {
         <div class="panel-layout">
           <!-- 左侧：迷你对局卡片列表 -->
           <div class="left-match-list-panel">
-            <template v-if="summoner && matches.length > 0">
+            <template v-if="summoner && (matches.length > 0 || currentPageNum > 1)">
               <MiniMatchList
-                :matches="filteredMatches"
+                :matches="matches"
                 :selected-game-id="selectedGameId"
                 :current-page-num="currentPageNum"
                 :has-more="hasMore"
