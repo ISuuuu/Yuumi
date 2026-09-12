@@ -249,20 +249,10 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 
           <!-- 全部战绩十列视图：几胜几负移到头像下方 -->
           <div
-            v-if="compact"
+            v-if="compact && playerData?.winCount !== undefined"
             class="col-avatar-summary"
           >
-            <span
-              v-if="playerData?.matchHistoryHidden"
-              class="summary-hidden"
-              :title="$t('gameInfo.matchHistoryHidden')"
-            >
-              {{ $t("gameInfo.matchHistoryHidden") }}
-            </span>
-            <span
-              v-else-if="playerData?.winCount !== undefined"
-              class="summary-counts"
-            >
+            <span class="summary-counts">
               <span class="summary-wins">{{ playerData.winCount }}{{ $t("career.win") }}</span>
               <span class="summary-losses">{{ playerData.lossesCount }}{{ $t("career.lose") }}</span>
             </span>
@@ -284,6 +274,24 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
                 player.summonerName ||
                 $t("gameInfo.playerIndex", { index: index + 1 })
               }}
+            </span>
+            <!-- 战绩隐藏锁图标 -->
+            <span
+              v-if="playerData?.matchHistoryHidden"
+              class="col-name-lock"
+              :title="$t('gameInfo.matchHistoryHidden')"
+            >
+              <svg
+                class="col-name-lock-svg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path
+                  fill-rule="evenodd"
+                  clip-rule="evenodd"
+                  d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 5a3 3 0 0 1 6 0v3H9V7zm3 6a1.5 1.5 0 0 0-1 2.618V18a1 1 0 1 0 2 0v-2.382A1.5 1.5 0 0 0 12 13z"
+                />
+              </svg>
             </span>
             <span
               v-if="playerData?.fateFlag"
@@ -328,19 +336,12 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 
           <!-- 按队伍(5列)模式：保持原有结构 -->
           <template v-else>
-            <!-- 战绩隐藏标识 -->
+            <!-- 几胜几负统计 + 排位段位/胜率概览（战绩隐藏时不展示文字） -->
             <div
-              v-if="playerData?.matchHistoryHidden"
+              v-if="playerData?.winCount !== undefined || rankSummary"
               class="col-summary"
             >
-              <span class="summary-hidden">{{ $t("gameInfo.matchHistoryHidden") }}</span>
-            </div>
-            <!-- 几胜几负统计 + 排位段位/胜率概览 -->
-            <div
-              v-else-if="playerData?.winCount !== undefined"
-              class="col-summary"
-            >
-              <span class="summary-counts">
+              <span v-if="playerData?.winCount !== undefined" class="summary-counts">
                 <span class="summary-wins">{{ playerData.winCount }}{{ $t("career.win") }}</span>
                 <span class="summary-losses">{{ playerData.lossesCount }}{{ $t("career.lose") }}</span>
               </span>
@@ -413,12 +414,7 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 
     <!-- 战绩隐藏或空记录占位 -->
     <template v-else>
-      <div v-if="playerData?.matchHistoryHidden" class="col-empty">
-        <div class="col-empty-icon">🔒</div>
-        <div class="col-empty-text">
-          {{ $t("gameInfo.matchHistoryHidden") }}
-        </div>
-      </div>
+      <div v-if="playerData?.matchHistoryHidden" class="col-empty col-empty-hidden"></div>
       <div v-else class="col-empty">
         <div class="col-empty-icon">📭</div>
         <div class="col-empty-text">
@@ -551,6 +547,18 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   font-weight: 700;
   border: 1.5px solid var(--border-color);
   box-sizing: border-box;
+}
+.col-name-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.col-name-lock-svg {
+  width: 11px;
+  height: 11px;
 }
 .col-champ-star {
   position: absolute;
@@ -741,14 +749,6 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.summary-hidden {
-  color: var(--text-dimmed);
-  font-size: 0.58rem;
-  font-weight: 600;
-  background: var(--border-color);
-  padding: 1px 4px;
-  border-radius: 3px;
 }
 
 /* ─── 加载中状态 ─── */
@@ -1063,14 +1063,6 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
 .compact .col-avatar-summary .summary-losses {
   color: var(--loss-color);
   font-weight: 700;
-}
-.compact .col-avatar-summary .summary-hidden {
-  font-size: 0.48rem;
-  padding: 0.5px 2px;
-  white-space: nowrap;
-  max-width: 36px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .compact .col-name {
   font-size: 0.72rem;

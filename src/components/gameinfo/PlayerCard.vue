@@ -205,6 +205,25 @@ const soloStats = computed(() => {
             $t("gameInfo.playerIndex", { index: (index ?? 0) + 1 })
           }}</span>
 
+          <!-- 战绩隐藏锁图标 -->
+          <span
+            v-if="playerData?.matchHistoryHidden"
+            class="pc-name-lock"
+            :title="$t('gameInfo.matchHistoryHidden')"
+          >
+            <svg
+              class="pc-name-lock-svg"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
+              <path
+                fill-rule="evenodd"
+                clip-rule="evenodd"
+                d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 5a3 3 0 0 1 6 0v3H9V7zm3 6a1.5 1.5 0 0 0-1 2.618V18a1 1 0 1 0 2 0v-2.382A1.5 1.5 0 0 0 12 13z"
+              />
+            </svg>
+          </span>
+
           <div class="name-tags-group">
             <!-- 宿命徽标 -->
             <span
@@ -250,18 +269,10 @@ const soloStats = computed(() => {
           </template>
         </div>
 
-        <!-- 第 3 行：近 10 场胜率与 KDA -->
+        <!-- 第 3 行：近 10 场胜率与 KDA（战绩隐藏时不展示） -->
         <div
           class="pc-row pc-stats-row"
-          v-if="playerData?.matchHistoryHidden"
-        >
-          <span class="pc-hidden-badge-clean">
-            {{ $t("gameInfo.matchHistoryHidden") }}
-          </span>
-        </div>
-        <div
-          class="pc-row pc-stats-row"
-          v-else-if="playerData?.winRate !== undefined || playerData?.avgKda !== undefined"
+          v-if="!playerData?.matchHistoryHidden && (playerData?.winRate !== undefined || playerData?.avgKda !== undefined)"
         >
           <span
             v-if="playerData?.winRate !== undefined"
@@ -496,6 +507,18 @@ const soloStats = computed(() => {
   white-space: nowrap;
   line-height: 1.15;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.pc-name-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.pc-name-lock-svg {
+  width: 12px;
+  height: 12px;
 }
 
 /* ─── 信息区 ─── */
@@ -733,14 +756,6 @@ const soloStats = computed(() => {
 .pc-winrate-text {
   font-size: 0.68rem;
   font-weight: 700;
-}
-.pc-hidden-badge-clean {
-  font-size: 0.64rem;
-  font-weight: 600;
-  color: var(--text-dimmed);
-  background: var(--border-color);
-  padding: 1px 5px;
-  border-radius: 3px;
 }
 .pc-kda-text {
   font-size: 0.68rem;
