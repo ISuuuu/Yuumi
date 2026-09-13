@@ -569,7 +569,8 @@ watch(gamePhase, (phase: string) => {
         if (import.meta.env.DEV) {
           console.log("[watch gamePhase] get_map_side result:", side);
         }
-        if (side) {
+        if (side === "blue" || side === "red") {
+          store.setMapSide(side);
           const sideLabel =
             side === "blue" ? t("titlebar.blueSide") : t("titlebar.redSide");
           mapSideLabel.value = sideLabel;
@@ -589,7 +590,8 @@ watch(gamePhase, (phase: string) => {
       (async () => {
         try {
           const side = await invoke<string | null>("get_map_side");
-          if (side) {
+          if (side === "blue" || side === "red") {
+            store.setMapSide(side);
             const sideLabel =
               side === "blue" ? t("titlebar.blueSide") : t("titlebar.redSide");
             mapSideLabel.value = sideLabel;
@@ -605,6 +607,7 @@ watch(gamePhase, (phase: string) => {
   } else {
     // 离开活跃对局（如 Lobby, None, EndOfGame 等）时清除阵营数据并复原标题
     mapSideLabel.value = "";
+    store.setMapSide(null);
     setTitle(title);
   }
 

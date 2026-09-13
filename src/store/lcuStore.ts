@@ -131,6 +131,9 @@ export const useLcuStore = defineStore("lcu", () => {
   // 跨窗口同步的历史拥有英雄记录
   const myHistoricalChampions = ref<number[]>([]);
 
+  // 当前对局所在阵营（"blue" | "red" | null）
+  const mapSide = ref<"blue" | "red" | null>(null);
+
   // 从 localStorage 恢复（用于晚启动的悬浮窗子窗口）
   function syncFromStorage(val: string | null) {
     if (val) {
@@ -183,12 +186,14 @@ export const useLcuStore = defineStore("lcu", () => {
     isConnected.value = v;
     if (!v) {
       hadInGame = false;
+      mapSide.value = null;
     }
   }
   function setWsConnected(v: boolean) {
     wsConnected.value = v;
     if (!v) {
       hadInGame = false;
+      mapSide.value = null;
     }
   }
   function setGamePhase(v: GamePhase) {
@@ -216,10 +221,12 @@ export const useLcuStore = defineStore("lcu", () => {
       newGameStartedTrigger.value = Date.now();
     } else if (v === "EndOfGame" || v === "Lobby" || v === "None" || v === "WaitingForStats") {
       champSelectSession.value = null;
+      mapSide.value = null;
       clearHistoricalChampions();
     }
     if (v === "Lobby" || v === "None" || v === "Matchmaking") {
       gameflowSession.value = null;
+      mapSide.value = null;
     }
   }
   function setGameflowSession(v: GameflowSession | null) {
@@ -255,6 +262,9 @@ export const useLcuStore = defineStore("lcu", () => {
   function setSelectedGameId(v: number | null) {
     selectedGameId.value = v;
   }
+  function setMapSide(v: "blue" | "red" | null) {
+    mapSide.value = v;
+  }
 
   return {
     isConnected,
@@ -270,6 +280,7 @@ export const useLcuStore = defineStore("lcu", () => {
     searchQuery,
     selectedGameId,
     myHistoricalChampions,
+    mapSide,
     addHistoricalChampion,
     setConnected,
     setWsConnected,
@@ -280,6 +291,7 @@ export const useLcuStore = defineStore("lcu", () => {
     setCurrentPage,
     setSearchQuery,
     setSelectedGameId,
+    setMapSide,
   };
 });
 

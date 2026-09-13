@@ -161,6 +161,19 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   }
   return {};
 }
+
+const columnSideColorClass = computed(() => {
+  if (!props.side) return null;
+  const mapSide = store.mapSide;
+  if (!mapSide) {
+    return props.side === "ally" ? "side-blue" : "side-red";
+  }
+  if (props.side === "ally") {
+    return mapSide === "red" ? "side-red" : "side-blue";
+  } else {
+    return mapSide === "red" ? "side-blue" : "side-red";
+  }
+});
 </script>
 
 <template>
@@ -170,6 +183,7 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
       compact,
       'side-ally': side === 'ally',
       'side-enemy': side === 'enemy',
+      [columnSideColorClass || '']: !!columnSideColorClass,
     }"
   >
     <!-- 列头部：所选英雄头像 + 玩家名（展示组队背景色） -->
@@ -444,6 +458,12 @@ function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   border-top-color: #3b82f6;
 }
 .player-column.side-enemy {
+  border-top-color: #f43f5e;
+}
+.player-column.side-blue {
+  border-top-color: #3b82f6;
+}
+.player-column.side-red {
   border-top-color: #f43f5e;
 }
 

@@ -229,7 +229,10 @@ onMounted(() => {
           <template v-if="viewMode === 'ten' && isTheirTeamRevealed">
             <!-- 我方区域（占左侧 50%） -->
             <div class="ten-toolbar-left">
-              <span class="side-pill ally-pill">
+              <span
+                class="side-pill ally-pill"
+                :class="store.mapSide === 'red' ? 'side-red' : 'side-blue'"
+              >
                 <span class="pill-dot"></span>
                 {{ $t("gameInfo.myTeam", { count: myTeam.length }) }}
               </span>
@@ -311,7 +314,10 @@ onMounted(() => {
 
               <!-- 敌方阵营指示与切换按钮容器 -->
               <div class="ten-right-controls">
-                <span class="side-pill enemy-pill">
+                <span
+                  class="side-pill enemy-pill"
+                  :class="store.mapSide === 'red' ? 'side-blue' : 'side-red'"
+                >
                   <span class="pill-dot"></span>
                   {{ $t("gameInfo.theirTeam", { count: theirTeam.length }) }}
                 </span>
@@ -356,7 +362,10 @@ onMounted(() => {
               <div class="five-team-premade">
                 <span
                   class="side-pill ally-pill"
-                  :class="{ 'clickable-pill': viewMode === 'five', 'active-pill': viewMode === 'five' && activeTab === 'my' }"
+                  :class="[
+                    store.mapSide === 'red' ? 'side-red' : 'side-blue',
+                    { 'clickable-pill': viewMode === 'five', 'active-pill': viewMode === 'five' && activeTab === 'my' }
+                  ]"
                   :title="$t('gameInfo.myTeam', { count: myTeam.length })"
                   @click="viewMode === 'five' ? (activeTab = 'my') : null"
                 >
@@ -438,7 +447,10 @@ onMounted(() => {
                   </div>
                   <span
                     class="side-pill enemy-pill clickable-pill"
-                    :class="{ 'active-pill': activeTab === 'their' }"
+                    :class="[
+                      store.mapSide === 'red' ? 'side-blue' : 'side-red',
+                      { 'active-pill': activeTab === 'their' }
+                    ]"
                     :title="$t('gameInfo.theirTeam', { count: isTheirTeamRevealed ? theirTeam.length : 0 })"
                     @click="activeTab = 'their'"
                   >
@@ -495,7 +507,10 @@ onMounted(() => {
             :compact="viewMode === 'ten'"
             :side="viewMode === 'ten' ? (i < myTeam.length ? 'ally' : 'enemy') : (activeTab === 'my' ? 'ally' : 'enemy')"
             :premade-idx="getPremadeIdx(p, viewMode === 'ten' ? (i < myTeam.length ? 'my' : 'their') : activeTab)"
-            :class="{ 'team-separator': viewMode === 'ten' && isTheirTeamRevealed && i === myTeam.length }"
+            :class="{
+              'team-separator': viewMode === 'ten' && isTheirTeamRevealed && i === myTeam.length,
+              'reverse-separator': viewMode === 'ten' && isTheirTeamRevealed && i === myTeam.length && store.mapSide === 'red',
+            }"
           />
         </div>
       </div>
@@ -772,6 +787,16 @@ onMounted(() => {
   color: #f43f5e;
   border: 1px solid rgba(244, 63, 94, 0.28);
 }
+.side-pill.side-blue {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+}
+.side-pill.side-red {
+  background: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
+  border: 1px solid rgba(244, 63, 94, 0.28);
+}
 .side-pill.clickable-pill {
   cursor: pointer;
   opacity: 0.65;
@@ -799,6 +824,14 @@ onMounted(() => {
   box-shadow: 0 0 5px #3b82f6;
 }
 .enemy-pill .pill-dot {
+  background: #f43f5e;
+  box-shadow: 0 0 5px #f43f5e;
+}
+.side-blue .pill-dot {
+  background: #3b82f6;
+  box-shadow: 0 0 5px #3b82f6;
+}
+.side-red .pill-dot {
   background: #f43f5e;
   box-shadow: 0 0 5px #f43f5e;
 }
@@ -876,6 +909,15 @@ onMounted(() => {
   left: -2px;
   bottom: 0;
   width: 2px;
+  background: linear-gradient(
+    180deg,
+    rgba(59, 130, 246, 0.6) 0%,
+    var(--border-color) 40%,
+    var(--border-color) 60%,
+    rgba(244, 63, 94, 0.6) 100%
+  );
+}
+.columns-ten :deep(.team-separator.reverse-separator)::before {
   background: linear-gradient(
     180deg,
     rgba(244, 63, 94, 0.6) 0%,

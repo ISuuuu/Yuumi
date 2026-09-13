@@ -1106,13 +1106,20 @@ export function useGamePlayerData(
     if (isTeamOne) {
       allyTeam = teamOne;
       enemyTeam = teamTwo;
+      store.setMapSide("blue");
     } else if (isTeamTwo) {
       allyTeam = teamTwo;
       enemyTeam = teamOne;
+      store.setMapSide("red");
     } else {
       // 兜底：若均未匹配到当前玩家（例如自定义人机且 summonerId 延迟），非空队伍优先作为 allyTeam
       allyTeam = teamOne.length > 0 ? teamOne : teamTwo;
       enemyTeam = teamOne.length > 0 ? teamTwo : teamOne;
+      if (teamOne.length > 0) {
+        store.setMapSide("blue");
+      } else if (teamTwo.length > 0) {
+        store.setMapSide("red");
+      }
     }
 
     if (gameflowMyTeam.value && gameflowMyTeam.value.length > 0) {
