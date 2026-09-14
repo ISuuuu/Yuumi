@@ -1,5 +1,6 @@
 import { ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
+import { useLcuStore } from "../store/lcuStore";
 import {
   fetchCurrentSummoner,
   fetchSummonerByPuuid,
@@ -19,14 +20,16 @@ let lastFetchedTime = 0;
 
 export function useMatchHistory() {
   const { t, te } = useI18n();
+  const store = useLcuStore();
 
   const summoner = ref<SummonerDisplay | null>(null);
-  const currentLoginPuuid = ref<string>("");
+  const currentLoginPuuid = ref<string>(store.currentSummoner?.puuid || "");
   const isViewingOther = computed(() => {
+    const myPuuid = currentLoginPuuid.value || store.currentSummoner?.puuid || "";
     return (
-      !!currentLoginPuuid.value &&
+      !!myPuuid &&
       !!summoner.value?.puuid &&
-      summoner.value.puuid !== currentLoginPuuid.value
+      summoner.value.puuid !== myPuuid
     );
   });
   const matches = ref<MatchDisplay[]>([]);
@@ -166,8 +169,13 @@ export function useMatchHistory() {
     }
   }
 
-  async function loadCareerSummoner(targetPuuid?: string, forceRefresh = false) {
-    if (!targetPuuid || (currentLoginPuuid.value && targetPuuid === currentLoginPuuid.value)) {
+  async function loadCareerSummoner(
+    targetPuuid?: string,
+    forceRefresh = false,
+    preloadedSummoner?: SummonerDisplay,
+  ) {
+    const myPuuid = currentLoginPuuid.value || store.currentSummoner?.puuid || "";
+    if (!targetPuuid || (myPuuid && targetPuuid === myPuuid)) {
       await loadSummoner(forceRefresh);
       return;
     }
@@ -175,10 +183,64 @@ export function useMatchHistory() {
     loading.value = true;
     error.value = "";
     try {
-      const targetSummoner = await fetchSummonerByPuuid(targetPuuid);
-      if (!targetSummoner) {
-        throw new Error("获取召唤师信息失败");
+      // 1. 优先使用传入的预加载召唤师对象
+      let targetSummoner: SummonerDisplay | null = preloadedSummoner ?? null;
+
+      // 2. 其次匹配 store 中记录的正在搜索的召唤师
+      if (!targetSummoner && store.searchedSummoner?.puuid === targetPuuid) {
+        targetSummoner = store.searchedSummoner;
       }
+
+      // 3. 尝试通过 LCU v2 接口拉取（好友/同房间等玩家可查到）
+      if (!targetSummoner) {
+        targetSummoner = await fetchSummonerByPuuid(targetPuuid);
+      }
+
+      // 4. 若接口 404，兜底构建基础对象，不阻断排位和战绩加载
+      if (!targetSummoner) {
+        targetSummoner = {
+          accountId: 0,
+          displayName: "召唤师",
+          gameName: "召唤师",
+          tagLine: "",
+          percentCompleteForNextLevel: 0,
+          profileIconId: 29,
+          puuid: targetPuuid,
+          summonerId: 0,
+          summonerLevel: 0,
+          xpSinceLastLevel: 0,
+          xpUntilNextLevel: 0,
+          profileIconUrl: "/lol-game-data/assets/v1/profile-icons/29.jpg",
+        };
+      }
+
+      // 确保 targetSummoner 中的 gameName 与 tagLine 规范拆分（避免第一行出现 Name#12345 导致与第二行重复或格式错误）
+      let cleanGameName = targetSummoner.gameName ?? "";
+      let cleanTagLine = targetSummoner.tagLine ?? "";
+      let cleanDisplayName = targetSummoner.displayName ?? "";
+
+      if (!cleanGameName || !cleanTagLine) {
+        const toSplit = cleanDisplayName.includes("#") ? cleanDisplayName : cleanGameName;
+        if (toSplit.includes("#")) {
+          const parts = toSplit.split("#");
+          if (!cleanGameName) cleanGameName = parts[0];
+          if (!cleanTagLine) cleanTagLine = parts.slice(1).join("#");
+        }
+      }
+      if (cleanDisplayName.includes("#")) {
+        cleanDisplayName = cleanDisplayName.split("#")[0];
+      }
+      if (!cleanGameName) {
+        cleanGameName = cleanDisplayName;
+      }
+
+      targetSummoner = {
+        ...targetSummoner,
+        displayName: cleanDisplayName,
+        gameName: cleanGameName,
+        tagLine: cleanTagLine,
+      };
+
       summoner.value = targetSummoner;
       await Promise.all([
         loadRankedStats(targetPuuid),
@@ -203,7 +265,9 @@ export function useMatchHistory() {
       );
       if (resp.success && resp.data && resp.data.queues) {
         rankedQueues.value = resp.data.queues;
-        cachedRankedQueues = rankedQueues.value;
+        if (!isViewingOther.value) {
+          cachedRankedQueues = rankedQueues.value;
+        }
       }
     } catch (e) {
       console.error("获取排位段位数据失败:", e);
@@ -234,7 +298,9 @@ export function useMatchHistory() {
         puuid, 0, targetCount, isGameEndSync,
       );
       matches.value = raw.slice(0, targetCount);
-      cachedMatches = matches.value;
+      if (!isViewingOther.value) {
+        cachedMatches = matches.value;
+      }
       updateRecentMatchesCache(puuid, raw);
     } catch (e) {
       console.error("获取战绩历史失败:", e);
@@ -294,7 +360,8 @@ export function useMatchHistory() {
 
   async function copyRiotId() {
     if (!summoner.value) return;
-    const fullId = `${summoner.value.gameName || summoner.value.displayName}#${summoner.value.tagLine}`;
+    const name = summoner.value.gameName || summoner.value.displayName;
+    const fullId = summoner.value.tagLine ? `${name}#${summoner.value.tagLine}` : name;
     try {
       await navigator.clipboard.writeText(fullId);
       copied.value = true;

@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { GameflowSession } from "../types/lcu";
+import type { SummonerDisplay } from "../api/lcu";
 
 /** LCU gameflow 全部已知阶段（/lol-gameflow/v1/gameflow-phase） */
 export type GamePhase =
@@ -134,6 +135,11 @@ export const useLcuStore = defineStore("lcu", () => {
   // 当前对局所在阵营（"blue" | "red" | null）
   const mapSide = ref<"blue" | "red" | null>(null);
 
+  // 当前登录召唤师信息
+  const currentSummoner = ref<SummonerDisplay | null>(null);
+  // 战绩查询页面当前展示的召唤师信息
+  const searchedSummoner = ref<SummonerDisplay | null>(null);
+
   // 从 localStorage 恢复（用于晚启动的悬浮窗子窗口）
   function syncFromStorage(val: string | null) {
     if (val) {
@@ -187,6 +193,8 @@ export const useLcuStore = defineStore("lcu", () => {
     if (!v) {
       hadInGame = false;
       mapSide.value = null;
+      currentSummoner.value = null;
+      searchedSummoner.value = null;
     }
   }
   function setWsConnected(v: boolean) {
@@ -194,6 +202,8 @@ export const useLcuStore = defineStore("lcu", () => {
     if (!v) {
       hadInGame = false;
       mapSide.value = null;
+      currentSummoner.value = null;
+      searchedSummoner.value = null;
     }
   }
   function setGamePhase(v: GamePhase) {
@@ -265,6 +275,12 @@ export const useLcuStore = defineStore("lcu", () => {
   function setMapSide(v: "blue" | "red" | null) {
     mapSide.value = v;
   }
+  function setCurrentSummoner(v: SummonerDisplay | null) {
+    currentSummoner.value = v;
+  }
+  function setSearchedSummoner(v: SummonerDisplay | null) {
+    searchedSummoner.value = v;
+  }
 
   return {
     isConnected,
@@ -281,6 +297,8 @@ export const useLcuStore = defineStore("lcu", () => {
     selectedGameId,
     myHistoricalChampions,
     mapSide,
+    currentSummoner,
+    searchedSummoner,
     addHistoricalChampion,
     setConnected,
     setWsConnected,
@@ -292,6 +310,8 @@ export const useLcuStore = defineStore("lcu", () => {
     setSearchQuery,
     setSelectedGameId,
     setMapSide,
+    setCurrentSummoner,
+    setSearchedSummoner,
   };
 });
 

@@ -246,6 +246,38 @@ const navigateSearchPayload = inject<
   Ref<{ name: string; gameId: number | null } | null>
 >("navigateSearchPayload")!;
 
+// 注入跳转到 Career 的共享状态
+const navigateCareerPayload = inject<
+  Ref<{ puuid: string; summoner?: SummonerDisplay } | null>
+>("navigateCareerPayload");
+
+// 同步战绩查询页面当前展示的召唤师到 Pinia store，供侧边栏等组件感知
+watch(
+  summoner,
+  (newVal) => {
+    store.setSearchedSummoner(newVal);
+  },
+  { immediate: true },
+);
+
+function handleCareerClick() {
+  const currentPuuid = store.currentSummoner?.puuid;
+  const targetPuuid = summoner.value?.puuid;
+  if (targetPuuid && (!currentPuuid || targetPuuid !== currentPuuid)) {
+    if (navigateCareerPayload) {
+      navigateCareerPayload.value = {
+        puuid: targetPuuid,
+        summoner: summoner.value ?? undefined,
+      };
+    }
+  } else {
+    if (navigateCareerPayload) {
+      navigateCareerPayload.value = { puuid: "" };
+    }
+  }
+  navigateTo("career");
+}
+
 let unlistenGameDataReady: (() => void) | null = null;
 
 onMounted(async () => {
@@ -401,11 +433,32 @@ async function doSearch(): Promise<boolean> {
     uploadedGameIds.value = new Set();
 
     const data = resp.data;
+    let parsedGameName = data.gameName ?? "";
+    let parsedTagLine = data.tagLine ?? "";
+    let rawDisplayName = data.displayName ?? name;
+
+    // 如果返回的 displayName 带有 #，或者 gameName/tagLine 为空，进行安全解析
+    if (!parsedGameName || !parsedTagLine) {
+      const targetNameToSplit = rawDisplayName.includes("#") ? rawDisplayName : name;
+      if (targetNameToSplit.includes("#")) {
+        const parts = targetNameToSplit.split("#");
+        if (!parsedGameName) parsedGameName = parts[0];
+        if (!parsedTagLine) parsedTagLine = parts.slice(1).join("#");
+      }
+    }
+    // 去掉 displayName 里残留的 #tagLine，保持与本人数据结构一致（第1行纯名字，第2行纯 tagLine）
+    if (rawDisplayName.includes("#")) {
+      rawDisplayName = rawDisplayName.split("#")[0];
+    }
+    if (!parsedGameName) {
+      parsedGameName = rawDisplayName;
+    }
+
     summoner.value = {
       accountId: data.accountId ?? 0,
-      displayName: data.displayName ?? name,
-      gameName: data.gameName ?? "",
-      tagLine: data.tagLine ?? "",
+      displayName: rawDisplayName,
+      gameName: parsedGameName,
+      tagLine: parsedTagLine,
       percentCompleteForNextLevel: data.percentCompleteForNextLevel ?? 0,
       profileIconId: data.profileIconId ?? 29,
       puuid: data.puuid ?? "",
@@ -1098,7 +1151,7 @@ const gameDetails = computed<GameDetail | null>(() => {
           </div>
         </div>
 
-        <n-button size="small" @click="navigateTo('career')">{{
+        <n-button size="small" @click="handleCareerClick">{{
           $t("nav.career")
         }}</n-button>
 

@@ -7,6 +7,7 @@ import LootManagerTab from "../components/career/LootManagerTab.vue";
 import LcuImage from "../components/LcuImage.vue";
 import LcuOfflineState from "../components/LcuOfflineState.vue";
 import { useMatchHistory } from "../composables/useMatchHistory";
+import type { SummonerDisplay } from "../api/lcu";
 
 const store = useLcuStore();
 const currentTab = ref("matches");
@@ -55,7 +56,7 @@ const navigateSearchPayload = inject<
   Ref<{ name: string; gameId: number | null } | null>
 >("navigateSearchPayload")!;
 const navigateCareerPayload = inject<
-  Ref<{ puuid: string } | null>
+  Ref<{ puuid: string; summoner?: SummonerDisplay } | null>
 >("navigateCareerPayload");
 const navigateTo = inject<(page: string) => void>("navigateTo");
 
@@ -63,7 +64,7 @@ watch(
   () => navigateCareerPayload?.value,
   (payload) => {
     if (payload?.puuid) {
-      loadCareerSummoner(payload.puuid);
+      loadCareerSummoner(payload.puuid, false, payload.summoner);
       currentTab.value = "matches";
     } else if (payload && payload.puuid === "") {
       backToMyCareer();
@@ -113,6 +114,13 @@ function goToHistory() {
   navigateTo?.("search");
 }
 
+function handleBackToMyCareer() {
+  if (navigateCareerPayload) {
+    navigateCareerPayload.value = { puuid: "" };
+  }
+  backToMyCareer();
+}
+
 // 供 LootManagerTab 开启战利品后刷新召唤师数据
 function refreshSummoner() {
   loadSummoner(true);
@@ -155,7 +163,7 @@ function refreshSummoner() {
               <button
                 class="copy-riot-id-btn"
                 @click="copyRiotId"
-                :title="`复制: ${summoner.gameName || summoner.displayName}#${summoner.tagLine}`"
+                :title="`复制: ${summoner.gameName || summoner.displayName}${summoner.tagLine ? '#' + summoner.tagLine : ''}`"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
@@ -164,7 +172,7 @@ function refreshSummoner() {
               </button>
               <span v-if="copied" class="copied-text">✓ {{ $t("career.copied") }}</span>
             </div>
-            <span class="tagline"># {{ summoner.tagLine }}</span>
+            <span v-if="summoner.tagLine" class="tagline"># {{ summoner.tagLine }}</span>
           </div>
         </div>
 
@@ -172,14 +180,14 @@ function refreshSummoner() {
           <button
             v-if="isViewingOther"
             class="action-btn back-to-me-btn"
-            @click="backToMyCareer"
+            @click="handleBackToMyCareer"
             :disabled="loading"
           >
             {{ $t("career.backToMe") }}
           </button>
           <button
             class="action-btn"
-            @click="isViewingOther && summoner?.puuid ? loadCareerSummoner(summoner.puuid, true) : loadSummoner(true)"
+            @click="isViewingOther && summoner?.puuid ? loadCareerSummoner(summoner.puuid, true, summoner) : loadSummoner(true)"
             :disabled="loading"
           >
             {{ $t("career.refresh") }}

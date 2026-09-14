@@ -145,6 +145,7 @@ provide("navigateSearchPayload", navigateSearchPayload);
 // 用于跳转到 Career 查看指定召唤师的共享状态
 const navigateCareerPayload = ref<{
   puuid: string;
+  summoner?: SummonerDisplay;
 } | null>(null);
 
 provide("navigateCareerPayload", navigateCareerPayload);
@@ -169,6 +170,9 @@ const isDarkTheme = computed(() => {
 
 // 供子组件跳转页面
 function navigateTo(page: string) {
+  if (currentPage.value !== page) {
+    pageHistory.push(currentPage.value);
+  }
   currentPage.value = page;
 }
 provide("navigateTo", navigateTo);
@@ -295,7 +299,18 @@ function navigate(page: string) {
     return;
   }
   if (page === "career") {
-    navigateCareerPayload.value = { puuid: "" };
+    if (
+      currentPage.value === "search" &&
+      store.searchedSummoner?.puuid &&
+      store.searchedSummoner.puuid !== store.currentSummoner?.puuid
+    ) {
+      navigateCareerPayload.value = {
+        puuid: store.searchedSummoner.puuid,
+        summoner: store.searchedSummoner,
+      };
+    } else {
+      navigateCareerPayload.value = { puuid: "" };
+    }
   }
   if (currentPage.value !== page) {
     pageHistory.push(currentPage.value);
@@ -403,6 +418,7 @@ async function loadLcuState() {
   // 1. 召唤师
   if (summonerResp.status === "fulfilled") {
     summoner.value = summonerResp.value;
+    store.setCurrentSummoner(summonerResp.value);
     console.log("[loadLcuState] 召唤师:", summoner.value?.displayName);
   } else {
     console.warn("[loadLcuState] 获取召唤师失败:", summonerResp.reason);
@@ -470,6 +486,8 @@ watch(
       currentPage.value = "career";
     } else {
       summoner.value = null;
+      store.setCurrentSummoner(null);
+      store.setSearchedSummoner(null);
       platformId.value = "";
       mapSideLabel.value = ""; // 断开连接时清空队伍阵营信息
       // 断开连接时回到首页
