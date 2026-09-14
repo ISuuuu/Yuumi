@@ -194,16 +194,25 @@ async fn handle_phase_change(
     // 进入 "None" 空闲状态时重置大厅创建标志（允许 WS 重连后重新创建）。
     // 但创建预设大厅成功后 LCU 会在极短时间内闪回一次 None（Lobby→None 抖动），
     // 若此时也重置标志会立刻再次建厅，重复 POST 会把玩家踢出小队（"你已被移出小队"）。
-    // 因此距上次建厅不足防抖窗口内出现的 None 视为抖动，跳过重置。
+    // 因此距上次建厅不足防抖窗口内出现的 None 视为抖动，安排延迟复查，避免误判导致状态卡死。
     if phase == "None" {
-        let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
-        let within_flicker = lobby
-            .last_create
-            .map(|t| t.elapsed() < LOBBY_FLICKER_WINDOW)
-            .unwrap_or(false);
+        let within_flicker = {
+            let lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+            lobby
+                .last_create
+                .map(|t| t.elapsed() < LOBBY_FLICKER_WINDOW)
+                .unwrap_or(false)
+        };
         if within_flicker {
-            log::debug!("忽略 Lobby→None 抖动（距上次建厅不足防抖窗口），保留建厅状态");
+            log::debug!("忽略 Lobby→None 抖动（距上次建厅不足防抖窗口），安排延迟复查");
+            spawn_verify_lobby_flicker(
+                app_handle.clone(),
+                cfg.clone(),
+                lobby_state.clone(),
+                LOBBY_FLICKER_WINDOW + Duration::from_millis(500),
+            );
         } else {
+            let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
             lobby.created = false;
         }
     }
@@ -281,6 +290,51 @@ async fn handle_phase_change(
     upload_trigger.on_phase_change(phase, app_handle).await;
 }
 
+/// 针对防抖窗口内出现的 None 事件进行延迟复查。
+/// 如果防抖窗口过后游戏依然处于 None 且没有有效大厅，说明大厅已丢失，重置状态并重新触发建厅。
+fn spawn_verify_lobby_flicker(
+    app_handle: AppHandle,
+    cfg: FunctionsConfig,
+    lobby_state: LobbyStateHandle,
+    delay: Duration,
+) {
+    crate::spawn_log_panic(async move {
+        sleep(delay).await;
+
+        if !cfg.enable_auto_create_lobby {
+            return;
+        }
+
+        let state = app_handle.state::<crate::AppState>();
+        let app_state = state.inner();
+
+        if app_state.lcu_client.read().await.as_ref().is_none() {
+            return;
+        }
+
+        let current_phase =
+            match lcu_request(app_state, "GET", "/lol-gameflow/v1/gameflow-phase", None).await {
+                Ok(serde_json::Value::String(p)) => p,
+                _ => return,
+            };
+
+        let lobby_exists = lcu_request(app_state, "GET", "/lol-lobby/v2/lobby", None)
+            .await
+            .is_ok();
+
+        if current_phase == "None" && !lobby_exists {
+            log::warn!("防抖窗口后检测到游戏仍处于 None 且无大厅，大厅已失效，重试建厅...");
+            {
+                let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+                lobby.created = false;
+            }
+            try_create_default_lobby(app_handle, &cfg, lobby_state);
+        } else {
+            log::debug!("防抖窗口后检测到大厅状态正常 (phase={})", current_phase);
+        }
+    });
+}
+
 /// 自动创建预设大厅（对应 Python `_tryCreateDefaultLobby`）。
 /// 重试循环放入后台任务执行，避免最长约 1 分钟的重试阻塞 gameflow 事件主循环。
 fn try_create_default_lobby(
@@ -298,6 +352,7 @@ fn try_create_default_lobby(
     }
 
     let queue_id = cfg.default_game_mode;
+    let lobby_state_clone = lobby_state.clone();
     crate::spawn_log_panic(async move {
         log::info!("自动创建预设大厅: queueId={}", queue_id);
 
@@ -308,6 +363,8 @@ fn try_create_default_lobby(
             // 检查 LCU 是否仍然连接
             if app_state.lcu_client.read().await.as_ref().is_none() {
                 log::info!("LCU 已断开，停止创建大厅");
+                let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
+                lobby.created = false;
                 return;
             }
 
@@ -320,23 +377,69 @@ fn try_create_default_lobby(
                     "None" | "" | "WaitingForStats" | "PreEndOfGame"
                 ) {
                     log::info!("当前阶段为 {}，跳过创建大厅", phase);
+                    let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
+                    lobby.created = true;
+                    lobby.last_create = Some(std::time::Instant::now());
                     return;
                 }
+            }
+
+            // 检查是否已在有效大厅中，避免重复创建踢出已有队伍
+            if lcu_request(app_state, "GET", "/lol-lobby/v2/lobby", None)
+                .await
+                .is_ok()
+            {
+                log::info!("当前已在有效大厅中，跳过创建大厅");
+                let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
+                lobby.created = true;
+                lobby.last_create = Some(std::time::Instant::now());
+                return;
             }
 
             // 尝试创建大厅
             let body = serde_json::json!({ "queueId": queue_id });
             match lcu_request(app_state, "POST", "/lol-lobby/v2/lobby", Some(body)).await {
                 Ok(_) => {
-                    log::info!("预设大厅创建成功 (尝试 {})", attempt + 1);
-                    let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
-                    lobby.last_create = Some(std::time::Instant::now());
-                    return;
+                    log::info!(
+                        "预设大厅请求已发送成功 (尝试 {})，等待确认状态...",
+                        attempt + 1
+                    );
+                    {
+                        let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
+                        lobby.last_create = Some(std::time::Instant::now());
+                    }
+
+                    // 等待 1 秒缓冲，确认大厅未被客户端刚启动时的初始页面跳转/弹窗冲刷
+                    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
+                    let phase =
+                        lcu_request(app_state, "GET", "/lol-gameflow/v1/gameflow-phase", None)
+                            .await;
+                    let is_in_lobby = match phase {
+                        Ok(serde_json::Value::String(ref p)) => p == "Lobby",
+                        _ => false,
+                    };
+                    let lobby_exists = lcu_request(app_state, "GET", "/lol-lobby/v2/lobby", None)
+                        .await
+                        .is_ok();
+
+                    if is_in_lobby || lobby_exists {
+                        log::info!("预设大厅创建并确认成功 (尝试 {})", attempt + 1);
+                        let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
+                        lobby.created = true;
+                        lobby.last_create = Some(std::time::Instant::now());
+                        return;
+                    } else {
+                        log::warn!("预设大厅创建后被客户端重置（未稳定在大厅），继续重试...");
+                        let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
+                        lobby.last_create = None;
+                    }
                 }
                 Err(e) => {
                     if e.contains("409") {
                         log::info!("创建大厅返回 409 (Conflict)，可能已在房间中，停止重试");
-                        let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
+                        lobby.created = true;
                         lobby.last_create = Some(std::time::Instant::now());
                         return;
                     }
@@ -348,6 +451,8 @@ fn try_create_default_lobby(
         }
 
         log::warn!("创建预设大厅：30 次重试均失败");
+        let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
+        lobby.created = false;
     });
 }
 
@@ -674,12 +779,12 @@ fn spawn_aram_team_side(app_handle: AppHandle, visible_to_team: bool) {
         // 发送报边消息；visible_to_team 为 false 时使用 celebration 类型（本地私密广播，队友不可见）
         let message = if visible_to_team {
             serde_json::json!({
-                "body": format!("[rustyuumi] 本局我方在{}", side_name),
+                "body": format!("[RUSTYUUMI] 本局我方在{}", side_name),
                 "type": "chat"
             })
         } else {
             serde_json::json!({
-                "body": format!("[rustyuumi] 本局我方在{}", side_name),
+                "body": format!("[RUSTYUUMI] 本局我方在{}", side_name),
                 "type": "celebration"
             })
         };
@@ -1036,7 +1141,7 @@ fn spawn_tag_reminder(app_handle: AppHandle) {
                     }
 
                     let message = serde_json::json!({
-                        "body": format!("[rustyuumi] 玩家 {} 已被标记：{}", name, tag),
+                        "body": format!("[RUSTYUUMI] 玩家 {} 已被标记：{}", name, tag),
                         "type": "celebration"
                     });
                     let path = format!("/lol-chat/v1/conversations/{}/messages", conv_id);
