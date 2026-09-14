@@ -21,8 +21,8 @@ const SUBSCRIBE_MSG: &str = r#"[5, "OnJsonApiEvent"]"#;
 
 /// champ-select session 事件节流间隔（毫秒）：
 /// 选人阶段 LCU 每秒推送多次（倒计时/悬停/动作变更），前端与各 Agent 只需要最新状态，
-/// 300ms 合并一次可显著降低前端 watcher / Agent / SignalR 的全链路处理压力
-const SESSION_THROTTLE_MS: u64 = 300;
+/// 50ms 合并一次既保证了毫秒级的换英雄实时刷新，又能消除同一毫秒内的瞬间重复帧
+const SESSION_THROTTLE_MS: u64 = 50;
 static LAST_SESSION_TS: AtomicU64 = AtomicU64::new(0);
 
 /// 判断 session 事件是否放行（处于节流窗口内则丢弃中间帧）

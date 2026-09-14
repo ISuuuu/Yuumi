@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { MatchDisplay, AppConfig } from "../../api/lcu";
 import {
@@ -42,13 +42,42 @@ const colHeaderStyle = computed(() => {
 });
 
 const currentChampId = computed(() => {
-  const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
-  if (fromResolver > 0) return fromResolver;
+  // 1. 选人阶段始终优先从选人会话实时推断（保证挑选悬停、锁定、ARAM换英雄、板凳席互换实时响应）
+  if (store.gamePhase === "ChampSelect" && store.champSelectSession) {
+    const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
+    if (fromResolver > 0) return fromResolver;
+  }
+  // 2. 选人外（游戏中/加载中/对局结束）或会话未推断出时：优先使用已有明确 championId
   if (props.playerData?.championId && props.playerData.championId > 0) {
     return props.playerData.championId;
   }
+  if (props.player?.championId && props.player.championId > 0) {
+    return props.player.championId;
+  }
+  if (props.player?.botChampionId && props.player.botChampionId > 0) {
+    return props.player.botChampionId;
+  }
+  // 3. 兜底从选人会话推断
+  const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
+  if (fromResolver > 0) return fromResolver;
   return 0;
 });
+
+watch(
+  () => [
+    currentChampId.value,
+    props.playerData?.matchHistoryHidden,
+    props.player?.displayName || props.player?.gameName,
+  ] as const,
+  ([cid, hidden, name]) => {
+    if (hidden) {
+      console.log(
+        `[PlayerMatchColumn] 隐藏战绩玩家英雄头像排查: name=${name}, side=${props.side}, cellId=${props.player?.cellId}, currentChampId=${cid}, playerDataChampId=${props.playerData?.championId}, playerPropChampId=${props.player?.championId}, profileIconId=${props.playerData?.info?.profileIconId ?? props.player?.profileIconId}`,
+      );
+    }
+  },
+  { immediate: true },
+);
 
 const masteryDetail = computed(() => {
   return getPlayerMasteryDetail(props.playerData, currentChampId.value);

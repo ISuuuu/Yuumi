@@ -97,41 +97,96 @@ export function resolvePlayerChampionId(
   session?: ChampSelectSessionLike | null,
 ): number {
   if (!player) return 0;
-  if (player.championId && player.championId > 0) return player.championId;
-  if (player.botChampionId && player.botChampionId > 0) return player.botChampionId;
-  if (player.championPickIntent && player.championPickIntent > 0) return player.championPickIntent;
 
-  // 从 actions 中查找该玩家的 pick（cellId 直接用原值查，仅适用于 session 原始 cellId 0..N）
-  // 注意：未轮到该玩家或该动作未完成(completed: false)且不在进行中时，
-  // session actions 预填的 championId 可能残留默认值或上一次意图，只有 completed 或 isInProgress 才代表真实选择
-  if (session?.actions && player.cellId !== undefined) {
-    for (const group of session.actions) {
-      for (const act of group) {
-        if (
-          act.actorCellId === player.cellId &&
-          act.type === "pick" &&
-          act.championId > 0 &&
-          (act.completed || act.isInProgress)
-        ) {
-          return act.championId;
-        }
-      }
-    }
-  }
-
-  // 兜底从 session 成员中查找（puuid/summonerId 优先，cellId 辅助）
+  // 1. 若存在选人会话 session，优先从 session 实时推断（保证悬停选人、锁定、ARAM换英雄、板凳席互换实时刷新）
   if (session) {
-    const allMembers = [...(session.myTeam || []), ...(session.theirTeam || [])];
-    const match = allMembers.find(
+    // 判断 player 期望查找的队伍池：cellId >= 5 或匹配 theirTeam 归属敌方，其余归属我方
+    const isEnemy =
+      (player.cellId !== undefined && player.cellId >= 5) ||
+      (session.theirTeam || []).some(
+        (m) =>
+          (player.puuid && m.puuid === player.puuid) ||
+          (player.summonerId && m.summonerId === player.summonerId),
+      );
+    const searchPool = isEnemy ? (session.theirTeam || []) : (session.myTeam || []);
+
+    let match = searchPool.find(
       (m) =>
         (player.puuid && m.puuid === player.puuid) ||
         (player.summonerId && m.summonerId === player.summonerId) ||
-        (player.cellId !== undefined && m.cellId === player.cellId),
+        (player.cellId !== undefined &&
+          (m.cellId === player.cellId || (isEnemy && m.cellId === player.cellId - 5))),
     );
-    if (match) {
-      if (match.championId && match.championId > 0) return match.championId;
-      if (match.championPickIntent && match.championPickIntent > 0) return match.championPickIntent;
+
+    // 跨阵营身份兜底（仅限真实 puuid / summonerId，严禁跨阵营按 cellId 匹配）
+    if (!match && (player.puuid || player.summonerId)) {
+      const allMembers = [...(session.myTeam || []), ...(session.theirTeam || [])];
+      match = allMembers.find(
+        (m) =>
+          (player.puuid && m.puuid === player.puuid) ||
+          (player.summonerId && m.summonerId === player.summonerId),
+      );
     }
+
+    const actualCellId = match?.cellId ?? player.cellId;
+
+    // 1.1 最高时效性：正在进行中的 Pick 动作（玩家在选人框中刚点击/悬停挑选英雄，尚未锁定）
+    if (session.actions && actualCellId !== undefined) {
+      for (const group of session.actions) {
+        for (const act of group) {
+          if (
+            act.actorCellId === actualCellId &&
+            act.type === "pick" &&
+            act.isInProgress &&
+            act.championId > 0
+          ) {
+            return act.championId;
+          }
+        }
+      }
+    }
+
+    // 1.2 选人会话成员上的已确定/锁定/ARAM随机分配与换选英雄
+    // ARAM 摇骰子（reroll）、板凳席互换（swap）、局末队友交换（trade）及排位锁定均实时更新 match.championId
+    if (match?.championId && match.championId > 0) {
+      return match.championId;
+    }
+
+    // 1.3 已完成的 Pick 动作（已锁定，但 member.championId 尚未同步到位的极短过渡微帧）
+    if (session.actions && actualCellId !== undefined) {
+      for (const group of session.actions) {
+        for (const act of group) {
+          if (
+            act.actorCellId === actualCellId &&
+            act.type === "pick" &&
+            act.completed &&
+            act.championId > 0
+          ) {
+            return act.championId;
+          }
+        }
+      }
+    }
+
+    // 1.4 预选意图（Pick Intent：尚未轮到该玩家挑选时，展示其计划选择的英雄）
+    if (match?.championPickIntent && match.championPickIntent > 0) {
+      return match.championPickIntent;
+    }
+  }
+
+  // 2. 玩家对象自带预选意图兜底
+  if (player.championPickIntent && player.championPickIntent > 0) {
+    return player.championPickIntent;
+  }
+
+  // 3. 人机英雄兜底
+  if (player.botChampionId && player.botChampionId > 0) {
+    return player.botChampionId;
+  }
+
+  // 4. 玩家已有历史英雄兜底（会话外或无会话更新时使用）
+  if (player.championId && player.championId > 0) {
+    return player.championId;
   }
 
   return 0;
