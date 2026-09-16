@@ -262,7 +262,9 @@
     "reconnectTriggered": "Reconnect triggered",
     "reconnectFailed": "Reconnect failed",
     "lcuReset": "LCU listener has been reset",
-    "lcuNotConnected": "LCU not connected, please start League Client first"
+    "lcuNotConnected": "LCU not connected, please start League Client first",
+    "confirm": "Confirm",
+    "cancel": "Cancel"
   },
   "tools": {
     "title": "Tools",

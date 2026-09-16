@@ -262,7 +262,9 @@
     "reconnectTriggered": "已触发游戏重连",
     "reconnectFailed": "重连请求失败",
     "lcuReset": "LCU 监听服务已重置",
-    "lcuNotConnected": "LCU 未连接，请先启动英雄联盟客户端"
+    "lcuNotConnected": "LCU 未连接，请先启动英雄联盟客户端",
+    "confirm": "确定",
+    "cancel": "取消"
   },
   "tools": {
     "title": "其他功能",
