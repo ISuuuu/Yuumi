@@ -65,9 +65,11 @@ const {
 function isSameIdentity(p: PremadePlayerLike, d: PlayerData | undefined): boolean {
   if (!d) return false;
   if (!d.info) return true; // 加载中占位：保留原行为（显示 loading）
-  // 匿名查询（选人敌方未公开）不得借用任何实名数据
-  const dSidReal = d.info.summonerId && d.info.summonerId !== p.cellId ? d.info.summonerId : 0;
-  if (!p.puuid && !p.summonerId && (d.info.puuid || dSidReal)) return false;
+  // 选人阶段匿名查询（敌方未公开）不得借用任何实名数据
+  if (store.gamePhase === "ChampSelect") {
+    const dSidReal = d.info.summonerId && d.info.summonerId !== p.cellId ? d.info.summonerId : 0;
+    if (!p.puuid && !p.summonerId && (d.info.puuid || dSidReal)) return false;
+  }
   return isIdentityCompatible(d, { puuid: p.puuid, summonerId: p.summonerId, cellId: p.cellId });
 }
 

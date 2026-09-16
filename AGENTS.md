@@ -247,6 +247,9 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 | `get_close_to_tray`          | commands/config.rs      | 读取关闭到托盘设置                        |
 | `get_lcu_connection_info`    | commands/lcu.rs         | 获取 LCU PID/port/token                   |
 | `get_game_data_assets`       | commands/lcu.rs         | 获取预加载的游戏资源映射                  |
+| `get_bench_my_champions`     | commands/lcu.rs         | 获取大乱斗板凳席我方已拥有英雄列表        |
+| `get_liveclient_playerlist`  | commands/lcu.rs         | 从 2999 端口获取全部玩家实时信息          |
+| `get_liveclient_active_player_name` | commands/lcu.rs  | 从 2999 端口获取本机当前操作玩家名字      |
 | `get_map_side`               | commands/lcu.rs         | 获取当前对局的游戏阵营 (蓝方/红方)        |
 | `detect_lol_path`            | commands/tools.rs       | 自动检测 LOL 客户端路径                   |
 | `select_lol_folder`          | commands/tools.rs       | 打开 LOL 客户端文件夹选择框               |
@@ -296,6 +299,7 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 | `install_pending_update`     | updater.rs              | 安装已下载且挂起的更新                    |
 | `fetch_github_text`          | commands/tools.rs       | 代理抓取 GitHub 资源                      |
 | `get_release_changelog`      | commands/tools.rs       | 获取版本更新日志                          |
+| `write_frontend_log`         | commands/tools.rs       | 写入前端日志到本地文件                    |
 | `save_saved_player`          | saved_players.rs        | 保存/标记同局玩家信息                    |
 | `query_all_saved_players`    | saved_players.rs        | 查询路人集列表（支持标签过滤/置顶）       |
 | `query_encountered_games`    | saved_players.rs        | 查询指定玩家相遇对局历史                  |

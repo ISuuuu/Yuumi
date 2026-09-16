@@ -837,3 +837,15 @@ pub async fn get_release_changelog(
 
     Ok(releases)
 }
+
+/// 记录前端日志到本地文件 (log 目录下)
+#[tauri::command]
+pub fn write_frontend_log(level: String, tag: String, message: String) -> Result<(), String> {
+    match level.to_lowercase().as_str() {
+        "error" => log::error!("[{}] {}", tag, message),
+        "warn" => log::warn!("[{}] {}", tag, message),
+        "debug" => log::debug!("[{}] {}", tag, message),
+        _ => log::info!("[{}] {}", tag, message),
+    }
+    Ok(())
+}

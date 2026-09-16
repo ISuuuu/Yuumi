@@ -2,7 +2,7 @@
 import { ref, onMounted, watch, computed, provide, defineAsyncComponent } from "vue";
 import { useLcuStore, initLcuListeners, type ChampSelectSession } from "./store/lcuStore";
 import { storeToRefs } from "pinia";
-import { fetchCurrentSummoner, getGameflowPhase, lcuRequest, fetchConfig } from "./api/lcu";
+import { fetchCurrentSummoner, getGameflowPhase, lcuRequest, fetchConfig, getMapSide } from "./api/lcu";
 import {
   updateThemeColor,
   updateDeathColor,
@@ -583,7 +583,7 @@ watch(gamePhase, (phase: string) => {
     // 异步获取队伍信息（蓝色方/红色方）追加到标题
     (async () => {
       try {
-        const side = await invoke<string | null>("get_map_side");
+        const side = await getMapSide();
         if (import.meta.env.DEV) {
           console.log("[watch gamePhase] get_map_side result:", side);
         }
@@ -607,7 +607,7 @@ watch(gamePhase, (phase: string) => {
     } else {
       (async () => {
         try {
-          const side = await invoke<string | null>("get_map_side");
+          const side = await getMapSide();
           if (side === "blue" || side === "red") {
             store.setMapSide(side);
             const sideLabel =

@@ -9,6 +9,8 @@ import i18n from "../i18n";
 export interface ChampionEntry {
   id: number;
   name: string;
+  alias?: string;
+  title?: string;
   iconPath: string;
 }
 
@@ -17,6 +19,7 @@ interface RawChampionEntry {
   id: number;
   name?: string;
   alias?: string;
+  title?: string;
   squarePortraitPath?: string;
 }
 
@@ -105,6 +108,8 @@ async function doFetchChampions(): Promise<ChampionEntry[]> {
           id: c.id,
           name:
             isEnglish && c.alias ? c.alias : c.name || c.alias || `#${c.id}`,
+          alias: c.alias,
+          title: c.title,
           iconPath:
             c.squarePortraitPath ||
             `/lol-game-data/assets/v1/champion-icons/${c.id}.png`,
@@ -168,4 +173,120 @@ async function doFetchKeywords(): Promise<Record<number, string>> {
     console.warn("Yuumi - Failed to load Tencent champion alias endpoint:", e);
   }
   return map;
+}
+
+/**
+ * 将 LiveClientData 返回的 championName 或 rawChampionName 匹配为 championId
+ * LiveClientData 返回的 championName 通常为英文 Alias（如 "Ahri", "MonkeyKing", "LeeSin", "MissFortune"）
+ * 或带有特例（如 "FiddleSticks", "DrMundo", "TwistedFate"）
+ */
+const LIVECLIENT_SPECIAL_ALIAS_MAP: Record<string, number> = {
+  // 特例英雄 ID 映射
+  wukong: 62,
+  monkeyking: 62,
+  drmundo: 36,
+  fiddlesticks: 9,
+  twistedfate: 4,
+  xinzhao: 5,
+  missfortune: 21,
+  jarvaniv: 59,
+  masteryi: 11,
+  tahmkench: 223,
+  aurelionsol: 136,
+  kogmaw: 96,
+  reksai: 421,
+  ksante: 897,
+  leblanc: 7,
+  nunu: 20,
+  nunuiwillump: 20,
+  renataglasc: 888,
+  belveth: 200,
+};
+
+export function findChampionIdByLiveClientName(
+  champList: ChampionEntry[],
+  champName?: string,
+  rawChampName?: string,
+): number {
+  if (!champName && !rawChampName) return 0;
+
+  const rawTrimmed = (rawChampName || "").trim();
+  const nameTrimmed = (champName || "").trim();
+
+  // 1. 直接全等匹配中文名或称号（例如 "放逐之刃", "影流之主", "锐雯", "劫"）
+  if (nameTrimmed) {
+    for (const c of champList) {
+      if (
+        c.name === nameTrimmed ||
+        c.title === nameTrimmed ||
+        c.alias === nameTrimmed
+      ) {
+        return c.id;
+      }
+    }
+  }
+  if (rawTrimmed) {
+    for (const c of champList) {
+      if (
+        c.name === rawTrimmed ||
+        c.title === rawTrimmed ||
+        c.alias === rawTrimmed
+      ) {
+        return c.id;
+      }
+    }
+  }
+
+  // 2. 尝试从 rawChampionName 提取英文（例如 "game_character_displayname_Ahri" 或 "Ahri"）
+  const cleanRaw = (rawChampName || "")
+    .replace(/^game_character_displayname_/i, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+  const cleanName = (champName || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+
+  // 3. 特例表命中
+  if (cleanName && LIVECLIENT_SPECIAL_ALIAS_MAP[cleanName]) {
+    return LIVECLIENT_SPECIAL_ALIAS_MAP[cleanName];
+  }
+  if (cleanRaw && LIVECLIENT_SPECIAL_ALIAS_MAP[cleanRaw]) {
+    return LIVECLIENT_SPECIAL_ALIAS_MAP[cleanRaw];
+  }
+
+  // 4. 在已缓存的英雄列表项中比对 alias 或 clean name
+  for (const c of champList) {
+    const cAliasClean = (c.alias || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    const cNameClean = (c.name || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+
+    if (cleanName && (cAliasClean === cleanName || cNameClean === cleanName)) {
+      return c.id;
+    }
+    if (cleanRaw && (cAliasClean === cleanRaw || cNameClean === cleanRaw)) {
+      return c.id;
+    }
+  }
+
+  // 5. 模糊包含匹配（中文称号/名字，如 "放逐之刃" 包含在 "放逐之刃锐雯" 中，或反之；限制长度>=2避免单字误伤）
+  if (nameTrimmed && nameTrimmed.length >= 2) {
+    for (const c of champList) {
+      if (
+        (c.name && (c.name.includes(nameTrimmed) || nameTrimmed.includes(c.name))) ||
+        (c.title && (c.title.includes(nameTrimmed) || nameTrimmed.includes(c.title)))
+      ) {
+        return c.id;
+      }
+    }
+  }
+
+  // 6. 比对 iconPath 中的英雄名字段
+  for (const c of champList) {
+    const iconLower = c.iconPath.toLowerCase();
+    if (cleanName && iconLower.includes(`/${cleanName}.png`)) {
+      return c.id;
+    }
+    if (cleanRaw && iconLower.includes(`/${cleanRaw}.png`)) {
+      return c.id;
+    }
+  }
+
+  return 0;
 }

@@ -641,6 +641,32 @@ export const deleteSavedPlayer = (puuid: string, selfPuuid: string) =>
 export const exportTaggedPlayersToJsonFile = () =>
   invoke<string | null>("export_tagged_players_to_json_file");
 
+/** 从游戏客户端内网端口获取 Live Client 玩家列表 */
+export interface LiveClientPlayer {
+  summonerName?: string;
+  riotId?: string;
+  riotIdGameName?: string;
+  riotIdTagLine?: string;
+  championName?: string;
+  team?: string;
+  rawChampionName?: string;
+  isBot?: boolean;
+}
+
+export const getLiveClientPlayerList = () =>
+  invoke<LiveClientPlayer[]>("get_liveclient_playerlist");
+
+export const getLiveClientActivePlayerName = () =>
+  invoke<string | null>("get_liveclient_active_player_name");
+
+/** 获取对局阵营（蓝方/红方） */
+export const getMapSide = () =>
+  invoke<"blue" | "red" | null>("get_map_side");
+
+/** 记录前端日志到本地文件 (log 目录下) */
+export const writeFrontendLog = (level: "info" | "warn" | "error" | "debug", tag: string, message: string) =>
+  invoke<void>("write_frontend_log", { level, tag, message }).catch(() => {});
+
 /** 从 JSON 文件导入带标记玩家，返回导入数量 */
 export const importTaggedPlayersFromJsonFile = () =>
   invoke<number>("import_tagged_players_from_json_file");
