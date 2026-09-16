@@ -71,7 +71,7 @@ watch(
   ] as const,
   ([cid, hidden, name]) => {
     if (hidden) {
-      console.log(
+      console.debug(
         `[PlayerMatchColumn] 隐藏战绩玩家英雄头像排查: name=${name}, side=${props.side}, cellId=${props.player?.cellId}, currentChampId=${cid}, playerDataChampId=${props.playerData?.championId}, playerPropChampId=${props.player?.championId}, profileIconId=${props.playerData?.info?.profileIconId ?? props.player?.profileIconId}`,
       );
     }
@@ -243,7 +243,7 @@ const columnSideColorClass = computed(() => {
                 :style="{ height: `${wrBar.fillHeight}%`, opacity: wrBar.opacity }"
               ></span>
             </span>
-            <!-- 选人阶段/对局中英雄头像，兜底召唤师头像 -->
+            <!-- 选人阶段/对局中：选了英雄显示英雄头像，未选英雄显示占位符（移除召唤师头像兜底以防与英雄混淆） -->
             <div
               class="col-champ-wrapper"
               :class="{ 'top-champ-ring': compact && masteryDetail?.isTopChampion }"
@@ -253,18 +253,6 @@ const columnSideColorClass = computed(() => {
                 :src="getChampionIcon(currentChampId)"
                 class="col-champ-avatar"
                 alt="champ"
-              />
-              <LcuImage
-                v-else-if="playerData?.info?.profileIconUrl"
-                :src="playerData.info.profileIconUrl"
-                class="col-champ-avatar"
-                alt="summoner"
-              />
-              <LcuImage
-                v-else-if="player.profileIconId"
-                :src="`/lol-game-data/assets/v1/profile-icons/${player.profileIconId}.jpg`"
-                class="col-champ-avatar"
-                alt="summoner"
               />
               <div v-else class="col-champ-avatar col-champ-avatar-empty">?</div>
 

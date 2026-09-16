@@ -58,7 +58,7 @@ watch(
   ] as const,
   ([cid, hidden, name]) => {
     if (hidden) {
-      console.log(
+      console.debug(
         `[PlayerCard] 隐藏战绩玩家英雄头像排查: name=${name}, activeTab=${props.activeTab}, cellId=${props.player?.cellId}, resolvedChampId=${cid}, playerDataChampId=${props.playerData?.championId}, playerPropChampId=${props.player?.championId}, profileIconId=${props.playerData?.info?.profileIconId ?? props.player?.profileIconId}`,
       );
     }
@@ -69,7 +69,7 @@ watch(
 const masteryDetail = computed(() => {
   const detail = getPlayerMasteryDetail(props.playerData, resolvedChampId.value);
   if (props.playerData?.info?.puuid) {
-    console.log(`[PlayerCard] 玩家 ${props.playerData?.info?.gameName} 熟练度详情:`, {
+    console.debug(`[PlayerCard] 玩家 ${props.playerData?.info?.gameName} 熟练度详情:`, {
       resolvedChampId: resolvedChampId.value,
       masteryCount: props.playerData?.masteries?.length ?? 0,
       detail,
@@ -180,33 +180,16 @@ const soloStats = computed(() => {
             />
           </svg>
           <div class="avatar-container-mini">
-            <!-- 选人阶段/对局中：选了英雄或预选了英雄优先显示英雄头像，否则兜底显示召唤师头像 -->
-            <template v-if="resolvedChampId > 0">
-              <LcuImage
-                :src="getChampionIcon(resolvedChampId)"
-                class="profile-avatar-mini"
-                alt="champ"
-              />
-            </template>
-            <template v-else-if="playerData?.info?.profileIconUrl">
-              <LcuImage
-                :src="playerData.info.profileIconUrl"
-                class="profile-avatar-mini"
-                alt="summoner"
-              />
-            </template>
-            <template v-else-if="player.profileIconId">
-              <LcuImage
-                :src="`/lol-game-data/assets/v1/profile-icons/${player.profileIconId}.jpg`"
-                class="profile-avatar-mini"
-                alt="summoner"
-              />
-            </template>
-            <template v-else>
-              <div class="profile-avatar-mini profile-avatar-empty-mini">
-                ?
-              </div>
-            </template>
+            <!-- 选人阶段/对局中：选了英雄显示英雄头像，未选英雄显示占位符（移除召唤师头像兜底以防与英雄混淆） -->
+            <LcuImage
+              v-if="resolvedChampId > 0"
+              :src="getChampionIcon(resolvedChampId)"
+              class="profile-avatar-mini"
+              alt="champ"
+            />
+            <div v-else class="profile-avatar-mini profile-avatar-empty-mini">
+              ?
+            </div>
           </div>
           <!-- 等级数字 -->
           <div
