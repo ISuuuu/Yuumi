@@ -183,7 +183,7 @@ export function useMatchHistory() {
     loading.value = true;
     error.value = "";
     try {
-      // 1. 优先使用传入的预加载召唤师对象
+      // 1. 优先使用传入的预加载召唤师对象，先让界面展示基础信息
       let targetSummoner: SummonerDisplay | null = preloadedSummoner ?? null;
 
       // 2. 其次匹配 store 中记录的正在搜索的召唤师
@@ -191,12 +191,19 @@ export function useMatchHistory() {
         targetSummoner = store.searchedSummoner;
       }
 
-      // 3. 尝试通过 LCU v2 接口拉取（好友/同房间等玩家可查到）
-      if (!targetSummoner) {
-        targetSummoner = await fetchSummonerByPuuid(targetPuuid);
+      // 3. 若未有数据或仅有占位数据（如预加载时等级为0），尝试通过 LCU 接口拉取真实权威资料（真实头像、等级等）
+      if (!targetSummoner || targetSummoner.summonerLevel === 0) {
+        try {
+          const remoteSummoner = await fetchSummonerByPuuid(targetPuuid);
+          if (remoteSummoner) {
+            targetSummoner = remoteSummoner;
+          }
+        } catch {
+          // 若远端 404，保留原有 targetSummoner 或在下方兜底
+        }
       }
 
-      // 4. 若接口 404，兜底构建基础对象，不阻断排位和战绩加载
+      // 4. 若接口 404 且无预加载对象，兜底构建基础对象，不阻断排位和战绩加载
       if (!targetSummoner) {
         targetSummoner = {
           accountId: 0,

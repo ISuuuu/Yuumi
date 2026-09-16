@@ -20,7 +20,7 @@ const mh = inject<{
   loading: Ref<boolean>;
   isViewingOther: Ref<boolean>;
   loadSummoner: (force?: boolean) => Promise<void>;
-  loadCareerSummoner: (puuid: string, force?: boolean) => Promise<void>;
+  loadCareerSummoner: (puuid: string, force?: boolean, preloadedSummoner?: SummonerDisplay) => Promise<void>;
   backToMyCareer: () => Promise<void>;
   loadCareerData: (puuid: string, sync?: boolean) => Promise<void>;
   loadRankedStats: (puuid: string) => Promise<void>;
@@ -250,7 +250,27 @@ function goToMatchDetail(gameId: number) {
 
 function handleClickTeammate(tm: RecentTeammate) {
   if (tm.puuid) {
-    loadCareerSummoner(tm.puuid);
+    let gameName = tm.name;
+    let tagLine = "";
+    if (tm.name.includes("#")) {
+      const parts = tm.name.split("#");
+      gameName = parts[0];
+      tagLine = parts.slice(1).join("#");
+    }
+    loadCareerSummoner(tm.puuid, false, {
+      accountId: 0,
+      displayName: tm.name,
+      gameName,
+      tagLine,
+      percentCompleteForNextLevel: 0,
+      profileIconId: 29,
+      puuid: tm.puuid,
+      summonerId: 0,
+      summonerLevel: 0,
+      xpSinceLastLevel: 0,
+      xpUntilNextLevel: 0,
+      profileIconUrl: tm.icon || "/lol-game-data/assets/v1/profile-icons/29.jpg",
+    });
     return;
   }
   if (navigateSearchPayload) {

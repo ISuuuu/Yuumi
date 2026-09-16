@@ -1,5 +1,6 @@
 import { inject, type Ref } from "vue";
 import type { PlayerData } from "../types/gameInfo";
+import type { SummonerDisplay } from "../api/lcu";
 
 /** 可点击跳转搜索的玩家名称载体（PremadePlayerLike / SummonerDisplay 等的结构子集） */
 export interface PlayerNameLike {
@@ -13,7 +14,7 @@ export function usePlayerSearch() {
     Ref<{ name: string; gameId: number | null } | null>
   >("navigateSearchPayload");
   const navigateCareerPayload = inject<
-    Ref<{ puuid: string } | null>
+    Ref<{ puuid: string; summoner?: SummonerDisplay } | null>
   >("navigateCareerPayload");
   const navigateTo = inject<(page: string) => void>("navigateTo");
 
@@ -61,7 +62,33 @@ export function usePlayerSearch() {
     const puuid = playerData?.info?.puuid || player?.puuid;
     if (puuid && puuid !== "00000000-0000-0000-0000-000000000000") {
       if (navigateCareerPayload) {
-        navigateCareerPayload.value = { puuid };
+        const info = playerData?.info;
+        const displayName =
+          info?.gameName ||
+          info?.displayName ||
+          player?.displayName ||
+          player?.summonerName ||
+          "召唤师";
+        const gameName = info?.gameName || player?.displayName || "";
+        const tagLine = info?.tagLine || player?.tagLine || "";
+        const iconId = info?.profileIconId ?? 29;
+        navigateCareerPayload.value = {
+          puuid,
+          summoner: {
+            accountId: info?.accountId ?? 0,
+            displayName,
+            gameName,
+            tagLine,
+            percentCompleteForNextLevel: 0,
+            profileIconId: iconId,
+            puuid,
+            summonerId: info?.summonerId ?? 0,
+            summonerLevel: info?.summonerLevel ?? 0,
+            xpSinceLastLevel: 0,
+            xpUntilNextLevel: 0,
+            profileIconUrl: `/lol-game-data/assets/v1/profile-icons/${iconId}.jpg`,
+          },
+        };
       }
       if (navigateTo) {
         navigateTo("career");

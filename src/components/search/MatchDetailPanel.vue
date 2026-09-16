@@ -3,6 +3,7 @@ import { inject, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import LcuImage from "../LcuImage.vue";
 import type { GameDetail } from "../../types/search";
+import type { SummonerDisplay } from "../../api/lcu";
 import { getQueueName } from "../../utils/queueName";
 
 defineProps<{
@@ -21,14 +22,37 @@ const emit = defineEmits<{
 const { t, te } = useI18n();
 
 const navigateCareerPayload = inject<
-  Ref<{ puuid: string } | null>
+  Ref<{ puuid: string; summoner?: SummonerDisplay } | null>
 >("navigateCareerPayload");
 const navigateTo = inject<(page: string) => void>("navigateTo");
 
 function handlePlayerClick(p: { puuid: string; summonerId: number; name: string }) {
   if (p.puuid && p.puuid !== "00000000-0000-0000-0000-000000000000") {
     if (navigateCareerPayload) {
-      navigateCareerPayload.value = { puuid: p.puuid };
+      let gameName = p.name;
+      let tagLine = "";
+      if (p.name.includes("#")) {
+        const parts = p.name.split("#");
+        gameName = parts[0];
+        tagLine = parts.slice(1).join("#");
+      }
+      navigateCareerPayload.value = {
+        puuid: p.puuid,
+        summoner: {
+          accountId: 0,
+          displayName: p.name,
+          gameName,
+          tagLine,
+          percentCompleteForNextLevel: 0,
+          profileIconId: 29,
+          puuid: p.puuid,
+          summonerId: p.summonerId,
+          summonerLevel: 0,
+          xpSinceLastLevel: 0,
+          xpUntilNextLevel: 0,
+          profileIconUrl: "/lol-game-data/assets/v1/profile-icons/29.jpg",
+        },
+      };
     }
     if (navigateTo) {
       navigateTo("career");
