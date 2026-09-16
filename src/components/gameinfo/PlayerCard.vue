@@ -26,7 +26,7 @@ const props = defineProps<{
 
 const store = useLcuStore();
 const { t } = useI18n();
-const { getPlayerSearchName, handleCareerClick } = usePlayerSearch();
+const { getPlayerSearchName, getPlayerDisplayName, handleCareerClick } = usePlayerSearch();
 
 const resolvedChampId = computed(() => {
   // 1. 选人阶段始终优先从选人会话推断（保证挑选悬停、锁定、ARAM换英雄、板凳席互换实时响应）
@@ -209,11 +209,7 @@ const soloStats = computed(() => {
             :title="getPlayerSearchName(player, playerData) ? `${$t('nav.career')} ${getPlayerSearchName(player, playerData)}` : undefined"
             @click="(e) => handleCareerClick(e, player, playerData)"
           >{{
-            playerData?.info?.gameName ||
-            playerData?.info?.displayName ||
-            player.displayName ||
-            player.gameName ||
-            player.summonerName ||
+            getPlayerDisplayName(player, playerData) ||
             $t("gameInfo.playerIndex", { index: (index ?? 0) + 1 })
           }}</span>
 
@@ -406,7 +402,7 @@ const soloStats = computed(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 8px 12px;
+  padding: 8px 10px;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -434,7 +430,7 @@ const soloStats = computed(() => {
 .pc-top-section {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   min-width: 0;
 }
@@ -563,7 +559,7 @@ const soloStats = computed(() => {
   font-size: 0.84rem;
   font-weight: 700;
   color: var(--text-color);
-  max-width: 95px;
+  max-width: 110px;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;

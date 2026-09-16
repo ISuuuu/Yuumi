@@ -23,18 +23,34 @@ export function usePlayerSearch() {
     playerData?: PlayerData,
   ): string {
     const info = playerData?.info;
-    const gameName =
+    const rawName =
       info?.gameName ||
       info?.displayName ||
       player?.displayName ||
       player?.summonerName ||
       "";
-    if (!gameName || gameName.startsWith("玩家") || gameName === "未知") {
+    if (!rawName || rawName.startsWith("玩家") || rawName === "未知") {
       return "";
     }
-    if (gameName.includes("#")) return gameName;
+    if (rawName.includes("#")) return rawName;
     const tagLine = info?.tagLine || player?.tagLine || "";
-    return tagLine ? `${gameName}#${tagLine}` : gameName;
+    return tagLine ? `${rawName}#${tagLine}` : rawName;
+  }
+
+  function getPlayerDisplayName(
+    player: PlayerNameLike,
+    playerData?: PlayerData,
+  ): string {
+    const info = playerData?.info;
+    const rawName =
+      info?.gameName ||
+      info?.displayName ||
+      player?.displayName ||
+      (player as { gameName?: string })?.gameName ||
+      player?.summonerName ||
+      "";
+    if (!rawName) return "";
+    return rawName.split("#")[0];
   }
 
   function handleNameClick(
@@ -100,6 +116,7 @@ export function usePlayerSearch() {
 
   return {
     getPlayerSearchName,
+    getPlayerDisplayName,
     handleNameClick,
     handleCareerClick,
   };

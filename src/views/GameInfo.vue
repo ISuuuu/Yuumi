@@ -107,6 +107,9 @@ function getPlayerData(p: PremadePlayerLike, idx: number) {
     const dName = d.info.displayName || d.info.gameName;
     if (pName && dName && pName === dName) return d;
   }
+  if (p.championId || p.botChampionId) {
+    console.debug(`[GameInfo] getPlayerData 未匹配到数据项: name=${p.displayName || p.gameName}, cellId=${p.cellId}, championId=${p.championId || p.botChampionId}, availableKeys=${Object.keys(playerData.value).join(",")}`);
+  }
   return undefined;
 }
 
@@ -551,7 +554,7 @@ onMounted(() => {
 /* 左右分栏 */
 .game-layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 285px 1fr;
   gap: 16px;
   flex: 1;
   min-height: 0;

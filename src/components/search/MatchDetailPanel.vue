@@ -239,7 +239,7 @@ function queueName(queueId: number, backendName: string): string {
                   "
                   :title="p.summonerId ? `${$t('nav.career')} ${p.name}` : '机器人'"
                 >
-                  {{ p.name }}
+                  {{ p.name.split('#')[0] }}
                 </span>
                 <span
                   v-if="participantRanks[p.puuid]"
@@ -598,7 +598,7 @@ function queueName(queueId: number, backendName: string): string {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 120px;
+  width: 96px;
   flex-shrink: 0;
 }
 
@@ -671,7 +671,7 @@ function queueName(queueId: number, backendName: string): string {
 }
 
 .player-name-col {
-  max-width: 140px;
+  max-width: 170px;
   min-width: 0;
   padding-right: 6px;
   flex-shrink: 0;
@@ -690,10 +690,7 @@ function queueName(queueId: number, backendName: string): string {
   border-radius: 4px;
   font-weight: 500;
   white-space: nowrap;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
 }
 
 .row-name {

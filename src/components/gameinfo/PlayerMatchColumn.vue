@@ -26,7 +26,7 @@ const props = defineProps<{
 
 const store = useLcuStore();
 const { t, te } = useI18n();
-const { getPlayerSearchName, handleNameClick } = usePlayerSearch();
+const { getPlayerSearchName, getPlayerDisplayName, handleNameClick } = usePlayerSearch();
 
 const premadeColor = computed(() => {
   if (props.premadeIdx === undefined || props.premadeIdx < 0) return null;
@@ -298,11 +298,7 @@ const columnSideColorClass = computed(() => {
               @click="(e) => handleNameClick(e, player, playerData)"
             >
               {{
-                playerData?.info?.gameName ||
-                playerData?.info?.displayName ||
-                player.displayName ||
-                player.gameName ||
-                player.summonerName ||
+                getPlayerDisplayName(player, playerData) ||
                 $t("gameInfo.playerIndex", { index: index + 1 })
               }}
             </span>
