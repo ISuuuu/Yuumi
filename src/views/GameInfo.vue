@@ -87,14 +87,8 @@ function getPlayerData(p: PremadePlayerLike, idx: number) {
     const byCell = playerData.value[p.cellId];
     if (byCell && isSameIdentity(p, byCell)) return byCell;
   }
-  // 10 列模式与 5 列我方队伍：支持按队伍槽位下标或带阵营偏移的槽位兜底
-  const isAlly = (myTeam.value as PremadePlayerLike[]).includes(p);
-  if (isAlly && p.cellId === undefined) {
-    const byIdx = playerData.value[idx];
-    if (byIdx && isSameIdentity(p, byIdx)) return byIdx;
-  }
-  // 若为敌方且未带 cellId，在 10 列视图时 idx 为 5..9，可尝试按 idx 匹配
-  if (!isAlly && p.cellId === undefined && idx >= 5) {
+  // 10 列模式与 5 列队伍：支持按槽位下标兜底
+  if (p.cellId === undefined) {
     const byIdx = playerData.value[idx];
     if (byIdx && isSameIdentity(p, byIdx)) return byIdx;
   }

@@ -57,9 +57,11 @@ const currentChampId = computed(() => {
   if (props.player?.botChampionId && props.player.botChampionId > 0) {
     return props.player.botChampionId;
   }
-  // 3. 兜底从选人会话推断
-  const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
-  if (fromResolver > 0) return fromResolver;
+  // 3. 兜底仅在选人阶段从选人会话推断，游戏已开始后严禁使用选人残留 session 盲目赋值
+  if (store.gamePhase === "ChampSelect" && store.champSelectSession) {
+    const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
+    if (fromResolver > 0) return fromResolver;
+  }
   return 0;
 });
 
@@ -441,7 +443,7 @@ const columnSideColorClass = computed(() => {
 
     <!-- 战绩隐藏或空记录占位 -->
     <template v-else>
-      <div v-if="playerData?.matchHistoryHidden" class="col-empty col-empty-hidden"></div>
+      <div v-if="playerData?.matchHistoryHidden || playerData?.isProfilePrivate" class="col-empty col-empty-hidden"></div>
       <div v-else class="col-empty">
         <div class="col-empty-icon">📭</div>
         <div class="col-empty-text">

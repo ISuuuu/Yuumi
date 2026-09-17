@@ -44,9 +44,11 @@ const resolvedChampId = computed(() => {
   if (props.player?.botChampionId && props.player.botChampionId > 0) {
     return props.player.botChampionId;
   }
-  // 3. 兜底从选人会话推断
-  const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
-  if (fromResolver > 0) return fromResolver;
+  // 3. 兜底仅在选人阶段从选人会话推断，游戏已开始后严禁使用选人残留 session 盲目赋值
+  if (store.gamePhase === "ChampSelect" && store.champSelectSession) {
+    const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
+    if (fromResolver > 0) return fromResolver;
+  }
   return 0;
 });
 
@@ -280,7 +282,7 @@ const soloStats = computed(() => {
         <!-- 第 3 行：近 10 场胜率与 KDA（战绩隐藏时不展示） -->
         <div
           class="pc-row pc-stats-row"
-          v-if="!playerData?.matchHistoryHidden && (playerData?.winRate !== undefined || playerData?.avgKda !== undefined)"
+          v-if="!playerData?.matchHistoryHidden && !playerData?.isProfilePrivate && (playerData?.winRate !== undefined || playerData?.avgKda !== undefined)"
         >
           <span
             v-if="playerData?.winRate !== undefined"
