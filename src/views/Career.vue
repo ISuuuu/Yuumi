@@ -158,6 +158,23 @@ function refreshSummoner() {
           <div class="summoner-info">
             <h1 class="display-name">
               {{ summoner.gameName || summoner.displayName }}
+              <span
+                v-if="summoner?.privacy?.toUpperCase() === 'PRIVATE'"
+                class="career-name-lock"
+                :title="$t('gameInfo.matchHistoryHidden')"
+              >
+                <svg
+                  class="career-name-lock-svg"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    clip-rule="evenodd"
+                    d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 5a3 3 0 0 1 6 0v3H9V7zm3 6a1.5 1.5 0 0 0-1 2.618V18a1 1 0 1 0 2 0v-2.382A1.5 1.5 0 0 0 12 13z"
+                  />
+                </svg>
+              </span>
             </h1>
             <div class="copy-wrapper">
               <button
@@ -392,6 +409,24 @@ function refreshSummoner() {
   color: var(--text-color);
   margin: 0;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.career-name-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #d97706;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.career-name-lock-svg {
+  width: 17px;
+  height: 17px;
 }
 
 .tagline {

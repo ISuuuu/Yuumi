@@ -7,6 +7,7 @@ export interface PlayerData {
   ranked: { solo: RankedQueueEntry | null; flex: RankedQueueEntry | null };
   loading: boolean;
   matchHistoryHidden?: boolean;
+  isProfilePrivate?: boolean;
   championId?: number;
   avgKda?: number;
   winRate?: number;

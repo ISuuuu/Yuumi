@@ -1016,6 +1016,14 @@ export function useGamePlayerData(
       }
 
       const targetChampId = resolveCarryChampionId(fallbackPlayer, cellId);
+      const isProfilePrivate = safeInfo.privacy?.toUpperCase() === "PRIVATE";
+      if (isProfilePrivate) {
+        writeFrontendLog(
+          "info",
+          "GameInfo:PrivateProfile",
+          `[生涯私密] 玩家: name="${safeInfo.gameName || safeInfo.displayName}", puuid="${safeInfo.puuid}", sid=${safeInfo.summonerId}, cellId=${cellId} - 客户端设置为生涯不公开`,
+        );
+      }
 
       const dataObj: PlayerData = {
         info: safeInfo,
@@ -1023,6 +1031,7 @@ export function useGamePlayerData(
         ranked: { solo, flex },
         loading: false,
         matchHistoryHidden,
+        isProfilePrivate,
         championId: targetChampId,
         avgKda,
         winRate,
@@ -1040,7 +1049,7 @@ export function useGamePlayerData(
       if (safeInfo.puuid) {
         playerData.value[safeInfo.puuid] = dataObj;
       }
-      console.log(`[GamePlayerData] 玩家数据已组装: cellId=${cellId}, name=${safeInfo.gameName || safeInfo.displayName}, champId=${targetChampId}, hidden=${matchHistoryHidden}, matchesCount=${matches.length}`);
+      console.log(`[GamePlayerData] 玩家数据已组装: cellId=${cellId}, name=${safeInfo.gameName || safeInfo.displayName}, champId=${targetChampId}, hidden=${matchHistoryHidden}, private=${isProfilePrivate}, matchesCount=${matches.length}`);
       debouncedSavePlayerData();
     } catch (err) {
       const existingInfo =

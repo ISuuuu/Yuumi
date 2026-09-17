@@ -15,6 +15,7 @@ import {
   fetchMatchHistorySgp,
   fetchMatchHistorySmart,
   fetchCurrentSummoner,
+  fetchSummonerByPuuid,
   lcuRequest,
   batchUploadMatches,
   fetchConfig,
@@ -110,6 +111,7 @@ const selectedGameId = ref<number | null>(null);
 const selectedGame = ref<MatchDetail | null>(null);
 const gameLoading = ref(false);
 const participantRanks = ref<Record<string, string>>({});
+const participantPrivacies = ref<Record<string, boolean>>({});
 
 const appConfig = ref<AppConfig | null>(null);
 
@@ -128,9 +130,10 @@ const TIER_MAP: Record<string, string> = {
 };
 const gameDataAssets = ref<GameDataAssets | null>(null);
 
-// ─── 对局详情 + 段位内存缓存（避免翻页/重复搜索/重复点选时重复请求）───
+// ─── 对局详情 + 段位/私密状态内存缓存（避免翻页/重复搜索/重复点选时重复请求）───
 const GAME_DETAIL_TTL = 10 * 60 * 1000;
 const RANK_TTL = 5 * 60 * 1000;
+const PRIVACY_TTL = 10 * 60 * 1000;
 const CACHE_LIMIT = 200;
 interface CacheEntry<T> {
   value: T;
@@ -138,6 +141,7 @@ interface CacheEntry<T> {
 }
 const gameDetailCache = new Map<number, CacheEntry<MatchDetail>>();
 const rankCache = new Map<string, CacheEntry<string>>();
+const privacyCache = new Map<string, CacheEntry<boolean>>();
 
 function cacheGet<K, T>(
   cache: Map<K, CacheEntry<T>>,
@@ -460,6 +464,7 @@ async function doSearch(): Promise<boolean> {
       gameName: parsedGameName,
       tagLine: parsedTagLine,
       percentCompleteForNextLevel: data.percentCompleteForNextLevel ?? 0,
+      privacy: data.privacy,
       profileIconId: data.profileIconId ?? 29,
       puuid: data.puuid ?? "",
       summonerId: data.summonerId ?? 0,
@@ -681,11 +686,13 @@ async function selectMatch(gameId: number) {
     if (!g || requestId !== selectMatchRequestId) return;
     selectedGame.value = g;
 
-    // 清空上次对局玩家的段位缓存
+    // 清空上次对局玩家的段位与私密状态缓存
     participantRanks.value = {};
+    participantPrivacies.value = {};
 
-    // 段位后台渐进加载，不阻塞详情主体展示
+    // 段位与玩家私密状态后台渐进加载，不阻塞详情主体展示
     void loadRanksInBackground(g, requestId);
+    void loadPrivaciesInBackground(g, requestId);
   } catch (e) {
     if (requestId !== selectMatchRequestId) return;
     console.error("拉取对局详细信息失败:", e);
@@ -756,6 +763,45 @@ async function loadRanksInBackground(g: MatchDetail, requestId: number) {
 
   if (requestId === selectMatchRequestId) {
     participantRanks.value = rankResults;
+  }
+}
+
+// 玩家生涯私密状态后台拉取，不阻塞详情展示
+async function loadPrivaciesInBackground(g: MatchDetail, requestId: number) {
+  const participants = g.participants || [];
+  const identities = g.participantIdentities || [];
+  if (participants.length === 0) return;
+
+  const playerPuuids: string[] = [];
+  for (const identity of identities) {
+    if (identity.player?.puuid && identity.player.summonerId) {
+      playerPuuids.push(identity.player.puuid);
+    }
+  }
+  if (playerPuuids.length === 0) return;
+
+  const privacyResults: Record<string, boolean> = {};
+
+  await runWithConcurrency(playerPuuids, 3, async (puuid) => {
+    const cachedPrivacy = cacheGet(privacyCache, puuid, PRIVACY_TTL);
+    if (cachedPrivacy !== null) {
+      if (cachedPrivacy) privacyResults[puuid] = true;
+      return;
+    }
+    try {
+      const s = await fetchSummonerByPuuid(puuid);
+      const isPrivate = s?.privacy?.toUpperCase() === "PRIVATE";
+      cacheSet(privacyCache, puuid, isPrivate);
+      if (isPrivate) {
+        privacyResults[puuid] = true;
+      }
+    } catch {
+      // 忽略单个玩家拉取失败
+    }
+  });
+
+  if (requestId === selectMatchRequestId) {
+    participantPrivacies.value = privacyResults;
   }
 }
 
@@ -1219,6 +1265,7 @@ const gameDetails = computed<GameDetail | null>(() => {
             :loading="gameLoading"
             :queue-id="selectedGame?.queueId ?? null"
             :participant-ranks="participantRanks"
+            :participant-privacies="participantPrivacies"
             :my-puuid="summoner?.puuid"
             @copy="copyGameId"
             @search-player="searchPlayerBySummonerId"

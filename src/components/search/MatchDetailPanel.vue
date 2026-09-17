@@ -11,6 +11,7 @@ defineProps<{
   loading: boolean;
   queueId: number | null;
   participantRanks: Record<string, string>;
+  participantPrivacies?: Record<string, boolean>;
   myPuuid?: string;
 }>();
 
@@ -240,6 +241,24 @@ function queueName(queueId: number, backendName: string): string {
                   :title="p.summonerId ? `${$t('nav.career')} ${p.name}` : '机器人'"
                 >
                   {{ p.name.split('#')[0] }}
+                </span>
+                <!-- 战绩私密隐藏高亮锁图标 -->
+                <span
+                  v-if="participantPrivacies?.[p.puuid]"
+                  class="row-name-lock"
+                  :title="$t('gameInfo.matchHistoryHidden')"
+                >
+                  <svg
+                    class="row-name-lock-svg"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      clip-rule="evenodd"
+                      d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 5a3 3 0 0 1 6 0v3H9V7zm3 6a1.5 1.5 0 0 0-1 2.618V18a1 1 0 1 0 2 0v-2.382A1.5 1.5 0 0 0 12 13z"
+                    />
+                  </svg>
                 </span>
                 <span
                   v-if="participantRanks[p.puuid]"
@@ -691,6 +710,20 @@ function queueName(queueId: number, backendName: string): string {
   font-weight: 500;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.row-name-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #d97706;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.row-name-lock-svg {
+  width: 12px;
+  height: 12px;
 }
 
 .row-name {

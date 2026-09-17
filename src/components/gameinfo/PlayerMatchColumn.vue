@@ -304,7 +304,7 @@ const columnSideColorClass = computed(() => {
             </span>
             <!-- 战绩隐藏锁图标 -->
             <span
-              v-if="playerData?.matchHistoryHidden"
+              v-if="playerData?.matchHistoryHidden || playerData?.isProfilePrivate"
               class="col-name-lock"
               :title="$t('gameInfo.matchHistoryHidden')"
             >
@@ -585,9 +585,9 @@ const columnSideColorClass = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-muted);
+  color: #d97706;
   flex-shrink: 0;
-  opacity: 0.85;
+  opacity: 0.9;
 }
 .col-name-lock-svg {
   width: 11px;

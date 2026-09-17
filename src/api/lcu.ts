@@ -102,6 +102,7 @@ export interface SummonerDisplay {
   xpSinceLastLevel: number;
   xpUntilNextLevel: number;
   profileIconUrl: string;
+  privacy?: string;
 }
 
 export interface CherryAugmentDetail {
@@ -204,6 +205,7 @@ export async function fetchSummonerByPuuid(
     summonerLevel: data.summonerLevel ?? 0,
     xpSinceLastLevel: data.xpSinceLastLevel ?? 0,
     xpUntilNextLevel: data.xpUntilNextLevel ?? 0,
+    privacy: data.privacy,
     profileIconUrl: `/lol-game-data/assets/v1/profile-icons/${data.profileIconId ?? 29}.jpg`,
   };
 }
