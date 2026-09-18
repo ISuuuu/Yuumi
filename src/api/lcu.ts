@@ -303,20 +303,25 @@ export interface RecentTeammatesResponse {
 export interface PlayerFateInfo {
   fateFlag: "ally" | "enemy" | null;
   recentlyChampionName: string | null;
+  gameId?: number | null;
+  allyCount?: number;
+  enemyCount?: number;
 }
 
 /** 获取最近队友统计 */
 export const fetchRecentTeammates = (gameIds: number[], puuid: string) =>
   invoke<RecentTeammatesResponse>("get_recent_teammates", { gameIds, puuid });
 
-/** 获取单个玩家上一局与自己的宿命关系及英雄名 */
+/** 获取单个玩家与自己的宿命关系及英雄名（支持传入单个 gameId 或多个候选 gameIds 查历史交手） */
 export const fetchPlayerFateInfo = (
-  gameId: number,
+  gameId: number | null | undefined,
   targetPuuid: string,
   currentSummonerId: number,
+  gameIds?: number[],
 ) =>
   invoke<PlayerFateInfo>("get_player_fate_info", {
-    gameId,
+    gameId: gameId || null,
+    gameIds: gameIds || null,
     targetPuuid,
     currentSummonerId,
   });
@@ -578,6 +583,7 @@ export interface PageResult<T> {
 export interface SavedPlayerMarker {
   tag: string | null;
   encounterCount: number;
+  lastEncounteredGameId?: number | null;
 }
 
 export interface SaveSavedPlayerInput {

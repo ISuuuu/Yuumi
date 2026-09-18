@@ -15,6 +15,9 @@ export interface PlayerData {
   lossesCount?: number;
   fateFlag?: "ally" | "enemy" | null;
   recentlyChampionName?: string;
+  fateIsLastGame?: boolean;
+  fateAllyCount?: number;
+  fateEnemyCount?: number;
   masteries?: ChampionMasteryItem[];
   streak?: StreakInfo | null;
 }

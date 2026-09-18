@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import type { MatchDisplay, AppConfig } from "../../api/lcu";
+import type { MatchDisplay, AppConfig, SavedPlayerMarker } from "../../api/lcu";
 import {
   PREMADE_COLORS,
   getChampionIcon,
@@ -22,11 +22,73 @@ const props = defineProps<{
   compact?: boolean;
   side?: "ally" | "enemy";
   premadeIdx?: number;
+  savedMap?: Record<string, SavedPlayerMarker>;
+  selfPuuid?: string;
 }>();
 
 const store = useLcuStore();
 const { t, te } = useI18n();
 const { getPlayerSearchName, getPlayerDisplayName, handleNameClick } = usePlayerSearch();
+
+const savedInfo = computed(() => {
+  const puuid = props.playerData?.info?.puuid || props.player?.puuid;
+  if (!puuid || !props.savedMap) return undefined;
+  if (props.selfPuuid && puuid === props.selfPuuid) return undefined;
+  return props.savedMap[puuid];
+});
+
+function savedBadgeTitle(info: SavedPlayerMarker): string {
+  return info.tag
+    ? t("gameInfo.savedPlayerTip", {
+        count: info.encounterCount,
+        tag: info.tag,
+      })
+    : t("gameInfo.savedPlayerTipNoTag", { count: info.encounterCount });
+}
+
+function getFateBadgeText(data: PlayerData | undefined): string {
+  if (!data?.fateFlag) return "";
+  const isLast = data.fateIsLastGame ?? true;
+  if (data.fateFlag === "ally") {
+    return isLast ? t("gameInfo.fateAllyText") : t("gameInfo.fateRecentAllyText");
+  } else {
+    return isLast ? t("gameInfo.fateEnemyText") : t("gameInfo.fateRecentEnemyText");
+  }
+}
+
+function getFateTitle(data: PlayerData | undefined): string {
+  if (!data?.fateFlag) return "";
+  const isLast = data.fateIsLastGame ?? true;
+  const baseTitle = data.fateFlag === "ally"
+    ? (isLast ? t("gameInfo.fateAllyTitle") : (t("gameInfo.fateRecentAllyTitle") || t("gameInfo.fateAllyTitle")))
+    : (isLast ? t("gameInfo.fateEnemyTitle") : (t("gameInfo.fateRecentEnemyTitle") || t("gameInfo.fateEnemyTitle")));
+  const champPart = data.recentlyChampionName ? ` (使用: ${data.recentlyChampionName})` : "";
+  let fullTitle = `${baseTitle}${champPart}`;
+
+  // 若多次交手且既有队友又有对手（或累计相遇 >= 2），在末尾补充详细交手统计
+  const allyCount = data.fateAllyCount ?? 0;
+  const enemyCount = data.fateEnemyCount ?? 0;
+  const totalCount = allyCount + enemyCount;
+  if (totalCount >= 2 && allyCount > 0 && enemyCount > 0) {
+    const statsPart = t("gameInfo.fateMultiEncounter", {
+      total: totalCount,
+      ally: allyCount,
+      enemy: enemyCount,
+    });
+    fullTitle += `\n${statsPart}`;
+  }
+
+  return fullTitle;
+}
+
+function isEncounteredMatch(gameId: number | string | undefined): boolean {
+  if (!gameId) return false;
+  const numId = Number(gameId);
+  if (savedInfo.value?.lastEncounteredGameId && savedInfo.value.lastEncounteredGameId === numId) {
+    return true;
+  }
+  return false;
+}
 
 const premadeColor = computed(() => {
   if (props.premadeIdx === undefined || props.premadeIdx < 0) return null;
@@ -325,22 +387,16 @@ const columnSideColorClass = computed(() => {
             <span
               v-if="playerData?.fateFlag"
               :class="['fate-badge', playerData.fateFlag]"
-              :title="
-                playerData.recentlyChampionName
-                  ? (playerData.fateFlag === 'ally'
-                    ? `${$t('gameInfo.fateAllyTitle')} (使用: ${playerData.recentlyChampionName})`
-                    : `${$t('gameInfo.fateEnemyTitle')} (使用: ${playerData.recentlyChampionName})`)
-                  : (playerData.fateFlag === 'ally'
-                    ? $t('gameInfo.fateAllyTitle')
-                    : $t('gameInfo.fateEnemyTitle'))
-              "
+              :title="getFateTitle(playerData)"
             >
-              {{
-                playerData.fateFlag === "ally"
-                  ? $t("gameInfo.fateAllyText")
-                  : $t("gameInfo.fateEnemyText")
-              }}
+              {{ getFateBadgeText(playerData) }}
             </span>
+            <!-- 标记玩家 / 曾同局（若已有上一局友/敌徽标，则隐藏默认的无标签'历史'标记，但保留用户手动备注的自定义标签） -->
+            <span
+              v-if="savedInfo && (savedInfo.tag || !playerData?.fateFlag)"
+              :class="['saved-badge', { 'met-only': !savedInfo.tag }]"
+              :title="savedBadgeTitle(savedInfo)"
+            >{{ savedInfo.tag || $t("gameInfo.savedPlayerMark") }}</span>
           </div>
 
           <!-- 全部战绩(10列)模式下：优先展示熟练度等级与点数，若无熟练度则展示段位兜底，避免该行空白 -->
@@ -406,6 +462,13 @@ const columnSideColorClass = computed(() => {
           <div class="cm-top-row">
             <span class="cm-mode" :title="getQueueName(m.queueId, m.name)">
               {{ getQueueName(m.queueId, m.name) }}
+            </span>
+            <span
+              v-if="isEncounteredMatch(m.gameId)"
+              class="cm-encountered-tag"
+              :title="$t('gameInfo.encounteredMatchTip')"
+            >
+              {{ $t("gameInfo.encounteredMatch") }}
             </span>
             <span class="cm-date">{{ formatMatchDate(m.shortTime) }}</span>
           </div>
@@ -671,6 +734,29 @@ const columnSideColorClass = computed(() => {
   border: 1px solid rgba(248, 113, 113, 0.4);
 }
 
+.saved-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 4px;
+  border-radius: 999px;
+  font-size: 0.54rem;
+  font-weight: 700;
+  line-height: 1.2;
+  background: var(--primary-color-alpha-15);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color-alpha-40);
+  max-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.saved-badge.met-only {
+  background: var(--border-color);
+  color: var(--text-muted);
+  border: none;
+}
+
 .col-streak-badge {
   display: inline-flex;
   align-items: center;
@@ -913,6 +999,18 @@ const columnSideColorClass = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   letter-spacing: 0.1px;
+}
+.cm-encountered-tag {
+  font-size: 0.5rem;
+  font-weight: 800;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: var(--primary-color-alpha-15);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color-alpha-40);
+  line-height: 1;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .cm-date {
   font-size: 0.52rem;

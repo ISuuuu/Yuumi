@@ -506,6 +506,8 @@ onMounted(() => {
             :compact="viewMode === 'ten'"
             :side="viewMode === 'ten' ? (i < myTeam.length ? 'ally' : 'enemy') : (activeTab === 'my' ? 'ally' : 'enemy')"
             :premade-idx="getPremadeIdx(p, viewMode === 'ten' ? (i < myTeam.length ? 'my' : 'their') : activeTab)"
+            :saved-map="savedPlayerMap"
+            :self-puuid="currentSummonerPuuid"
             :class="{
               'team-separator': viewMode === 'ten' && isTheirTeamRevealed && i === myTeam.length,
               'reverse-separator': viewMode === 'ten' && isTheirTeamRevealed && i === myTeam.length && store.mapSide === 'red',

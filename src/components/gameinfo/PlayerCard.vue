@@ -98,6 +98,41 @@ function savedBadgeTitle(info: SavedPlayerMarker): string {
     : t("gameInfo.savedPlayerTipNoTag", { count: info.encounterCount });
 }
 
+function getFateBadgeText(data: PlayerData | undefined): string {
+  if (!data?.fateFlag) return "";
+  const isLast = data.fateIsLastGame ?? true;
+  if (data.fateFlag === "ally") {
+    return isLast ? t("gameInfo.fateAllyText") : t("gameInfo.fateRecentAllyText");
+  } else {
+    return isLast ? t("gameInfo.fateEnemyText") : t("gameInfo.fateRecentEnemyText");
+  }
+}
+
+function getFateTitle(data: PlayerData | undefined): string {
+  if (!data?.fateFlag) return "";
+  const isLast = data.fateIsLastGame ?? true;
+  const baseTitle = data.fateFlag === "ally"
+    ? (isLast ? t("gameInfo.fateAllyTitle") : (t("gameInfo.fateRecentAllyTitle") || t("gameInfo.fateAllyTitle")))
+    : (isLast ? t("gameInfo.fateEnemyTitle") : (t("gameInfo.fateRecentEnemyTitle") || t("gameInfo.fateEnemyTitle")));
+  const champPart = data.recentlyChampionName ? ` (使用: ${data.recentlyChampionName})` : "";
+  let fullTitle = `${baseTitle}${champPart}`;
+
+  // 若多次交手且既有队友又有对手（或累计相遇 >= 2），在末尾补充详细交手统计
+  const allyCount = data.fateAllyCount ?? 0;
+  const enemyCount = data.fateEnemyCount ?? 0;
+  const totalCount = allyCount + enemyCount;
+  if (totalCount >= 2 && allyCount > 0 && enemyCount > 0) {
+    const statsPart = t("gameInfo.fateMultiEncounter", {
+      total: totalCount,
+      ally: allyCount,
+      enemy: enemyCount,
+    });
+    fullTitle += `\n${statsPart}`;
+  }
+
+  return fullTitle;
+}
+
 const TIER_MAP = computed<Record<string, string>>(() => ({
   NONE: "",
   IRON: t("tools.spoofTier.IRON"),
@@ -239,25 +274,12 @@ const soloStats = computed(() => {
             <span
               v-if="playerData?.fateFlag"
               :class="['fate-badge', playerData.fateFlag]"
-              :title="
-                playerData.recentlyChampionName
-                  ? (playerData.fateFlag === 'ally'
-                    ? `${$t('gameInfo.fateAllyTitle')} (使用: ${playerData.recentlyChampionName})`
-                    : `${$t('gameInfo.fateEnemyTitle')} (使用: ${playerData.recentlyChampionName})`)
-                  : (playerData.fateFlag === 'ally'
-                    ? $t('gameInfo.fateAllyTitle')
-                    : $t('gameInfo.fateEnemyTitle'))
-              "
-            >{{
-                playerData.fateFlag === "ally"
-                  ? $t("gameInfo.fateAllyText")
-                  : $t("gameInfo.fateEnemyText")
-              }}</span
-            >
+              :title="getFateTitle(playerData)"
+            >{{ getFateBadgeText(playerData) }}</span>
 
-            <!-- 标记玩家 -->
+            <!-- 标记玩家（若已有上一局友/敌徽标，则隐藏默认的无标签'历史'标记，但保留用户手动备注的自定义标签） -->
             <span
-              v-if="savedInfo"
+              v-if="savedInfo && (savedInfo.tag || !playerData?.fateFlag)"
               :class="['saved-badge', { 'met-only': !savedInfo.tag }]"
               :title="savedBadgeTitle(savedInfo)"
             >{{ savedInfo.tag || $t("gameInfo.savedPlayerMark") }}</span>

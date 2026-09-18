@@ -368,51 +368,28 @@ async fn check_fate(
 pub struct PlayerFateInfo {
     pub fate_flag: Option<String>,
     pub recently_champion_name: Option<String>,
+    pub game_id: Option<u64>,
+    #[serde(default)]
+    pub ally_count: u32,
+    #[serde(default)]
+    pub enemy_count: u32,
 }
 
-/// 前端独立调用的单个玩家宿命获取接口
-#[tauri::command]
-pub async fn get_player_fate_info(
-    game_id: u64,
-    target_puuid: String,
+/// 检查单场对局中目标玩家与当前玩家的关系
+fn inspect_game_fate(
+    detail: &serde_json::Value,
+    target_puuid: &str,
     current_summoner_id: u64,
-    app_state: State<'_, AppState>,
-) -> Result<PlayerFateInfo, String> {
-    // 锁内只提取连接参数，尽早释放读锁，避免 HTTP 请求期间阻塞 monitor 重连
-    let (auth, base, http_client) = {
-        let lock = app_state.lcu().await?;
-        let lcu = lock.as_ref().ok_or("LCU未连接")?;
-        (
-            build_auth_header(&lcu.token),
-            format!("https://127.0.0.1:{}", lcu.port),
-            lcu.http_client.clone(),
-        )
-    };
-
-    let url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
-    let resp = http_client
-        .get(&url)
-        .header("Authorization", &auth)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let detail: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-
+) -> Option<(String, Option<i32>)> {
     let queue_id = detail.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0);
-    let participants = detail
-        .get("participants")
-        .and_then(|v| v.as_array())
-        .ok_or("无法解析 participants")?;
+    let participants = detail.get("participants").and_then(|v| v.as_array())?;
     let identities = detail
         .get("participantIdentities")
-        .and_then(|v| v.as_array())
-        .ok_or("无法解析 participantIdentities")?;
+        .and_then(|v| v.as_array())?;
 
     let mut current_pid: Option<i64> = None;
     let mut target_pid: Option<i64> = None;
 
-    // 1. 查找 participantId
     for ident in identities {
         let player_data = match ident.get("player") {
             Some(p) => p,
@@ -439,78 +416,147 @@ pub async fn get_player_fate_info(
         }
     }
 
-    let target_pid = target_pid.ok_or("找不到目标玩家")?;
+    let current_pid = current_pid?;
+    let target_pid = target_pid?;
 
-    // 查找目标玩家在这一局使用的英雄 ID
+    if current_pid == target_pid {
+        return None;
+    }
+
     let mut target_champion_id: Option<i32> = None;
+    let mut current_team: Option<i64> = None;
+    let mut target_team: Option<i64> = None;
+
     for p in participants {
         let pid = match p.get("participantId").and_then(|v| v.as_i64()) {
             Some(id) => id,
             None => continue,
         };
+
+        let team_val = if queue_id == 1700 {
+            p.get("stats")
+                .and_then(|s| s.get("subteamPlacement"))
+                .and_then(|v| v.as_i64())
+        } else {
+            p.get("teamId").and_then(|v| v.as_i64())
+        };
+
+        if pid == current_pid {
+            current_team = team_val;
+        }
         if pid == target_pid {
+            target_team = team_val;
             target_champion_id = p
                 .get("championId")
                 .and_then(|v| v.as_i64())
                 .map(|id| id as i32);
-            break;
         }
     }
 
-    let recently_champion_name = if let Some(cid) = target_champion_id {
+    let ct = current_team?;
+    let tt = target_team?;
+    let flag = if ct == tt {
+        "ally".to_string()
+    } else {
+        "enemy".to_string()
+    };
+    Some((flag, target_champion_id))
+}
+
+/// 前端独立调用的单个玩家宿命获取接口（支持传入多个 game_id，按顺序查找最近一场共同对局）
+#[tauri::command]
+pub async fn get_player_fate_info(
+    game_id: Option<u64>,
+    game_ids: Option<Vec<u64>>,
+    target_puuid: String,
+    current_summoner_id: u64,
+    app_state: State<'_, AppState>,
+) -> Result<PlayerFateInfo, String> {
+    let mut candidate_game_ids = Vec::new();
+    if let Some(ids) = game_ids {
+        for id in ids {
+            if id > 0 && !candidate_game_ids.contains(&id) {
+                candidate_game_ids.push(id);
+            }
+        }
+    }
+    if let Some(gid) = game_id {
+        if gid > 0 && !candidate_game_ids.contains(&gid) {
+            candidate_game_ids.push(gid);
+        }
+    }
+
+    if candidate_game_ids.is_empty() {
+        return Ok(PlayerFateInfo {
+            fate_flag: None,
+            recently_champion_name: None,
+            game_id: None,
+            ally_count: 0,
+            enemy_count: 0,
+        });
+    }
+
+    // 锁内只提取连接参数，尽早释放读锁，避免 HTTP 请求期间阻塞 monitor 重连
+    let (auth, base, http_client) = {
+        let lock = app_state.lcu().await?;
+        let lcu = lock.as_ref().ok_or("LCU未连接")?;
+        (
+            build_auth_header(&lcu.token),
+            format!("https://127.0.0.1:{}", lcu.port),
+            lcu.http_client.clone(),
+        )
+    };
+
+    let mut first_flag: Option<String> = None;
+    let mut first_cid: Option<i32> = None;
+    let mut first_game_id: Option<u64> = None;
+    let mut ally_count = 0u32;
+    let mut enemy_count = 0u32;
+
+    for &gid in &candidate_game_ids {
+        let url = format!("{}/lol-match-history/v1/games/{}", base, gid);
+        let resp = match http_client
+            .get(&url)
+            .header("Authorization", &auth)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        let detail: serde_json::Value = match resp.json().await {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        if let Some((flag, cid)) = inspect_game_fate(&detail, &target_puuid, current_summoner_id) {
+            if flag == "ally" {
+                ally_count += 1;
+            } else {
+                enemy_count += 1;
+            }
+            if first_flag.is_none() {
+                first_flag = Some(flag);
+                first_cid = cid;
+                first_game_id = Some(gid);
+            }
+        }
+    }
+
+    let recently_champion_name = if let Some(cid) = first_cid {
         let assets = app_state.game_data.read().await;
         assets.champions.get(&cid).cloned()
     } else {
         None
     };
 
-    let fate_flag = if let Some(curr_pid) = current_pid {
-        if curr_pid == target_pid {
-            None
-        } else {
-            // 2. 查找对应的队伍 ID
-            let mut current_team: Option<i64> = None;
-            let mut target_team: Option<i64> = None;
-
-            for p in participants {
-                let pid = match p.get("participantId").and_then(|v| v.as_i64()) {
-                    Some(id) => id,
-                    None => continue,
-                };
-
-                let team_val = if queue_id == 1700 {
-                    p.get("stats")
-                        .and_then(|s| s.get("subteamPlacement"))
-                        .and_then(|v| v.as_i64())
-                } else {
-                    p.get("teamId").and_then(|v| v.as_i64())
-                };
-
-                if pid == curr_pid {
-                    current_team = team_val;
-                }
-                if pid == target_pid {
-                    target_team = team_val;
-                }
-            }
-
-            if let (Some(ct), Some(tt)) = (current_team, target_team) {
-                if ct == tt {
-                    Some("ally".to_string())
-                } else {
-                    Some("enemy".to_string())
-                }
-            } else {
-                None
-            }
-        }
-    } else {
-        None
-    };
-
     Ok(PlayerFateInfo {
-        fate_flag,
+        fate_flag: first_flag,
         recently_champion_name,
+        game_id: first_game_id,
+        ally_count,
+        enemy_count,
     })
 }
 

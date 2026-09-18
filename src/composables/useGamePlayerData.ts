@@ -8,6 +8,7 @@ import {
   lcuRequest,
   fetchConfig,
   fetchPlayerFateInfo,
+  querySavedPlayersMap,
   getLiveClientPlayerList,
   getLiveClientActivePlayerName,
   getMapSide,
@@ -1088,22 +1089,51 @@ export function useGamePlayerData(
 
       let fateFlag: "ally" | "enemy" | null = null;
       let recentlyChampionName = "";
+      let fateIsLastGame = true;
+      let fateAllyCount = 0;
+      let fateEnemyCount = 0;
       if (
         currentSummonerId.value &&
-        matches.length > 0 &&
         !isCurrentPlayer &&
         safeInfo.puuid
       ) {
         try {
-          const lastGameId = matches[0].gameId;
-          const fateInfo = await fetchPlayerFateInfo(
-            lastGameId,
-            safeInfo.puuid,
-            currentSummonerId.value,
-          );
-          if (fateInfo) {
-            fateFlag = fateInfo.fateFlag;
-            recentlyChampionName = fateInfo.recentlyChampionName || "";
+          // 候选 game_id 列表：优先使用路人集记录的最近相遇对局 ID，随后按时间倒序填入目标玩家近 5 场战绩
+          const candidateIds: number[] = [];
+          if (currentSummonerPuuid.value) {
+            try {
+              const savedMap = await querySavedPlayersMap(currentSummonerPuuid.value);
+              const targetSaved = savedMap[safeInfo.puuid];
+              if (targetSaved?.lastEncounteredGameId) {
+                candidateIds.push(targetSaved.lastEncounteredGameId);
+              }
+            } catch {
+              // ignore saved map lookup failure
+            }
+          }
+          for (const m of matches.slice(0, 5)) {
+            if (m.gameId && !candidateIds.includes(m.gameId)) {
+              candidateIds.push(m.gameId);
+            }
+          }
+
+          if (candidateIds.length > 0) {
+            const fateInfo = await fetchPlayerFateInfo(
+              candidateIds[0],
+              safeInfo.puuid,
+              currentSummonerId.value,
+              candidateIds,
+            );
+            if (fateInfo && fateInfo.fateFlag) {
+              fateFlag = fateInfo.fateFlag;
+              recentlyChampionName = fateInfo.recentlyChampionName || "";
+              fateAllyCount = fateInfo.allyCount ?? 0;
+              fateEnemyCount = fateInfo.enemyCount ?? 0;
+              // 如果命中的对局不是 matches[0]，或者是好几局之前的，则标记为非最上一局
+              if (matches[0] && fateInfo.gameId && fateInfo.gameId !== matches[0].gameId) {
+                fateIsLastGame = false;
+              }
+            }
           }
         } catch (e) {
           console.error("宿命检测失败:", e);
@@ -1138,6 +1168,9 @@ export function useGamePlayerData(
         lossesCount,
         fateFlag,
         recentlyChampionName,
+        fateIsLastGame,
+        fateAllyCount,
+        fateEnemyCount,
         masteries: masteryData,
         streak,
       };
