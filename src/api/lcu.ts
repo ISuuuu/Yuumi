@@ -312,16 +312,14 @@ export interface PlayerFateInfo {
 export const fetchRecentTeammates = (gameIds: number[], puuid: string) =>
   invoke<RecentTeammatesResponse>("get_recent_teammates", { gameIds, puuid });
 
-/** 获取单个玩家与自己的宿命关系及英雄名（支持传入单个 gameId 或多个候选 gameIds 查历史交手） */
+/** 获取单个玩家与自己的宿命关系及英雄名（传入候选 gameIds，按顺序查找最近一场共同对局） */
 export const fetchPlayerFateInfo = (
-  gameId: number | null | undefined,
+  gameIds: number[],
   targetPuuid: string,
   currentSummonerId: number,
-  gameIds?: number[],
 ) =>
   invoke<PlayerFateInfo>("get_player_fate_info", {
-    gameId: gameId || null,
-    gameIds: gameIds || null,
+    gameIds,
     targetPuuid,
     currentSummonerId,
   });

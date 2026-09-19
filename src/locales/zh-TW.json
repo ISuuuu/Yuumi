@@ -658,6 +658,7 @@
     "fateRecentAllyText": "曾友",
     "fateRecentEnemyText": "曾敵",
     "fateMultiEncounter": "近期交手 {total} 次: {ally} 局隊友 · {enemy} 局對手",
+    "fateUsedChampion": "使用: {champ}",
     "savedPlayerMark": "歷史",
     "savedPlayerTip": "曾同局 {count} 次 · 標記: {tag}",
     "savedPlayerTipNoTag": "曾同局 {count} 次",

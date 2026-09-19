@@ -463,26 +463,21 @@ fn inspect_game_fate(
     Some((flag, target_champion_id))
 }
 
-/// 前端独立调用的单个玩家宿命获取接口（支持传入多个 game_id，按顺序查找最近一场共同对局）
+/// 前端独立调用的单个玩家宿命获取接口（传入候选 game_id 列表，按顺序取最近一场共同对局并统计历史交手次数）
 #[tauri::command]
 pub async fn get_player_fate_info(
-    game_id: Option<u64>,
     game_ids: Option<Vec<u64>>,
     target_puuid: String,
     current_summoner_id: u64,
     app_state: State<'_, AppState>,
 ) -> Result<PlayerFateInfo, String> {
+    // 去重并保留传入顺序（调用方保证越靠前优先级越高）
     let mut candidate_game_ids = Vec::new();
     if let Some(ids) = game_ids {
         for id in ids {
             if id > 0 && !candidate_game_ids.contains(&id) {
                 candidate_game_ids.push(id);
             }
-        }
-    }
-    if let Some(gid) = game_id {
-        if gid > 0 && !candidate_game_ids.contains(&gid) {
-            candidate_game_ids.push(gid);
         }
     }
 
@@ -507,30 +502,51 @@ pub async fn get_player_fate_info(
         )
     };
 
+    // 复用 LCU 并发信号量，避免宿命检测打满 LCU 连接
+    let semaphore = {
+        let lock = app_state.api_semaphore.read().await;
+        lock.clone()
+    };
+
+    // 并发拉取候选对局详情，结果按候选顺序回填，保证"最先命中"取的是优先级最高的候选
+    let mut handles = Vec::with_capacity(candidate_game_ids.len());
+    for &gid in &candidate_game_ids {
+        let auth = auth.clone();
+        let base = base.clone();
+        let http_client = http_client.clone();
+        let semaphore = semaphore.clone();
+        let target_puuid = target_puuid.clone();
+        handles.push(tokio::spawn(async move {
+            let _permit = match semaphore.acquire().await {
+                Ok(p) => p,
+                Err(_) => return None,
+            };
+            let url = format!("{}/lol-match-history/v1/games/{}", base, gid);
+            let resp = match http_client
+                .get(&url)
+                .header("Authorization", &auth)
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(_) => return None,
+            };
+            let detail: serde_json::Value = match resp.json().await {
+                Ok(d) => d,
+                Err(_) => return None,
+            };
+            inspect_game_fate(&detail, &target_puuid, current_summoner_id)
+        }));
+    }
+
     let mut first_flag: Option<String> = None;
     let mut first_cid: Option<i32> = None;
     let mut first_game_id: Option<u64> = None;
     let mut ally_count = 0u32;
     let mut enemy_count = 0u32;
 
-    for &gid in &candidate_game_ids {
-        let url = format!("{}/lol-match-history/v1/games/{}", base, gid);
-        let resp = match http_client
-            .get(&url)
-            .header("Authorization", &auth)
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
-        let detail: serde_json::Value = match resp.json().await {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-
-        if let Some((flag, cid)) = inspect_game_fate(&detail, &target_puuid, current_summoner_id) {
+    for (idx, h) in handles.into_iter().enumerate() {
+        if let Ok(Some((flag, cid))) = h.await {
             if flag == "ally" {
                 ally_count += 1;
             } else {
@@ -539,7 +555,7 @@ pub async fn get_player_fate_info(
             if first_flag.is_none() {
                 first_flag = Some(flag);
                 first_cid = cid;
-                first_game_id = Some(gid);
+                first_game_id = Some(candidate_game_ids[idx]);
             }
         }
     }

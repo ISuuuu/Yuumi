@@ -658,6 +658,7 @@
     "fateRecentAllyText": "Ex-Ally",
     "fateRecentEnemyText": "Ex-Enemy",
     "fateMultiEncounter": "Recent {total} game(s): {ally} ally · {enemy} enemy",
+    "fateUsedChampion": "using {champ}",
     "savedPlayerMark": "History",
     "savedPlayerTip": "Encountered {count} time(s) · Tag: {tag}",
     "savedPlayerTipNoTag": "Encountered {count} time(s)",

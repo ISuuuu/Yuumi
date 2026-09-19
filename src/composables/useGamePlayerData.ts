@@ -15,6 +15,7 @@ import {
   writeFrontendLog,
   type MatchDisplay,
   type AppConfig,
+  type SavedPlayerMarker,
 } from "../api/lcu";
 import type {
   PlayerData,
@@ -709,6 +710,17 @@ export function useGamePlayerData(
     return inheritPlaceholderChampion(existing, cellId, fallbackPlayer) || 0;
   };
 
+  // 路人集标记映射的 in-flight 去重：同一批 10 名玩家并发加载宿命候选时只查询一次
+  let savedPlayersMapInflight: Promise<Record<string, SavedPlayerMarker>> | null = null;
+  const getSavedPlayersMapCached = () => {
+    if (!savedPlayersMapInflight) {
+      savedPlayersMapInflight = querySavedPlayersMap(currentSummonerPuuid.value).finally(() => {
+        savedPlayersMapInflight = null;
+      });
+    }
+    return savedPlayersMapInflight;
+  };
+
   async function loadPlayerData(
     cellId: number,
     summonerId: number,
@@ -1098,31 +1110,33 @@ export function useGamePlayerData(
         safeInfo.puuid
       ) {
         try {
-          // 候选 game_id 列表：优先使用路人集记录的最近相遇对局 ID，随后按时间倒序填入目标玩家近 5 场战绩
+          // 候选 game_id 列表：按时间倒序填入目标玩家近 5 场战绩，末尾补路人集记录的最近相遇对局（回溯 5 局以外的历史交手）
           const candidateIds: number[] = [];
+          for (const m of matches.slice(0, 5)) {
+            if (m.gameId && !candidateIds.includes(m.gameId)) {
+              candidateIds.push(m.gameId);
+            }
+          }
           if (currentSummonerPuuid.value) {
             try {
-              const savedMap = await querySavedPlayersMap(currentSummonerPuuid.value);
+              const savedMap = await getSavedPlayersMapCached();
               const targetSaved = savedMap[safeInfo.puuid];
-              if (targetSaved?.lastEncounteredGameId) {
+              if (
+                targetSaved?.lastEncounteredGameId &&
+                !candidateIds.includes(targetSaved.lastEncounteredGameId)
+              ) {
                 candidateIds.push(targetSaved.lastEncounteredGameId);
               }
             } catch {
               // ignore saved map lookup failure
             }
           }
-          for (const m of matches.slice(0, 5)) {
-            if (m.gameId && !candidateIds.includes(m.gameId)) {
-              candidateIds.push(m.gameId);
-            }
-          }
 
           if (candidateIds.length > 0) {
             const fateInfo = await fetchPlayerFateInfo(
-              candidateIds[0],
+              candidateIds,
               safeInfo.puuid,
               currentSummonerId.value,
-              candidateIds,
             );
             if (fateInfo && fateInfo.fateFlag) {
               fateFlag = fateInfo.fateFlag;

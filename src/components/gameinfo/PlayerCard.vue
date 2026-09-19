@@ -10,6 +10,7 @@ import {
 } from "../../types/gameInfo";
 import { useLcuStore } from "../../store/lcuStore";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
+import { useFateBadge } from "../../composables/useFateBadge";
 import type { SavedPlayerMarker } from "../../api/lcu";
 import LcuImage from "../LcuImage.vue";
 
@@ -80,58 +81,11 @@ const masteryDetail = computed(() => {
   return detail;
 });
 
-// 该玩家是否为"保存的玩家"（曾同局/打了标签），取 tag 与相遇次数；
-// 当前登录召唤师自身不展示曾同局徽章
-const savedInfo = computed(() => {
-  const puuid = props.playerData?.info?.puuid;
-  if (!puuid || !props.savedMap) return undefined;
-  if (props.selfPuuid && puuid === props.selfPuuid) return undefined;
-  return props.savedMap[puuid];
-});
-
-function savedBadgeTitle(info: SavedPlayerMarker): string {
-  return info.tag
-    ? t("gameInfo.savedPlayerTip", {
-        count: info.encounterCount,
-        tag: info.tag,
-      })
-    : t("gameInfo.savedPlayerTipNoTag", { count: info.encounterCount });
-}
-
-function getFateBadgeText(data: PlayerData | undefined): string {
-  if (!data?.fateFlag) return "";
-  const isLast = data.fateIsLastGame ?? true;
-  if (data.fateFlag === "ally") {
-    return isLast ? t("gameInfo.fateAllyText") : t("gameInfo.fateRecentAllyText");
-  } else {
-    return isLast ? t("gameInfo.fateEnemyText") : t("gameInfo.fateRecentEnemyText");
-  }
-}
-
-function getFateTitle(data: PlayerData | undefined): string {
-  if (!data?.fateFlag) return "";
-  const isLast = data.fateIsLastGame ?? true;
-  const baseTitle = data.fateFlag === "ally"
-    ? (isLast ? t("gameInfo.fateAllyTitle") : (t("gameInfo.fateRecentAllyTitle") || t("gameInfo.fateAllyTitle")))
-    : (isLast ? t("gameInfo.fateEnemyTitle") : (t("gameInfo.fateRecentEnemyTitle") || t("gameInfo.fateEnemyTitle")));
-  const champPart = data.recentlyChampionName ? ` (使用: ${data.recentlyChampionName})` : "";
-  let fullTitle = `${baseTitle}${champPart}`;
-
-  // 若多次交手且既有队友又有对手（或累计相遇 >= 2），在末尾补充详细交手统计
-  const allyCount = data.fateAllyCount ?? 0;
-  const enemyCount = data.fateEnemyCount ?? 0;
-  const totalCount = allyCount + enemyCount;
-  if (totalCount >= 2 && allyCount > 0 && enemyCount > 0) {
-    const statsPart = t("gameInfo.fateMultiEncounter", {
-      total: totalCount,
-      ally: allyCount,
-      enemy: enemyCount,
-    });
-    fullTitle += `\n${statsPart}`;
-  }
-
-  return fullTitle;
-}
+const { savedInfo, savedBadgeTitle, getFateBadgeText, getFateTitle } = useFateBadge(
+  () => props.playerData?.info?.puuid,
+  () => props.savedMap,
+  () => props.selfPuuid,
+);
 
 const TIER_MAP = computed<Record<string, string>>(() => ({
   NONE: "",
