@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useLcuStore } from "../store/lcuStore";
 import MatchHistoryTab from "../components/career/MatchHistoryTab.vue";
 import LootManagerTab from "../components/career/LootManagerTab.vue";
+import ChampionMasteryTab from "../components/career/ChampionMasteryTab.vue";
 import LcuImage from "../components/LcuImage.vue";
 import LcuOfflineState from "../components/LcuOfflineState.vue";
 import { useMatchHistory } from "../composables/useMatchHistory";
@@ -74,7 +75,7 @@ watch(
 );
 
 watch(isViewingOther, (other) => {
-  if (other && currentTab.value === "loot") {
+  if (other && (currentTab.value === "loot" || currentTab.value === "mastery")) {
     currentTab.value = "matches";
   }
 });
@@ -229,6 +230,12 @@ function refreshSummoner() {
         >
           战利品
         </div>
+        <div
+          :class="['career-tab-item', { active: currentTab === 'mastery' }]"
+          @click="currentTab = 'mastery'"
+        >
+          英雄熟练度
+        </div>
       </div>
 
       <!-- 视图内容：使用 v-show 保留切换状态 -->
@@ -240,6 +247,10 @@ function refreshSummoner() {
           v-show="currentTab === 'loot'"
           :active="currentTab === 'loot'"
           :refresh-summoner="refreshSummoner"
+        />
+        <ChampionMasteryTab
+          v-show="currentTab === 'mastery'"
+          :active="currentTab === 'mastery'"
         />
       </template>
     </div>

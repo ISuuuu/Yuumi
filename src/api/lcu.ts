@@ -676,3 +676,59 @@ export const writeFrontendLog = (level: "info" | "warn" | "error" | "debug", tag
 /** 从 JSON 文件导入带标记玩家，返回导入数量 */
 export const importTaggedPlayersFromJsonFile = () =>
   invoke<number>("import_tagged_players_from_json_file");
+
+/** 英雄熟练度与赛段里程碑信息 */
+export interface ChampionMasteryInfo {
+  championId: number;
+  championName: string;
+  championTitle: string;
+  championIconUrl: string;
+  championLevel: number;
+  championPoints: number;
+  championPointsSinceLastLevel: number;
+  championPointsUntilNextLevel: number;
+  markRequiredForNextLevel: number;
+  tokensEarned: number;
+  championSeasonMilestone: number;
+  milestoneGrades: string[];
+  chestGranted: boolean;
+  eligibleForChest: boolean;
+  nextLevelPoints: number;
+  lastPlayTime: number;
+}
+
+/** 获取玩家全英雄熟练度列表 */
+export const fetchChampionMasteryList = () =>
+  invoke<ChampionMasteryInfo[]>("get_champion_mastery_list");
+
+/** 玩家挑战勋章与成就数据项 */
+export interface PlayerChallengeItem {
+  id: number;
+  name: string;
+  description: string;
+  currentLevel?: string;
+  level?: string;
+  percentile?: number;
+  value?: number;
+  achievedTime?: number;
+  category?: string;
+  isApex?: boolean;
+  hasParent?: boolean;
+  availableIds?: number[];
+  capstoneGroupId?: number;
+}
+
+/** 挑战称号项 */
+export interface PlayerTitleItem {
+  id?: number | string;
+  itemId?: number | string;
+  name: string;
+}
+
+/** 获取玩家挑战与勋章数据 */
+export const fetchPlayerChallenges = () =>
+  invoke<Record<string, PlayerChallengeItem> | PlayerChallengeItem[]>("get_player_challenges");
+
+/** 设置玩家佩戴的称号与挑战徽章 (最多 3 个) */
+export const setPlayerPreferences = (titleId: string, challengeIds: string[]) =>
+  invoke<unknown>("set_player_preferences", { titleId, challengeIds });

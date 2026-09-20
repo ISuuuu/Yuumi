@@ -909,3 +909,47 @@ pub async fn spectate_directly(
 
     Ok(format!("观战启动成功（CMD 方式），目标: {}", name))
 }
+
+// ─── 挑战勋章与称号设置 ───
+
+/// 获取已拥有的挑战与称号列表
+#[tauri::command]
+pub async fn get_player_challenges(
+    app_state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    lcu_request(
+        app_state.inner(),
+        "GET",
+        "/lol-challenges/v1/challenges/local-player",
+        None,
+    )
+    .await
+}
+
+/// 设置当前佩戴的称号和最多 3 个挑战勋章
+#[tauri::command]
+pub async fn set_player_preferences(
+    title_id: String,
+    challenge_ids: Vec<String>,
+    app_state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut body = serde_json::json!({
+        "title": title_id,
+        "challengeIds": challenge_ids,
+    });
+    // 尝试携带当前 bannerAccent 避免重置横幅
+    if let Ok(me) = lcu_request(app_state.inner(), "GET", "/lol-chat/v1/me", None).await {
+        if let Some(banner) = me.pointer("/lol/bannerIdSelected").and_then(|v| v.as_str()) {
+            if !banner.is_empty() {
+                body["bannerAccent"] = serde_json::Value::String(banner.to_string());
+            }
+        }
+    }
+    lcu_request(
+        app_state.inner(),
+        "POST",
+        "/lol-challenges/v1/update-player-preferences/",
+        Some(body),
+    )
+    .await
+}

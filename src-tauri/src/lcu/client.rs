@@ -167,6 +167,7 @@ const ALLOWED_API_PREFIXES: &[&str] = &[
     "/lol-ranked/",
     "/lol-match-history/",
     "/lol-champion-mastery/",
+    "/lol-challenges/",
     "/lol-honor-v2/",
     "/lol-honor/",
     "/lol-pre-end-of-game/",
