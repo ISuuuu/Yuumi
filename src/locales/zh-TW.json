@@ -322,7 +322,8 @@
       "playAgainLabel": "對局結束後自動再來一局:",
       "aramSideLabel": "ARAM 選人時自動報邊:",
       "aramSideVisibleLabel": "報邊訊息對隊友可見:",
-      "tagReminderLabel": "選人階段自動提醒標記玩家:"
+      "tagReminderLabel": "選人階段自動提醒標記玩家:",
+      "friendRadarLabel": "好友對局結束雷達提醒:"
     },
     "benchOverlay": {
       "title": "大亂斗板凳席懸浮窗",

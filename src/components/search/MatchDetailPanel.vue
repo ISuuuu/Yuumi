@@ -2,6 +2,7 @@
 import { inject, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import LcuImage from "../LcuImage.vue";
+import ReplayButton from "../ReplayButton.vue";
 import type { GameDetail } from "../../types/search";
 import type { SummonerDisplay } from "../../api/lcu";
 import { getQueueName } from "../../utils/queueName";
@@ -96,23 +97,26 @@ function queueName(queueId: number, backendName: string): string {
             </span>
           </div>
         </div>
-        <button
-          class="copy-btn"
-          title="复制游戏 ID"
-          @click="emit('copy', details.gameId)"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
+        <div class="banner-actions">
+          <ReplayButton :game-id="details.gameId" />
+          <button
+            class="copy-btn"
+            title="复制游戏 ID"
+            @click="emit('copy', details.gameId)"
           >
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-            <path
-              d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-            />
-          </svg>
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <!-- 队伍详细数据 -->
@@ -455,6 +459,13 @@ function queueName(queueId: number, backendName: string): string {
 .banner-subtext {
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+.banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .copy-btn {

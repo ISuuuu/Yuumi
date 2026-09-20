@@ -69,6 +69,7 @@ declare module 'vue' {
     PlayerMatchColumn: typeof import('./components/gameinfo/PlayerMatchColumn.vue')['default']
     ProfileBackgroundCard: typeof import('./components/tools/quickactions/ProfileBackgroundCard.vue')['default']
     RankSpoofCard: typeof import('./components/tools/quickactions/RankSpoofCard.vue')['default']
+    ReplayButton: typeof import('./components/ReplayButton.vue')['default']
     RestartClientCard: typeof import('./components/tools/quickactions/RestartClientCard.vue')['default']
     RunesSection: typeof import('./components/opgg/RunesSection.vue')['default']
     ScreenshotSection: typeof import('./components/settings/ScreenshotSection.vue')['default']

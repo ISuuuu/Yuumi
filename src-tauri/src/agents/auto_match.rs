@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
@@ -30,6 +30,8 @@ pub enum GameflowEvent {
     HonorBallot(HonorBallot),
     /// 收到的游戏邀请列表（/lol-lobby/v2/received-invitations）
     ReceivedInvitations(Vec<ReceivedInvitation>),
+    /// 好友聊天与状态事件（/lol-chat/v1/friends）
+    FriendEvent(serde_json::Value),
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -89,6 +91,8 @@ pub fn start(
         let mut upload_trigger = upload_trigger;
         let mut ready_check_accepted = false; // 跟踪是否已接受匹配
         let mut honored = false; // 跟踪当前对局是否已自动荣誉点赞（防 WS 重复推送刷屏）
+        let mut friend_in_game_states: std::collections::HashMap<String, bool> =
+            std::collections::HashMap::new();
 
         while let Some(event) = rx.recv().await {
             let cfg = {
@@ -166,9 +170,90 @@ pub fn start(
                         spawn_handle_invitations(app_handle.clone(), invitations);
                     }
                 }
+                GameflowEvent::FriendEvent(data) => {
+                    handle_friend_event(&data, &mut friend_in_game_states, &cfg, &app_handle);
+                }
             }
         }
     });
+}
+
+/// 好友状态事件处理（好友雷达）
+fn handle_friend_event(
+    data: &serde_json::Value,
+    friend_in_game_states: &mut std::collections::HashMap<String, bool>,
+    cfg: &FunctionsConfig,
+    app_handle: &AppHandle,
+) {
+    if let Some(arr) = data.as_array() {
+        for item in arr {
+            process_single_friend(item, friend_in_game_states, cfg, app_handle);
+        }
+    } else if data.is_object() {
+        process_single_friend(data, friend_in_game_states, cfg, app_handle);
+    }
+}
+
+fn process_single_friend(
+    friend: &serde_json::Value,
+    friend_in_game_states: &mut std::collections::HashMap<String, bool>,
+    cfg: &FunctionsConfig,
+    app_handle: &AppHandle,
+) {
+    let puuid = match friend.get("puuid").and_then(|v| v.as_str()) {
+        Some(p) if !p.is_empty() => p,
+        _ => return,
+    };
+
+    // 检查是否在游戏中（通常存储在 lol.gameStatus 或顶层 gameStatus）
+    let game_status = friend
+        .pointer("/lol/gameStatus")
+        .and_then(|v| v.as_str())
+        .or_else(|| friend.get("gameStatus").and_then(|v| v.as_str()))
+        .unwrap_or("");
+    let is_ingame = game_status.eq_ignore_ascii_case("inGame");
+
+    // 获取好友昵称
+    let game_name = friend
+        .get("gameName")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let game_tag = friend.get("gameTag").and_then(|v| v.as_str()).unwrap_or("");
+    let raw_name = friend.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let display_name = if !game_name.is_empty() {
+        if !game_tag.is_empty() {
+            format!("{}#{}", game_name, game_tag)
+        } else {
+            game_name.to_string()
+        }
+    } else if !raw_name.is_empty() {
+        raw_name.to_string()
+    } else {
+        "未知好友".to_string()
+    };
+
+    let was_in_game = friend_in_game_states.get(puuid).copied().unwrap_or(false);
+    friend_in_game_states.insert(puuid.to_string(), is_ingame);
+
+    if cfg.enable_friend_radar && cfg.watched_friend_puuids.iter().any(|p| p == puuid) {
+        // 当状态从 inGame 变成 outOfGame 或空闲时
+        if was_in_game && !is_ingame {
+            log::info!(
+                "[好友雷达] 星标好友 {} (puuid: {}) 已结束对局，当前空闲",
+                display_name,
+                puuid
+            );
+            let msg = format!("星标好友 {} 已结束对局，当前空闲", display_name);
+            let _ = app_handle.emit(
+                "friend-game-ended",
+                serde_json::json!({
+                    "puuid": puuid,
+                    "name": display_name,
+                    "message": msg,
+                }),
+            );
+        }
+    }
 }
 
 /// 游戏阶段变化处理

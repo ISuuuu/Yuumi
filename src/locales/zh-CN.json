@@ -322,7 +322,8 @@
       "playAgainLabel": "对局结束后自动再来一局:",
       "aramSideLabel": "ARAM 选人时自动报边:",
       "aramSideVisibleLabel": "报边消息对队友可见:",
-      "tagReminderLabel": "选人阶段自动提醒标记玩家:"
+      "tagReminderLabel": "选人阶段自动提醒标记玩家:",
+      "friendRadarLabel": "好友对局结束雷达提醒:"
     },
     "benchOverlay": {
       "title": "大乱斗板凳席悬浮窗",
