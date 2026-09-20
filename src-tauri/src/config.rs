@@ -218,6 +218,10 @@ pub struct FunctionsConfig {
     /// 选人阶段对带标记的玩家发送聊天提醒（默认关闭）
     #[serde(default)]
     pub enable_auto_tag_reminder: bool,
+    #[serde(default)]
+    pub watched_friend_puuids: Vec<String>,
+    #[serde(default)]
+    pub enable_friend_radar: bool,
 }
 
 impl Default for FunctionsConfig {
@@ -278,6 +282,8 @@ impl Default for FunctionsConfig {
             enable_auto_aram_team_side: false,
             aram_team_side_visible_to_team: false,
             enable_auto_tag_reminder: false,
+            watched_friend_puuids: Vec::new(),
+            enable_friend_radar: false,
         }
     }
 }

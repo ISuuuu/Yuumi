@@ -41,6 +41,12 @@ function updateTagReminder(value: boolean) {
   config.value.Functions.EnableAutoTagReminder = value;
   triggerAutoSave();
 }
+
+function updateFriendRadar(value: boolean) {
+  if (!config?.value) return;
+  config.value.Functions.EnableFriendRadar = value;
+  triggerAutoSave();
+}
 </script>
 
 <template>
@@ -75,7 +81,8 @@ function updateTagReminder(value: boolean) {
                 config.Functions.EnableAutoHonor ||
                 config.Functions.EnableAutoPlayAgain ||
                 config.Functions.EnableAutoAramTeamSide ||
-                config.Functions.EnableAutoTagReminder
+                config.Functions.EnableAutoTagReminder ||
+                config.Functions.EnableFriendRadar
                   ? t("tools.autoGameflow.statusEnabled")
                   : t("tools.autoGameflow.statusDisabled")
               }}
@@ -124,6 +131,13 @@ function updateTagReminder(value: boolean) {
         <n-switch
           :value="config.Functions.EnableAutoTagReminder"
           @update:value="updateTagReminder"
+        />
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">{{ t("tools.autoGameflow.friendRadarLabel") }}</span>
+        <n-switch
+          :value="config.Functions.EnableFriendRadar"
+          @update:value="updateFriendRadar"
         />
       </div>
     </n-collapse-item>

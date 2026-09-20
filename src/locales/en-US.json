@@ -322,7 +322,8 @@
       "playAgainLabel": "Auto play again after game:",
       "aramSideLabel": "Report ARAM team side in champ select:",
       "aramSideVisibleLabel": "Make team side message visible to teammates:",
-      "tagReminderLabel": "Auto-remind tagged players in champ select:"
+      "tagReminderLabel": "Auto-remind tagged players in champ select:",
+      "friendRadarLabel": "Friend match-end radar notification:"
     },
     "benchOverlay": {
       "title": "ARAM Bench Overlay",

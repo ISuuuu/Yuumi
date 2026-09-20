@@ -485,6 +485,8 @@ export interface FunctionsConfig {
   EnableAutoAramTeamSide: boolean;
   AramTeamSideVisibleToTeam: boolean;
   EnableAutoTagReminder: boolean;
+  WatchedFriendPuuids: string[];
+  EnableFriendRadar: boolean;
 }
 
 export interface OtherConfig {
@@ -761,3 +763,15 @@ export const fetchPlayerChallenges = () =>
 /** 设置玩家佩戴的称号与挑战徽章 (最多 3 个) */
 export const setPlayerPreferences = (titleId: string, challengeIds: string[]) =>
   invoke<unknown>("set_player_preferences", { titleId, challengeIds });
+
+/** 下载指定对局回放 (.rofl) */
+export const downloadGameReplay = (gameId: number) =>
+  invoke<unknown>("download_game_replay", { gameId });
+
+/** 获取指定对局回放状态 (如 "checking", "downloading", "watch", "unsupported" 等) */
+export const getReplayStatus = (gameId: number) =>
+  invoke<string>("get_replay_status", { gameId });
+
+/** 唤起客户端观看指定对局回放 */
+export const watchGameReplay = (gameId: number) =>
+  invoke<unknown>("watch_game_replay", { gameId });

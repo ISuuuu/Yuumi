@@ -6,6 +6,7 @@ import { fetchRecentTeammates, fetchConfig } from "../../api/lcu";
 import type { SummonerDisplay, MatchDisplay, RecentTeammate } from "../../api/lcu";
 import type { RankDisplaySource, RankedQueueEntry } from "../../types/lcu";
 import LcuImage from "../LcuImage.vue";
+import ReplayButton from "../ReplayButton.vue";
 import { NPopover, NSpin } from "naive-ui";
 
 const store = useLcuStore();
@@ -744,6 +745,11 @@ watch(
           <div class="time-panel">
             <span class="game-map">{{ translateMapName(m.map) }}</span>
             <span class="match-time">{{ formatTime(m.timeStamp) }}</span>
+          </div>
+
+          <!-- 8. 回放按钮 -->
+          <div class="replay-action-panel" @click.stop>
+            <ReplayButton :game-id="m.gameId" />
           </div>
         </div>
       </div>
@@ -1491,4 +1497,12 @@ watch(
     transform: translateY(0);
   }
 }
+
+.replay-action-panel {
+  display: flex;
+  align-items: center;
+  margin-left: 14px;
+  flex-shrink: 0;
+}
+
 </style>

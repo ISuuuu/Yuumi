@@ -1102,3 +1102,42 @@ pub async fn set_player_preferences(
     )
     .await
 }
+
+/// 下载指定对局回放 (.rofl)
+#[tauri::command]
+pub async fn download_game_replay(
+    game_id: i64,
+    app_state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let path = format!("/lol-replays/v1/rofls/{}/download", game_id);
+    let body = serde_json::json!({ "componentType": "replay-button_match-history" });
+    crate::lcu::client::lcu_request(&app_state, "POST", &path, Some(body)).await
+}
+
+/// 查询指定对局回放当前状态（如 "checking", "downloading", "watch", "unsupported" 等）
+#[tauri::command]
+pub async fn get_replay_status(
+    game_id: i64,
+    app_state: State<'_, AppState>,
+) -> Result<String, String> {
+    let path = format!("/lol-replays/v1/rofls/{}", game_id);
+    let val = crate::lcu::client::lcu_request(&app_state, "GET", &path, None).await?;
+    let state = val
+        .get("state")
+        .and_then(|s| s.as_str())
+        .or_else(|| val.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    Ok(state)
+}
+
+/// 播放指定对局回放，唤起客户端观战
+#[tauri::command]
+pub async fn watch_game_replay(
+    game_id: i64,
+    app_state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let path = format!("/lol-replays/v1/rofls/{}/watch", game_id);
+    let body = serde_json::json!({ "componentType": "replay-button_match-history" });
+    crate::lcu::client::lcu_request(&app_state, "POST", &path, Some(body)).await
+}
