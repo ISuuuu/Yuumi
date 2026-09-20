@@ -1,10 +1,44 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import { useAutoSaveConfig } from "../../composables/useAutoSaveConfig";
 import { useI18n } from "vue-i18n";
-import { NSwitch, NInputNumber, NCollapse, NCollapseItem } from "naive-ui";
+import {
+  NSwitch,
+  NInputNumber,
+  NCollapse,
+  NCollapseItem,
+  NButton,
+  useDialog,
+} from "naive-ui";
+import { useToast } from "../../composables/useToast";
+import { dodgeChampSelect, cleanError } from "../../api/lcu";
 
 const { config, triggerAutoSave } = useAutoSaveConfig();
 const { t } = useI18n();
+const dialog = useDialog();
+const { showToast } = useToast();
+const dodging = ref(false);
+
+function handleDodge() {
+  dialog.warning({
+    title: "秒退对局确认",
+    content: "秒退将受到官方正常的扣胜点与匹配等待惩罚，确认退出当前对局？",
+    positiveText: "确认秒退",
+    negativeText: "取消",
+    positiveButtonProps: { type: "error" },
+    onPositiveClick: async () => {
+      dodging.value = true;
+      try {
+        const msg = await dodgeChampSelect();
+        showToast(msg || "秒退成功", "success");
+      } catch (err: unknown) {
+        showToast(`秒退失败: ${cleanError(err)}`, "error");
+      } finally {
+        dodging.value = false;
+      }
+    },
+  });
+}
 
 function updateDelay(value: number | null) {
   if (!config?.value) return;
@@ -73,6 +107,21 @@ function updateEnabled(value: boolean) {
           :value="config.Functions.EnableAutoAcceptMatching"
           @update:value="updateEnabled"
         />
+      </div>
+      <div class="setting-row dodge-row">
+        <div class="dodge-info">
+          <span class="setting-label font-medium">选人阶段秒退</span>
+          <span class="dodge-tip">安全退出选人界面，无需强制关闭 LOL 客户端</span>
+        </div>
+        <n-button
+          size="small"
+          type="error"
+          secondary
+          :loading="dodging"
+          @click="handleDodge"
+        >
+          优雅秒退 (Dodge)
+        </n-button>
       </div>
     </n-collapse-item>
   </n-collapse>
@@ -157,5 +206,27 @@ function updateEnabled(value: boolean) {
 .setting-label {
   font-size: 0.82rem;
   color: var(--text-muted);
+}
+
+.dodge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dodge-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dodge-tip {
+  font-size: 0.72rem;
+  color: var(--text-dimmed);
+}
+
+.font-medium {
+  font-weight: 500;
+  color: var(--text-color);
 }
 </style>

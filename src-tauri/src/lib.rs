@@ -326,6 +326,8 @@ pub fn run() {
             tools::create_5v5_practice_lobby,
             tools::aram_reroll_and_swap_back,
             tools::apply_rune_page,
+            tools::apply_item_set,
+            tools::dodge_champ_select,
             tools::get_lcu_zoom,
             tools::fix_lcu_window,
             tools::clear_game_cache,

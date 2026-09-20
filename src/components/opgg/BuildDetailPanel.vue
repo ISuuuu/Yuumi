@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { ref, computed } from "vue";
 import LcuImage from "../LcuImage.vue";
 import RunesSection from "./RunesSection.vue";
 import SkillOrderSection from "./SkillOrderSection.vue";
 import ItemsSection from "./ItemsSection.vue";
+import { useToast } from "../../composables/useToast";
+import {
+  applyItemSet,
+  cleanError,
+  type ItemSetBlock,
+  type ItemSetItem,
+} from "../../api/lcu";
 import type { GameDataAssets } from "../../types/lcu";
 import type {
   OpggBuildData,
@@ -126,6 +133,107 @@ const weakCounters = computed(() => {
 function getSpellIcon(id: number): string {
   return resolveSpellIcon(props.gameDataAssets, id);
 }
+
+const { showToast } = useToast();
+const applyingItemSet = ref(false);
+
+const hasItemsData = computed(() => {
+  return Boolean(
+    props.build.starter_items?.length ||
+      props.build.core_items?.length ||
+      props.build.boots?.length ||
+      props.build.last_items?.length,
+  );
+});
+
+async function handleApplyItemSet() {
+  const champId = props.build.summary?.id || props.championId;
+  if (!champId) {
+    showToast("无法获取当前英雄信息", "warning");
+    return;
+  }
+
+  // 1. 出门装备
+  const starterItems: ItemSetItem[] = [];
+  const seenStarter = new Set<string>();
+  for (const group of (props.build.starter_items || []).slice(0, 2)) {
+    for (const id of group.ids) {
+      const idStr = String(id);
+      if (!seenStarter.has(idStr)) {
+        seenStarter.add(idStr);
+        starterItems.push({ id: idStr, count: 1 });
+      }
+    }
+  }
+
+  // 2. 核心装备与鞋子
+  const coreItems: ItemSetItem[] = [];
+  const seenCore = new Set<string>();
+  for (const group of (props.build.core_items || []).slice(0, 2)) {
+    for (const id of group.ids) {
+      const idStr = String(id);
+      if (!seenCore.has(idStr)) {
+        seenCore.add(idStr);
+        coreItems.push({ id: idStr, count: 1 });
+      }
+    }
+  }
+  for (const group of (props.build.boots || []).slice(0, 2)) {
+    for (const id of group.ids) {
+      const idStr = String(id);
+      if (!seenCore.has(idStr)) {
+        seenCore.add(idStr);
+        coreItems.push({ id: idStr, count: 1 });
+      }
+    }
+  }
+
+  // 3. 推荐与可选装备
+  const lastItems: ItemSetItem[] = [];
+  const seenLast = new Set<string>();
+  for (const item of (props.build.last_items || []).slice(0, 10)) {
+    for (const id of item.ids) {
+      const idStr = String(id);
+      if (!seenCore.has(idStr) && !seenLast.has(idStr)) {
+        seenLast.add(idStr);
+        lastItems.push({ id: idStr, count: 1 });
+      }
+    }
+  }
+
+  const blocks: ItemSetBlock[] = [];
+  if (starterItems.length > 0) {
+    blocks.push({ type: "出门装备", items: starterItems });
+  }
+  if (coreItems.length > 0) {
+    blocks.push({ type: "核心装备", items: coreItems });
+  }
+  if (lastItems.length > 0) {
+    blocks.push({ type: "可选与推荐装备", items: lastItems });
+  }
+
+  if (blocks.length === 0) {
+    showToast("当前英雄暂无推荐出装数据", "warning");
+    return;
+  }
+
+  const champName =
+    props.championsMap.get(champId) ||
+    props.build.summary?.name ||
+    "英雄";
+  const posName = props.position ? ` - ${props.position}` : "";
+  const title = `[Yuumi] ${champName}${posName}`;
+
+  applyingItemSet.value = true;
+  try {
+    const res = await applyItemSet(champId, title, blocks);
+    showToast(res || `已成功导入装备页：${title}`, "success");
+  } catch (e: unknown) {
+    showToast(`导入装备页失败: ${cleanError(e)}`, "error");
+  } finally {
+    applyingItemSet.value = false;
+  }
+}
 </script>
 
 <template>
@@ -235,6 +343,28 @@ function getSpellIcon(id: number): string {
   />
 
   <!-- 出装：初始装备 + 鞋子 | 核心装备 → | 可选装备 -->
+  <div class="items-action-bar" v-if="hasItemsData">
+    <button
+      class="apply-item-set-btn"
+      :disabled="applyingItemSet"
+      @click="handleApplyItemSet"
+    >
+      <svg
+        class="btn-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+        <polyline points="17 21 17 13 7 13 7 21" />
+        <polyline points="7 3 7 8 15 8" />
+      </svg>
+      <span>{{ applyingItemSet ? "正在应用出装..." : "一键应用出装到游戏推荐页" }}</span>
+    </button>
+  </div>
   <ItemsSection
     :starter-items="build.starter_items"
     :core-items="build.core_items"
@@ -523,5 +653,42 @@ function getSpellIcon(id: number): string {
 }
 .wr-bad {
   color: var(--loss-color);
+}
+
+/* 装备一键应用操作栏 */
+.items-action-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 12px 14px -2px 14px;
+}
+.apply-item-set-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--primary-color);
+  color: #fff;
+  border: 1px solid var(--primary-color);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.apply-item-set-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+.apply-item-set-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.apply-item-set-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-icon {
+  width: 14px;
+  height: 14px;
 }
 </style>

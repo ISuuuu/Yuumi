@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::State;
@@ -908,4 +908,153 @@ pub async fn spectate_directly(
         .map_err(|e| format!("启动游戏客户端失败: {}", e))?;
 
     Ok(format!("观战启动成功（CMD 方式），目标: {}", name))
+}
+
+// ─── 装备页与选人秒退 ───
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemSetItem {
+    pub id: String,
+    #[serde(default = "default_item_count")]
+    pub count: i32,
+}
+
+fn default_item_count() -> i32 {
+    1
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemSetBlock {
+    #[serde(rename = "type")]
+    pub block_type: String,
+    pub items: Vec<ItemSetItem>,
+    #[serde(default)]
+    pub rec_math: Option<bool>,
+    #[serde(default)]
+    pub min_summoner_level: Option<i32>,
+    #[serde(default)]
+    pub max_summoner_level: Option<i32>,
+    #[serde(default)]
+    pub show_if_summoner_spell: Option<String>,
+    #[serde(default)]
+    pub hide_if_summoner_spell: Option<String>,
+}
+
+/// 一键应用装备方案到客户端推荐装备页
+#[tauri::command]
+pub async fn apply_item_set(
+    champion_id: i32,
+    title: String,
+    blocks: Vec<ItemSetBlock>,
+    app_state: State<'_, AppState>,
+) -> Result<String, String> {
+    // 1. 获取当前玩家 summonerId
+    let current_summoner = lcu_request(
+        app_state.inner(),
+        "GET",
+        "/lol-summoner/v1/current-summoner",
+        None,
+    )
+    .await?;
+    let summoner_id = current_summoner
+        .get("summonerId")
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
+        .or_else(|| {
+            current_summoner.get("id").and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
+        })
+        .ok_or_else(|| "无法获取当前召唤师 ID".to_string())?;
+
+    // 2. 拉取现有 sets
+    let sets_path = format!("/lol-item-sets/v1/item-sets/{}/sets", summoner_id);
+    let existing_sets_res = lcu_request(app_state.inner(), "GET", &sets_path, None).await;
+
+    let mut root = match existing_sets_res {
+        Ok(val) if val.is_object() => val,
+        _ => serde_json::json!({
+            "accountId": summoner_id,
+            "itemSets": [],
+            "timestamp": chrono::Utc::now().timestamp_millis(),
+        }),
+    };
+
+    // 3. 防覆盖安全机制：过滤掉原有的 title.starts_with("[Yuumi]") 的项
+    let mut item_sets = match root.get("itemSets").and_then(|v| v.as_array()) {
+        Some(arr) => arr
+            .iter()
+            .filter(|set| {
+                let t = set.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                !t.starts_with("[Yuumi]")
+            })
+            .cloned()
+            .collect::<Vec<_>>(),
+        None => Vec::new(),
+    };
+
+    // 4. 将新生成的装备页追加进去
+    let new_set = serde_json::json!({
+        "title": title,
+        "associatedChampions": [champion_id],
+        "associatedMaps": [11, 12],
+        "blocks": blocks,
+        "map": "any",
+        "mode": "any",
+        "preferredItemSlots": [],
+        "sortorder": 0,
+        "startedFrom": "blank",
+        "type": "custom"
+    });
+    item_sets.push(new_set);
+
+    if let Some(obj) = root.as_object_mut() {
+        obj.insert("itemSets".to_string(), serde_json::Value::Array(item_sets));
+        if obj.get("accountId").is_none_or(|v| v.is_null()) {
+            obj.insert("accountId".to_string(), serde_json::json!(summoner_id));
+        }
+        obj.insert(
+            "timestamp".to_string(),
+            serde_json::json!(chrono::Utc::now().timestamp_millis()),
+        );
+    }
+
+    // 5. POST /lol-item-sets/v1/item-sets/{summonerId}/sets
+    lcu_request(app_state.inner(), "POST", &sets_path, Some(root)).await?;
+
+    Ok(format!("装备页应用成功: {}", title))
+}
+
+/// 选人阶段优雅秒退 (Dodge Queue)
+#[tauri::command]
+pub async fn dodge_champ_select(app_state: State<'_, AppState>) -> Result<String, String> {
+    // 1. 先校验当前 phase 是否为 "ChampSelect"
+    let phase_val = lcu_request(
+        app_state.inner(),
+        "GET",
+        "/lol-gameflow/v1/gameflow-phase",
+        None,
+    )
+    .await?;
+    let phase = phase_val.as_str().unwrap_or("");
+    if phase != "ChampSelect" {
+        return Err("仅在选人阶段支持秒退".to_string());
+    }
+
+    // 2. 调用 POST /lol-login/v1/session/invoke?destination=gameService&method=quitLol，body: [""]
+    let body = serde_json::json!([""]);
+    lcu_request(
+        app_state.inner(),
+        "POST",
+        "/lol-login/v1/session/invoke?destination=gameService&method=quitLol",
+        Some(body),
+    )
+    .await?;
+
+    Ok("秒退成功".to_string())
 }

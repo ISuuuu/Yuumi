@@ -676,3 +676,33 @@ export const writeFrontendLog = (level: "info" | "warn" | "error" | "debug", tag
 /** 从 JSON 文件导入带标记玩家，返回导入数量 */
 export const importTaggedPlayersFromJsonFile = () =>
   invoke<number>("import_tagged_players_from_json_file");
+
+/** 装备项结构 */
+export interface ItemSetItem {
+  id: string;
+  count?: number;
+}
+
+/** 装备块结构 */
+export interface ItemSetBlock {
+  type: string;
+  items: ItemSetItem[];
+  recMath?: boolean;
+  minSummonerLevel?: number;
+  maxSummonerLevel?: number;
+  showIfSummonerSpell?: string;
+  hideIfSummonerSpell?: string;
+}
+
+/** 应用装备方案到客户端推荐装备页 */
+export const applyItemSet = (
+  championId: number,
+  title: string,
+  blocks: ItemSetBlock[],
+) =>
+  invoke<string>("apply_item_set", { championId, title, blocks });
+
+/** 选人阶段优雅秒退 (Dodge Queue) */
+export const dodgeChampSelect = () =>
+  invoke<string>("dodge_champ_select");
+
