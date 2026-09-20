@@ -12,6 +12,7 @@ import SignatureCard from "./quickactions/SignatureCard.vue";
 import ProfileBackgroundCard from "./quickactions/ProfileBackgroundCard.vue";
 import RankSpoofCard from "./quickactions/RankSpoofCard.vue";
 import OnlineStatusCard from "./quickactions/OnlineStatusCard.vue";
+import BadgesPreferencesCard from "./quickactions/BadgesPreferencesCard.vue";
 import ClearBadgesCard from "./quickactions/ClearBadgesCard.vue";
 import ClearBorderCard from "./quickactions/ClearBorderCard.vue";
 
@@ -45,6 +46,7 @@ provideQuickActionsLoading();
     <RankSpoofCard />
     <OnlineStatusCard />
 
+    <BadgesPreferencesCard />
     <ClearBadgesCard />
     <ClearBorderCard />
   </div>

@@ -105,3 +105,190 @@ pub async fn get_current_summoner(
 
     summoner.to_display().ok_or("召唤师数据不完整".to_string())
 }
+
+// ─── 英雄熟练度与赛段里程碑 ───
+
+/// 英雄熟练度与里程碑清洗结构体
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChampionMasteryInfo {
+    pub champion_id: i64,
+    pub champion_name: String,
+    pub champion_title: String,
+    pub champion_icon_url: String,
+    pub champion_level: i32,
+    pub champion_points: i64,
+    pub champion_points_since_last_level: i64,
+    pub champion_points_until_next_level: i64,
+    pub mark_required_for_next_level: i32,
+    pub tokens_earned: i32,
+    pub champion_season_milestone: i32,
+    pub milestone_grades: Vec<String>,
+    pub chest_granted: bool,
+    pub eligible_for_chest: bool,
+    pub next_level_points: i64,
+    pub last_play_time: i64,
+}
+
+/// 获取当前玩家全英雄熟练度列表与里程碑进度
+#[tauri::command]
+pub async fn get_champion_mastery_list(
+    app_state: State<'_, AppState>,
+) -> Result<Vec<ChampionMasteryInfo>, String> {
+    use crate::lcu::client::lcu_request;
+
+    // 1. 获取全英雄熟练度基础数据
+    let mastery_val = lcu_request(
+        app_state.inner(),
+        "GET",
+        "/lol-champion-mastery/v1/local-player/champion-mastery",
+        None,
+    )
+    .await?;
+
+    // 2. 尝试获取赛段里程碑进度（容错）
+    let milestone_val = lcu_request(
+        app_state.inner(),
+        "GET",
+        "/lol-champion-mastery/v1/local-player/champion-milestone-progress",
+        None,
+    )
+    .await
+    .ok();
+
+    // 映射：championId -> (eligibleForChest, milestoneGrades)
+    let mut milestone_map: std::collections::HashMap<i64, (Option<bool>, Vec<String>)> =
+        std::collections::HashMap::new();
+
+    if let Some(val) = milestone_val {
+        if let Some(arr) = val.as_array() {
+            for item in arr {
+                if let Some(cid) = item.get("championId").and_then(|v| v.as_i64()) {
+                    let eligible = item.get("eligibleForChest").and_then(|v| v.as_bool());
+                    let grades = item
+                        .get("milestoneGrades")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|g| g.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    milestone_map.insert(cid, (eligible, grades));
+                }
+            }
+        }
+    }
+
+    let items = mastery_val
+        .as_array()
+        .ok_or_else(|| "熟练度数据格式错误，期望数组".to_string())?;
+
+    let game_data = app_state.game_data.read().await;
+
+    let mut result = Vec::with_capacity(items.len());
+    for item in items {
+        let champion_id = item
+            .get("championId")
+            .and_then(|v| v.as_i64())
+            .unwrap_or_default();
+        if champion_id <= 0 {
+            continue;
+        }
+
+        let champion_level = item
+            .get("championLevel")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let champion_points = item
+            .get("championPoints")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let champion_points_since_last_level = item
+            .get("championPointsSinceLastLevel")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let champion_points_until_next_level = item
+            .get("championPointsUntilNextLevel")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let mark_required_for_next_level = item
+            .get("markRequiredForNextLevel")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let tokens_earned = item
+            .get("tokensEarned")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let champion_season_milestone = item
+            .get("championSeasonMilestone")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let chest_granted = item
+            .get("chestGranted")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let last_play_time = item
+            .get("lastPlayTime")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        let mut milestone_grades: Vec<String> = item
+            .get("milestoneGrades")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|g| g.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let mut eligible_for_chest = !chest_granted;
+        if let Some((prog_eligible, prog_grades)) = milestone_map.get(&champion_id) {
+            if let Some(el) = prog_eligible {
+                eligible_for_chest = *el;
+            }
+            if milestone_grades.is_empty() && !prog_grades.is_empty() {
+                milestone_grades = prog_grades.clone();
+            }
+        }
+
+        let next_level_points = if champion_points_until_next_level > 0 {
+            champion_points + champion_points_until_next_level
+        } else {
+            champion_points
+        };
+
+        let champion_name = game_data
+            .champions
+            .get(&(champion_id as i32))
+            .cloned()
+            .unwrap_or_else(|| format!("英雄 {}", champion_id));
+
+        let champion_icon_url = format!(
+            "/lol-game-data/assets/v1/champion-icons/{}.png",
+            champion_id
+        );
+
+        result.push(ChampionMasteryInfo {
+            champion_id,
+            champion_name,
+            champion_title: String::new(),
+            champion_icon_url,
+            champion_level,
+            champion_points,
+            champion_points_since_last_level,
+            champion_points_until_next_level,
+            mark_required_for_next_level,
+            tokens_earned,
+            champion_season_milestone,
+            milestone_grades,
+            chest_granted,
+            eligible_for_chest,
+            next_level_points,
+            last_play_time,
+        });
+    }
+
+    Ok(result)
+}
