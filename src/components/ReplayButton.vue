@@ -50,16 +50,29 @@ function startPolling() {
     try {
       const current = await getReplayStatus(props.gameId);
       const s = (current || "").toLowerCase();
-      if (s === "watch") {
+      if (s === "watch" || s === "found") {
         clearPoll();
         state.value = "watch";
         showToast("回放下载完成，可点击观看", "success");
-      } else if (s === "unsupported") {
+      } else if (
+        s === "unsupported" ||
+        s === "incompatible" ||
+        s === "missingorexpired" ||
+        s === "lost"
+      ) {
         clearPoll();
         state.value = "unsupported";
-        showToast("该对局回放版本已过期或不受支持", "warning");
+        const hint =
+          s === "incompatible"
+            ? "该对局版本与客户端不一致，无法播放"
+            : "该对局回放已过期或不受支持";
+        showToast(hint, "warning");
       } else if (s === "downloading" || s === "checking") {
         state.value = "downloading";
+      } else if (s === "error") {
+        clearPoll();
+        state.value = "error";
+        showToast("下载回放失败，请稍后重试", "error");
       }
     } catch {
       // 忽略单次轮询异常，继续等待
@@ -97,7 +110,7 @@ async function handleClick(e: MouseEvent) {
     const curStatus = await getReplayStatus(props.gameId);
     const s = (curStatus || "").toLowerCase();
 
-    if (s === "watch") {
+    if (s === "watch" || s === "found") {
       state.value = "watch";
       showToast("回放已下载就绪，正在启动...", "info");
       try {
@@ -109,9 +122,25 @@ async function handleClick(e: MouseEvent) {
       return;
     }
 
-    if (s === "unsupported") {
+    if (
+      s === "unsupported" ||
+      s === "incompatible" ||
+      s === "missingorexpired" ||
+      s === "lost"
+    ) {
       state.value = "unsupported";
-      showToast("该对局回放已过期或不受支持", "warning");
+      const hint =
+        s === "incompatible"
+          ? "该对局版本与客户端不一致，无法播放"
+          : "该对局回放已过期或不受支持";
+      showToast(hint, "warning");
+      return;
+    }
+
+    if (s === "downloading") {
+      state.value = "downloading";
+      showToast("回放正在下载中...", "info");
+      startPolling();
       return;
     }
 

@@ -1109,19 +1109,43 @@ pub async fn download_game_replay(
     game_id: i64,
     app_state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    // 确保本地元数据已初始化注册
+    let create_path = format!("/lol-replays/v2/metadata/{}/create", game_id);
+    let _ = crate::lcu::client::lcu_request(
+        &app_state,
+        "POST",
+        &create_path,
+        Some(serde_json::json!({})),
+    )
+    .await;
+
     let path = format!("/lol-replays/v1/rofls/{}/download", game_id);
     let body = serde_json::json!({ "componentType": "replay-button_match-history" });
     crate::lcu::client::lcu_request(&app_state, "POST", &path, Some(body)).await
 }
 
-/// 查询指定对局回放当前状态（如 "checking", "downloading", "watch", "unsupported" 等）
+/// 查询指定对局回放当前状态（如 "checking", "downloading", "watch", "download", "unsupported" 等）
 #[tauri::command]
 pub async fn get_replay_status(
     game_id: i64,
     app_state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let path = format!("/lol-replays/v1/rofls/{}", game_id);
-    let val = crate::lcu::client::lcu_request(&app_state, "GET", &path, None).await?;
+    let path = format!("/lol-replays/v1/metadata/{}", game_id);
+    let val = match crate::lcu::client::lcu_request(&app_state, "GET", &path, None).await {
+        Ok(v) => v,
+        Err(_) => {
+            // 若尚未存在本地元数据（LCU 返回 404），先触发元数据创建
+            let create_path = format!("/lol-replays/v2/metadata/{}/create", game_id);
+            let _ = crate::lcu::client::lcu_request(
+                &app_state,
+                "POST",
+                &create_path,
+                Some(serde_json::json!({})),
+            )
+            .await;
+            crate::lcu::client::lcu_request(&app_state, "GET", &path, None).await?
+        }
+    };
     let state = val
         .get("state")
         .and_then(|s| s.as_str())
