@@ -481,20 +481,6 @@ fn process_event(text: &str, app_handle: &AppHandle) {
         }
     }
 
-    if uri.starts_with("/lol-chat/v1/friends") {
-        if let Some(data) = event_data.get("data") {
-            if let Err(e) =
-                state
-                    .gameflow_tx
-                    .try_send(crate::agents::auto_match::GameflowEvent::FriendEvent(
-                        data.clone(),
-                    ))
-            {
-                log::warn!("[WS] 推送 Gameflow FriendEvent 失败: {}", e);
-            }
-        }
-    }
-
     // ── SignalR 转发 ──
     if uri == "/lol-gameflow/v1/gameflow-phase"
         || uri == "/lol-gameflow/v1/session"

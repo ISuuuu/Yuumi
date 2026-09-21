@@ -2,7 +2,6 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useToast } from "../composables/useToast";
 import type { GameflowSession } from "../types/lcu";
 import type { SummonerDisplay } from "../api/lcu";
 
@@ -412,19 +411,6 @@ export async function initLcuListeners() {
     console.log(`[lcuStore] upload-success: gameId=${event.payload.gameId}`);
     store.gameEndedTrigger = Date.now();
   });
-
-  // 好友对局结束雷达事件
-  await listen<{ puuid: string; name: string; message: string }>(
-    "friend-game-ended",
-    (event) => {
-      console.log("[lcuStore] friend-game-ended:", event.payload);
-      const { showToast } = useToast();
-      const msg =
-        event.payload?.message ||
-        `星标好友 ${event.payload?.name || ""} 已结束对局，当前空闲`;
-      showToast(msg, "info");
-    },
-  );
 
   console.log("[lcuStore] all listeners registered");
 

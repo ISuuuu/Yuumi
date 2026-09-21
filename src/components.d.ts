@@ -30,6 +30,7 @@ declare module 'vue' {
     ColorPickerWithAlpha: typeof import('./components/ColorPickerWithAlpha.vue')['default']
     CustomTitleBar: typeof import('./components/layout/CustomTitleBar.vue')['default']
     FixWindowCard: typeof import('./components/tools/quickactions/FixWindowCard.vue')['default']
+    FriendCleanerCard: typeof import('./components/tools/FriendCleanerCard.vue')['default']
     ItemsSection: typeof import('./components/opgg/ItemsSection.vue')['default']
     LcuImage: typeof import('./components/LcuImage.vue')['default']
     LcuOfflineState: typeof import('./components/LcuOfflineState.vue')['default']

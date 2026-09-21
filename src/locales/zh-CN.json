@@ -323,8 +323,11 @@
       "playAgainLabel": "对局结束后自动再来一局:",
       "aramSideLabel": "ARAM 选人时自动报边:",
       "aramSideVisibleLabel": "报边消息对队友可见:",
-      "tagReminderLabel": "选人阶段自动提醒标记玩家:",
-      "friendRadarLabel": "好友对局结束雷达提醒:"
+      "tagReminderLabel": "选人阶段自动提醒标记玩家:"
+    },
+    "friendCleaner": {
+      "title": "好友管理与僵尸号清理",
+      "desc": "扫描好友列表，筛选并批量清理长期未上线的离线好友"
     },
     "benchOverlay": {
       "title": "大乱斗板凳席悬浮窗",

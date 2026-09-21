@@ -344,6 +344,7 @@ pub fn run() {
             tools::download_game_replay,
             tools::get_replay_status,
             tools::watch_game_replay,
+            tools::batch_delete_friends,
             loot::get_openable_loots,
             loot::batch_open_loots,
             loot::smart_open_all_loots,

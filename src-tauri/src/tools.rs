@@ -1204,3 +1204,26 @@ pub async fn watch_game_replay(
     let body = serde_json::json!({ "componentType": "replay-button_match-history" });
     crate::lcu::client::lcu_request(&app_state, "POST", &path, Some(body)).await
 }
+
+/// 批量删除好友
+#[tauri::command]
+pub async fn batch_delete_friends(
+    friend_ids: Vec<String>,
+    app_state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let mut deleted = 0;
+    for id in friend_ids {
+        let path = format!("/lol-chat/v1/friends/{}", id);
+        if lcu_request(app_state.inner(), "DELETE", &path, None)
+            .await
+            .is_ok()
+        {
+            deleted += 1;
+        }
+    }
+    log::info!(
+        "[batch_delete_friends] 批量删除好友完成，成功删除 {} 个",
+        deleted
+    );
+    Ok(deleted)
+}

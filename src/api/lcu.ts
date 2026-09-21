@@ -485,8 +485,8 @@ export interface FunctionsConfig {
   EnableAutoAramTeamSide: boolean;
   AramTeamSideVisibleToTeam: boolean;
   EnableAutoTagReminder: boolean;
-  WatchedFriendPuuids: string[];
-  EnableFriendRadar: boolean;
+  WatchedFriendPuuids?: string[];
+  EnableFriendRadar?: boolean;
   EnableDodgeInGameInfo: boolean;
 }
 
@@ -776,3 +776,25 @@ export const getReplayStatus = (gameId: number) =>
 /** 唤起客户端观看指定对局回放 */
 export const watchGameReplay = (gameId: number) =>
   invoke<unknown>("watch_game_replay", { gameId });
+
+export interface LcuFriend {
+  id: string;
+  puuid: string;
+  summonerId: number;
+  gameName: string;
+  gameTag: string;
+  name: string;
+  note: string;
+  availability: string;
+  icon: number;
+  lastSeenOnlineTimestamp: number | null;
+  groupName: string;
+}
+
+/** 获取当前客户端全部好友列表 */
+export const fetchLcuFriends = () =>
+  lcuRequest<LcuFriend[]>("GET", "/lol-chat/v1/friends");
+
+/** 批量删除好友 */
+export const batchDeleteFriends = (friendIds: string[]) =>
+  invoke<number>("batch_delete_friends", { friendIds });

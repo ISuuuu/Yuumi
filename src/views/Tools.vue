@@ -9,6 +9,7 @@ import AutoSwapCard from "../components/tools/AutoSwapCard.vue";
 import AutoHoverCard from "../components/tools/AutoHoverCard.vue";
 import AutoGameflowCard from "../components/tools/AutoGameflowCard.vue";
 import SpectateCard from "../components/tools/SpectateCard.vue";
+import FriendCleanerCard from "../components/tools/FriendCleanerCard.vue";
 import LcuQuickActionsCard from "../components/tools/LcuQuickActionsCard.vue";
 
 const config = inject<Ref<AppConfig | null>>("appConfig");
@@ -43,6 +44,7 @@ provide("updateConfig", updateConfig);
       <div class="group-header">{{ $t("tools.groupGame") }}</div>
       <AutoGameflowCard />
       <SpectateCard />
+      <FriendCleanerCard />
       <LcuQuickActionsCard />
     </div>
   </div>

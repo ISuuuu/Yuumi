@@ -176,6 +176,8 @@ const ALLOWED_API_PREFIXES: &[&str] = &[
     "/lol-item-sets/",
     "/lol-login/",
     "/lol-replays/",
+    "/lol-inventory/",
+    "/lol-champions/",
     "/riotclient/",
     "/system/",
 ];

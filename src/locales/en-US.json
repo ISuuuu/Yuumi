@@ -323,8 +323,11 @@
       "playAgainLabel": "Auto play again after game:",
       "aramSideLabel": "Report ARAM team side in champ select:",
       "aramSideVisibleLabel": "Make team side message visible to teammates:",
-      "tagReminderLabel": "Auto-remind tagged players in champ select:",
-      "friendRadarLabel": "Friend match-end radar notification:"
+      "tagReminderLabel": "Auto-remind tagged players in champ select:"
+    },
+    "friendCleaner": {
+      "title": "Friend Manager & Inactive Cleanup",
+      "desc": "Scan friends list and batch remove long-term inactive friends"
     },
     "benchOverlay": {
       "title": "ARAM Bench Overlay",
