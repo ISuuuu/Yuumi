@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 import LcuImage from "../LcuImage.vue";
-import ReplayButton from "../ReplayButton.vue";
 import type { MatchDisplay } from "../../api/lcu";
 import { getQueueName } from "../../utils/queueName";
 
@@ -38,9 +37,6 @@ function queueName(queueId: number, backendName: string): string {
         {{ match.kills }}/<span class="death-red">{{ match.deaths }}</span
         >/{{ match.assists }}
       </span>
-    </div>
-    <div class="mini-replay-box" @click.stop>
-      <ReplayButton :game-id="match.gameId" compact />
     </div>
   </div>
 </template>
@@ -136,12 +132,5 @@ function queueName(queueId: number, backendName: string): string {
 .death-red {
   color: var(--death-color, var(--loss-color));
   font-weight: 600;
-}
-
-.mini-replay-box {
-  margin-left: 8px;
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
 }
 </style>

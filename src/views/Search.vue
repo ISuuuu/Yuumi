@@ -30,6 +30,7 @@ import type {
   RankedStats,
 } from "../types/lcu";
 import LcuOfflineState from "../components/LcuOfflineState.vue";
+import MiniMatchList from "../components/search/MiniMatchList.vue";
 import MatchDetailPanel from "../components/search/MatchDetailPanel.vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -171,6 +172,7 @@ const hasMore = ref(false); // 是否有下一页
 const allMatchesSearch = ref<MatchDisplay[]>([]); // 全量数据，本地翻页用
 const loadedGameIndex = ref(0); // 已加载到的游标
 const loadingMore = ref(false); // 防止重复触发 SGP 加载
+const pageSwitching = ref(false); // 防止翻页期间重复触发
 const INITIAL_BATCH = 20; // 首次加载 20 条（2 页）
 const LOAD_MORE_COUNT = 30; // 每次增量加载 30 条
 const PREFETCH_PAGES = 1; // 提前 1 页预拉取
@@ -803,6 +805,55 @@ async function loadPrivaciesInBackground(g: MatchDetail, requestId: number) {
   }
 }
 
+async function handlePrevPage() {
+  if (searching.value || pageSwitching.value) return; // 防重入
+  if (currentPageNum.value > 1) {
+    pageSwitching.value = true;
+    try {
+      currentPageNum.value--;
+      await loadMatchHistoryList();
+      if (matches.value.length > 0) {
+        selectMatch(matches.value[0].gameId);
+      }
+    } finally {
+      pageSwitching.value = false;
+    }
+  }
+}
+
+async function handleNextPage() {
+  if (!hasMore.value || pageSwitching.value || searching.value) return;
+  pageSwitching.value = true;
+  try {
+    const targetPage = currentPageNum.value + 1;
+    const requiredCount = targetPage * matchesPerPage;
+
+    // 如果当前缓存里的数据不够填满下一页，等待增量拉取完成
+    while (allFilteredMatches.value.length < requiredCount) {
+      const prevCount = allMatchesSearch.value.length;
+      await loadMoreMatches();
+      // 如果尝试拉取后总数没有增加，说明已经触达接口最底层尽头
+      if (allMatchesSearch.value.length === prevCount) {
+        break;
+      }
+    }
+
+    // 如果尝试拉取后依然没有下一页的数据（例如确实打完所有对局了），不翻页
+    if (allFilteredMatches.value.length <= (targetPage - 1) * matchesPerPage) {
+      hasMore.value = false;
+      return;
+    }
+
+    currentPageNum.value = targetPage;
+    await loadMatchHistoryList();
+    if (matches.value.length > 0) {
+      selectMatch(matches.value[0].gameId);
+    }
+  } finally {
+    pageSwitching.value = false;
+  }
+}
+
 // 静态映射查找
 function getSpellUrl(spellId?: number) {
   if (!spellId) return "";
@@ -1177,10 +1228,38 @@ const gameDetails = computed<GameDetail | null>(() => {
 
       <div v-if="error" class="error">{{ error }}</div>
 
-      <!-- 对局详情面板容器 -->
+      <!-- 分栏对局面板 -->
+      <!-- 分栏对局面板容器 -->
       <div class="panel-layout-container">
         <div class="panel-layout">
-          <!-- 对局详情 -->
+          <!-- 左侧：迷你对局卡片列表 -->
+          <div class="left-match-list-panel">
+            <template v-if="summoner && (matches.length > 0 || currentPageNum > 1)">
+              <MiniMatchList
+                :matches="matches"
+                :selected-game-id="selectedGameId"
+                :current-page-num="currentPageNum"
+                :has-more="hasMore"
+                @select="selectMatch"
+                @prev="handlePrevPage"
+                @next="handleNextPage"
+              />
+            </template>
+            <!-- 如果没有战绩，左侧展示 10 个等高的骨架空白卡片框 -->
+            <template v-else>
+              <div class="mini-match-list-skeleton">
+                <div
+                  v-for="i in 10"
+                  :key="i"
+                  class="mini-match-card skeleton-card"
+                ></div>
+              </div>
+              <!-- 如果没有数据，渲染一个同等高度的空白骨架翻页占位框 -->
+              <div class="pagination-skeleton"></div>
+            </template>
+          </div>
+
+          <!-- 右侧：对局详情 -->
           <MatchDetailPanel
             :details="gameDetails"
             :loading="gameLoading"
@@ -1532,10 +1611,11 @@ const gameDetails = computed<GameDetail | null>(() => {
   cursor: pointer;
 }
 
-/* 对局面板布局 */
+/* 分栏大布局 */
 .panel-layout {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 16px;
   align-items: stretch;
   animation: fadeInUp 0.45s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
 }
@@ -1613,6 +1693,36 @@ const gameDetails = computed<GameDetail | null>(() => {
   color: var(--text-color);
   font-size: 0.92rem;
   font-weight: 600;
+}
+
+/* 首次欢迎与加载占位 */
+.mini-match-list-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.mini-match-card.skeleton-card {
+  height: 58px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  cursor: default;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.015);
+  border: 1px dashed var(--border-color);
+  box-shadow: none;
+}
+
+.pagination-skeleton {
+  height: 38px;
+  margin-top: 10px;
+  box-sizing: border-box;
+}
+
+[data-theme="dark"] .mini-match-card.skeleton-card {
+  background: rgba(255, 255, 255, 0.01);
 }
 
 @keyframes float {
