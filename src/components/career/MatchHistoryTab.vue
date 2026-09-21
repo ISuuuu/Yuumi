@@ -1503,6 +1503,15 @@ watch(
   align-items: center;
   margin-left: 14px;
   flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.match-card:hover .replay-action-panel,
+.replay-action-panel:focus-within {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 </style>
