@@ -77,6 +77,16 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => {
       color: "rgba(255, 255, 255, 0.15)",
       borderColor: "rgba(255, 255, 255, 0.2)",
     },
+    Tooltip: {
+      color: isDark ? "rgba(28, 28, 30, 0.95)" : "rgba(255, 255, 255, 0.95)",
+      textColor: isDark ? "#f8fafc" : "#0f172a",
+      borderRadius: "8px",
+    },
+    Popover: {
+      color: isDark ? "rgba(28, 28, 30, 0.95)" : "rgba(255, 255, 255, 0.95)",
+      textColor: isDark ? "#f8fafc" : "#0f172a",
+      borderRadius: "8px",
+    },
     Dialog: {
       color: isDark ? "rgba(28, 28, 30, 0.92)" : "rgba(255, 255, 255, 0.90)",
       borderColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
@@ -1360,9 +1370,14 @@ html[data-mica="true"] body {
 .n-modal,
 .n-drawer {
   background-color: var(--card-bg) !important;
+  color: var(--text-color) !important;
   border: 1px solid var(--border-color) !important;
   box-shadow: var(--shadow-lg) !important;
   transform: translateZ(0); /* 开启 GPU 硬件加速 */
+}
+
+.n-popover .n-popover__content {
+  color: var(--text-color) !important;
 }
 
 /* 如果开启了云母效果，且不是嵌套状态，赋予菜单毛玻璃质感 */

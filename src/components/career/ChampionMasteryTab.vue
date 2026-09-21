@@ -354,9 +354,9 @@ function calcProgressPercentage(item: ChampionMasteryInfo): number {
               <span class="stage-tag">里程碑 {{ item.championSeasonMilestone }}</span>
               <!-- 评级徽章 -->
               <div v-if="item.milestoneGrades && item.milestoneGrades.length > 0" class="grades-wrapper">
-                <n-tooltip trigger="hover">
+                <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
-                    <div class="grades-tags">
+                    <div class="grades-tags" role="button" tabindex="0">
                       <span
                         v-for="(grade, idx) in item.milestoneGrades.slice(0, 3)"
                         :key="idx"
@@ -369,7 +369,18 @@ function calcProgressPercentage(item: ChampionMasteryInfo): number {
                       </span>
                     </div>
                   </template>
-                  当前赛段已获得评级: {{ item.milestoneGrades.join(', ') }}
+                  <div class="milestone-grades-tooltip">
+                    <span class="tooltip-label">当前赛段已获评级</span>
+                    <div class="tooltip-tags">
+                      <span
+                        v-for="(grade, idx) in item.milestoneGrades"
+                        :key="idx"
+                        class="grade-pill grade-pill-in-tooltip"
+                      >
+                        {{ grade }}
+                      </span>
+                    </div>
+                  </div>
                 </n-tooltip>
               </div>
             </div>
@@ -822,23 +833,70 @@ function calcProgressPercentage(item: ChampionMasteryInfo): number {
 
 .grades-tags {
   display: flex;
-  gap: 2px;
+  gap: 3px;
+  cursor: pointer;
+  align-items: center;
 }
 
 .grade-pill {
-  background: rgba(255, 215, 0, 0.12);
-  color: #ffd700;
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
   font-size: 0.62rem;
   font-weight: 700;
   padding: 0 4px;
   border-radius: 3px;
-  border: 1px solid rgba(255, 215, 0, 0.25);
+  border: 1px solid rgba(217, 119, 6, 0.32);
+  line-height: 1.3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+[data-theme="dark"] .grade-pill {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
 }
 
 .grade-pill.more {
+  background: rgba(140, 150, 170, 0.12);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .grade-pill.more {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-muted);
   border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* 评级悬浮提示窗 */
+.milestone-grades-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--text-color);
+}
+
+.tooltip-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-color);
+  opacity: 0.9;
+}
+
+.tooltip-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.grade-pill-in-tooltip {
+  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 
 .chest-badge-container {
