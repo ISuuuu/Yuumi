@@ -294,7 +294,8 @@
       "statusEnabled": "已启用",
       "statusDisabled": "未启用",
       "enableHover": "启用自动亮起:",
-      "confirmTimeout": "在结束时确认选择 (防秒退):"
+      "confirmTimeout": "在结束时确认选择 (防秒退):",
+      "enableDodgeInGameInfo": "在对局信息中显示秒退按钮:"
     },
     "autoBan": {
       "title": "自动禁用英雄",
@@ -685,7 +686,13 @@
     "firstPlay": "初学",
     "winStreak": "{count}连胜",
     "lossStreak": "{count}连败",
-    "rankedGamesStats": "{games}场 {rate}%"
+    "rankedGamesStats": "{games}场 {rate}%",
+    "dodge": "秒退",
+    "dodgeTitle": "秒退对局确认",
+    "dodgeConfirm": "秒退将受到官方正常的扣胜点与匹配等待惩罚，确认退出当前对局？",
+    "dodgeConfirmBtn": "确认秒退",
+    "dodgeSuccess": "秒退成功",
+    "dodgeFailed": "秒退失败: {error}"
   },
   "career": {
     "summonerInfo": "召唤师信息",

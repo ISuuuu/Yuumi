@@ -278,7 +278,7 @@
       "desc": "在你設置的秒數之後自動接受對局匹配",
       "statusEnabled": "已啟用，延遲: {delay} 秒",
       "statusDisabled": "未啟用",
-      "delayLabel": "在對局找到後接受對局前延遲的秒數:"
+      "delayLabel": "在對局找到後接受對局前延遲的秒数:"
     },
     "autoSwap": {
       "title": "自動接受交換請求",
@@ -294,7 +294,8 @@
       "statusEnabled": "已啟用",
       "statusDisabled": "未啟用",
       "enableHover": "啟用自動亮起:",
-      "confirmTimeout": "在結束時確認選擇 (防秒退):"
+      "confirmTimeout": "在結束時確認選擇 (防秒退):",
+      "enableDodgeInGameInfo": "在對局信息中顯示秒退按鈕:"
     },
     "autoBan": {
       "title": "自動禁用英雄",
@@ -685,7 +686,13 @@
     "firstPlay": "初學",
     "winStreak": "{count}連勝",
     "lossStreak": "{count}連敗",
-    "rankedGamesStats": "{games}場 {rate}%"
+    "rankedGamesStats": "{games}場 {rate}%",
+    "dodge": "跳game",
+    "dodgeTitle": "跳game對局確認",
+    "dodgeConfirm": "跳game將受到官方正常的扣勝點與匹配等待懲罰，確認退出當前對局？",
+    "dodgeConfirmBtn": "確認跳game",
+    "dodgeSuccess": "跳game成功",
+    "dodgeFailed": "跳game失敗: {error}"
   },
   "career": {
     "summonerInfo": "召喚師信息",

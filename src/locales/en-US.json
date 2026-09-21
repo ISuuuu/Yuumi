@@ -294,7 +294,8 @@
       "statusEnabled": "Enabled",
       "statusDisabled": "Disabled",
       "enableHover": "Enable Auto Hover:",
-      "confirmTimeout": "Lock in on timeout (prevent dodge):"
+      "confirmTimeout": "Lock in on timeout (prevent dodge):",
+      "enableDodgeInGameInfo": "Show Dodge button in Game Info:"
     },
     "autoBan": {
       "title": "Auto Ban Champion",
@@ -685,7 +686,13 @@
     "firstPlay": "Novice",
     "winStreak": "{count}W Streak",
     "lossStreak": "{count}L Streak",
-    "rankedGamesStats": "{games}G {rate}%"
+    "rankedGamesStats": "{games}G {rate}%",
+    "dodge": "Dodge",
+    "dodgeTitle": "Confirm Dodge Match",
+    "dodgeConfirm": "Dodging will result in official LP penalty and queue queue lockout. Are you sure you want to dodge?",
+    "dodgeConfirmBtn": "Confirm Dodge",
+    "dodgeSuccess": "Dodged successfully",
+    "dodgeFailed": "Failed to dodge: {error}"
   },
   "career": {
     "summonerInfo": "Summoner Info",

@@ -222,6 +222,9 @@ pub struct FunctionsConfig {
     pub watched_friend_puuids: Vec<String>,
     #[serde(default)]
     pub enable_friend_radar: bool,
+    /// 在对局信息中显示秒退按钮（默认关闭）
+    #[serde(default)]
+    pub enable_dodge_in_game_info: bool,
 }
 
 impl Default for FunctionsConfig {
@@ -284,6 +287,7 @@ impl Default for FunctionsConfig {
             enable_auto_tag_reminder: false,
             watched_friend_puuids: Vec::new(),
             enable_friend_radar: false,
+            enable_dodge_in_game_info: false,
         }
     }
 }

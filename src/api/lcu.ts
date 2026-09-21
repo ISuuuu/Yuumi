@@ -487,6 +487,7 @@ export interface FunctionsConfig {
   EnableAutoTagReminder: boolean;
   WatchedFriendPuuids: string[];
   EnableFriendRadar: boolean;
+  EnableDodgeInGameInfo: boolean;
 }
 
 export interface OtherConfig {

@@ -1046,17 +1046,39 @@ pub async fn dodge_champ_select(app_state: State<'_, AppState>) -> Result<String
         return Err("仅在选人阶段支持秒退".to_string());
     }
 
-    // 2. 调用 POST /lol-login/v1/session/invoke?destination=gameService&method=quitLol，body: [""]
-    let body = serde_json::json!([""]);
-    lcu_request(
+    // 2. 依次尝试 LCU 官方秒退与退出端点
+    // 优先 1: 匹配/排位模式的标准秒退通道
+    let dodge_body = serde_json::json!({
+        "dodgeIds": [],
+        "phase": "ChampSelect",
+        "state": "PartyDodged"
+    });
+    let dodge_res = lcu_request(
         app_state.inner(),
         "POST",
-        "/lol-login/v1/session/invoke?destination=gameService&method=quitLol",
-        Some(body),
+        "/lol-gameflow/v1/session/dodge",
+        Some(dodge_body),
     )
-    .await?;
+    .await;
 
-    Ok("秒退成功".to_string())
+    // 优先 2: 选人组队构建器退出端点 (例如匹配/自定义/大乱斗等)
+    let quit_res = lcu_request(
+        app_state.inner(),
+        "POST",
+        "/lol-lobby-team-builder/champ-select/v1/session/quit",
+        None,
+    )
+    .await;
+
+    // 优先 3: 兜底调用 LCDS quitV2 代理
+    let lcds_path = "/lol-login/v1/session/invoke?destination=lcdsServiceProxy&method=call&args=%5B%22%22%2C%22teambuilder-draft%22%2C%22quitV2%22%2C%22%22%5D";
+    let lcds_res = lcu_request(app_state.inner(), "POST", lcds_path, None).await;
+
+    if dodge_res.is_ok() || quit_res.is_ok() || lcds_res.is_ok() {
+        Ok("秒退成功".to_string())
+    } else {
+        dodge_res.map(|_| "秒退成功".to_string())
+    }
 }
 
 // ─── 挑战勋章与称号设置 ───
