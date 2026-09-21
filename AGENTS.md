@@ -144,28 +144,35 @@ Yuumi/
 │   │   ├── useLoot.ts              # 战利品智能开箱/分解/重铸
 │   │   ├── useMatchHistory.ts      # 战绩历史 Hook
 │   │   ├── usePremadeGroup.ts      # 组队分析 Hook
+│   │   ├── useFateBadge.ts         # 宿命对局与相遇徽章逻辑
 │   │   ├── useGamePlayerData.ts   # 对局玩家数据集中管理
+│   │   ├── useSettingsAutoSave.ts  # 设置页自动持久化 Hook
 │   │   └── useAutoSaveConfig.ts    # 配置项自动保存 Hook
 │   ├── assets/                     # 静态资源（图片等）
 │   ├── views/
 │   │   ├── Home.vue                # 首页（LCU 状态 + 快捷导航）
-│   │   ├── Career.vue              # 生涯战绩（召唤师 + 对局历史）
+│   │   ├── Career.vue              # 生涯战绩（召唤师 + 对局历史 + 英雄熟练度）
 │   │   ├── Search.vue              # 战绩查询（玩家搜索 + 对局列表）
-│   │   ├── GameInfo.vue            # 对局信息（10 人段位 + KDA）
+│   │   ├── GameInfo.vue            # 对局信息（10 人段位 + KDA + 宿命对局）
 │   │   ├── SavedPlayers.vue        # 路人集（曾同局玩家/标记玩家管理）
 │   │   ├── TFT.vue                 # 云顶之弈（段位/战绩/阵容推荐/海克斯）
-│   │   ├── Settings.vue            # 设置（头像/签名/在线状态/配置/HTTP代理）
-│   │   ├── Tools.vue               # 工具箱（创建房间/ARAM 摇号/自动流程/战利品/符文/皮肤等）
+│   │   ├── Settings.vue            # 设置（个性化/路径/云端服务/更新/关于）
+│   │   ├── Tools.vue               # 工具箱（好友清理/房间/自动流程/战利品/符文装备/观战）
 │   │   └── BenchOverlay.vue        # 大乱斗板凳席悬浮窗
 │   └── components/
 │       ├── tft/                    # 云顶之弈子组件（TftRankHeader/TftMatchCard/TftMatchDetailModal/TftMetaCompsTab/TftAugmentsTab）
 │       ├── gameinfo/               # 对局信息子组件（PlayerCard/PlayerMatchColumn/TeamComposition/PhaseBadge 等）
-│       ├── career/                 # 生涯子组件（SummonerHeader/MatchHistoryTab）
-│       ├── tools/                  # 工具箱子组件（AutoGameflowCard/LootTab 等）
+│       ├── career/                 # 生涯子组件（SummonerHeader/MatchHistoryTab/ChampionMasteryTab/LootManagerTab）
+│       ├── search/                 # 战绩查询子组件（MatchListItem/MiniMatchList/MatchDetailPanel）
+│       ├── settings/               # 设置页模块子组件（PersonalizationSection/LolPathSection/ScreenshotSection/UpdateSection 等）
+│       ├── opgg/                   # OP.GG 子组件（TierListPanel/BuildDetailPanel/RunesSection/ItemsSection 等）
+│       ├── tools/                  # 工具箱子组件（AutoGameflowCard/FriendCleanerCard/SpectateCard/quickactions/* 等）
 │       ├── layout/                 # 布局与自定义标题栏
 │       ├── OpggModal.vue           # OP.GG 数据弹窗
 │       ├── OpggWindow.vue          # OP.GG 独立窗口组件
 │       ├── NoticePopup.vue         # 更新日志弹窗组件
+│       ├── UpdateDialog.vue        # 自动更新弹窗组件
+│       ├── ReplayButton.vue        # 对局回放下载与播放组件
 │       ├── LcuOfflineState.vue     # 统一 LCU 离线未连接状态
 │       ├── LcuImage.vue            # LCU 资源图片组件（loading/error/fallback 状态）
 │       ├── ChampionPicker.vue      # 英雄选择器（v-model: number[]）
@@ -173,14 +180,16 @@ Yuumi/
 │       └── NaiveUIBridge.vue       # Naive UI 全局 API 桥接组件
 ├── src-tauri/                      # Tauri/Rust 后端
 │   ├── src/
-│   │   ├── main.rs                 # Rust 入口
+│   │   ├── main.rs                 # Rust 入口（便携升级 helper 判定 / 日志初始化）
 │   │   ├── lib.rs                  # AppState、命令注册、agent 启动、系统托盘
 │   │   ├── config.rs               # 配置读写与 Schema 自动迁移（%APPDATA%/Yuumi/config.json）
+│   │   ├── runtime.rs              # 运行环境模式检测（便携版/安装版）
+│   │   ├── portable_updater.rs     # 便携版更新机制与独立升级替换 helper
 │   │   ├── saved_players.rs        # 路人集系统（SQLite 持久化/标记管理/相遇历史/导入导出）
 │   │   ├── commands/               # Tauri 拆分命令 (config.rs, lcu.rs, tools.rs)
 │   │   ├── loot.rs                 # 战利品管理系统 (开箱/分解/重铸/精粹查询)
 │   │   ├── updater.rs              # 自动更新机制与更新日志本地缓存
-│   │   ├── tools.rs                # 杂项工具（创建房间/ARAM 摇号/符文/皮肤/OP.GG抓取）
+│   │   ├── tools.rs                # 杂项工具（回放/好友清理/装备页/房间/ARAM摇号/符文/OP.GG抓取/观战）
 │   │   ├── logging.rs              # 日志系统（flexi_logger，日志写入 exe 同级 log/ 目录）
 │   │   ├── signalr.rs              # SignalR Hub 远程反代（条件启动）
 │   │   ├── upload.rs               # 对局上传队列（包含落盘暂存与重试逻辑）
@@ -194,14 +203,15 @@ Yuumi/
 │   │   │   └── game_data.rs        # 游戏资源预加载（物品/技能/符文/Cherry海克斯/英雄 ID→名称/iconPath）
 │   │   ├── parsers/
 │   │   │   ├── mod.rs
-│   │   │   ├── summoner.rs         # 召唤师数据清洗
+│   │   │   ├── summoner.rs         # 召唤师数据清洗与英雄熟练度 2.0
 │   │   │   ├── match_parser.rs     # 战绩数据清洗（parseGameData/get_recent_teammates/海克斯大乱斗/经典模式）
 │   │   │   ├── game_info.rs        # 对局信息（10 人段位 + 近期 KDA + 宿命对局分析）
 │   │   │   └── tft.rs              # TFT 云顶之弈数据解析 (战绩/段位/海克斯/阵容)
 │   │   └── agents/
 │   │       ├── mod.rs
 │   │       ├── auto_bp.rs          # 自动选人/禁人/召唤师技能/板凳席推送
-│   │       └── auto_match.rs       # 自动接受匹配/接受邀请/自动点赞/延时再来一局/自动重连/标记提醒/对局结束触发上传
+│   │       ├── auto_match.rs       # 自动接受匹配/接受邀请/自动点赞/延时再来一局/自动重连/标记提醒/对局结束触发上传
+│   │       └── auto_screenshot.rs # 游戏内多杀事件实时监听与自动截图
 │   ├── tauri.conf.json
 │   ├── capabilities/
 │   └── Cargo.toml
@@ -261,6 +271,7 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 | `call_lcu_api`               | lcu/client.rs           | 通用 LCU API 转发                         |
 | `get_lcu_asset`              | lcu/client.rs           | 获取单个 LCU 图片资源                     |
 | `get_current_summoner`       | parsers/summoner.rs     | 获取召唤师信息                            |
+| `get_champion_mastery_list`  | parsers/summoner.rs     | 获取英雄熟练度与里程碑成就列表            |
 | `get_match_history`          | parsers/match_parser.rs | 获取战绩列表 (LCU 本地接口)               |
 | `get_match_history_sgp`      | parsers/match_parser.rs | 获取战绩列表 (SGP 远程接口)               |
 | `get_recent_teammates`       | parsers/match_parser.rs | 获取近期组队队友数据分析                  |
@@ -273,6 +284,7 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 | `create_5v5_practice_lobby`  | tools.rs                | 创建自定义房间                            |
 | `aram_reroll_and_swap_back`  | tools.rs                | 大乱斗摇号换回                            |
 | `apply_rune_page`            | tools.rs                | 应用符文页                                |
+| `apply_item_set`             | tools.rs                | 保存并应用装备页到 LCU 客户端             |
 | `get_lcu_zoom`               | tools.rs                | 获取 LCU 窗口缩放                         |
 | `fix_lcu_window`             | tools.rs                | 修复 LCU 窗口位置                         |
 | `clear_game_cache`           | tools.rs                | 清除游戏缓存                              |
@@ -283,6 +295,12 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 | `get_game_settings_readonly` | tools.rs                | 读取游戏设置                              |
 | `set_game_settings_readonly` | tools.rs                | 写入游戏设置                              |
 | `spectate_directly`          | tools.rs                | 直接观战指定玩家                          |
+| `get_player_challenges`      | tools.rs                | 获取玩家挑战成就列表与装配勋章            |
+| `set_player_preferences`     | tools.rs                | 保存召唤师勋章称号等个性化配置            |
+| `download_game_replay`       | tools.rs                | 下载对局 ROFL 回放文件                    |
+| `get_replay_status`          | tools.rs                | 查询对局回放下载进度与状态                |
+| `watch_game_replay`          | tools.rs                | 调用客户端启动并观看对局回放              |
+| `batch_delete_friends`       | tools.rs                | 批量清理/删除指定好友                     |
 | `get_openable_loots`         | loot.rs                 | 获取可打开的战利品列表                    |
 | `batch_open_loots`           | loot.rs                 | 批量打开指定战利品                        |
 | `smart_open_all_loots`       | loot.rs                 | 一键智能全自动批量开箱                    |
