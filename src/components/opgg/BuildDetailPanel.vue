@@ -666,9 +666,9 @@ async function handleApplyItemSet() {
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  background: var(--primary-color);
+  background: #2fbc5d;
   color: #fff;
-  border: 1px solid var(--primary-color);
+  border: 1px solid #2fbc5d;
   border-radius: 6px;
   font-size: 0.78rem;
   font-weight: 600;
@@ -677,7 +677,8 @@ async function handleApplyItemSet() {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 .apply-item-set-btn:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background: #25a44e;
+  border-color: #25a44e;
   transform: translateY(-1px);
 }
 .apply-item-set-btn:active:not(:disabled) {

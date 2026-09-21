@@ -950,7 +950,7 @@ pub async fn apply_item_set(
     blocks: Vec<ItemSetBlock>,
     app_state: State<'_, AppState>,
 ) -> Result<String, String> {
-    // 1. 获取当前玩家 summonerId
+    // 1. 获取当前玩家 summonerId 与 accountId
     let current_summoner = lcu_request(
         app_state.inner(),
         "GET",
@@ -972,6 +972,14 @@ pub async fn apply_item_set(
         })
         .ok_or_else(|| "无法获取当前召唤师 ID".to_string())?;
 
+    let account_id = current_summoner
+        .get("accountId")
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
+        .unwrap_or(summoner_id);
+
     // 2. 拉取现有 sets
     let sets_path = format!("/lol-item-sets/v1/item-sets/{}/sets", summoner_id);
     let existing_sets_res = lcu_request(app_state.inner(), "GET", &sets_path, None).await;
@@ -979,7 +987,7 @@ pub async fn apply_item_set(
     let mut root = match existing_sets_res {
         Ok(val) if val.is_object() => val,
         _ => serde_json::json!({
-            "accountId": summoner_id,
+            "accountId": account_id,
             "itemSets": [],
             "timestamp": chrono::Utc::now().timestamp_millis(),
         }),
@@ -998,8 +1006,10 @@ pub async fn apply_item_set(
         None => Vec::new(),
     };
 
-    // 4. 将新生成的装备页追加进去
+    // 4. 将新生成的装备页追加进去（必须携带 uid 与 sortrank，以供客户端 UI 正确索引与呈现）
+    let uid = uuid::Uuid::new_v4().to_string();
     let new_set = serde_json::json!({
+        "uid": uid,
         "title": title,
         "associatedChampions": [champion_id],
         "associatedMaps": [11, 12],
@@ -1007,7 +1017,7 @@ pub async fn apply_item_set(
         "map": "any",
         "mode": "any",
         "preferredItemSlots": [],
-        "sortorder": 0,
+        "sortrank": 1,
         "startedFrom": "blank",
         "type": "custom"
     });
@@ -1016,7 +1026,7 @@ pub async fn apply_item_set(
     if let Some(obj) = root.as_object_mut() {
         obj.insert("itemSets".to_string(), serde_json::Value::Array(item_sets));
         if obj.get("accountId").is_none_or(|v| v.is_null()) {
-            obj.insert("accountId".to_string(), serde_json::json!(summoner_id));
+            obj.insert("accountId".to_string(), serde_json::json!(account_id));
         }
         obj.insert(
             "timestamp".to_string(),
@@ -1024,8 +1034,15 @@ pub async fn apply_item_set(
         );
     }
 
-    // 5. POST /lol-item-sets/v1/item-sets/{summonerId}/sets
-    lcu_request(app_state.inner(), "POST", &sets_path, Some(root)).await?;
+    // 5. PUT /lol-item-sets/v1/item-sets/{summonerId}/sets
+    // 注意：LCU 的 sets 保存接口必须使用 PUT 方法才能真正持久化并写入客户端配置；
+    // 若使用 POST，LCU 虽返回 200/成功响应但并不会真正保存到 sets 列表中。
+    lcu_request(app_state.inner(), "PUT", &sets_path, Some(root)).await?;
+    log::info!(
+        "[apply_item_set] 成功持久化装备配置页至 LCU (PUT {}), title: {}",
+        sets_path,
+        title
+    );
 
     Ok(format!("装备页应用成功: {}", title))
 }

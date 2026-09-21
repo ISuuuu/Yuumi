@@ -446,9 +446,13 @@ async function setRunePage(rune: OpggRunePreset) {
   color: var(--text-color);
 }
 .tab-btn.active {
-  background: var(--primary-color);
+  background: #2fbc5d;
   color: white;
-  border-color: var(--primary-color);
+  border-color: #2fbc5d;
+}
+.tab-btn.active:hover {
+  background: #25a44e;
+  border-color: #25a44e;
 }
 .tab-btn:disabled {
   opacity: 0.4;
