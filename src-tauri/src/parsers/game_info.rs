@@ -369,6 +369,7 @@ pub struct PlayerFateInfo {
     pub fate_flag: Option<String>,
     pub recently_champion_name: Option<String>,
     pub game_id: Option<u64>,
+    pub game_creation: Option<u64>,
     #[serde(default)]
     pub ally_count: u32,
     #[serde(default)]
@@ -380,7 +381,7 @@ fn inspect_game_fate(
     detail: &serde_json::Value,
     target_puuid: &str,
     current_summoner_id: u64,
-) -> Option<(String, Option<i32>)> {
+) -> Option<(String, Option<i32>, Option<u64>)> {
     let queue_id = detail.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0);
     let participants = detail.get("participants").and_then(|v| v.as_array())?;
     let identities = detail
@@ -460,7 +461,8 @@ fn inspect_game_fate(
     } else {
         "enemy".to_string()
     };
-    Some((flag, target_champion_id))
+    let game_creation = detail.get("gameCreation").and_then(|v| v.as_u64());
+    Some((flag, target_champion_id, game_creation))
 }
 
 /// 前端独立调用的单个玩家宿命获取接口（传入候选 game_id 列表，按顺序取最近一场共同对局并统计历史交手次数）
@@ -486,6 +488,7 @@ pub async fn get_player_fate_info(
             fate_flag: None,
             recently_champion_name: None,
             game_id: None,
+            game_creation: None,
             ally_count: 0,
             enemy_count: 0,
         });
@@ -542,11 +545,12 @@ pub async fn get_player_fate_info(
     let mut first_flag: Option<String> = None;
     let mut first_cid: Option<i32> = None;
     let mut first_game_id: Option<u64> = None;
+    let mut first_game_creation: Option<u64> = None;
     let mut ally_count = 0u32;
     let mut enemy_count = 0u32;
 
     for (idx, h) in handles.into_iter().enumerate() {
-        if let Ok(Some((flag, cid))) = h.await {
+        if let Ok(Some((flag, cid, creation))) = h.await {
             if flag == "ally" {
                 ally_count += 1;
             } else {
@@ -556,6 +560,7 @@ pub async fn get_player_fate_info(
                 first_flag = Some(flag);
                 first_cid = cid;
                 first_game_id = Some(candidate_game_ids[idx]);
+                first_game_creation = creation;
             }
         }
     }
@@ -571,6 +576,7 @@ pub async fn get_player_fate_info(
         fate_flag: first_flag,
         recently_champion_name,
         game_id: first_game_id,
+        game_creation: first_game_creation,
         ally_count,
         enemy_count,
     })
@@ -652,5 +658,38 @@ mod tests {
         // 结构不完整（无 queues / 非 JSON 对象）时返回 None
         assert!(parse_rank_from_value(&json!({})).is_none());
         assert!(parse_rank_from_value(&json!("not-an-object")).is_none());
+    }
+
+    #[test]
+    fn inspect_game_fate_extracts_relation_champion_and_game_creation() {
+        let detail = json!({
+            "queueId": 450,
+            "gameCreation": 1_705_329_000_000_u64,
+            "participantIdentities": [
+                { "participantId": 1, "player": { "puuid": "me-puuid", "summonerId": 1001 } },
+                { "participantId": 2, "player": { "puuid": "ally-puuid", "summonerId": 1002 } },
+                { "participantId": 6, "player": { "puuid": "enemy-puuid", "summonerId": 2001 } }
+            ],
+            "participants": [
+                { "participantId": 1, "teamId": 100, "championId": 81 },
+                { "participantId": 2, "teamId": 100, "championId": 64 },
+                { "participantId": 6, "teamId": 200, "championId": 157 }
+            ]
+        });
+
+        let ally_res = inspect_game_fate(&detail, "ally-puuid", 1001);
+        assert_eq!(
+            ally_res,
+            Some(("ally".to_string(), Some(64), Some(1_705_329_000_000)))
+        );
+
+        let enemy_res = inspect_game_fate(&detail, "enemy-puuid", 1001);
+        assert_eq!(
+            enemy_res,
+            Some(("enemy".to_string(), Some(157), Some(1_705_329_000_000)))
+        );
+
+        // 自身不判定关系
+        assert!(inspect_game_fate(&detail, "me-puuid", 1001).is_none());
     }
 }

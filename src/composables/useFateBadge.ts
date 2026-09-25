@@ -25,13 +25,29 @@ export function useFateBadge(
     return savedMap[puuid];
   });
 
+  function formatEncounterTime(ts: number | undefined | null): string {
+    if (!ts) return "";
+    const ms = ts < 10_000_000_000 ? ts * 1000 : ts;
+    const d = new Date(ms);
+    if (isNaN(d.getTime())) return "";
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+      d.getHours(),
+    )}:${pad(d.getMinutes())}`;
+  }
+
   function savedBadgeTitle(info: SavedPlayerMarker): string {
-    return info.tag
+    const baseTip = info.tag
       ? t("gameInfo.savedPlayerTip", {
           count: info.encounterCount,
           tag: info.tag,
         })
       : t("gameInfo.savedPlayerTipNoTag", { count: info.encounterCount });
+    const timeStr = formatEncounterTime(info.lastMetAt);
+    if (timeStr) {
+      return `${baseTip}\n${t("gameInfo.savedPlayerLastMet", { time: timeStr })}`;
+    }
+    return baseTip;
   }
 
   function getFateBadgeText(data: PlayerData | undefined): string {
@@ -58,6 +74,13 @@ export function useFateBadge(
       ? ` (${t("gameInfo.fateUsedChampion", { champ: data.recentlyChampionName })})`
       : "";
     let fullTitle = `${baseTitle}${champPart}`;
+
+    const timeStr = formatEncounterTime(
+      data.fateGameCreation ?? savedInfo.value?.lastMetAt,
+    );
+    if (timeStr) {
+      fullTitle += `\n${t("gameInfo.fateGameTime", { time: timeStr })}`;
+    }
 
     // 若多次交手且既有队友又有对手，在末尾补充详细交手统计
     const allyCount = data.fateAllyCount ?? 0;

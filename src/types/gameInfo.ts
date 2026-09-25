@@ -15,6 +15,7 @@ export interface PlayerData {
   lossesCount?: number;
   fateFlag?: "ally" | "enemy" | null;
   recentlyChampionName?: string;
+  fateGameCreation?: number;
   fateIsLastGame?: boolean;
   fateAllyCount?: number;
   fateEnemyCount?: number;

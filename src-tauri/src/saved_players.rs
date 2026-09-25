@@ -410,9 +410,10 @@ pub struct SavedPlayerMarker {
     pub tag: Option<String>,
     pub encounter_count: i32,
     pub last_encountered_game_id: Option<i64>,
+    pub last_met_at: Option<i64>,
 }
 
-/// 获取全部保存玩家的精简映射：puuid → 标记信息（tag + 相遇次数 + 最近相遇对局）
+/// 获取全部保存玩家的精简映射：puuid → 标记信息（tag + 相遇次数 + 最近相遇对局 + 最近相遇时间）
 #[tauri::command]
 pub async fn get_saved_players_map(
     app_state: tauri::State<'_, AppState>,
@@ -430,7 +431,8 @@ pub async fn get_saved_players_map(
                          WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid),
                         (SELECT eg.game_id FROM encountered_games eg
                          WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid
-                         ORDER BY eg.update_at DESC LIMIT 1)
+                         ORDER BY eg.update_at DESC LIMIT 1),
+                        sp.last_met_at
                  FROM saved_players sp WHERE sp.self_puuid = ?1",
             )
             .map_err(|e| e.to_string())?;
@@ -443,6 +445,7 @@ pub async fn get_saved_players_map(
                         tag: r.get(1)?,
                         encounter_count: r.get::<_, i32>(2).unwrap_or(1),
                         last_encountered_game_id: r.get(3)?,
+                        last_met_at: r.get(4)?,
                     },
                 ))
             })

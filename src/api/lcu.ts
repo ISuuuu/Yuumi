@@ -304,6 +304,7 @@ export interface PlayerFateInfo {
   fateFlag: "ally" | "enemy" | null;
   recentlyChampionName: string | null;
   gameId?: number | null;
+  gameCreation?: number | null;
   allyCount?: number;
   enemyCount?: number;
 }
@@ -585,6 +586,7 @@ export interface SavedPlayerMarker {
   tag: string | null;
   encounterCount: number;
   lastEncounteredGameId?: number | null;
+  lastMetAt?: number | null;
 }
 
 export interface SaveSavedPlayerInput {

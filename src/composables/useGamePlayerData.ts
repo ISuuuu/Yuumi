@@ -1101,6 +1101,7 @@ export function useGamePlayerData(
 
       let fateFlag: "ally" | "enemy" | null = null;
       let recentlyChampionName = "";
+      let fateGameCreation: number | undefined = undefined;
       let fateIsLastGame = true;
       let fateAllyCount = 0;
       let fateEnemyCount = 0;
@@ -1117,10 +1118,11 @@ export function useGamePlayerData(
               candidateIds.push(m.gameId);
             }
           }
+          let targetSaved: SavedPlayerMarker | undefined;
           if (currentSummonerPuuid.value) {
             try {
               const savedMap = await getSavedPlayersMapCached();
-              const targetSaved = savedMap[safeInfo.puuid];
+              targetSaved = savedMap[safeInfo.puuid];
               if (
                 targetSaved?.lastEncounteredGameId &&
                 !candidateIds.includes(targetSaved.lastEncounteredGameId)
@@ -1143,9 +1145,19 @@ export function useGamePlayerData(
               recentlyChampionName = fateInfo.recentlyChampionName || "";
               fateAllyCount = fateInfo.allyCount ?? 0;
               fateEnemyCount = fateInfo.enemyCount ?? 0;
+              fateGameCreation = fateInfo.gameCreation ?? undefined;
               // 如果命中的对局不是 matches[0]，或者是好几局之前的，则标记为非最上一局
               if (matches[0] && fateInfo.gameId && fateInfo.gameId !== matches[0].gameId) {
                 fateIsLastGame = false;
+              }
+              if (!fateGameCreation && fateInfo.gameId) {
+                const matched = matches.find((m) => m.gameId === fateInfo.gameId);
+                if (matched?.timeStamp) {
+                  fateGameCreation = matched.timeStamp;
+                }
+              }
+              if (!fateGameCreation && targetSaved?.lastMetAt) {
+                fateGameCreation = targetSaved.lastMetAt;
               }
             }
           }
@@ -1182,6 +1194,7 @@ export function useGamePlayerData(
         lossesCount,
         fateFlag,
         recentlyChampionName,
+        fateGameCreation,
         fateIsLastGame,
         fateAllyCount,
         fateEnemyCount,
