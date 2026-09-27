@@ -64,7 +64,7 @@ export interface PremadePlayerLike {
   botName?: string;
 }
 
-export type PremadeTarget = number | PremadePlayerLike;
+export type PremadeTarget = number | string | PremadePlayerLike;
 
 export interface PremadeGroup {
   colorIdx: number;

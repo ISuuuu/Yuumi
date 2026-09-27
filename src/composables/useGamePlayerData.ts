@@ -31,7 +31,7 @@ import type {
   RankedStats,
 } from "../types/lcu";
 import type { SummonerDisplay } from "../api/lcu";
-import { computePremadeColors } from "./usePremadeGroup";
+import { computePremadeColors, hasPremadeGroup } from "./usePremadeGroup";
 import { lazySetItem } from "../utils/lazyStorage";
 import { runWithConcurrency } from "../utils/runWithConcurrency";
 import {
@@ -284,8 +284,8 @@ function mergeMatchesWithCache(
 
 export function useGamePlayerData(
   appConfig: Ref<AppConfig | null>,
-  premadeColorsMy: Ref<Record<number, number>>,
-  premadeColorsTheir: Ref<Record<number, number>>,
+  premadeColorsMy: Ref<Record<string | number, number>>,
+  premadeColorsTheir: Ref<Record<string | number, number>>,
   activeTab: Ref<"my" | "their">,
 ) {
   const store = useLcuStore();
@@ -612,39 +612,79 @@ export function useGamePlayerData(
               (currentSummonerId.value &&
                 p.summonerId === currentSummonerId.value) ||
               (currentSummonerPuuid.value &&
-                p.puuid === currentSummonerPuuid.value),
+                p.puuid === currentSummonerPuuid.value) ||
+              champSelectTeamSnapshot.value.some(
+                (cs) =>
+                  (p.puuid && cs.puuid && cs.puuid === p.puuid) ||
+                  (p.summonerId &&
+                    cs.summonerId &&
+                    cs.summonerId === p.summonerId) ||
+                  (p.summonerName &&
+                    cs.displayName &&
+                    cs.displayName === p.summonerName) ||
+                  (p.gameName && cs.gameName && cs.gameName === p.gameName),
+              ),
           );
           const ally = isTeamOne || t2.length === 0 ? t1 : t2;
           const enemy = isTeamOne || t2.length === 0 ? t2 : t1;
           sessionAllyTeam.value = ally;
           sessionEnemyTeam.value = enemy;
-          premadeColorsMy.value = computePremadeColors(ally);
-          premadeColorsTheir.value = computePremadeColors(enemy);
-          return;
+
+          // 将 gameflow 中的组队标识同步回填至选人快照，供加载阶段继承及 cellId 映射使用
+          for (const cs of champSelectTeamSnapshot.value) {
+            if (!cs.teamParticipantId && !cs.partyId) {
+              const matchedAlly = ally.find(
+                (ap) =>
+                  (cs.puuid && ap.puuid && cs.puuid === ap.puuid) ||
+                  (cs.summonerId &&
+                    ap.summonerId &&
+                    cs.summonerId === ap.summonerId) ||
+                  (cs.displayName &&
+                    ap.summonerName &&
+                    cs.displayName === ap.summonerName) ||
+                  (cs.gameName && ap.gameName && cs.gameName === ap.gameName),
+              );
+              const tpid =
+                matchedAlly?.teamParticipantId ?? matchedAlly?.partyId;
+              if (tpid !== undefined && tpid !== null && tpid !== "" && tpid !== 0 && tpid !== "0") {
+                cs.teamParticipantId = tpid;
+                cs.partyId = tpid;
+              }
+            }
+          }
+
+          const allyColors = computePremadeColors(ally);
+          const enemyColors = computePremadeColors(enemy);
+          if (hasPremadeGroup(allyColors)) {
+            // 若选人快照已回填组队 ID，合并快照计算出的 cellId 映射
+            const snapColors = computePremadeColors(champSelectTeamSnapshot.value);
+            premadeColorsMy.value = { ...allyColors, ...snapColors };
+          }
+          if (hasPremadeGroup(enemyColors)) {
+            premadeColorsTheir.value = enemyColors;
+          }
         }
       }
-      // 备选降级：若 gameflow 暂无组队数据，但选人 session 已有 teamParticipantId
-      if (
-        Object.keys(premadeColorsMy.value).length === 0 &&
-        store.champSelectSession?.myTeam?.some(
-          (p: ChampSelectPlayer) =>
-            p.teamParticipantId !== undefined || p.partyId !== undefined,
-        )
-      ) {
-        premadeColorsMy.value = computePremadeColors(
-          store.champSelectSession.myTeam,
-        );
+      // 备选降级：若 gameflow 暂无有效组队数据，但选人 session 或快照已有 teamParticipantId
+      if (!hasPremadeGroup(premadeColorsMy.value)) {
+        const csMySource =
+          champSelectTeamSnapshot.value.length > 0
+            ? champSelectTeamSnapshot.value
+            : store.champSelectSession?.myTeam || [];
+        const csMyColors = computePremadeColors(csMySource);
+        if (hasPremadeGroup(csMyColors)) {
+          premadeColorsMy.value = csMyColors;
+        }
       }
-      if (
-        Object.keys(premadeColorsTheir.value).length === 0 &&
-        store.champSelectSession?.theirTeam?.some(
-          (p: ChampSelectPlayer) =>
-            p.teamParticipantId !== undefined || p.partyId !== undefined,
-        )
-      ) {
-        premadeColorsTheir.value = computePremadeColors(
-          store.champSelectSession.theirTeam,
-        );
+      if (!hasPremadeGroup(premadeColorsTheir.value)) {
+        const csTheirSource =
+          champSelectTheirTeamSnapshot.value.length > 0
+            ? champSelectTheirTeamSnapshot.value
+            : store.champSelectSession?.theirTeam || [];
+        const csTheirColors = computePremadeColors(csTheirSource);
+        if (hasPremadeGroup(csTheirColors)) {
+          premadeColorsTheir.value = csTheirColors;
+        }
       }
     } catch {
       /* ignore */
@@ -1504,11 +1544,77 @@ export function useGamePlayerData(
         }
       }
 
+      // 继承组队标识：优先自身已有，若缺失则从 snap、sessionAlly/EnemyTeam 或 prevTeam 继承
+      let resolvedTeamParticipantId =
+        (p.teamParticipantId !== 0 && p.teamParticipantId !== "0" && p.teamParticipantId) ||
+        (p.partyId !== 0 && p.partyId !== "0" && p.partyId) ||
+        undefined;
+
+      if (!resolvedTeamParticipantId && snap) {
+        resolvedTeamParticipantId =
+          (snap.teamParticipantId !== 0 && snap.teamParticipantId !== "0" && snap.teamParticipantId) ||
+          (snap.partyId !== 0 && snap.partyId !== "0" && snap.partyId) ||
+          undefined;
+      }
+
+      if (!resolvedTeamParticipantId) {
+        const sessionTeam = isEnemy
+          ? sessionEnemyTeam.value
+          : sessionAllyTeam.value;
+        const matchedSession = sessionTeam.find(
+          (sp) =>
+            (p.puuid && sp.puuid && p.puuid === sp.puuid) ||
+            (p.summonerId &&
+              sp.summonerId &&
+              p.summonerId === sp.summonerId) ||
+            (p.summonerName &&
+              sp.displayName &&
+              p.summonerName === sp.displayName) ||
+            (p.gameName && sp.gameName && p.gameName === sp.gameName),
+        );
+        if (matchedSession) {
+          resolvedTeamParticipantId =
+            (matchedSession.teamParticipantId !== 0 &&
+              matchedSession.teamParticipantId !== "0" &&
+              matchedSession.teamParticipantId) ||
+            (matchedSession.partyId !== 0 &&
+              matchedSession.partyId !== "0" &&
+              matchedSession.partyId) ||
+            undefined;
+        }
+      }
+
+      if (!resolvedTeamParticipantId) {
+        const prevTeam = isEnemy
+          ? gameflowTheirTeam.value
+          : gameflowMyTeam.value;
+        const prevPlayer = prevTeam.find(
+          (pp) =>
+            (p.puuid && pp.puuid && pp.puuid === p.puuid) ||
+            (p.summonerId &&
+              pp.summonerId &&
+              pp.summonerId === p.summonerId) ||
+            pp.cellId === stableCellId,
+        );
+        if (prevPlayer) {
+          resolvedTeamParticipantId =
+            (prevPlayer.teamParticipantId !== 0 &&
+              prevPlayer.teamParticipantId !== "0" &&
+              prevPlayer.teamParticipantId) ||
+            (prevPlayer.partyId !== 0 &&
+              prevPlayer.partyId !== "0" &&
+              prevPlayer.partyId) ||
+            undefined;
+        }
+      }
+
       return {
         ...p,
         cellId: stableCellId,
         isEnemy,
         championId: resolvedChampId,
+        teamParticipantId: resolvedTeamParticipantId ?? p.teamParticipantId,
+        partyId: resolvedTeamParticipantId ?? p.partyId,
         summonerId: p.summonerId,
         puuid: p.puuid,
         gameName: p.gameName,
@@ -1646,8 +1752,60 @@ export function useGamePlayerData(
     seedInitialPlayerData(gameflowMyTeam.value);
     seedInitialPlayerData(gameflowTheirTeam.value);
 
-    premadeColorsMy.value = computePremadeColors(gameflowMyTeam.value);
-    premadeColorsTheir.value = computePremadeColors(gameflowTheirTeam.value);
+    const newPremadeMy = computePremadeColors(gameflowMyTeam.value);
+    const newPremadeTheir = computePremadeColors(gameflowTheirTeam.value);
+
+    // 辅助函数：若当前 session 偶尔缺少组队 ID，利用已识别的旧组队（按 puuid / summonerId 强身份键），
+    // 迁移绑定到带有新 stableCellId 的队伍成员上，防止组队颜色在游戏加载时丢失
+    const migratePremadeColors = (
+      team: PremadePlayerLike[],
+      existingColors: Record<string | number, number>,
+    ): Record<string | number, number> => {
+      const migrated: Record<string | number, number> = {};
+      for (const p of team) {
+        const cIdx =
+          (p.puuid && existingColors[p.puuid] !== undefined
+            ? existingColors[p.puuid]
+            : undefined) ??
+          (p.summonerId && existingColors[p.summonerId] !== undefined
+            ? existingColors[p.summonerId]
+            : undefined);
+        if (cIdx !== undefined) {
+          if (p.puuid) migrated[p.puuid] = cIdx;
+          if (p.summonerId) migrated[p.summonerId] = cIdx;
+          if (p.cellId !== undefined) migrated[p.cellId] = cIdx;
+        }
+      }
+      return migrated;
+    };
+
+    if (hasPremadeGroup(newPremadeMy)) {
+      premadeColorsMy.value = newPremadeMy;
+    } else if (hasPremadeGroup(premadeColorsMy.value)) {
+      const migrated = migratePremadeColors(
+        gameflowMyTeam.value,
+        premadeColorsMy.value,
+      );
+      if (hasPremadeGroup(migrated)) {
+        premadeColorsMy.value = migrated;
+      }
+    } else {
+      premadeColorsMy.value = newPremadeMy;
+    }
+
+    if (hasPremadeGroup(newPremadeTheir)) {
+      premadeColorsTheir.value = newPremadeTheir;
+    } else if (hasPremadeGroup(premadeColorsTheir.value)) {
+      const migrated = migratePremadeColors(
+        gameflowTheirTeam.value,
+        premadeColorsTheir.value,
+      );
+      if (hasPremadeGroup(migrated)) {
+        premadeColorsTheir.value = migrated;
+      }
+    } else {
+      premadeColorsTheir.value = newPremadeTheir;
+    }
 
     // 无论当前 activeTab 是哪一队，均并发启动双方队伍加载（当前可见队伍优先启动）
     // 避免 10 列视图时敌方被推迟到 background 甚至因异步延迟导致渲染空白
@@ -2325,10 +2483,13 @@ export function useGamePlayerData(
       }
       if (phase === "ChampSelect") {
         currentGameId.value = null;
+        cachedSession = null;
         gameflowMyTeam.value = [];
         gameflowTheirTeam.value = [];
         champSelectTeamSnapshot.value = [];
         champSelectTheirTeamSnapshot.value = [];
+        sessionAllyTeam.value = [];
+        sessionEnemyTeam.value = [];
         lastSessionTeamSig = "";
         playerData.value = {};
         premadeColorsMy.value = {};
@@ -2356,6 +2517,11 @@ export function useGamePlayerData(
       if (!session?.gameData) return;
       if (session.gameData.gameId)
         currentGameId.value = session.gameData.gameId;
+      cachedSession = { data: session, timestamp: Date.now() };
+      if (store.gamePhase === "ChampSelect") {
+        fetchPremadeColors();
+        return;
+      }
       if (store.gamePhase !== "InProgress" && store.gamePhase !== "GameStart")
         return;
       const { teamOne, teamTwo } = session.gameData;
@@ -2370,6 +2536,12 @@ export function useGamePlayerData(
           (currentTotal > 0 && sessionTotal > currentTotal)
         ) {
           processTeamData(teamOne || [], teamTwo || []);
+        } else if (
+          !hasPremadeGroup(premadeColorsMy.value) ||
+          !hasPremadeGroup(premadeColorsTheir.value)
+        ) {
+          // 若人数已满但此前尚未拿到组队 ID，尝试从最新推送的 session 补齐组队颜色
+          fetchPremadeColors();
         }
       }
     },
@@ -2379,7 +2551,7 @@ export function useGamePlayerData(
     (team || [])
       .map((p) => {
         const champId = resolvePlayerChampionId(p, session);
-        return `${p.cellId}:${champId}:${p.puuid || ""}`;
+        return `${p.cellId}:${champId}:${p.puuid || ""}:${p.teamParticipantId ?? p.partyId ?? ""}`;
       })
       .join(",");
 
@@ -2435,9 +2607,21 @@ export function useGamePlayerData(
                 : prev?.championId && prev.championId > 0
                   ? prev.championId
                   : 0;
+            const finalTpid =
+              (p.teamParticipantId !== 0 &&
+                p.teamParticipantId !== "0" &&
+                p.teamParticipantId) ||
+              (p.partyId !== 0 && p.partyId !== "0" && p.partyId) ||
+              (prev?.teamParticipantId !== 0 &&
+                prev?.teamParticipantId !== "0" &&
+                prev?.teamParticipantId) ||
+              (prev?.partyId !== 0 && prev?.partyId !== "0" && prev?.partyId) ||
+              undefined;
             return {
               ...p,
               championId: finalChampId,
+              teamParticipantId: finalTpid ?? p.teamParticipantId,
+              partyId: finalTpid ?? p.partyId,
             };
           });
         };

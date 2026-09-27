@@ -25,8 +25,8 @@ const viewMode = ref<"ten" | "five">("ten");
 const appConfig =
   inject<Ref<AppConfig | null>>("appConfig") || ref<AppConfig | null>(null);
 
-const premadeColorsMy = ref<Record<number, number>>({});
-const premadeColorsTheir = ref<Record<number, number>>({});
+const premadeColorsMy = ref<Record<string | number, number>>({});
+const premadeColorsTheir = ref<Record<string | number, number>>({});
 
 const {
   playerData,
