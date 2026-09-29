@@ -2564,19 +2564,9 @@ export function useGamePlayerData(
         // 否则（如中途启动或选人秒退离开），尝试从 localStorage 恢复上一次对局快照
         restoreReserveDataFromLocalStorage();
       }
-      // 确保敌方队伍快照在离开对局时若处于内存状态，得以稳定维持
-      if (
-        champSelectTheirTeamSnapshot.value.length === 0 &&
-        gameflowTheirTeam.value.length > 0
-      ) {
-        champSelectTheirTeamSnapshot.value = [...gameflowTheirTeam.value];
-      }
-      if (
-        champSelectTeamSnapshot.value.length === 0 &&
-        gameflowMyTeam.value.length > 0
-      ) {
-        champSelectTeamSnapshot.value = [...gameflowMyTeam.value];
-      }
+      champSelectTeamSnapshot.value = [];
+      champSelectTheirTeamSnapshot.value = [];
+      lastSessionTeamSig = "";
     } else {
       champSelectTeamSnapshot.value = [];
       champSelectTheirTeamSnapshot.value = [];
