@@ -32,7 +32,6 @@ import type {
 } from "../types/lcu";
 import type { SummonerDisplay } from "../api/lcu";
 import { computePremadeColors, hasPremadeGroup } from "./usePremadeGroup";
-import { lazySetItem } from "../utils/lazyStorage";
 import { runWithConcurrency } from "../utils/runWithConcurrency";
 import {
   fetchChampions,
@@ -258,28 +257,62 @@ async function fetchSessionCached(): Promise<GameflowSession | null> {
   return null;
 }
 
-const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_gf_matches_cache_${puuid}`;
-function mergeMatchesWithCache(
-  puuid: string,
-  fresh: MatchDisplay[],
-): MatchDisplay[] {
-  let cached: MatchDisplay[] = [];
-  try {
-    const raw = localStorage.getItem(MATCHES_CACHE_KEY(puuid));
-    if (raw) cached = JSON.parse(raw);
-  } catch {
-    /* ignore */
+function computeMatchStats(matches: MatchDisplay[]) {
+  let totalKills = 0;
+  let totalDeaths = 0;
+  let totalAssists = 0;
+  let remakeCount = 0;
+  let currentWinCount = 0;
+  let currentLossesCount = 0;
+
+  matches.forEach((m: MatchDisplay) => {
+    if (m.remake) {
+      remakeCount++;
+    } else {
+      totalKills += m.kills ?? 0;
+      totalDeaths += m.deaths ?? 0;
+      totalAssists += m.assists ?? 0;
+      if (m.win) {
+        currentWinCount++;
+      } else {
+        currentLossesCount++;
+      }
+    }
+  });
+
+  const validMatches = matches.length - remakeCount;
+  const winRate =
+    validMatches > 0 ? Math.round((currentWinCount / validMatches) * 100) : 0;
+  const deathsForCalc = totalDeaths === 0 ? 1 : totalDeaths;
+  const avgKda = (totalKills + totalAssists) / deathsForCalc;
+
+  let streak: StreakInfo | null = null;
+  const validStreakMatches = matches.filter((m) => !m.remake);
+  if (validStreakMatches.length > 0) {
+    const firstWin = validStreakMatches[0].win;
+    let count = 0;
+    for (const m of validStreakMatches) {
+      if (m.win === firstWin) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    if (count >= 2) {
+      streak = {
+        type: firstWin ? "win" : "loss",
+        count,
+      };
+    }
   }
 
-  const merged = [...fresh, ...cached]
-    .filter(
-      (m, idx, arr) => arr.findIndex((x) => x.gameId === m.gameId) === idx,
-    )
-    .sort((a, b) => b.timeStamp - a.timeStamp);
-
-  lazySetItem(MATCHES_CACHE_KEY(puuid), merged);
-
-  return merged;
+  return {
+    winCount: currentWinCount,
+    lossesCount: currentLossesCount,
+    winRate,
+    avgKda,
+    streak,
+  };
 }
 
 export function useGamePlayerData(
@@ -437,6 +470,104 @@ export function useGamePlayerData(
     });
   }
 
+  let isSyncingCurrentPlayerMatches = false;
+  let lastCurrentPlayerSyncTime = 0;
+
+  async function syncCurrentPlayerMatches(forceNetwork = false) {
+    if (!store.isConnected) return;
+    if (isSyncingCurrentPlayerMatches) return;
+    if (!forceNetwork && Date.now() - lastCurrentPlayerSyncTime < 10_000) {
+      return;
+    }
+
+    let puuid =
+      currentSummonerPuuid.value || store.currentSummoner?.puuid || "";
+    let sid =
+      currentSummonerId.value || store.currentSummoner?.summonerId || 0;
+
+    if (!puuid || !sid) {
+      try {
+        const s = await fetchCurrentSummoner();
+        if (s?.puuid) {
+          puuid = s.puuid;
+          currentSummonerPuuid.value = s.puuid;
+        }
+        if (s?.summonerId) {
+          sid = s.summonerId;
+          currentSummonerId.value = s.summonerId;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!puuid) return;
+
+    const myTeamMember = gameflowMyTeam.value.find(
+      (p) =>
+        (puuid && p.puuid === puuid) || (sid && p.summonerId === sid),
+    );
+    const myCellKey =
+      myTeamMember?.cellId !== undefined ? String(myTeamMember.cellId) : null;
+
+    const targetEntries: PlayerData[] = [];
+    for (const key of Object.keys(playerData.value)) {
+      const entry = playerData.value[key];
+      if (!entry || entry.loading) continue;
+      if (
+        (entry.info?.puuid && entry.info.puuid === puuid) ||
+        (entry.info?.summonerId && sid && entry.info.summonerId === sid) ||
+        key === puuid ||
+        (sid && key === String(sid)) ||
+        (myCellKey !== null && key === myCellKey)
+      ) {
+        if (!targetEntries.includes(entry)) {
+          targetEntries.push(entry);
+        }
+      }
+    }
+    if (targetEntries.length === 0) return;
+
+    const filterEnabled = appConfig.value?.Functions?.GameInfoFilter ?? false;
+    isSyncingCurrentPlayerMatches = true;
+    lastCurrentPlayerSyncTime = Date.now();
+    try {
+      const maxMatches = filterEnabled ? 50 : 10;
+      const rawMatches = await fetchMatchHistorySmart(puuid, 0, maxMatches, {
+        forceSgp: true,
+      });
+      if (rawMatches && rawMatches.length > 0) {
+        let filtered = rawMatches;
+        if (filterEnabled && currentQueueId.value !== null) {
+          filtered = filtered.filter((m) => m.queueId === currentQueueId.value);
+        }
+        const top10 = filtered.slice(0, 10);
+        if (top10.length > 0) {
+          const prevFirstId = targetEntries[0].matches?.[0]?.gameId;
+          const prevLen = targetEntries[0].matches?.length ?? 0;
+          const stats = computeMatchStats(top10);
+          for (const entry of targetEntries) {
+            entry.matches = top10;
+            entry.matchHistoryHidden = false;
+            entry.winCount = stats.winCount;
+            entry.lossesCount = stats.lossesCount;
+            entry.winRate = stats.winRate;
+            entry.avgKda = stats.avgKda;
+            entry.streak = stats.streak;
+          }
+          if (top10[0]?.gameId !== prevFirstId || top10.length !== prevLen) {
+            debouncedSavePlayerData();
+          }
+        }
+      }
+    } catch (e) {
+      console.debug("[GamePlayerData] 同步当前玩家最新战绩失败:", e);
+    } finally {
+      isSyncingCurrentPlayerMatches = false;
+    }
+  }
+
+  let isRestoredFromReserve = false;
+
   function restoreReserveDataFromLocalStorage(): boolean {
     try {
       const savedMyTeam = localStorage.getItem("yuumi_last_gameflow_my_team");
@@ -474,6 +605,8 @@ export function useGamePlayerData(
           hasRestored = true;
           // 异步检查并补齐缺少熟练度的玩家（例如旧版本保留的数据）
           backfillMissingMasteries();
+          // 同步当前玩家最新战绩（优先读本地缓存秒级刷新，若在线则拉取最新）
+          syncCurrentPlayerMatches();
         }
       }
       if (savedPremadeMy) {
@@ -499,6 +632,9 @@ export function useGamePlayerData(
         premadeColorsTheir.value = computePremadeColors(
           gameflowTheirTeam.value,
         );
+      }
+      if (hasRestored) {
+        isRestoredFromReserve = true;
       }
       return hasRestored;
     } catch {
@@ -699,7 +835,16 @@ export function useGamePlayerData(
         store.setGamePhase(phaseResp.data);
         if (phaseResp.data === "InProgress" || phaseResp.data === "GameStart") {
           loadFromGameflowSession();
+        } else if (phaseResp.data !== "ChampSelect") {
+          // 非活跃阶段刷新时，主动强制同步当前玩家最新战绩
+          syncCurrentPlayerMatches(true);
         }
+      } else if (
+        store.gamePhase !== "InProgress" &&
+        store.gamePhase !== "GameStart" &&
+        store.gamePhase !== "ChampSelect"
+      ) {
+        syncCurrentPlayerMatches(true);
       }
     } catch {
       /* ignore */
@@ -820,6 +965,13 @@ export function useGamePlayerData(
           .catch(() => {
             /* ignore */
           });
+      }
+      // 若复用的是当前玩家，后台异步核对最新战绩并同步
+      const isMe =
+        realSummonerId === currentSummonerId.value ||
+        (!!playerPuuid && playerPuuid === currentSummonerPuuid.value);
+      if (isMe) {
+        syncCurrentPlayerMatches();
       }
       return;
     }
@@ -1053,10 +1205,11 @@ export function useGamePlayerData(
         summonerId === currentSummonerId.value ||
         (!!safeInfo.puuid && safeInfo.puuid === currentSummonerPuuid.value);
 
-      let matches: MatchDisplay[] = rawMatches;
-      if (safeInfo.puuid && isCurrentPlayer) {
-        matches = mergeMatchesWithCache(safeInfo.puuid, rawMatches);
+      if (isCurrentPlayer) {
+        lastCurrentPlayerSyncTime = Date.now();
       }
+
+      let matches: MatchDisplay[] = rawMatches;
 
       if (filterEnabled && currentQueueId.value !== null) {
         matches = matches.filter(
@@ -1082,61 +1235,15 @@ export function useGamePlayerData(
       let winRate: number | undefined = undefined;
       let winCount: number | undefined = undefined;
       let lossesCount: number | undefined = undefined;
-
-      if (matches && matches.length > 0) {
-        let totalKills = 0;
-        let totalDeaths = 0;
-        let totalAssists = 0;
-        let remakeCount = 0;
-        let currentWinCount = 0;
-        let currentLossesCount = 0;
-
-        matches.forEach((m: MatchDisplay) => {
-          if (m.remake) {
-            remakeCount++;
-          } else {
-            totalKills += m.kills ?? 0;
-            totalDeaths += m.deaths ?? 0;
-            totalAssists += m.assists ?? 0;
-            if (m.win) {
-              currentWinCount++;
-            } else {
-              currentLossesCount++;
-            }
-          }
-        });
-
-        winCount = currentWinCount;
-        lossesCount = currentLossesCount;
-        const validMatches = matches.length - remakeCount;
-        winRate =
-          validMatches > 0
-            ? Math.round((currentWinCount / validMatches) * 100)
-            : 0;
-        const deathsForCalc = totalDeaths === 0 ? 1 : totalDeaths;
-        avgKda = (totalKills + totalAssists) / deathsForCalc;
-      }
-
       let streak: StreakInfo | null = null;
+
       if (matches && matches.length > 0) {
-        const validStreakMatches = matches.filter((m) => !m.remake);
-        if (validStreakMatches.length > 0) {
-          const firstWin = validStreakMatches[0].win;
-          let count = 0;
-          for (const m of validStreakMatches) {
-            if (m.win === firstWin) {
-              count++;
-            } else {
-              break;
-            }
-          }
-          if (count >= 2) {
-            streak = {
-              type: firstWin ? "win" : "loss",
-              count,
-            };
-          }
-        }
+        const stats = computeMatchStats(matches);
+        winCount = stats.winCount;
+        lossesCount = stats.lossesCount;
+        winRate = stats.winRate;
+        avgKda = stats.avgKda;
+        streak = stats.streak;
       }
 
       let fateFlag: "ally" | "enemy" | null = null;
@@ -1892,12 +1999,25 @@ export function useGamePlayerData(
       const t1 = teamOne || [];
       const t2 = teamTwo || [];
       const liveGameId = data.gameData.gameId ?? null;
-      if (liveGameId) currentGameId.value = liveGameId;
+      const isCustomGame = data.gameData.queue?.isCustom === true;
+      if (liveGameId) {
+        const savedId = Number(localStorage.getItem("yuumi_last_game_id")) || 0;
+        if (
+          (isRestoredFromReserve && savedId !== liveGameId) ||
+          (savedId !== liveGameId && champSelectTeamSnapshot.value.length === 0)
+        ) {
+          // 检测到全新的对局 ID，且当前不是从本次选人快照过渡而来，清理上一次对局残留的旧数据
+          playerData.value = {};
+          gameflowMyTeam.value = [];
+          gameflowTheirTeam.value = [];
+          isRestoredFromReserve = false;
+        }
+        currentGameId.value = liveGameId;
+      }
       // InProgress 阶段 LCU 会把 gameflow 队伍精简（甚至只剩我方或单边）：
       // 当落盘有同 gameId 的完整快照，且当前队伍为空或当前队伍少于落盘人数或当前 session 少于落盘人数时，
       // 先从快照恢复整局数据，后续逻辑中的长度守卫与 identity 合并会保留更全的数据，防止敌方丢失
       const sessionTotal = t1.length + t2.length;
-      const isCustomGame = data.gameData.queue?.isCustom === true;
       if (liveGameId && !isCustomGame) {
         try {
           const savedId =
@@ -2458,13 +2578,13 @@ export function useGamePlayerData(
         champSelectTeamSnapshot.value = [...gameflowMyTeam.value];
       }
     } else {
+      champSelectTeamSnapshot.value = [];
+      champSelectTheirTeamSnapshot.value = [];
+      lastSessionTeamSig = "";
       // 刚进入选人阶段时，清空当前内存视图与快照以展示当前新选人
       if (store.gamePhase === "ChampSelect") {
         gameflowMyTeam.value = [];
         gameflowTheirTeam.value = [];
-        champSelectTeamSnapshot.value = [];
-        champSelectTheirTeamSnapshot.value = [];
-        lastSessionTeamSig = "";
         playerData.value = {};
       }
     }
@@ -2482,6 +2602,7 @@ export function useGamePlayerData(
         }
       }
       if (phase === "ChampSelect") {
+        isRestoredFromReserve = false;
         currentGameId.value = null;
         cachedSession = null;
         gameflowMyTeam.value = [];
@@ -2498,9 +2619,17 @@ export function useGamePlayerData(
         refreshState();
       }
       if (phase === "InProgress" || phase === "GameStart") {
-        // 清理选人阶段以数字 0..9 临时缓存的旧键，避免红方我方 5..9 槽位残留与对局敌方 5..9 发生碰撞
-        for (let i = 0; i < 10; i++) {
-          delete playerData.value[i];
+        // 未经历本局选人快照过渡（例如直连进游戏、大乱斗或游戏中途启动软件），彻底清空残留数据，防止上一局旧快照污染新对局
+        if (champSelectTeamSnapshot.value.length === 0) {
+          playerData.value = {};
+          gameflowMyTeam.value = [];
+          gameflowTheirTeam.value = [];
+          isRestoredFromReserve = false;
+        } else {
+          // 清理选人阶段以数字 0..9 临时缓存的旧键，避免红方我方 5..9 槽位残留与对局敌方 5..9 发生碰撞
+          for (let i = 0; i < 10; i++) {
+            delete playerData.value[i];
+          }
         }
         // 从选人阶段进入载入或游戏时，清空 session 缓存
         cachedSession = null;
@@ -2671,6 +2800,65 @@ export function useGamePlayerData(
 
   watch(activeTab, () => loadAllPlayers());
 
+  // 监听对局结束事件：延时梯度轮询拉取刚结束对局的最新战绩，同步更新到保留快照中
+  watch(
+    () => store.gameEndedTrigger,
+    () => {
+      const delays = [2000, 3500, 5000];
+      delays.reduce(
+        (p, delay) =>
+          p.then(
+            () =>
+              new Promise<void>((resolve) => {
+                setTimeout(async () => {
+                  try {
+                    await syncCurrentPlayerMatches(true);
+                  } catch {
+                    /* ignore */
+                  }
+                  resolve();
+                }, delay);
+              }),
+          ),
+        Promise.resolve(),
+      );
+    },
+  );
+
+  watch(
+    () => store.currentSummoner,
+    (summoner) => {
+      if (summoner?.summonerId) currentSummonerId.value = summoner.summonerId;
+      if (summoner?.puuid) currentSummonerPuuid.value = summoner.puuid;
+      if (
+        summoner?.puuid &&
+        store.gamePhase !== "InProgress" &&
+        store.gamePhase !== "GameStart" &&
+        store.gamePhase !== "ChampSelect"
+      ) {
+        syncCurrentPlayerMatches();
+      }
+    },
+  );
+
+  watch(
+    () => store.isConnected,
+    async (connected) => {
+      if (connected) {
+        if (!currentSummonerPuuid.value || !currentSummonerId.value) {
+          try {
+            const s = await fetchCurrentSummoner();
+            if (s?.summonerId) currentSummonerId.value = s.summonerId;
+            if (s?.puuid) currentSummonerPuuid.value = s.puuid;
+          } catch {
+            /* ignore */
+          }
+        }
+        refreshState();
+      }
+    },
+  );
+
   watch(
     () => store.currentPage,
     (newPage) => {
@@ -2690,6 +2878,8 @@ export function useGamePlayerData(
             Object.keys(playerData.value).length > 0;
           if (!hasPlayerData) {
             restoreReserveDataFromLocalStorage();
+          } else {
+            syncCurrentPlayerMatches();
           }
           // 仅拉取当前 phase 和 champSelectSession，切勿覆盖已保留的对局
           refreshState();
@@ -2707,7 +2897,12 @@ export function useGamePlayerData(
       }
     }
 
-    if (appConfig.value?.Functions?.EnableReserveGameinfo) {
+    if (
+      appConfig.value?.Functions?.EnableReserveGameinfo &&
+      store.gamePhase !== "ChampSelect" &&
+      store.gamePhase !== "GameStart" &&
+      store.gamePhase !== "InProgress"
+    ) {
       if (restoreReserveDataFromLocalStorage()) {
         if (
           Object.keys(premadeColorsMy.value).length === 0 &&
