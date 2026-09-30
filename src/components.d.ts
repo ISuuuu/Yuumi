@@ -70,6 +70,7 @@ declare module 'vue' {
     PersonalizationSection: typeof import('./components/settings/PersonalizationSection.vue')['default']
     PlayerCard: typeof import('./components/gameinfo/PlayerCard.vue')['default']
     PlayerMatchColumn: typeof import('./components/gameinfo/PlayerMatchColumn.vue')['default']
+    PremadeGroupChips: typeof import('./components/gameinfo/PremadeGroupChips.vue')['default']
     ProfileBackgroundCard: typeof import('./components/tools/quickactions/ProfileBackgroundCard.vue')['default']
     RankSpoofCard: typeof import('./components/tools/quickactions/RankSpoofCard.vue')['default']
     ReplayButton: typeof import('./components/ReplayButton.vue')['default']
