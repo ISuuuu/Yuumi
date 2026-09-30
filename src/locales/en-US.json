@@ -649,6 +649,18 @@
     "premade": "Party",
     "premadeLegend": "Party:",
     "premadeIdx": "Party {idx}",
+    "tierShort": {
+      "IRON": "Iron",
+      "BRONZE": "Bronze",
+      "SILVER": "Silver",
+      "GOLD": "Gold",
+      "PLATINUM": "Plat",
+      "EMERALD": "Emerald",
+      "DIAMOND": "Diamond",
+      "MASTER": "Master",
+      "GRANDMASTER": "GM",
+      "CHALLENGER": "Chall"
+    },
     "soloRank": "Solo",
     "flexRank": "Flex",
     "noRank": "None",

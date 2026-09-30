@@ -646,6 +646,18 @@
     "premade": "組隊",
     "premadeLegend": "組隊:",
     "premadeIdx": "組隊 {idx}",
+    "tierShort": {
+      "IRON": "鐵",
+      "BRONZE": "銅",
+      "SILVER": "銀",
+      "GOLD": "金",
+      "PLATINUM": "鉑",
+      "EMERALD": "翡",
+      "DIAMOND": "鑽",
+      "MASTER": "大師",
+      "GRANDMASTER": "宗師",
+      "CHALLENGER": "王者"
+    },
     "soloRank": "單雙",
     "flexRank": "靈活",
     "noRank": "無",

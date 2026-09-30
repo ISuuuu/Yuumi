@@ -649,6 +649,18 @@
     "premade": "组队",
     "premadeLegend": "组队:",
     "premadeIdx": "组队 {idx}",
+    "tierShort": {
+      "IRON": "铁",
+      "BRONZE": "铜",
+      "SILVER": "银",
+      "GOLD": "金",
+      "PLATINUM": "铂",
+      "EMERALD": "翡",
+      "DIAMOND": "钻",
+      "MASTER": "大师",
+      "GRANDMASTER": "宗师",
+      "CHALLENGER": "王者"
+    },
     "soloRank": "单双",
     "flexRank": "灵活",
     "noRank": "无",

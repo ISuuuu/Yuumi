@@ -318,7 +318,6 @@ pub fn run() {
             parsers::match_parser::get_match_history,
             parsers::match_parser::get_match_history_sgp,
             parsers::match_parser::get_recent_teammates,
-            parsers::game_info::get_game_player_summaries,
             parsers::game_info::get_player_fate_info,
             parsers::tft::get_tft_data,
             parsers::tft::get_tft_ranked_stats,

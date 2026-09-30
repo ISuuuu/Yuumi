@@ -146,6 +146,7 @@ Yuumi/
 │   │   ├── usePremadeGroup.ts      # 组队分析 Hook
 │   │   ├── useFateBadge.ts         # 宿命对局与相遇徽章逻辑
 │   │   ├── useGamePlayerData.ts   # 对局玩家数据集中管理
+│   │   ├── usePlayerChampionId.ts  # 对局玩家当前英雄 ID 解析 Hook
 │   │   ├── useSettingsAutoSave.ts  # 设置页自动持久化 Hook
 │   │   └── useAutoSaveConfig.ts    # 配置项自动保存 Hook
 │   ├── assets/                     # 静态资源（图片等）
@@ -275,7 +276,6 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 | `get_match_history`          | parsers/match_parser.rs | 获取战绩列表 (LCU 本地接口)               |
 | `get_match_history_sgp`      | parsers/match_parser.rs | 获取战绩列表 (SGP 远程接口)               |
 | `get_recent_teammates`       | parsers/match_parser.rs | 获取近期组队队友数据分析                  |
-| `get_game_player_summaries`  | parsers/game_info.rs    | 获取对局 10 人段位 + KDA                  |
 | `get_player_fate_info`       | parsers/game_info.rs    | 获取同场玩家历史交手/宿命战绩统计        |
 | `get_tft_data`               | parsers/tft.rs          | 获取云顶之弈基础数据                      |
 | `get_tft_ranked_stats`       | parsers/tft.rs          | 获取云顶之弈段位与近期胜率统计            |

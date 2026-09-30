@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   getChampionIcon,
-  resolvePlayerChampionId,
   getPlayerMasteryDetail,
   type PlayerData,
   type PremadePlayerLike,
 } from "../../types/gameInfo";
-import { useLcuStore } from "../../store/lcuStore";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import { useFateBadge } from "../../composables/useFateBadge";
+import { usePlayerChampionId } from "../../composables/usePlayerChampionId";
 import type { SavedPlayerMarker } from "../../api/lcu";
 import LcuImage from "../LcuImage.vue";
 
@@ -18,67 +17,22 @@ const props = defineProps<{
   player: PremadePlayerLike;
   playerData?: PlayerData;
   premadeIdx: number;
-  activeTab: "my" | "their";
   premadeCardStyle: Record<string, string>;
   savedMap?: Record<string, SavedPlayerMarker>;
   selfPuuid?: string;
   index?: number;
 }>();
 
-const store = useLcuStore();
 const { t } = useI18n();
 const { getPlayerSearchName, getPlayerDisplayName, handleCareerClick } = usePlayerSearch();
 
-const resolvedChampId = computed(() => {
-  // 1. 选人阶段始终优先从选人会话推断（保证挑选悬停、锁定、ARAM换英雄、板凳席互换实时响应）
-  if (store.gamePhase === "ChampSelect" && store.champSelectSession) {
-    const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
-    if (fromResolver > 0) return fromResolver;
-  }
-  // 2. 选人外（游戏中/加载中/对局结束）或会话未推断出时：优先使用已有明确 championId
-  if (props.playerData?.championId && props.playerData.championId > 0) {
-    return props.playerData.championId;
-  }
-  if (props.player?.championId && props.player.championId > 0) {
-    return props.player.championId;
-  }
-  if (props.player?.botChampionId && props.player.botChampionId > 0) {
-    return props.player.botChampionId;
-  }
-  // 3. 兜底仅在选人阶段从选人会话推断，游戏已开始后严禁使用选人残留 session 盲目赋值
-  if (store.gamePhase === "ChampSelect" && store.champSelectSession) {
-    const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
-    if (fromResolver > 0) return fromResolver;
-  }
-  return 0;
-});
-
-watch(
-  () => [
-    resolvedChampId.value,
-    props.playerData?.matchHistoryHidden,
-    props.player?.displayName || props.player?.gameName,
-  ] as const,
-  ([cid, hidden, name]) => {
-    if (hidden) {
-      console.debug(
-        `[PlayerCard] 隐藏战绩玩家英雄头像排查: name=${name}, activeTab=${props.activeTab}, cellId=${props.player?.cellId}, resolvedChampId=${cid}, playerDataChampId=${props.playerData?.championId}, playerPropChampId=${props.player?.championId}, profileIconId=${props.playerData?.info?.profileIconId ?? props.player?.profileIconId}`,
-      );
-    }
-  },
-  { immediate: true },
+const resolvedChampId = usePlayerChampionId(
+  () => props.player,
+  () => props.playerData,
 );
 
 const masteryDetail = computed(() => {
-  const detail = getPlayerMasteryDetail(props.playerData, resolvedChampId.value);
-  if (props.playerData?.info?.puuid) {
-    console.debug(`[PlayerCard] 玩家 ${props.playerData?.info?.gameName} 熟练度详情:`, {
-      resolvedChampId: resolvedChampId.value,
-      masteryCount: props.playerData?.masteries?.length ?? 0,
-      detail,
-    });
-  }
-  return detail;
+  return getPlayerMasteryDetail(props.playerData, resolvedChampId.value);
 });
 
 const { savedInfo, savedBadgeTitle, getFateBadgeText, getFateTitle } = useFateBadge(

@@ -3,19 +3,20 @@ import { ref, computed, inject, type Ref } from "vue";
 import { onMounted, watch } from "vue";
 import { useLcuStore } from "../store/lcuStore";
 import type { AppConfig, SavedPlayerMarker } from "../api/lcu";
-import { querySavedPlayersMap } from "../api/lcu";
-import {
-  PREMADE_COLORS,
-  getChampionIcon,
-  type PlayerData,
-  type PremadePlayerLike,
+import type {
+  PlayerData,
+  PremadePlayerLike,
 } from "../types/gameInfo";
 import { usePremadeGroup } from "../composables/usePremadeGroup";
-import { useGamePlayerData, isIdentityCompatible } from "../composables/useGamePlayerData";
+import {
+  useGamePlayerData,
+  isIdentityCompatible,
+  querySavedPlayersMapDedup,
+} from "../composables/useGamePlayerData";
 import PlayerCard from "../components/gameinfo/PlayerCard.vue";
 import LcuOfflineState from "../components/LcuOfflineState.vue";
 import PlayerMatchColumn from "../components/gameinfo/PlayerMatchColumn.vue";
-import LcuImage from "../components/LcuImage.vue";
+import PremadeGroupChips from "../components/gameinfo/PremadeGroupChips.vue";
 
 const store = useLcuStore();
 const activeTab = ref<"my" | "their">("my");
@@ -73,6 +74,21 @@ function isSameIdentity(p: PremadePlayerLike, d: PlayerData | undefined): boolea
   return isIdentityCompatible(d, { puuid: p.puuid, summonerId: p.summonerId, cellId: p.cellId });
 }
 
+// 身份反查索引：按 info 内的真实身份键（puuid / summonerId / 名字）建表，
+// 模板每列查询复用，避免渲染期间对 playerData 做全量遍历
+const playerDataLookup = computed(() => {
+  const map = new Map<string, PlayerData>();
+  for (const key of Object.keys(playerData.value)) {
+    const d = playerData.value[key];
+    if (!d?.info) continue;
+    if (d.info.puuid) map.set(`p:${d.info.puuid}`, d);
+    if (d.info.summonerId) map.set(`s:${d.info.summonerId}`, d);
+    const name = d.info.displayName || d.info.gameName;
+    if (name) map.set(`n:${name}`, d);
+  }
+  return map;
+});
+
 function getPlayerData(p: PremadePlayerLike, idx: number) {
   // 身份优先查找：puuid → summonerId → cellId（与数据层顺序一致，身份键优先命中同一玩家）
   if (p.puuid) {
@@ -93,16 +109,13 @@ function getPlayerData(p: PremadePlayerLike, idx: number) {
     if (byIdx && isSameIdentity(p, byIdx)) return byIdx;
   }
   // 若按真实 stableCellId 或 idx 索引均未直接命中（如 5 列切 Tab 或 10 列合并展示时）：
-  // 尝试在 playerData 中按队员已知身份（puuid / summonerId / displayName）遍历反查
-  for (const key of Object.keys(playerData.value)) {
-    const d = playerData.value[key];
-    if (!d?.info) continue;
-    if (p.puuid && d.info.puuid && d.info.puuid === p.puuid) return d;
-    if (p.summonerId && d.info.summonerId && d.info.summonerId === p.summonerId) return d;
-    const pName = p.displayName || p.gameName || p.summonerName;
-    const dName = d.info.displayName || d.info.gameName;
-    if (pName && dName && pName === dName) return d;
-  }
+  // 按队员已知身份（puuid / summonerId / displayName）从反查索引取
+  const pName = p.displayName || p.gameName || p.summonerName;
+  const fallback =
+    (p.puuid && playerDataLookup.value.get(`p:${p.puuid}`)) ||
+    (p.summonerId && playerDataLookup.value.get(`s:${p.summonerId}`)) ||
+    (pName && playerDataLookup.value.get(`n:${pName}`));
+  if (fallback) return fallback;
   if (p.championId || p.botChampionId) {
     console.debug(`[GameInfo] getPlayerData 未匹配到数据项: name=${p.displayName || p.gameName}, cellId=${p.cellId}, championId=${p.championId || p.botChampionId}, availableKeys=${Object.keys(playerData.value).join(",")}`);
   }
@@ -110,6 +123,7 @@ function getPlayerData(p: PremadePlayerLike, idx: number) {
 }
 
 // 保存玩家映射：puuid → { tag, encounterCount }，用于玩家卡片旁标记"曾同局"
+// 查询走 useGamePlayerData 的共享去重封装（与宿命候选加载共用同一次 IPC）
 const savedPlayerMap = ref<Record<string, SavedPlayerMarker>>({});
 
 // 敌方队伍是否已公开可用（选人阶段敌方通常不可见；自定义/人机模式公开可见）
@@ -142,22 +156,15 @@ const allPlayers = computed(() => {
   return [...myTeam.value, ...theirTeam.value];
 });
 
-// in-flight 去重：挂载/连接/选人等多触发源同时到达时只发一次查询
-let savedPlayerMapInflight: Promise<void> | null = null;
-
+// in-flight 去重由共享封装 querySavedPlayersMapDedup 处理
 async function loadSavedPlayerMap() {
   const puuid = currentSummonerPuuid.value;
   if (!puuid || !store.isConnected) return;
-  if (savedPlayerMapInflight) return;
-  savedPlayerMapInflight = (async () => {
-    try {
-      savedPlayerMap.value = await querySavedPlayersMap(puuid);
-    } catch (e) {
-      console.error("[GameInfo] 保存玩家映射加载失败:", e);
-    } finally {
-      savedPlayerMapInflight = null;
-    }
-  })();
+  try {
+    savedPlayerMap.value = await querySavedPlayersMapDedup(puuid);
+  } catch (e) {
+    console.error("[GameInfo] 保存玩家映射加载失败:", e);
+  }
 }
 
 watch(() => store.gamePhase, (phase) => {
@@ -209,7 +216,6 @@ onMounted(() => {
             :player="p"
             :player-data="getPlayerData(p, i)"
             :premade-idx="getPremadeIdx(p, activeTab)"
-            :active-tab="activeTab"
             :premade-card-style="getPremadeCardStyle(p, activeTab)"
             :saved-map="savedPlayerMap"
             :self-puuid="currentSummonerPuuid"
@@ -236,38 +242,7 @@ onMounted(() => {
                 {{ $t("gameInfo.myTeam", { count: myTeam.length }) }}
               </span>
               <!-- 我方组队芯片 -->
-              <div v-if="myPremadeGroups.length > 0" class="premade-chips-wrapper">
-                <div
-                  v-for="group in myPremadeGroups"
-                  :key="group.colorIdx"
-                  class="premade-group-chip"
-                  :style="{
-                    borderColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].border,
-                    backgroundColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].bg,
-                  }"
-                  :title="$t('gameInfo.premadeIdx', { idx: group.colorIdx + 1 })"
-                >
-                  <span
-                    class="legend-dot"
-                    :style="{
-                      background: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].dot,
-                    }"
-                  ></span>
-                  <div class="premade-avatars">
-                    <template v-for="m in group.members" :key="m.summonerId">
-                      <LcuImage
-                        v-if="m.championId > 0"
-                        :src="getChampionIcon(m.championId)"
-                        class="premade-avatar"
-                        :title="m.displayName"
-                      />
-                      <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">
-                        {{ m.displayName ? m.displayName.slice(0, 1) : '?' }}
-                      </div>
-                    </template>
-                  </div>
-                </div>
-              </div>
+              <PremadeGroupChips :groups="myPremadeGroups" />
             </div>
 
             <!-- 中间精准绝对居中 50% 轴线的 VS 分隔指示 -->
@@ -278,38 +253,7 @@ onMounted(() => {
             <!-- 敌方区域（占右侧 50%） -->
             <div class="ten-toolbar-right">
               <!-- 敌方组队芯片 -->
-              <div v-if="theirPremadeGroups.length > 0" class="premade-chips-wrapper">
-                <div
-                  v-for="group in theirPremadeGroups"
-                  :key="group.colorIdx"
-                  class="premade-group-chip"
-                  :style="{
-                    borderColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].border,
-                    backgroundColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].bg,
-                  }"
-                  :title="$t('gameInfo.premadeIdx', { idx: group.colorIdx + 1 })"
-                >
-                  <span
-                    class="legend-dot"
-                    :style="{
-                      background: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].dot,
-                    }"
-                  ></span>
-                  <div class="premade-avatars">
-                    <template v-for="m in group.members" :key="m.summonerId">
-                      <LcuImage
-                        v-if="m.championId > 0"
-                        :src="getChampionIcon(m.championId)"
-                        class="premade-avatar"
-                        :title="m.displayName"
-                      />
-                      <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">
-                        {{ m.displayName ? m.displayName.slice(0, 1) : '?' }}
-                      </div>
-                    </template>
-                  </div>
-                </div>
-              </div>
+              <PremadeGroupChips :groups="theirPremadeGroups" />
 
               <!-- 敌方阵营指示与切换按钮容器 -->
               <div class="ten-right-controls">
@@ -371,38 +315,7 @@ onMounted(() => {
                   <span class="pill-dot"></span>
                   {{ $t("gameInfo.myTeam", { count: myTeam.length }) }}
                 </span>
-                <div v-if="myPremadeGroups.length > 0" class="premade-chips-wrapper">
-                  <div
-                    v-for="group in myPremadeGroups"
-                    :key="group.colorIdx"
-                    class="premade-group-chip"
-                    :style="{
-                      borderColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].border,
-                      backgroundColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].bg,
-                    }"
-                    :title="$t('gameInfo.premadeIdx', { idx: group.colorIdx + 1 })"
-                  >
-                    <span
-                      class="legend-dot"
-                      :style="{
-                        background: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].dot,
-                      }"
-                    ></span>
-                    <div class="premade-avatars">
-                      <template v-for="m in group.members" :key="m.summonerId">
-                        <LcuImage
-                          v-if="m.championId > 0"
-                          :src="getChampionIcon(m.championId)"
-                          class="premade-avatar"
-                          :title="m.displayName"
-                        />
-                        <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">
-                          {{ m.displayName ? m.displayName.slice(0, 1) : '?' }}
-                        </div>
-                      </template>
-                    </div>
-                  </div>
-                </div>
+                <PremadeGroupChips :groups="myPremadeGroups" />
               </div>
 
               <!-- VS 分隔指示与敌方组队区（仅当敌方有数据且已公开时显示） -->
@@ -412,38 +325,7 @@ onMounted(() => {
 
                 <!-- 敌方组队区 -->
                 <div class="five-team-premade">
-                  <div v-if="theirPremadeGroups.length > 0" class="premade-chips-wrapper">
-                    <div
-                      v-for="group in theirPremadeGroups"
-                      :key="group.colorIdx"
-                      class="premade-group-chip"
-                      :style="{
-                        borderColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].border,
-                        backgroundColor: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].bg,
-                      }"
-                      :title="$t('gameInfo.premadeIdx', { idx: group.colorIdx + 1 })"
-                    >
-                      <span
-                        class="legend-dot"
-                        :style="{
-                          background: PREMADE_COLORS[group.colorIdx % PREMADE_COLORS.length].dot,
-                        }"
-                      ></span>
-                      <div class="premade-avatars">
-                        <template v-for="m in group.members" :key="m.summonerId">
-                          <LcuImage
-                            v-if="m.championId > 0"
-                            :src="getChampionIcon(m.championId)"
-                            class="premade-avatar"
-                            :title="m.displayName"
-                          />
-                          <div v-else class="premade-avatar premade-avatar-empty" :title="m.displayName">
-                            {{ m.displayName ? m.displayName.slice(0, 1) : '?' }}
-                          </div>
-                        </template>
-                      </div>
-                    </div>
-                  </div>
+                  <PremadeGroupChips :groups="theirPremadeGroups" />
                   <span
                     class="side-pill enemy-pill clickable-pill"
                     :class="[
@@ -690,81 +572,6 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   min-width: 0;
-}
-
-.premade-chips-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: nowrap;
-  overflow: hidden;
-}
-
-.premade-group-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 7px;
-  border-width: 1px;
-  border-style: solid;
-  border-radius: 999px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-.premade-group-chip:hover {
-  filter: brightness(1.1);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
-}
-
-.legend-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  box-shadow: 0 0 5px currentColor;
-}
-
-.premade-avatars {
-  display: flex;
-  align-items: center;
-}
-
-.premade-avatar {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 1.5px solid rgba(255, 255, 255, 0.8);
-  box-sizing: border-box;
-  margin-left: -4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-.premade-avatar:first-child {
-  margin-left: 0;
-}
-
-.premade-avatar-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-  color: var(--text-dimmed);
-  font-size: 0.6rem;
-  font-weight: 800;
-  border: 1.5px solid rgba(255, 255, 255, 0.8);
-  box-sizing: border-box;
-  margin-left: -4px;
-}
-.premade-avatar-empty:first-child {
-  margin-left: 0;
 }
 
 .side-pill {

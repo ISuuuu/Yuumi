@@ -1,367 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::State;
 
-use crate::parsers::match_parser::{LcuMatchHistoryResponse, MatchDisplay};
 use crate::{build_auth_header, AppState};
-
-// ─── 输入数据结构（来自 champ select 的 myTeam / theirTeam）───
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GamePlayerInfo {
-    #[serde(default)]
-    pub summoner_id: u64,
-    #[serde(default)]
-    pub puuid: Option<String>,
-    #[serde(default)]
-    pub champion_id: i32,
-}
-
-// ─── 输出数据结构 ───
-
-/// 单个玩家的战绩汇总
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlayerGameSummary {
-    pub summoner_id: u64,
-    pub puuid: String,
-    pub name: String,
-    pub level: u32,
-    pub champion_id: i32,
-    pub champion_icon_url: String,
-    pub rank_info: Option<RankInfo>,
-    pub recent_kda: (i32, i32, i32), // (kills, deaths, assists)
-    pub recent_win_rate: f64,
-    pub recent_games: Vec<MatchDisplay>,
-    pub fate_flag: Option<String>, // "ally" | "enemy" | null
-    pub recently_champion_id: Option<i32>,
-    pub recently_champion_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RankInfo {
-    pub tier: String,
-    pub rank: String,
-    pub league_points: i32,
-    pub wins: i32,
-    pub losses: i32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LcuSummonerById {
-    pub puuid: Option<String>,
-    pub display_name: Option<String>,
-    pub summoner_level: Option<u32>,
-}
-
-// ─── 十人并发查询 ───
-
-/// 并发查询所有玩家的战绩、段位、KDA，并判定上局关系
-#[tauri::command]
-pub async fn get_game_player_summaries(
-    players: Vec<GamePlayerInfo>,
-    current_summoner_id: u64,
-    app_state: State<'_, AppState>,
-) -> Result<Vec<PlayerGameSummary>, String> {
-    // 如果资源尚未加载完成，且 LCU 已连接，进行等待以防止解析出来的图片/装备路径为空（最多等 5 秒）
-    crate::lcu::client::wait_for_game_data(app_state.inner()).await;
-
-    // 锁内只提取连接参数（http_client 克隆是 Arc 浅拷贝），
-    // 尽早释放读锁，避免并发查询期间阻塞 monitor 重连
-    let (auth, base, http_client) = {
-        let lock = app_state.lcu().await?;
-        let lcu = lock.as_ref().unwrap();
-        (
-            build_auth_header(&lcu.token),
-            format!("https://127.0.0.1:{}", lcu.port),
-            lcu.http_client.clone(),
-        )
-    };
-    let assets = Arc::new(app_state.game_data.read().await.clone());
-
-    // 复用全局并发信号量（由配置 ApiConcurrencyNumber 控制），
-    // 限制同时打向 LCU 的玩家查询数量，避免 10 人并发造成请求风暴
-    let semaphore = {
-        let lock = app_state.api_semaphore.read().await;
-        lock.clone()
-    };
-
-    // 并发查询所有玩家
-    let mut handles = Vec::new();
-    for player in &players {
-        let auth = auth.clone();
-        let base = base.clone();
-        let http = http_client.clone();
-        let player = player.clone();
-        let assets = assets.clone();
-        let semaphore = semaphore.clone();
-
-        handles.push(tokio::spawn(async move {
-            let _permit = semaphore.acquire().await.ok()?;
-            fetch_player_summary(
-                &http,
-                &base,
-                &auth,
-                &player,
-                current_summoner_id,
-                assets.as_ref(),
-            )
-            .await
-        }));
-    }
-
-    let mut results = Vec::new();
-    for handle in handles {
-        match handle.await {
-            Ok(Some(summary)) => results.push(summary),
-            Ok(None) => {}
-            Err(e) => log::error!("玩家查询任务 panic: {}", e),
-        }
-    }
-
-    Ok(results)
-}
-
-async fn fetch_player_summary(
-    http: &reqwest::Client,
-    base: &str,
-    auth: &str,
-    player: &GamePlayerInfo,
-    current_summoner_id: u64,
-    assets: &crate::lcu::game_data::GameDataAssets,
-) -> Option<PlayerGameSummary> {
-    // 1. 获取召唤师信息（优先 summonerId，其次 puuid）
-    let mut summoner: Option<LcuSummonerById> = None;
-    if player.summoner_id > 0 {
-        let summoner_url = format!("{}/lol-summoner/v1/summoners/{}", base, player.summoner_id);
-        if let Ok(resp) = http
-            .get(&summoner_url)
-            .header("Authorization", auth)
-            .send()
-            .await
-        {
-            if let Ok(data) = resp.json::<LcuSummonerById>().await {
-                summoner = Some(data);
-            }
-        }
-    }
-    if summoner.is_none() {
-        if let Some(ref puuid) = player.puuid {
-            if !puuid.is_empty() {
-                let summoner_url = format!("{}/lol-summoner/v2/summoners/puuid/{}", base, puuid);
-                if let Ok(resp) = http
-                    .get(&summoner_url)
-                    .header("Authorization", auth)
-                    .send()
-                    .await
-                {
-                    if let Ok(data) = resp.json::<LcuSummonerById>().await {
-                        summoner = Some(data);
-                    }
-                }
-            }
-        }
-    }
-
-    let summoner = summoner?;
-    let puuid = summoner.puuid?;
-    let name = summoner.display_name.unwrap_or_default();
-    let level = summoner.summoner_level.unwrap_or(0);
-
-    // 2+3. 段位与战绩请求互相独立，并发发出（rank ∥ matches）
-    let rank_url = format!("{}/lol-ranked/v1/ranked-stats/{}", base, puuid);
-    let games_url = format!(
-        "{}/lol-match-history/v1/products/lol/{}/matches?begIndex=0&endIndex=11",
-        base, puuid
-    );
-
-    let (rank_resp, games_resp) = tokio::join!(
-        http.get(&rank_url).header("Authorization", auth).send(),
-        http.get(&games_url).header("Authorization", auth).send(),
-    );
-
-    let rank_info = match rank_resp {
-        Ok(resp) => resp
-            .json::<serde_json::Value>()
-            .await
-            .ok()
-            .and_then(|v| parse_rank_from_value(&v)),
-        Err(_) => None,
-    };
-
-    let games_info = match games_resp {
-        Ok(resp) => resp.json::<LcuMatchHistoryResponse>().await.ok(),
-        Err(_) => None,
-    };
-
-    let (recent_games, total_kills, total_deaths, total_assists, wins) = match games_info {
-        Some(history) => {
-            let games: Vec<MatchDisplay> = history
-                .games
-                .games
-                .iter()
-                .filter_map(|g| g.to_display(assets))
-                .collect();
-
-            let (k, d, a, w) = games.iter().fold((0, 0, 0, 0), |(k, d, a, w), g| {
-                (
-                    k + g.kills,
-                    d + g.deaths,
-                    a + g.assists,
-                    w + if g.win { 1 } else { 0 },
-                )
-            });
-
-            (games, k, d, a, w)
-        }
-        None => (Vec::new(), 0, 0, 0, 0),
-    };
-
-    let game_count = (recent_games.len()).max(1) as f64;
-    let win_rate = wins as f64 / game_count;
-
-    // 4. 上局宿命判定：检查最近一局是否与当前玩家有交集
-    let fate_flag = if let Some(first_game) = recent_games.first() {
-        check_fate(
-            http,
-            base,
-            auth,
-            first_game.game_id,
-            current_summoner_id,
-            &puuid,
-        )
-        .await
-    } else {
-        None
-    };
-
-    // 5. 最近常用英雄
-    let recently_champion_id = recent_games.first().map(|g| g.champion_id);
-    let recently_champion_name =
-        recently_champion_id.and_then(|id| assets.champions.get(&id).cloned());
-
-    let champion_icon_url = format!(
-        "/lol-game-data/assets/v1/champion-icons/{}.png",
-        player.champion_id
-    );
-
-    Some(PlayerGameSummary {
-        summoner_id: player.summoner_id,
-        puuid,
-        name,
-        level,
-        champion_id: player.champion_id,
-        champion_icon_url,
-        rank_info,
-        recent_kda: (total_kills, total_deaths, total_assists),
-        recent_win_rate: win_rate,
-        recent_games,
-        fate_flag,
-        recently_champion_id,
-        recently_champion_name,
-    })
-}
-
-/// 检查上局关系：当前玩家是上局的队友还是对手
-async fn check_fate(
-    http: &reqwest::Client,
-    base: &str,
-    auth: &str,
-    game_id: u64,
-    current_summoner_id: u64,
-    target_puuid: &str,
-) -> Option<String> {
-    let url = format!("{}/lol-match-history/v1/games/{}", base, game_id);
-    let resp = http
-        .get(&url)
-        .header("Authorization", auth)
-        .send()
-        .await
-        .ok()?;
-    let detail: serde_json::Value = resp.json().await.ok()?;
-
-    let queue_id = detail.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0);
-    let participants = detail.get("participants").and_then(|v| v.as_array())?;
-    let identities = detail
-        .get("participantIdentities")
-        .and_then(|v| v.as_array())?;
-
-    let mut current_pid: Option<i64> = None;
-    let mut target_pid: Option<i64> = None;
-
-    // 1. 查找 participantId
-    for ident in identities {
-        let player_data = match ident.get("player") {
-            Some(p) => p,
-            None => continue,
-        };
-        let puuid = player_data
-            .get("puuid")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let summoner_id = player_data
-            .get("summonerId")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let pid = match ident.get("participantId").and_then(|v| v.as_i64()) {
-            Some(id) => id,
-            None => continue,
-        };
-
-        if puuid == target_puuid {
-            target_pid = Some(pid);
-        }
-        if summoner_id == current_summoner_id {
-            current_pid = Some(pid);
-        }
-    }
-
-    let current_pid = current_pid?;
-    let target_pid = target_pid?;
-
-    // 如果是同一个人，则无队友/对手关系
-    if current_pid == target_pid {
-        return None;
-    }
-
-    // 2. 查找对应的队伍 ID
-    let mut current_team: Option<i64> = None;
-    let mut target_team: Option<i64> = None;
-
-    for p in participants {
-        let pid = match p.get("participantId").and_then(|v| v.as_i64()) {
-            Some(id) => id,
-            None => continue,
-        };
-
-        let team_val = if queue_id == 1700 {
-            p.get("stats")
-                .and_then(|s| s.get("subteamPlacement"))
-                .and_then(|v| v.as_i64())
-        } else {
-            p.get("teamId").and_then(|v| v.as_i64())
-        };
-
-        if pid == current_pid {
-            current_team = team_val;
-        }
-        if pid == target_pid {
-            target_team = team_val;
-        }
-    }
-
-    let current_team = current_team?;
-    let target_team = target_team?;
-
-    if current_team == target_team {
-        Some("ally".to_string())
-    } else {
-        Some("enemy".to_string())
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -465,6 +107,35 @@ fn inspect_game_fate(
     Some((flag, target_champion_id, game_creation))
 }
 
+// ─── 对局详情进程内缓存 ───
+// 宿命检测中同局玩家的候选 gameId 高度重叠，且已结束对局的详情不可变，
+// 缓存可避免同一 gameId 的完整详情被并发/重复下载；容量满时整体清空即可。
+
+const GAME_DETAIL_CACHE_CAP: usize = 32;
+
+fn game_detail_cache() -> &'static Mutex<HashMap<u64, Arc<serde_json::Value>>> {
+    static CACHE: OnceLock<Mutex<HashMap<u64, Arc<serde_json::Value>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn game_detail_cache_get(game_id: u64) -> Option<Arc<serde_json::Value>> {
+    game_detail_cache()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&game_id)
+        .cloned()
+}
+
+fn game_detail_cache_insert(game_id: u64, detail: Arc<serde_json::Value>) {
+    let mut cache = game_detail_cache()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if cache.len() >= GAME_DETAIL_CACHE_CAP {
+        cache.clear();
+    }
+    cache.insert(game_id, detail);
+}
+
 /// 前端独立调用的单个玩家宿命获取接口（传入候选 game_id 列表，按顺序取最近一场共同对局并统计历史交手次数）
 #[tauri::command]
 pub async fn get_player_fate_info(
@@ -511,7 +182,8 @@ pub async fn get_player_fate_info(
         lock.clone()
     };
 
-    // 并发拉取候选对局详情，结果按候选顺序回填，保证"最先命中"取的是优先级最高的候选
+    // 并发拉取候选对局详情，结果按候选顺序回填，保证"最先命中"取的是优先级最高的候选。
+    // 详情先查进程内缓存（命中不占信号量），未命中才请求 LCU 并回填缓存
     let mut handles = Vec::with_capacity(candidate_game_ids.len());
     for &gid in &candidate_game_ids {
         let auth = auth.clone();
@@ -520,6 +192,9 @@ pub async fn get_player_fate_info(
         let semaphore = semaphore.clone();
         let target_puuid = target_puuid.clone();
         handles.push(tokio::spawn(async move {
+            if let Some(detail) = game_detail_cache_get(gid) {
+                return inspect_game_fate(&detail, &target_puuid, current_summoner_id);
+            }
             let _permit = match semaphore.acquire().await {
                 Ok(p) => p,
                 Err(_) => return None,
@@ -538,6 +213,8 @@ pub async fn get_player_fate_info(
                 Ok(d) => d,
                 Err(_) => return None,
             };
+            let detail = Arc::new(detail);
+            game_detail_cache_insert(gid, detail.clone());
             inspect_game_fate(&detail, &target_puuid, current_summoner_id)
         }));
     }
@@ -582,83 +259,10 @@ pub async fn get_player_fate_info(
     })
 }
 
-fn parse_rank_from_value(v: &serde_json::Value) -> Option<RankInfo> {
-    // 查找 RANKED_SOLO_5x5 队列
-    let queues = v.get("queues")?.as_array()?;
-    for queue in queues {
-        let queue_type = queue
-            .get("queueType")
-            .and_then(|q| q.as_str())
-            .unwrap_or("");
-        if queue_type == "RANKED_SOLO_5x5" {
-            return Some(RankInfo {
-                tier: queue
-                    .get("tier")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                rank: queue
-                    .get("rank")
-                    .and_then(|r| r.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                league_points: queue
-                    .get("leaguePoints")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0) as i32,
-                wins: queue.get("wins").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                losses: queue.get("losses").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-            });
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn parse_rank_extracts_solo_queue_entry() {
-        let v = json!({
-            "queues": [
-                { "queueType": "RANKED_FLEX_SR", "tier": "GOLD", "rank": "I", "leaguePoints": 33, "wins": 10, "losses": 5 },
-                { "queueType": "RANKED_SOLO_5x5", "tier": "PLATINUM", "rank": "II", "leaguePoints": 75, "wins": 120, "losses": 110 }
-            ]
-        });
-        let rank = parse_rank_from_value(&v).expect("应解析出单双排段位");
-        assert_eq!(rank.tier, "PLATINUM");
-        assert_eq!(rank.rank, "II");
-        assert_eq!(rank.league_points, 75);
-        assert_eq!(rank.wins, 120);
-        assert_eq!(rank.losses, 110);
-    }
-
-    #[test]
-    fn parse_rank_returns_none_without_solo_queue() {
-        let v = json!({
-            "queues": [
-                { "queueType": "RANKED_FLEX_SR", "tier": "GOLD", "rank": "I", "leaguePoints": 33, "wins": 10, "losses": 5 },
-                { "queueType": "RANKED_TFT_DOUBLE_UP", "tier": "SILVER", "rank": "III", "leaguePoints": 0, "wins": 1, "losses": 2 }
-            ]
-        });
-        assert!(parse_rank_from_value(&v).is_none());
-    }
-
-    #[test]
-    fn parse_rank_tolerates_missing_fields() {
-        // 缺失数值字段时回退默认值而非 panic
-        let v = json!({ "queues": [{ "queueType": "RANKED_SOLO_5x5", "tier": "IRON" }] });
-        let rank = parse_rank_from_value(&v).expect("字段缺失也应返回段位骨架");
-        assert_eq!(rank.tier, "IRON");
-        assert_eq!(rank.rank, "");
-        assert_eq!(rank.league_points, 0);
-
-        // 结构不完整（无 queues / 非 JSON 对象）时返回 None
-        assert!(parse_rank_from_value(&json!({})).is_none());
-        assert!(parse_rank_from_value(&json!("not-an-object")).is_none());
-    }
 
     #[test]
     fn inspect_game_fate_extracts_relation_champion_and_game_creation() {

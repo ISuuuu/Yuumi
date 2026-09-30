@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { MatchDisplay, AppConfig, SavedPlayerMarker } from "../../api/lcu";
+import type { RankedQueueEntry } from "../../types/lcu";
 import {
   PREMADE_COLORS,
   getChampionIcon,
-  resolvePlayerChampionId,
   getPlayerMasteryDetail,
   type PlayerData,
   type PremadePlayerLike,
@@ -13,6 +13,7 @@ import {
 import { useLcuStore } from "../../store/lcuStore";
 import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import { useFateBadge } from "../../composables/useFateBadge";
+import { usePlayerChampionId } from "../../composables/usePlayerChampionId";
 import LcuImage from "../LcuImage.vue";
 
 const props = defineProps<{
@@ -59,82 +60,39 @@ const colHeaderStyle = computed(() => {
   };
 });
 
-const currentChampId = computed(() => {
-  // 1. 选人阶段始终优先从选人会话实时推断（保证挑选悬停、锁定、ARAM换英雄、板凳席互换实时响应）
-  if (store.gamePhase === "ChampSelect" && store.champSelectSession) {
-    const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
-    if (fromResolver > 0) return fromResolver;
-  }
-  // 2. 选人外（游戏中/加载中/对局结束）或会话未推断出时：优先使用已有明确 championId
-  if (props.playerData?.championId && props.playerData.championId > 0) {
-    return props.playerData.championId;
-  }
-  if (props.player?.championId && props.player.championId > 0) {
-    return props.player.championId;
-  }
-  if (props.player?.botChampionId && props.player.botChampionId > 0) {
-    return props.player.botChampionId;
-  }
-  // 3. 兜底仅在选人阶段从选人会话推断，游戏已开始后严禁使用选人残留 session 盲目赋值
-  if (store.gamePhase === "ChampSelect" && store.champSelectSession) {
-    const fromResolver = resolvePlayerChampionId(props.player, store.champSelectSession);
-    if (fromResolver > 0) return fromResolver;
-  }
-  return 0;
-});
-
-watch(
-  () => [
-    currentChampId.value,
-    props.playerData?.matchHistoryHidden,
-    props.player?.displayName || props.player?.gameName,
-  ] as const,
-  ([cid, hidden, name]) => {
-    if (hidden) {
-      console.debug(
-        `[PlayerMatchColumn] 隐藏战绩玩家英雄头像排查: name=${name}, side=${props.side}, cellId=${props.player?.cellId}, currentChampId=${cid}, playerDataChampId=${props.playerData?.championId}, playerPropChampId=${props.player?.championId}, profileIconId=${props.playerData?.info?.profileIconId ?? props.player?.profileIconId}`,
-      );
-    }
-  },
-  { immediate: true },
+const currentChampId = usePlayerChampionId(
+  () => props.player,
+  () => props.playerData,
 );
 
 const masteryDetail = computed(() => {
   return getPlayerMasteryDetail(props.playerData, currentChampId.value);
 });
 
-const TIER_SHORT_MAP: Record<string, string> = {
-  IRON: "铁",
-  BRONZE: "铜",
-  SILVER: "银",
-  GOLD: "金",
-  PLATINUM: "铂",
-  EMERALD: "翡",
-  DIAMOND: "钻",
-  MASTER: "大师",
-  GRANDMASTER: "宗师",
-  CHALLENGER: "王者",
-};
+// 段位短名：紧凑列空间有限，走 i18n 短名（gameInfo.tierShort.*），缺失时回退前两字母截断
+function tierShortName(tier: string): string {
+  const key = `gameInfo.tierShort.${tier}`;
+  if (te(key)) return t(key);
+  return tier.slice(0, 2);
+}
 
-const rankSummary = computed(() => {
-  const solo = props.playerData?.ranked?.solo;
-  if (solo && solo.tier && solo.tier !== "NONE") {
-    const total = (solo.wins || 0) + (solo.losses || 0);
-    const wr = total > 0 ? Math.round(((solo.wins || 0) / total) * 100) : 0;
-    const tName = TIER_SHORT_MAP[solo.tier] || solo.tier.slice(0, 2);
-    const rName = solo.rank && solo.rank !== "NA" ? solo.rank : "";
-    return total > 0 ? `${tName}${rName} ${wr}%` : `${tName}${rName}`;
-  }
-  const flex = props.playerData?.ranked?.flex;
-  if (flex && flex.tier && flex.tier !== "NONE") {
-    const total = (flex.wins || 0) + (flex.losses || 0);
-    const wr = total > 0 ? Math.round(((flex.wins || 0) / total) * 100) : 0;
-    const tName = TIER_SHORT_MAP[flex.tier] || flex.tier.slice(0, 2);
-    const rName = flex.rank && flex.rank !== "NA" ? flex.rank : "";
-    return total > 0 ? `${tName}${rName} ${wr}%` : `${tName}${rName}`;
-  }
-  return "";
-});
+function summarizeQueue(q?: RankedQueueEntry | null): string {
+  if (!q || !q.tier || q.tier === "NONE") return "";
+  const wins = q.wins || 0;
+  const losses = q.losses || 0;
+  const total = wins + losses;
+  const wr = total > 0 ? Math.round((wins / total) * 100) : 0;
+  const rName = q.rank && q.rank !== "NA" ? q.rank : "";
+  return total > 0
+    ? `${tierShortName(q.tier)}${rName} ${wr}%`
+    : `${tierShortName(q.tier)}${rName}`;
+}
+
+const rankSummary = computed(
+  () =>
+    summarizeQueue(props.playerData?.ranked?.solo) ||
+    summarizeQueue(props.playerData?.ranked?.flex),
+);
 
 // 头像左侧胜率竖条：>50 绿、<50 红；50% 时高度为 0，100% 胜率或 0% 胜率（100%败率）时完全填充
 const wrBar = computed(() => {
@@ -533,12 +491,6 @@ const columnSideColorClass = computed(() => {
   transition: height 0.3s ease-in-out;
 }
 .wr-bar.win .wr-bar-fill {
-  background: #10b981;
-}
-.wr-bar.lose .wr-bar-fill {
-  background: #f87171;
-}
-.wr-bar.win .wr-bar-fill {
   background: var(--win-color);
 }
 .wr-bar.lose .wr-bar-fill {
@@ -711,33 +663,6 @@ const columnSideColorClass = computed(() => {
   background: var(--border-color);
   color: var(--text-muted);
   border: none;
-}
-
-.col-streak-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 0.52rem;
-  font-weight: 800;
-  line-height: 1;
-  padding: 1px 3px;
-  border-radius: 2.5px;
-  flex-shrink: 0;
-}
-.col-streak-badge.win {
-  background: rgba(249, 115, 22, 0.14);
-  color: #ea580c;
-  border: 1px solid rgba(249, 115, 22, 0.3);
-}
-.col-streak-badge.loss {
-  background: rgba(59, 130, 246, 0.14);
-  color: #2563eb;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-}
-.col-streak-svg {
-  width: 8px;
-  height: 8px;
-  flex-shrink: 0;
 }
 
 .col-mastery-row {
@@ -1155,15 +1080,6 @@ const columnSideColorClass = computed(() => {
 }
 .compact .col-name {
   font-size: 0.72rem;
-}
-.compact .col-streak-badge {
-  font-size: 0.52rem;
-  padding: 0.5px 3px;
-  gap: 1.5px;
-}
-.compact .col-streak-svg {
-  width: 7.5px;
-  height: 7.5px;
 }
 .compact .col-mastery-row {
   display: flex;
