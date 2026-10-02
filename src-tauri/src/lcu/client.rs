@@ -197,70 +197,48 @@ pub async fn lcu_request(
         return Err(format!("不允许的 API 路径: {}", path));
     }
 
-    // 在锁内只提取连接参数（http_client 克隆是 Arc 浅拷贝，代价极低），
-    // 尽早释放读锁，避免重试循环期间阻塞 monitor 的重连写锁
-    let (port, token, http_client) = {
-        let lock = app_state.lcu().await?;
-        let lcu = lock.as_ref().unwrap();
-        (lcu.port, lcu.token.clone(), lcu.http_client.clone())
-    };
-
     // 获取并发许可（每轮重试单独 acquire，避免挂起请求占死并发池）
     let semaphore = {
         let lock = app_state.api_semaphore.read().await;
         lock.clone()
     };
 
-    let url = format!("https://127.0.0.1:{}{}", port, path);
-
-    // Basic Auth: base64("riot:<token>")
-    let auth_value = build_auth_header(&token);
-
     let method_upper = method.to_uppercase();
+    if !matches!(
+        method_upper.as_str(),
+        "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+    ) {
+        return Err(format!("不支持的 HTTP 方法: {}", method_upper));
+    }
 
-    // 基础请求对象在循环外构建一次（method 分发、URL 拼接、JSON body 序列化只做一次），
-    // 重试时通过 try_clone 复用同一请求，避免每轮循环重复构建。
-    let base_req = {
+    let mut last_err = String::new();
+
+    for attempt in 1..=MAX_RETRIES {
+        // 先取并发许可，再读取连接参数。
+        // 排队期间 LCU 可能已重启换代（port/token 立即失效），若先读参数再排队，
+        // 请求会打到已下线的旧端口，白白消耗整轮重试与信号量许可。
+        let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
+
+        let (port, token, http_client) = {
+            let lock = app_state.lcu().await?;
+            let lcu = lock.as_ref().unwrap();
+            (lcu.port, lcu.token.clone(), lcu.http_client.clone())
+        };
+
+        let url = format!("https://127.0.0.1:{}{}", port, path);
+
         let mut req = match method_upper.as_str() {
             "GET" => http_client.get(&url),
             "POST" => http_client.post(&url),
             "PUT" => http_client.put(&url),
             "PATCH" => http_client.patch(&url),
             "DELETE" => http_client.delete(&url),
-            other => return Err(format!("不支持的 HTTP 方法: {}", other)),
+            _ => unreachable!("HTTP 方法已在循环外校验"),
         };
-        req = req.header("Authorization", &auth_value);
+        req = req.header("Authorization", &build_auth_header(&token));
         if let Some(ref json_body) = body {
             req = req.json(json_body);
         }
-        req
-    };
-
-    let mut last_err = String::new();
-
-    for attempt in 1..=MAX_RETRIES {
-        // 每轮重试单独获取并发许可，挂起请求仅占用单轮 permit，超时释放后不阻塞后续请求
-        let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
-
-        // 优先复用基础请求；try_clone 失败（异常 body）时降级为每轮重建
-        let req = match base_req.try_clone() {
-            Some(req) => req,
-            None => {
-                let mut req = match method_upper.as_str() {
-                    "GET" => http_client.get(&url),
-                    "POST" => http_client.post(&url),
-                    "PUT" => http_client.put(&url),
-                    "PATCH" => http_client.patch(&url),
-                    "DELETE" => http_client.delete(&url),
-                    _ => return Err("不支持的 HTTP 方法".to_string()),
-                };
-                req = req.header("Authorization", &auth_value);
-                if let Some(ref json_body) = body {
-                    req = req.json(json_body);
-                }
-                req
-            }
-        };
 
         match req.send().await {
             Ok(response) => {

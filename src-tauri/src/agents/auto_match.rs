@@ -10,10 +10,28 @@ use std::sync::Arc;
 /// 该窗口内出现的 None 视为抖动，不重置建厅状态，避免重复建厅把玩家踢出小队。
 const LOBBY_FLICKER_WINDOW: std::time::Duration = std::time::Duration::from_millis(2000);
 
+/// 建厅重试的最大轮数（每轮间隔 2 秒）。
+/// LCU 刚启动的前十几秒会返回 CURRENT_PLAYER_PUUID_NOT_FOUND 等暂态错误，
+/// 十余轮足够覆盖；过长的重试链会在 LCU 换代时拖住全局 API 信号量。
+const LOBBY_CREATE_MAX_ATTEMPTS: u32 = 12;
+
 /// 自动创建大厅的共享状态（建厅重试在后台任务中执行，需跨任务共享标志）
 #[derive(Default)]
 struct LobbyState {
     created: bool,
+    /// 已有建厅任务在后台重试，防止多条路径（阶段事件 / 延迟复查 / 手动重置）
+    /// 并发启动多个建厅任务。
+    running: bool,
+    /// 本轮「空闲(None)」阶段是否已处理过。
+    /// LCU 关闭或重连过程中会在极短时间内重复推送同一阶段（实测一次关闭可产生
+    /// 上百条 gameflow-phase=None），若逐条重置建厅标志并重新启动建厅任务，会并发
+    /// 堆出上百个任务把全局 API 信号量（默认仅 5 个许可）吃满，导致新 LCU 就绪后
+    /// 建厅请求排队数十秒才发出。
+    idle_handled: bool,
+    /// 处理上述空闲阶段时对应的 LCU 实例（pid + port）。
+    /// 用来区分「同一 LCU 会话内的重复 None 事件」与「LCU 重启后的全新会话」：
+    /// 后者必须重新触发一次建厅，前者必须忽略。
+    idle_lcu: Option<(u32, u16)>,
     last_create: Option<std::time::Instant>,
 }
 
@@ -150,6 +168,8 @@ pub fn start(
                     {
                         let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
                         lobby.created = false;
+                        lobby.idle_handled = false;
+                        lobby.idle_lcu = None;
                     }
                     if last_phase == "None" && cfg.enable_auto_create_lobby {
                         try_create_default_lobby(app_handle.clone(), &cfg, lobby_state.clone());
@@ -195,26 +215,60 @@ async fn handle_phase_change(
     // 但创建预设大厅成功后 LCU 会在极短时间内闪回一次 None（Lobby→None 抖动），
     // 若此时也重置标志会立刻再次建厅，重复 POST 会把玩家踢出小队（"你已被移出小队"）。
     // 因此距上次建厅不足防抖窗口内出现的 None 视为抖动，安排延迟复查，避免误判导致状态卡死。
+    //
+    // 仅在「新的 LCU 会话」的首条 None 上处理：LCU 关闭/重连时会重复推送同一阶段上百次，
+    // 逐条重置并重启建厅任务会并发堆出上百个任务，吃满全局 API 信号量。
     if phase == "None" {
-        let within_flicker = {
-            let lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
-            lobby
-                .last_create
-                .map(|t| t.elapsed() < LOBBY_FLICKER_WINDOW)
-                .unwrap_or(false)
+        // 以 LCU 实例为界：同一实例内的重复 None 事件只处理一次，
+        // 而 LCU 重启换代后的首条 None 必须正常重置状态并重新建厅。
+        let current_lcu = {
+            let state = app_handle.state::<crate::AppState>();
+            let lock = state.lcu_client.read().await;
+            lock.as_ref().map(|l| (l.pid, l.port))
         };
-        if within_flicker {
-            log::debug!("忽略 Lobby→None 抖动（距上次建厅不足防抖窗口），安排延迟复查");
-            spawn_verify_lobby_flicker(
-                app_handle.clone(),
-                cfg.clone(),
-                lobby_state.clone(),
-                LOBBY_FLICKER_WINDOW + Duration::from_millis(500),
-            );
-        } else {
+        let already_handled = {
             let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
-            lobby.created = false;
+            if lobby.idle_lcu != current_lcu {
+                log::debug!(
+                    "LCU 实例已变化（{:?} → {:?}），重置本轮空闲阶段标记",
+                    lobby.idle_lcu,
+                    current_lcu
+                );
+                lobby.idle_lcu = current_lcu;
+                lobby.idle_handled = false;
+                lobby.created = false;
+            }
+            lobby.idle_handled
+        };
+        if !already_handled {
+            {
+                let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+                lobby.idle_handled = true;
+            }
+            let within_flicker = {
+                let lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+                lobby
+                    .last_create
+                    .map(|t| t.elapsed() < LOBBY_FLICKER_WINDOW)
+                    .unwrap_or(false)
+            };
+            if within_flicker {
+                log::debug!("忽略 Lobby→None 抖动（距上次建厅不足防抖窗口），安排延迟复查");
+                spawn_verify_lobby_flicker(
+                    app_handle.clone(),
+                    cfg.clone(),
+                    lobby_state.clone(),
+                    LOBBY_FLICKER_WINDOW + Duration::from_millis(500),
+                );
+            } else {
+                let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+                lobby.created = false;
+            }
         }
+    } else {
+        // 离开空闲阶段，结束本轮空闲标记，便于下次回到 None 时重新建厅
+        let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
+        lobby.idle_handled = false;
     }
     *last_phase = phase.to_string();
 
@@ -342,13 +396,14 @@ fn try_create_default_lobby(
     cfg: &FunctionsConfig,
     lobby_state: LobbyStateHandle,
 ) {
-    // 已建成或已在建厅重试中则跳过（占位防止后续事件重复启动建厅任务）
+    // 已建成或已有建厅任务在跑则跳过（防止后续事件重复启动建厅任务）
     {
         let mut lobby = lobby_state.lock().unwrap_or_else(|e| e.into_inner());
-        if lobby.created {
+        if lobby.created || lobby.running {
             return;
         }
         lobby.created = true;
+        lobby.running = true;
     }
 
     let queue_id = cfg.default_game_mode;
@@ -359,12 +414,33 @@ fn try_create_default_lobby(
         let state = app_handle.state::<crate::AppState>();
         let app_state = state.inner();
 
-        for attempt in 0..30 {
-            // 检查 LCU 是否仍然连接
-            if app_state.lcu_client.read().await.as_ref().is_none() {
-                log::info!("LCU 已断开，停止创建大厅");
+        // 绑定本次任务对应的 LCU 实例（pid + port）。
+        // LCU 重启后旧实例的 port/token 立即失效，任务必须立刻退出，
+        // 否则会持续以连接错误重试、长期占用全局 API 信号量，把新实例的请求一起堵住。
+        let bound = {
+            let lock = app_state.lcu_client.read().await;
+            lock.as_ref().map(|l| (l.pid, l.port))
+        };
+        let Some((bound_pid, bound_port)) = bound else {
+            log::info!("LCU 未连接，跳过创建大厅");
+            let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
+            lobby.created = false;
+            lobby.running = false;
+            return;
+        };
+
+        for attempt in 0..LOBBY_CREATE_MAX_ATTEMPTS {
+            // 检查 LCU 是否仍然是同一实例（未断开、未重启换代）
+            let same_lcu = {
+                let lock = app_state.lcu_client.read().await;
+                lock.as_ref()
+                    .is_some_and(|l| l.pid == bound_pid && l.port == bound_port)
+            };
+            if !same_lcu {
+                log::info!("LCU 已断开或重启，停止创建大厅");
                 let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
                 lobby.created = false;
+                lobby.running = false;
                 return;
             }
 
@@ -379,6 +455,7 @@ fn try_create_default_lobby(
                     log::info!("当前阶段为 {}，跳过创建大厅", phase);
                     let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
                     lobby.created = true;
+                    lobby.running = false;
                     lobby.last_create = Some(std::time::Instant::now());
                     return;
                 }
@@ -392,6 +469,7 @@ fn try_create_default_lobby(
                 log::info!("当前已在有效大厅中，跳过创建大厅");
                 let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
                 lobby.created = true;
+                lobby.running = false;
                 lobby.last_create = Some(std::time::Instant::now());
                 return;
             }
@@ -427,6 +505,7 @@ fn try_create_default_lobby(
                         log::info!("预设大厅创建并确认成功 (尝试 {})", attempt + 1);
                         let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
                         lobby.created = true;
+                        lobby.running = false;
                         lobby.last_create = Some(std::time::Instant::now());
                         return;
                     } else {
@@ -440,6 +519,7 @@ fn try_create_default_lobby(
                         log::info!("创建大厅返回 409 (Conflict)，可能已在房间中，停止重试");
                         let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
                         lobby.created = true;
+                        lobby.running = false;
                         lobby.last_create = Some(std::time::Instant::now());
                         return;
                     }
@@ -450,9 +530,10 @@ fn try_create_default_lobby(
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
 
-        log::warn!("创建预设大厅：30 次重试均失败");
+        log::warn!("创建预设大厅：{} 次重试均失败", LOBBY_CREATE_MAX_ATTEMPTS);
         let mut lobby = lobby_state_clone.lock().unwrap_or_else(|e| e.into_inner());
         lobby.created = false;
+        lobby.running = false;
     });
 }
 

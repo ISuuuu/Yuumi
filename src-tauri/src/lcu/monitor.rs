@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::OnceLock;
@@ -37,7 +38,12 @@ pub fn start(
     game_data: Arc<RwLock<GameDataAssets>>,
 ) {
     crate::spawn_log_panic(async move {
-        let mut was_connected = false;
+        let was_connected = Arc::new(AtomicBool::new(false));
+        // 就绪探测 + 状态提交放到后台任务执行（LCU 启动初期 HTTP 可能十几秒都不可用，
+        // 串行等待会拖住整个轮询循环，导致 LCU 就绪后迟迟无法被发现）。
+        // 该标志保证同一时刻只有一个探测在途，避免并发探测互相重复提交状态；
+        // 代价是探测期间（最长约 30s）若 LCU 又换了一个实例，需要等本次探测结束后才会重新发起。
+        let reconnect_in_flight = Arc::new(AtomicBool::new(false));
         let mut sys = System::new();
         let mut consecutive_misses: u32 = 0;
         let mut cached_exe_dir: Option<PathBuf> = None;
@@ -47,7 +53,7 @@ pub fn start(
         let mut debug_file_removed = false;
 
         loop {
-            sleep(if was_connected {
+            sleep(if was_connected.load(Ordering::Relaxed) {
                 POLL_INTERVAL_STABLE
             } else {
                 POLL_INTERVAL
@@ -139,7 +145,8 @@ pub fn start(
 
             match lcu_info {
                 Some((pid, port, token, server)) => {
-                    if needs_reconnect {
+                    // 仅在没有探测在途时才启动新的探测任务
+                    if needs_reconnect && !reconnect_in_flight.swap(true, Ordering::SeqCst) {
                         // ── 阶段 2: 在获取写锁之前探测 LCU HTTP 是否就绪 ──
                         log::info!(
                             "检测到 LCU: pid={}, port={}, server={:?}, 等待 HTTP 服务器就绪...",
@@ -148,68 +155,77 @@ pub fn start(
                             server
                         );
 
-                        if let Err(msg) = probe_lcu_readiness(port, &token).await {
-                            log::warn!("LCU 就绪探测失败，跳过本轮: {}", msg);
-                            // 不写入状态，下个轮询周期自动重试
-                        } else {
-                            // ── 阶段 3: 探测通过，构建客户端并提交状态 ──
-                            {
-                                let http_client = shared_lcu_http_client().clone();
-                                let client = LcuClient {
-                                    pid,
-                                    port,
-                                    token: token.clone(),
-                                    server: server.clone(),
-                                    http_client,
-                                };
-                                // 写锁仅短暂持有
+                        let lcu_state = lcu_state.clone();
+                        let game_data = game_data.clone();
+                        let was_connected = was_connected.clone();
+                        let reconnect_in_flight = reconnect_in_flight.clone();
+                        let app_handle = app_handle.clone();
+                        crate::spawn_log_panic(async move {
+                            if let Err(msg) = probe_lcu_readiness(port, &token).await {
+                                log::warn!("LCU 就绪探测失败，跳过本轮: {}", msg);
+                                // 不写入状态，下个轮询周期自动重试
+                            } else {
+                                // ── 阶段 3: 探测通过，构建客户端并提交状态 ──
                                 {
-                                    let mut lock = lcu_state.write().await;
-                                    *lock = Some(client);
-                                }
-                                was_connected = true;
-
-                                // LCU 重启后旧 SGP token 失效，清空缓存
-                                super::sgp::clear_sgp_token_cache();
-
-                                // 异步加载游戏资源映射（不阻塞监控循环）
-                                let gd = game_data.clone();
-                                let app_handle_for_gd = app_handle.clone();
-                                let token_for_gd = token.clone();
-                                crate::spawn_log_panic(async move {
-                                    let tmp_lcu = LcuClient {
+                                    let http_client = shared_lcu_http_client().clone();
+                                    let client = LcuClient {
                                         pid,
                                         port,
-                                        token: token_for_gd.clone(),
-                                        server: None,
-                                        http_client: shared_lcu_http_client().clone(),
+                                        token: token.clone(),
+                                        server: server.clone(),
+                                        http_client,
                                     };
-                                    let assets =
-                                        super::game_data::fetch_game_data_assets(&tmp_lcu).await;
-                                    *gd.write().await = assets;
-                                    log::info!("游戏资源已更新");
-                                    let _ = app_handle_for_gd.emit("game-data-ready", ());
-                                });
+                                    // 写锁仅短暂持有
+                                    {
+                                        let mut lock = lcu_state.write().await;
+                                        *lock = Some(client);
+                                    }
+                                    was_connected.store(true, Ordering::Relaxed);
 
-                                let _ = app_handle.emit(
-                                    "lcu-client-started",
-                                    serde_json::json!({ "port": port }),
-                                );
+                                    // LCU 重启后旧 SGP token 失效，清空缓存
+                                    super::sgp::clear_sgp_token_cache();
 
-                                super::ws::connect(app_handle.clone(), port, token);
+                                    // 异步加载游戏资源映射（不阻塞监控循环）
+                                    let gd = game_data.clone();
+                                    let app_handle_for_gd = app_handle.clone();
+                                    let token_for_gd = token.clone();
+                                    crate::spawn_log_panic(async move {
+                                        let tmp_lcu = LcuClient {
+                                            pid,
+                                            port,
+                                            token: token_for_gd.clone(),
+                                            server: None,
+                                            http_client: shared_lcu_http_client().clone(),
+                                        };
+                                        let assets =
+                                            super::game_data::fetch_game_data_assets(&tmp_lcu)
+                                                .await;
+                                        *gd.write().await = assets;
+                                        log::info!("游戏资源已更新");
+                                        let _ = app_handle_for_gd.emit("game-data-ready", ());
+                                    });
+
+                                    let _ = app_handle.emit(
+                                        "lcu-client-started",
+                                        serde_json::json!({ "port": port }),
+                                    );
+
+                                    super::ws::connect(app_handle.clone(), port, token);
+                                }
                             }
-                        }
+                            // 无论成功失败都要释放标志，否则探测失败后永远无法重试
+                            reconnect_in_flight.store(false, Ordering::SeqCst);
+                        });
                     }
                 }
                 None => {
                     // ── 断开处理 ──
-                    if was_connected {
+                    if was_connected.swap(false, Ordering::SeqCst) {
                         log::info!("LCU 已断开");
                         {
                             let mut lock = lcu_state.write().await;
                             *lock = None;
                         }
-                        was_connected = false;
                         cached_exe_dir = None;
                         super::sgp::clear_sgp_token_cache();
 
