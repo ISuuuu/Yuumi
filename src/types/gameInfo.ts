@@ -1,5 +1,8 @@
 import type { MatchDisplay, SummonerDisplay } from "../api/lcu";
 import type { RankedQueueEntry } from "./lcu";
+import type { AggregatedPositions, AggregatedChampion } from "../utils/matchAnalysis";
+
+export type { AggregatedPositions, AggregatedChampion };
 
 export interface PlayerData {
   info: SummonerDisplay | null;
@@ -21,6 +24,8 @@ export interface PlayerData {
   fateEnemyCount?: number;
   masteries?: ChampionMasteryItem[];
   streak?: StreakInfo | null;
+  positions?: AggregatedPositions | null;
+  topChampions?: AggregatedChampion[];
 }
 
 export interface ChampionMasteryItem {

@@ -34,6 +34,12 @@ export function getCachedChampions(): ChampionEntry[] | null {
   return cachedChampions;
 }
 
+/** 根据英雄 ID 同步获取中文英雄名称（未加载时返回 undefined） */
+export function getChampionNameById(id: number): string | undefined {
+  if (!cachedChampions) return undefined;
+  return cachedChampions.find((c) => c.id === id)?.name;
+}
+
 /** 获取缓存的腾讯关键词，缓存命中时同步返回 */
 export function getCachedKeywords(): Record<number, string> | null {
   return cachedKeywords;

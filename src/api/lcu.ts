@@ -146,6 +146,7 @@ export interface MatchDisplay {
   augmentIds: number[];
   augmentIconUrls: string[];
   augmentNames: string[];
+  position?: string | null;
 }
 
 /** 获取当前召唤师信息（Rust 解析层清洗后，404 时自动重试） */

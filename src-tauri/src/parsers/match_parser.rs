@@ -37,6 +37,17 @@ pub struct LcuMatchParticipant {
     pub spell1_id: i32,
     pub spell2_id: i32,
     pub stats: LcuMatchStats,
+    #[serde(default)]
+    pub timeline: Option<LcuParticipantTimeline>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LcuParticipantTimeline {
+    #[serde(default)]
+    pub lane: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,9 +131,55 @@ pub struct MatchDisplay {
     pub augment_ids: Vec<i32>,
     pub augment_icon_urls: Vec<String>,
     pub augment_names: Vec<String>,
+    // 召唤师峡谷等 5v5 模式的位置归一化（"TOP" | "JUNGLE" | "MIDDLE" | "BOTTOM" | "UTILITY"）
+    #[serde(default)]
+    pub position: Option<String>,
 }
 
 // ─── 数据清洗 ───
+
+/// 将 LCU 的 lane 和 role 推导为标准 5 峡谷位置（TOP, JUNGLE, MIDDLE, BOTTOM, UTILITY）
+pub fn resolve_position(lane: Option<&str>, role: Option<&str>) -> Option<String> {
+    let lane = lane?.trim();
+    if lane.is_empty() || lane.eq_ignore_ascii_case("NONE") {
+        return None;
+    }
+    let role = role.map(|r| r.trim()).unwrap_or("");
+
+    let lane_upper = lane.to_ascii_uppercase();
+    let role_upper = role.to_ascii_uppercase();
+
+    match lane_upper.as_str() {
+        "TOP" => Some("TOP".to_string()),
+        "JUNGLE" => Some("JUNGLE".to_string()),
+        "MIDDLE" | "MID" => Some("MIDDLE".to_string()),
+        "BOTTOM" | "BOT" => {
+            if role_upper.contains("SUPPORT") {
+                Some("UTILITY".to_string())
+            } else {
+                Some("BOTTOM".to_string())
+            }
+        }
+        _ => None,
+    }
+}
+
+/// 归一化 SGP teamPosition
+pub fn normalize_sgp_position(val: Option<&str>) -> Option<String> {
+    let val = val?.trim();
+    if val.is_empty() || val.eq_ignore_ascii_case("NONE") {
+        return None;
+    }
+    let upper = val.to_ascii_uppercase();
+    match upper.as_str() {
+        "TOP" => Some("TOP".to_string()),
+        "JUNGLE" => Some("JUNGLE".to_string()),
+        "MIDDLE" | "MID" => Some("MIDDLE".to_string()),
+        "BOTTOM" | "BOT" => Some("BOTTOM".to_string()),
+        "UTILITY" | "SUPPORT" => Some("UTILITY".to_string()),
+        _ => None,
+    }
+}
 
 /// 从 stats 中提取海克斯强化 ID，去重后最多返回 5 个。
 /// 将候选海克斯强化 ID 去重、过滤 0、最多保留 5 个
@@ -234,6 +291,11 @@ impl LcuMatchGame {
         let augment_ids = extract_augment_ids(stats);
         let (augment_icon_urls, augment_names) = resolve_augment_details(&augment_ids, assets);
 
+        let position = participant
+            .timeline
+            .as_ref()
+            .and_then(|t| resolve_position(t.lane.as_deref(), t.role.as_deref()));
+
         Some(MatchDisplay {
             queue_id: self.queue_id,
             game_id: self.game_id,
@@ -268,6 +330,7 @@ impl LcuMatchGame {
             augment_ids,
             augment_icon_urls,
             augment_names,
+            position,
         })
     }
 }
@@ -773,6 +836,25 @@ pub async fn get_match_history_sgp(
             .filter_map(|id| assets.items.get(id).cloned())
             .collect();
 
+        let position =
+            normalize_sgp_position(participant.get("teamPosition").and_then(|v| v.as_str()))
+                .or_else(|| {
+                    normalize_sgp_position(
+                        participant.get("selectedPosition").and_then(|v| v.as_str()),
+                    )
+                })
+                .or_else(|| {
+                    let lane = participant
+                        .get("timeline")
+                        .and_then(|t| t.get("lane"))
+                        .and_then(|v| v.as_str());
+                    let role = participant
+                        .get("timeline")
+                        .and_then(|t| t.get("role"))
+                        .and_then(|v| v.as_str());
+                    resolve_position(lane, role)
+                });
+
         displays.push(MatchDisplay {
             queue_id,
             game_id,
@@ -807,6 +889,7 @@ pub async fn get_match_history_sgp(
             augment_ids,
             augment_icon_urls,
             augment_names,
+            position,
         });
     }
 
@@ -1267,5 +1350,79 @@ mod tests {
         assert_eq!(timestamp_to_short_str(1_705_329_000_000), "01-15 14:30");
         // 无效时间戳兜底
         assert_eq!(timestamp_to_str(u64::MAX), "1970-01-01 00:00");
+    }
+
+    #[test]
+    fn resolve_position_maps_standard_lanes_and_roles() {
+        assert_eq!(
+            resolve_position(Some("TOP"), Some("SOLO")),
+            Some("TOP".to_string())
+        );
+        assert_eq!(
+            resolve_position(Some("JUNGLE"), Some("NONE")),
+            Some("JUNGLE".to_string())
+        );
+        assert_eq!(
+            resolve_position(Some("MIDDLE"), Some("SOLO")),
+            Some("MIDDLE".to_string())
+        );
+        assert_eq!(
+            resolve_position(Some("MID"), Some("SOLO")),
+            Some("MIDDLE".to_string())
+        );
+        assert_eq!(
+            resolve_position(Some("BOTTOM"), Some("DUO_CARRY")),
+            Some("BOTTOM".to_string())
+        );
+        assert_eq!(
+            resolve_position(Some("BOTTOM"), Some("DUO_SUPPORT")),
+            Some("UTILITY".to_string())
+        );
+        assert_eq!(
+            resolve_position(Some("BOT"), Some("SUPPORT")),
+            Some("UTILITY".to_string())
+        );
+        assert_eq!(resolve_position(Some("NONE"), Some("NONE")), None);
+        assert_eq!(resolve_position(None, None), None);
+        assert_eq!(resolve_position(Some(""), Some("")), None);
+    }
+
+    #[test]
+    fn normalize_sgp_position_maps_positions() {
+        assert_eq!(normalize_sgp_position(Some("TOP")), Some("TOP".to_string()));
+        assert_eq!(
+            normalize_sgp_position(Some("JUNGLE")),
+            Some("JUNGLE".to_string())
+        );
+        assert_eq!(
+            normalize_sgp_position(Some("MIDDLE")),
+            Some("MIDDLE".to_string())
+        );
+        assert_eq!(
+            normalize_sgp_position(Some("BOTTOM")),
+            Some("BOTTOM".to_string())
+        );
+        assert_eq!(
+            normalize_sgp_position(Some("UTILITY")),
+            Some("UTILITY".to_string())
+        );
+        assert_eq!(
+            normalize_sgp_position(Some("SUPPORT")),
+            Some("UTILITY".to_string())
+        );
+        assert_eq!(normalize_sgp_position(Some("")), None);
+        assert_eq!(normalize_sgp_position(Some("NONE")), None);
+        assert_eq!(normalize_sgp_position(None), None);
+    }
+
+    #[test]
+    fn to_display_extracts_position_from_timeline() {
+        let mut game = sample_game(420);
+        game.participants[0].timeline = Some(LcuParticipantTimeline {
+            lane: Some("BOTTOM".into()),
+            role: Some("DUO_SUPPORT".into()),
+        });
+        let d = game.to_display(&GameDataAssets::default()).unwrap();
+        assert_eq!(d.position, Some("UTILITY".to_string()));
     }
 }

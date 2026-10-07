@@ -34,6 +34,12 @@ import type { SummonerDisplay } from "../api/lcu";
 import { computePremadeColors, hasPremadeGroup } from "./usePremadeGroup";
 import { runWithConcurrency } from "../utils/runWithConcurrency";
 import {
+  computeAggregatedPositions,
+  computeAggregatedChampions,
+  type AggregatedPositions,
+  type AggregatedChampion,
+} from "../utils/matchAnalysis";
+import {
   fetchChampions,
   findChampionIdByLiveClientName,
 } from "../utils/championCache";
@@ -339,12 +345,17 @@ function computeMatchStats(matches: MatchDisplay[]) {
     }
   }
 
+  const positions = computeAggregatedPositions(matches);
+  const topChampions = computeAggregatedChampions(matches, 5);
+
   return {
     winCount: currentWinCount,
     lossesCount: currentLossesCount,
     winRate,
     avgKda,
     streak,
+    positions,
+    topChampions,
   };
 }
 
@@ -593,6 +604,8 @@ export function useGamePlayerData(
             entry.winRate = stats.winRate;
             entry.avgKda = stats.avgKda;
             entry.streak = stats.streak;
+            entry.positions = stats.positions;
+            entry.topChampions = stats.topChampions;
           }
           if (top10[0]?.gameId !== prevFirstId || top10.length !== prevLen) {
             debouncedSavePlayerData();
@@ -1278,6 +1291,8 @@ export function useGamePlayerData(
       let winCount: number | undefined = undefined;
       let lossesCount: number | undefined = undefined;
       let streak: StreakInfo | null = null;
+      let positions: AggregatedPositions | null = null;
+      let topChampions: AggregatedChampion[] = [];
 
       if (matches && matches.length > 0) {
         const stats = computeMatchStats(matches);
@@ -1286,6 +1301,8 @@ export function useGamePlayerData(
         winRate = stats.winRate;
         avgKda = stats.avgKda;
         streak = stats.streak;
+        positions = stats.positions;
+        topChampions = stats.topChampions;
       }
 
       const targetChampId = resolveCarryChampionId(fallbackPlayer, cellId);
@@ -1316,6 +1333,8 @@ export function useGamePlayerData(
         lossesCount,
         masteries: masteryData,
         streak,
+        positions,
+        topChampions,
       };
       playerData.value[cellId] = dataObj;
       if (summonerId && summonerId !== cellId) {
