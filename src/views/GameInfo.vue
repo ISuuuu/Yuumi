@@ -489,9 +489,10 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   flex: 1;
-  padding: 12px;
-  gap: 10px;
-  overflow: hidden;
+  padding: 10px 8px;
+  gap: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* 右侧：5 列战绩 */

@@ -15,6 +15,9 @@ import { usePlayerSearch } from "../../composables/usePlayerSearch";
 import { useFateBadge } from "../../composables/useFateBadge";
 import { usePlayerChampionId } from "../../composables/usePlayerChampionId";
 import LcuImage from "../LcuImage.vue";
+import PositionIcon from "../PositionIcon.vue";
+import RankedIcon from "../RankedIcon.vue";
+import { getPositionName, getShortPositionName } from "../../utils/matchAnalysis";
 
 const props = defineProps<{
   player: PremadePlayerLike;
@@ -77,7 +80,7 @@ function tierShortName(tier: string): string {
 }
 
 function summarizeQueue(q?: RankedQueueEntry | null): string {
-  if (!q || !q.tier || q.tier === "NONE") return "";
+  if (!q || !q.tier || q.tier === "NONE" || q.tier === "UNRANKED") return "";
   const wins = q.wins || 0;
   const losses = q.losses || 0;
   const total = wins + losses;
@@ -88,11 +91,63 @@ function summarizeQueue(q?: RankedQueueEntry | null): string {
     : `${tierShortName(q.tier)}${rName}`;
 }
 
+const activeRankQueue = computed(() => {
+  const solo = props.playerData?.ranked?.solo;
+  if (solo?.tier && solo.tier !== "NONE" && solo.tier !== "UNRANKED") return solo;
+  const flex = props.playerData?.ranked?.flex;
+  if (flex?.tier && flex.tier !== "NONE" && flex.tier !== "UNRANKED") return flex;
+  return null;
+});
+
+const activeRankTier = computed(() => activeRankQueue.value?.tier ?? null);
+
 const rankSummary = computed(
   () =>
     summarizeQueue(props.playerData?.ranked?.solo) ||
     summarizeQueue(props.playerData?.ranked?.flex),
 );
+
+// 10 列紧凑模式下的段位短描述（优先单双排，无单双排则用灵活排）
+const compactRankText = computed(() => {
+  const q = activeRankQueue.value;
+  if (!q || !q.tier || q.tier === "NONE" || q.tier === "UNRANKED") return "";
+  const rName = q.rank && q.rank !== "NA" ? q.rank : "";
+  return `${tierShortName(q.tier)}${rName}`;
+});
+
+const rankDetailedTooltip = computed(() => {
+  const lines: string[] = [];
+  const solo = props.playerData?.ranked?.solo;
+  if (solo && solo.tier && solo.tier !== "NONE" && solo.tier !== "UNRANKED") {
+    const tName = tierShortName(solo.tier);
+    const r = solo.rank && solo.rank !== "NA" ? ` ${solo.rank}` : "";
+    const lp = solo.leaguePoints !== undefined ? ` ${solo.leaguePoints}LP` : "";
+    const w = solo.wins || 0;
+    const l = solo.losses || 0;
+    const tot = w + l;
+    const wr = tot > 0 ? ` (${w}胜${l}负 ${Math.round((w / tot) * 100)}%)` : "";
+    lines.push(`单双排: ${tName}${r}${lp}${wr}`);
+  } else {
+    lines.push("单双排: 无段位");
+  }
+  const flex = props.playerData?.ranked?.flex;
+  if (flex && flex.tier && flex.tier !== "NONE" && flex.tier !== "UNRANKED") {
+    const tName = tierShortName(flex.tier);
+    const r = flex.rank && flex.rank !== "NA" ? ` ${flex.rank}` : "";
+    const lp = flex.leaguePoints !== undefined ? ` ${flex.leaguePoints}LP` : "";
+    const w = flex.wins || 0;
+    const l = flex.losses || 0;
+    const tot = w + l;
+    const wr = tot > 0 ? ` (${w}胜${l}负 ${Math.round((w / tot) * 100)}%)` : "";
+    lines.push(`灵活排: ${tName}${r}${lp}${wr}`);
+  } else {
+    lines.push("灵活排: 无段位");
+  }
+  if (masteryDetail.value) {
+    lines.push(`熟练度: Lv.${masteryDetail.value.level} (${masteryDetail.value.points.toLocaleString()}点)`);
+  }
+  return lines.join("\n");
+});
 
 // 头像左侧胜率竖条：>50 绿、<50 红；50% 时高度为 0，100% 胜率或 0% 胜率（100%败率）时完全填充
 const wrBar = computed(() => {
@@ -181,6 +236,45 @@ const columnSideColorClass = computed(() => {
     return mapSide === "red" ? "side-blue" : "side-red";
   }
 });
+
+const primaryPos = computed(() => props.playerData?.positions?.primaryPosition);
+const primaryPosPercent = computed(() => props.playerData?.positions?.primaryPercentage);
+const secondaryPos = computed(() => props.playerData?.positions?.secondaryPosition);
+const secondaryPosPercent = computed(() => props.playerData?.positions?.secondaryPercentage);
+
+const posTooltip = computed(() => {
+  if (!primaryPos.value) return "";
+  const name = getPositionName(primaryPos.value);
+  const pct = primaryPosPercent.value ?? 0;
+  const positions = props.playerData?.positions;
+  const lines: string[] = [];
+  if (positions && positions.entries && positions.entries.length > 0) {
+    if (secondaryPos.value && secondaryPosPercent.value) {
+      const secName = getPositionName(secondaryPos.value);
+      lines.push(
+        `常玩位置: 主选${name} (${pct}%) · 次选${secName} (${secondaryPosPercent.value}%) · 近期 ${positions.totalValid} 场`,
+      );
+    } else {
+      lines.push(`常玩位置: ${name} (${pct}%) · 近期 ${positions.totalValid} 场`);
+    }
+    for (const entry of positions.entries) {
+      if (entry.count > 0) {
+        lines.push(`${entry.name}: ${entry.count}场 (${entry.percentage}%)`);
+      }
+    }
+  } else {
+    lines.push(`常玩位置: ${name} (${pct}%)`);
+  }
+  const topChamps = props.playerData?.topChampions;
+  if (topChamps && topChamps.length > 0) {
+    const champNames = topChamps
+      .slice(0, 3)
+      .map((c) => `${c.championName || c.championId} (${c.games}场 ${c.winRate}%)`)
+      .join("、");
+    lines.push(`常用英雄: ${champNames}`);
+  }
+  return lines.join("\n");
+});
 </script>
 
 <template>
@@ -266,6 +360,31 @@ const columnSideColorClass = computed(() => {
               <span class="summary-losses">{{ playerData.lossesCount }}{{ $t("career.lose") }}</span>
             </span>
           </div>
+
+          <!-- 全部战绩十列视图：常用英雄位置多加一行显示在胜负下面（支持主选+次选） -->
+          <div
+            v-if="compact && primaryPos"
+            class="col-avatar-pos"
+            :title="posTooltip"
+          >
+            <template v-if="!secondaryPos || !secondaryPosPercent">
+              <PositionIcon :position="primaryPos" :use-position-color="true" :size="9.5" />
+              <span class="avatar-pos-text">
+                {{ getPositionName(primaryPos) }}
+                <template v-if="primaryPosPercent !== undefined">{{ primaryPosPercent }}%</template>
+              </span>
+            </template>
+            <template v-else>
+              <span class="avatar-pos-item">
+                <PositionIcon :position="primaryPos" :use-position-color="true" :size="9" />
+                <span class="avatar-pos-text">{{ getShortPositionName(primaryPos) }}{{ primaryPosPercent }}%</span>
+              </span>
+              <span class="avatar-pos-item">
+                <PositionIcon :position="secondaryPos" :use-position-color="true" :size="9" />
+                <span class="avatar-pos-text">{{ getShortPositionName(secondaryPos) }}{{ secondaryPosPercent }}%</span>
+              </span>
+            </template>
+          </div>
         </div>
 
         <div class="col-header-info">
@@ -313,40 +432,47 @@ const columnSideColorClass = computed(() => {
             >{{ savedInfo.tag || $t("gameInfo.savedPlayerMark") }}</span>
           </div>
 
-          <!-- 全部战绩(10列)模式下：优先展示熟练度等级与点数，若无熟练度则展示段位兜底，避免该行空白 -->
+          <!-- 全部战绩(10列)模式下：排位段位（图标+短名）与英雄熟练度并存展示，段位图标始终可见 -->
           <template v-if="compact">
-            <div
-              v-if="masteryDetail"
-              class="col-mastery-row"
-              :class="{ 'is-top': masteryDetail.isTopChampion }"
-              :title="$t('gameInfo.masteryTooltip', { level: masteryDetail.level, points: masteryDetail.points.toLocaleString() })"
-            >
-              <span class="col-mastery-badge">Lv.{{ masteryDetail.level }}</span>
-              <span class="col-mastery-pts">{{ masteryDetail.formattedPoints }}</span>
-            </div>
-            <div
-              v-else-if="rankSummary"
-              class="col-mastery-row"
-              :title="rankSummary"
-            >
-              <span class="col-rank-tag">{{ rankSummary }}</span>
+            <div class="col-rank-mastery-row" :title="rankDetailedTooltip">
+              <!-- 排位段位（优先单双，无单双则灵活） -->
+              <span v-if="activeRankTier" class="col-rank-tag">
+                <RankedIcon :tier="activeRankTier" :size="12" class="col-rank-icon" />
+                <span class="col-rank-text" :class="activeRankTier">{{ compactRankText || rankSummary }}</span>
+              </span>
+              <span v-else class="col-rank-tag unranked">
+                <span class="col-rank-unranked">{{ $t("gameInfo.noRank") }}</span>
+              </span>
+
+              <!-- 英雄熟练度微徽章（若已选英雄且有熟练度） -->
+              <span
+                v-if="masteryDetail"
+                class="col-mastery-badge"
+                :class="{ 'is-top': masteryDetail.isTopChampion }"
+              >Lv.{{ masteryDetail.level }}</span>
             </div>
           </template>
 
-          <!-- 按队伍(5列)模式：保持原有结构 -->
+          <!-- 按队伍(5列)模式：胜负统计、段位图标与短名、熟练度等级（按用户要求移除上下路常玩位置） -->
           <template v-else>
-            <!-- 几胜几负统计 + 排位段位/胜率概览（战绩隐藏时不展示文字） -->
             <div
-              v-if="playerData?.winCount !== undefined || rankSummary"
+              v-if="playerData?.winCount !== undefined || rankSummary || masteryDetail"
               class="col-summary"
             >
               <span v-if="playerData?.winCount !== undefined" class="summary-counts">
                 <span class="summary-wins">{{ playerData.winCount }}{{ $t("career.win") }}</span>
                 <span class="summary-losses">{{ playerData.lossesCount }}{{ $t("career.lose") }}</span>
               </span>
-              <span v-if="rankSummary" class="col-rank-tag" :title="rankSummary">
-                {{ rankSummary }}
+              <span v-if="rankSummary" class="col-rank-tag" :title="rankDetailedTooltip">
+                <RankedIcon v-if="activeRankTier" :tier="activeRankTier" :size="13" class="col-rank-icon" />
+                <span class="col-rank-text" :class="activeRankTier">{{ rankSummary }}</span>
               </span>
+              <span
+                v-if="masteryDetail"
+                class="col-mastery-badge"
+                :class="{ 'is-top': masteryDetail.isTopChampion }"
+                :title="$t('gameInfo.masteryTooltip', { level: masteryDetail.level, points: masteryDetail.points.toLocaleString() })"
+              >Lv.{{ masteryDetail.level }}</span>
             </div>
           </template>
         </div>
@@ -372,10 +498,13 @@ const columnSideColorClass = computed(() => {
           ]"
           :style="getMatchCardStyle(m)"
         >
-          <!-- 卡片顶部：游戏类型 + 对局日期（独立一行） -->
+          <!-- 卡片顶部：游戏类型 + 位置 + 对局日期（独立一行） -->
           <div class="cm-top-row">
             <span class="cm-mode" :title="getQueueName(m.queueId, m.name)">
               {{ getQueueName(m.queueId, m.name) }}
+            </span>
+            <span v-if="m.position" class="cm-pos-tag" :title="`位置: ${getPositionName(m.position)}`">
+              <PositionIcon :position="m.position" :use-position-color="true" :size="11" />
             </span>
             <span
               v-if="isEncounteredMatch(m.gameId)"
@@ -728,11 +857,22 @@ const columnSideColorClass = computed(() => {
   color: var(--text-muted);
   gap: 4px;
   line-height: 1;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
 }
 .summary-counts {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.summary-wins,
+.summary-losses {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .summary-wins {
   color: var(--win-color);
@@ -742,15 +882,82 @@ const columnSideColorClass = computed(() => {
   color: var(--loss-color);
   font-weight: 700;
 }
+.col-rank-mastery-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  width: 100%;
+  margin: 1px 0 0;
+  line-height: 1;
+}
 .col-rank-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2.5px;
   color: var(--text-muted);
   font-size: 0.58rem;
   font-weight: 600;
-  margin-left: 2px;
-  max-width: 70px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex-shrink: 1;
+}
+.col-rank-icon {
+  flex-shrink: 0;
+}
+.col-rank-text {
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.col-rank-text.IRON { color: #848c96; }
+.col-rank-text.BRONZE { color: #b45309; }
+.col-rank-text.SILVER { color: #8293a7; }
+.col-rank-text.GOLD { color: #d97706; }
+.col-rank-text.PLATINUM { color: #0d9488; }
+.col-rank-text.EMERALD { color: #059669; }
+.col-rank-text.DIAMOND { color: #3b82f6; }
+.col-rank-text.MASTER { color: #8b5cf6; }
+.col-rank-text.GRANDMASTER { color: #ef4444; }
+.col-rank-text.CHALLENGER { color: #f59e0b; }
+
+.col-rank-unranked {
+  font-size: 0.56rem;
+  color: var(--text-dimmed);
+}
+.col-pos-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0.5px 3.5px;
+  background: var(--hover-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  font-size: 0.58rem;
+  line-height: 1;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.col-pos-tag.compact {
+  padding: 1px;
+  background: transparent;
+  border: none;
+}
+.col-pos-name {
+  font-weight: 700;
+  color: var(--text-color);
+}
+.col-pos-pct {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.col-pos-sep {
+  color: var(--text-dimmed);
+  font-size: 0.55rem;
+  margin: 0 1px;
 }
 
 /* ─── 加载中状态 ─── */
@@ -880,6 +1087,16 @@ const columnSideColorClass = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   letter-spacing: 0.1px;
+}
+.cm-pos-tag {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+.cm-pos-tag:hover {
+  opacity: 1;
 }
 .cm-encountered-tag {
   font-size: 0.5rem;
@@ -1025,7 +1242,7 @@ const columnSideColorClass = computed(() => {
   border-top-width: 3px;
 }
 .compact .col-header {
-  height: 50px;
+  height: 54px;
   padding: 3px 4px;
 }
 .compact .col-header-top {
@@ -1077,6 +1294,29 @@ const columnSideColorClass = computed(() => {
 .compact .col-avatar-summary .summary-losses {
   color: var(--loss-color);
   font-weight: 700;
+}
+.compact .col-avatar-pos {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5px;
+  width: 100%;
+  margin-top: 1.5px;
+  line-height: 1;
+  cursor: help;
+}
+.compact .avatar-pos-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+.compact .col-avatar-pos .avatar-pos-text {
+  font-size: 0.52rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  line-height: 1;
+  white-space: nowrap;
+  letter-spacing: -0.2px;
 }
 .compact .col-name {
   font-size: 0.72rem;

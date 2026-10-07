@@ -7,7 +7,17 @@ import type { SummonerDisplay, MatchDisplay, RecentTeammate } from "../../api/lc
 import type { RankDisplaySource, RankedQueueEntry } from "../../types/lcu";
 import LcuImage from "../LcuImage.vue";
 import ReplayButton from "../ReplayButton.vue";
-import { NPopover, NSpin } from "naive-ui";
+import PositionIcon from "../PositionIcon.vue";
+import RankedIcon from "../RankedIcon.vue";
+import {
+  computeAggregatedPositions,
+  computeAggregatedChampions,
+  POSITION_NAMES,
+  getPositionName,
+  type AggregatedPositions,
+  type AggregatedChampion,
+} from "../../utils/matchAnalysis";
+import { NPopover, NSpin, NTooltip } from "naive-ui";
 
 const store = useLcuStore();
 const { t, te } = useI18n();
@@ -78,10 +88,17 @@ const flexQueue = computed(() =>
   rankedQueues.value.find((q) => q.queueType === "RANKED_FLEX_SR") || null,
 );
 
+const aggregatedPositions = computed<AggregatedPositions | null>(() => {
+  return computeAggregatedPositions(recentMatches.value);
+});
+
+const aggregatedTopChamps = computed<AggregatedChampion[]>(() => {
+  return computeAggregatedChampions(recentMatches.value, 6);
+});
+
 const statsSummary = computed(() => {
   if (recentMatches.value.length === 0) return null;
   let wins = 0, losses = 0, kills = 0, deaths = 0, assists = 0;
-  const champMap: Record<number, { id: number; icon: string; count: number }> = {};
 
   for (const m of recentMatches.value) {
     if (m.win) wins++;
@@ -89,19 +106,10 @@ const statsSummary = computed(() => {
     kills += m.kills;
     deaths += m.deaths;
     assists += m.assists;
-
-    if (!champMap[m.championId]) {
-      champMap[m.championId] = { id: m.championId, icon: m.championIconUrl, count: 0 };
-    }
-    champMap[m.championId].count++;
   }
 
-  const topChamps = Object.values(champMap)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 6);
-
   const kdaRatio = deaths === 0 ? "Perfect" : ((kills + assists) / deaths).toFixed(1);
-  return { wins, losses, kills, deaths, assists, kda: kdaRatio, topChamps };
+  return { wins, losses, kills, deaths, assists, kda: kdaRatio };
 });
 
 // ─── 辅助函数 ───
@@ -432,7 +440,14 @@ watch(
             <td>{{ soloQueue ? soloQueue.wins : 0 }}</td>
             <td>{{ soloQueue ? soloQueue.losses : 0 }}</td>
             <td class="rank-name">
-              {{ soloQueue ? formatRank(soloQueue) : "--" }}
+              <div class="rank-cell-wrapper">
+                <RankedIcon
+                  v-if="soloQueue?.tier && soloQueue.tier !== 'NONE' && soloQueue.tier !== 'UNRANKED'"
+                  :tier="soloQueue.tier"
+                  :size="18"
+                />
+                <span>{{ soloQueue ? formatRank(soloQueue) : "--" }}</span>
+              </div>
             </td>
             <td>{{ soloQueue ? soloQueue.leaguePoints : 0 }}</td>
             <td>{{ soloQueue ? formatHighestRank(soloQueue) : "--" }}</td>
@@ -455,7 +470,14 @@ watch(
             <td>{{ flexQueue ? flexQueue.wins : 0 }}</td>
             <td>{{ flexQueue ? flexQueue.losses : 0 }}</td>
             <td class="rank-name">
-              {{ flexQueue ? formatRank(flexQueue) : "--" }}
+              <div class="rank-cell-wrapper">
+                <RankedIcon
+                  v-if="flexQueue?.tier && flexQueue.tier !== 'NONE' && flexQueue.tier !== 'UNRANKED'"
+                  :tier="flexQueue.tier"
+                  :size="18"
+                />
+                <span>{{ flexQueue ? formatRank(flexQueue) : "--" }}</span>
+              </div>
             </td>
             <td>{{ flexQueue ? flexQueue.leaguePoints : 0 }}</td>
             <td>{{ flexQueue ? formatHighestRank(flexQueue) : "--" }}</td>
@@ -486,15 +508,93 @@ watch(
         <span class="kda-ratio">({{ statsSummary.kda }})</span>
       </div>
 
+      <!-- 近期常玩位置分布 -->
+      <div v-if="aggregatedPositions && aggregatedPositions.totalValid > 0" class="recent-positions-group">
+        <n-popover trigger="hover" placement="bottom" :delay="150" style="border-radius: 8px; padding: 10px;">
+          <template #trigger>
+            <div class="pos-summary-pill">
+              <span class="pos-summary-title">常玩位置:</span>
+              <div class="pos-summary-tags">
+                <span
+                  v-for="p in aggregatedPositions.entries.filter(e => e.count > 0).slice(0, 2)"
+                  :key="p.position"
+                  class="pos-tag-chip"
+                >
+                  <PositionIcon :position="p.position" :use-position-color="true" :size="13" />
+                  <span class="pos-tag-name">{{ p.name }}</span>
+                  <span class="pos-tag-pct">{{ p.percentage }}%</span>
+                </span>
+              </div>
+            </div>
+          </template>
+          <div class="career-pos-popover">
+            <div class="pos-popover-title">近期位置分布 ({{ aggregatedPositions.totalValid }} 场峡谷)</div>
+            <div class="pos-popover-list">
+              <div
+                v-for="e in aggregatedPositions.entries"
+                :key="e.position"
+                class="pos-popover-item"
+              >
+                <PositionIcon :position="e.position" :use-position-color="true" :size="13" />
+                <span class="pop-name">{{ e.name }}</span>
+                <div class="pop-bar-wrap">
+                  <div
+                    class="pop-bar-fill"
+                    :style="{ width: `${e.percentage}%`, backgroundColor: e.color }"
+                  ></div>
+                </div>
+                <span class="pop-val">{{ e.count }}场 · {{ e.percentage }}%</span>
+              </div>
+            </div>
+          </div>
+        </n-popover>
+      </div>
+
+      <!-- 近期常用英雄：带胜率微标 + Popover 详情 -->
       <div class="recent-champs">
-        <div
-          v-for="c in statsSummary.topChamps"
-          :key="c.id"
-          class="recent-champ-icon"
-          :title="$t('career.gamesCount', { count: c.count })"
+        <n-popover
+          v-for="c in aggregatedTopChamps"
+          :key="c.championId"
+          trigger="hover"
+          placement="bottom"
+          :delay="120"
+          style="border-radius: 8px; padding: 8px 10px;"
         >
-          <LcuImage :src="c.icon" alt="champ" />
-        </div>
+          <template #trigger>
+            <div class="recent-champ-icon-wrap">
+              <div class="recent-champ-icon">
+                <LcuImage :src="c.championIconUrl" alt="champ" />
+              </div>
+              <span
+                class="recent-champ-badge"
+                :class="c.winRate >= 60 ? 'wr-high' : c.winRate < 45 ? 'wr-low' : 'wr-mid'"
+              >
+                {{ c.games }}
+              </span>
+            </div>
+          </template>
+          <div class="champ-hover-card">
+            <div class="champ-hover-head">
+              <LcuImage :src="c.championIconUrl" class="champ-hover-icon" />
+              <div class="champ-hover-info">
+                <div class="champ-hover-title">
+                  近期出场 {{ c.games }} 次
+                  <span v-if="c.primaryPosition" class="champ-hover-pos">
+                    <PositionIcon :position="c.primaryPosition" :use-position-color="true" :size="12" />
+                    {{ POSITION_NAMES[c.primaryPosition] }}
+                  </span>
+                </div>
+                <div class="champ-hover-line">
+                  <span :class="c.winRate >= 60 ? 'win-text' : c.winRate < 45 ? 'lose-text' : ''">{{ c.winRate }}% 胜率</span>
+                  <span class="stats-divider">·</span>
+                  <span>{{ c.wins }}胜 {{ c.losses }}负</span>
+                  <span class="stats-divider">·</span>
+                  <span>KDA {{ c.kda }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </n-popover>
       </div>
 
       <div class="summary-actions">
@@ -646,9 +746,14 @@ watch(
 
           <!-- 2. 胜负状态与游戏模式/时长 -->
           <div class="result-panel">
-            <span :class="['result-text', getResultClass(m)]">
-              {{ getResultText(m) }}
-            </span>
+            <div class="result-head-row">
+              <span :class="['result-text', getResultClass(m)]">
+                {{ getResultText(m) }}
+              </span>
+              <span v-if="m.position" class="result-pos-badge" :title="`位置: ${getPositionName(m.position)}`">
+                <PositionIcon :position="m.position" :use-position-color="true" :size="13" />
+              </span>
+            </div>
             <div class="result-sub-info">
               <span class="queue-mode">{{ getQueueName(m) }}</span>
               <span class="game-duration">{{ m.duration }}</span>
@@ -837,6 +942,13 @@ watch(
   color: var(--primary-color);
 }
 
+.rank-cell-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+
 /* 近期数据概览栏 */
 .recent-summary-bar {
   display: flex;
@@ -899,17 +1011,197 @@ watch(
   color: var(--death-color, var(--loss-color));
 }
 
+/* ─── 近期常玩位置胶囊 ─── */
+.recent-positions-group {
+  display: flex;
+  align-items: center;
+}
+.pos-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--hover-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.pos-summary-pill:hover {
+  background: var(--hover-bg-strong);
+  border-color: rgba(var(--primary-color-rgb, 99, 102, 241), 0.3);
+}
+.pos-summary-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.pos-summary-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pos-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.72rem;
+}
+.pos-tag-name {
+  font-weight: 700;
+  color: var(--text-color);
+}
+.pos-tag-pct {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+/* 生涯位置分布 Popover */
+.career-pos-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+
 .recent-champs {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
+}
+
+.recent-champ-icon-wrap {
+  position: relative;
+  display: inline-block;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.recent-champ-icon-wrap:hover {
+  transform: scale(1.15);
+  z-index: 2;
 }
 
 .recent-champ-icon {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   overflow: hidden;
+  border: 1.5px solid var(--border-color);
+}
+
+.recent-champ-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  font-size: 0.52rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: rgba(15, 23, 42, 0.88);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.recent-champ-badge.wr-high {
+  color: #10b981;
+}
+.recent-champ-badge.wr-mid {
+  color: #60a5fa;
+}
+.recent-champ-badge.wr-low {
+  color: #94a3b8;
+}
+
+/* 常用英雄 Popover 卡片 */
+.champ-hover-card {
+  min-width: 160px;
+}
+.champ-hover-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.champ-hover-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  flex-shrink: 0;
   border: 1px solid var(--border-color);
+}
+.champ-hover-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.champ-hover-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-color);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.champ-hover-pos {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+.champ-hover-line {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.stats-divider {
+  opacity: 0.5;
+}
+
+/* Popover 位置列表项公共样式 */
+.pos-popover-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-color);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 4px;
+}
+.pos-popover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pos-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+}
+.pop-name {
+  font-weight: 600;
+  color: var(--text-color);
+  width: 26px;
+  flex-shrink: 0;
+}
+.pop-bar-wrap {
+  flex: 1;
+  height: 5px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 2.5px;
+  overflow: hidden;
+}
+.pop-bar-fill {
+  height: 100%;
+  border-radius: 2.5px;
+  transition: width 0.3s ease;
+}
+.pop-val {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 .summary-actions {
@@ -1148,6 +1440,22 @@ watch(
   flex-direction: column;
   justify-content: center;
   min-width: 90px;
+}
+
+.result-head-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.result-pos-badge {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.9;
+  transition: opacity 0.15s ease;
+}
+.result-pos-badge:hover {
+  opacity: 1;
 }
 
 .result-text {
