@@ -2247,7 +2247,11 @@ export function useGamePlayerData(
         if (!myLiveClientTeam) {
           const allyRealPlayers = gameflowMyTeam.value.filter((p) => {
             const rawName = p.gameName || p.displayName || p.summonerName;
-            return isRealSummonerName(rawName, champList);
+            const hasIdentity = Boolean(
+              p.puuid || p.tagLine || (p.summonerId && p.summonerId !== p.cellId),
+            );
+            const isBot = Boolean(p.bot || p.isBot);
+            return isRealSummonerName(rawName, champList, { hasIdentity, isBot });
           });
 
           for (const lp of clientList) {
@@ -2280,7 +2284,8 @@ export function useGamePlayerData(
         if (!myLiveClientTeam) {
           try {
             const activeName = await getLiveClientActivePlayerName();
-            if (activeName && isRealSummonerName(activeName, champList)) {
+            const hasIdentity = Boolean(store.currentSummoner?.puuid);
+            if (activeName && isRealSummonerName(activeName, champList, { hasIdentity })) {
               const activeNorm = normalizeName(activeName);
               const matchedPlayers = clientList.filter((lp) => {
                 const lpNames = [
@@ -2388,7 +2393,11 @@ export function useGamePlayerData(
           // 1) 优先进行严格全等名字匹配（双方均须为真实召唤师名称，排除脱敏英雄名与占位名误撞）
           let targetPlayer = candidateTeam.find((p) => {
             const rawPName = p.gameName || p.displayName || p.summonerName;
-            if (!isRealSummonerName(rawPName, champList)) return false;
+            const hasIdentity = Boolean(
+              p.puuid || p.tagLine || (p.summonerId && p.summonerId !== p.cellId),
+            );
+            const isBot = Boolean(p.bot || p.isBot);
+            if (!isRealSummonerName(rawPName, champList, { hasIdentity, isBot })) return false;
             const pCleanNames = [
               normalizeName(p.gameName),
               normalizeName(p.displayName),
@@ -2412,7 +2421,14 @@ export function useGamePlayerData(
           // 3) 仅对【敌方队伍】（在排位等模式通常完全脱敏为“玩家1”~“玩家5”），且名字和英雄都未匹配时，
           // 且该敌方槽位尚未绑定其他英雄或玩家时，才考虑按未绑定的槽位有序回填
           const realName = lp.riotIdGameName || lp.summonerName || lp.riotId;
-          const isRealName = isRealSummonerName(realName, champList);
+          const lpHasIdentity = Boolean(
+            lp.riotIdTagLine || (realName && realName.includes("#")),
+          );
+          const lpIsBot = Boolean(lp.isBot);
+          const isRealName = isRealSummonerName(realName, champList, {
+            hasIdentity: lpHasIdentity,
+            isBot: lpIsBot,
+          });
           if (!targetPlayer && isEnemyLp) {
             const enemyLiveGroup = enemyLiveClients;
             const lpIndexInGroup = enemyLiveGroup.indexOf(lp);

@@ -297,48 +297,85 @@ export function findChampionIdByLiveClientName(
   return 0;
 }
 
+export interface SummonerNameCheckOptions {
+  /** 是否已知为电脑/人机（若是电脑则绝非真实玩家） */
+  isBot?: boolean;
+  /** 是否拥有真实玩家凭据（如合法 puuid、真实 summonerId、非空 tagLine 等） */
+  hasIdentity?: boolean;
+}
+
 /**
  * 校验一个名字是否是合法的真实召唤师名称
- * 排除英雄中文名、英雄称号、英文名/别名、脱敏占位名（如“玩家1”~“玩家5”）
+ * 排除排位匿名占位名（如“玩家1”~“玩家10”）、电脑人机、复合英雄全称（如“迅捷斥候提莫”）及内部代号
+ * 支持真名恰好与英雄同名（如“提莫#0001”或拥有真实身份）的玩家正常识别
  */
 export function isRealSummonerName(
   name?: string | null,
   champList?: ChampionEntry[],
+  options?: SummonerNameCheckOptions,
 ): boolean {
   if (!name) return false;
   const trimmed = name.trim();
   if (!trimmed) return false;
 
-  // 1. 排除 RiotID 中的 #tag，取主要游戏名
-  const pureName = trimmed.split("#")[0].trim();
+  // 1. 若显式标记为电脑，直接判定为非真实玩家
+  if (options?.isBot) return false;
+
+  // 2. 分解 RiotID（主要游戏名 + tagLine）
+  const hashIdx = trimmed.indexOf("#");
+  const pureName = hashIdx >= 0 ? trimmed.slice(0, hashIdx).trim() : trimmed;
+  const tagLine = hashIdx >= 0 ? trimmed.slice(hashIdx + 1).trim() : "";
   if (!pureName) return false;
 
-  const lowerPure = pureName.toLowerCase();
-
-  // 2. 占位名判定（国服/外服常见对局匿名占位格式）
+  // 3. 占位名判定（国服/外服常见对局匿名占位格式，无论是否有 tag 均排除）
   // 例如：“玩家1”~“玩家10”、“召唤师1”~“召唤师10”、“Player 1”、“Summoner 1”
   if (/^(玩家|召唤师|player|summoner)\s*[0-9]+$/i.test(pureName)) {
     return false;
   }
 
-  // 3. 与英雄库（中文名、称号、alias、别名等）匹配
-  const champions = champList || cachedChampions || [];
-  if (champions.length > 0) {
-    for (const c of champions) {
-      if (c.name && lowerPure === c.name.toLowerCase()) return false;
-      if (c.title && lowerPure === c.title.toLowerCase()) return false;
-      if (c.alias && lowerPure === c.alias.toLowerCase()) return false;
-      // 复合称号+名字（例如“迅捷斥候提莫”、“德玛西亚之力盖伦”）
-      if (c.title && c.name && lowerPure === (c.title + c.name).toLowerCase()) {
-        return false;
-      }
-    }
+  // 4. 电脑常见命名模式过滤（如“黑暗之女 电脑”、“Annie Bot”、“电脑 1”）
+  if (/(\s*电脑|\s+bot)$/i.test(pureName) || /^电脑\s*[0-9]*$/i.test(pureName)) {
+    return false;
   }
 
-  // 4. 特例英文别名表
+  // 5. 内部代号过滤（如 "game_character_displayname_Ahri"）
+  if (/^game_character_displayname_/i.test(pureName)) {
+    return false;
+  }
+
+  const lowerPure = pureName.toLowerCase();
+
+  // 6. 特例英文系统代号表（如 monkeyking 等系统内置别名）
   const alphaPure = lowerPure.replace(/[^a-z0-9]/g, "");
   if (alphaPure && LIVECLIENT_SPECIAL_ALIAS_MAP[alphaPure]) {
     return false;
+  }
+
+  // 7. 若玩家拥有明确的真实身份凭据（带有非空 RiotID #tag，或已有真实 puuid/身份），
+  // 即使名字恰好叫“提莫”、“亚索”，也是 100% 真实玩家！
+  const hasDefiniteIdentity = Boolean(tagLine || options?.hasIdentity);
+  if (hasDefiniteIdentity) {
+    return true;
+  }
+
+  // 8. 针对既无 #tag 又无身份凭据的纯文本名称，进行系统英雄文本比对：
+  const champions = champList || cachedChampions || [];
+  if (champions.length > 0) {
+    for (const c of champions) {
+      // 8.1 复合称号+名字（例如“迅捷斥候提莫”、“德玛西亚之力盖伦”），玩家不可注册此类复合名
+      if (c.title && c.name && lowerPure === (c.title + c.name).toLowerCase()) {
+        return false;
+      }
+      // 8.2 纯英雄称号（如“迅捷斥候”、“疾风剑豪”、“暗裔剑魔”）：
+      // 客户端脱敏或英雄默认展示时常用纯称号，无身份凭据时视为系统称号文本
+      if (c.title && lowerPure === c.title.toLowerCase()) {
+        return false;
+      }
+      // 8.3 纯英文系统别名（如 "Teemo", "Yasuo", "Ahri"）
+      if (c.alias && lowerPure === c.alias.toLowerCase()) {
+        return false;
+      }
+    }
   }
 
   return true;

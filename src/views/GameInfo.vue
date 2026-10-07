@@ -108,7 +108,13 @@ const teamLookups = computed(() => {
       if (d.info.puuid) map.set(`p:${d.info.puuid}`, d);
       if (d.info.summonerId) map.set(`s:${d.info.summonerId}`, d);
       const rawName = d.info.displayName || d.info.gameName;
-      if (isRealSummonerName(rawName)) {
+      const dHasIdentity = Boolean(
+        d.info.puuid ||
+          d.info.tagLine ||
+          (d.info.summonerId && d.info.summonerId > 10) ||
+          (rawName && rawName.includes("#")),
+      );
+      if (isRealSummonerName(rawName, undefined, { hasIdentity: dHasIdentity })) {
         const norm = normalizeLookupName(rawName);
         if (norm) map.set(`n:${norm}`, d);
       }
@@ -163,7 +169,14 @@ function getPlayerData(p: PremadePlayerLike, idx: number) {
 
   // 2.2 名字反查（严格要求为真实召唤师名称，废除纯名字跨队兜底，脱敏英雄名/占位名严禁反查）
   const pRawName = p.displayName || p.gameName || p.summonerName;
-  if (isRealSummonerName(pRawName)) {
+  const pHasIdentity = Boolean(
+    p.puuid ||
+      (p.summonerId && p.summonerId !== p.cellId) ||
+      p.tagLine ||
+      (pRawName && pRawName.includes("#")),
+  );
+  const pIsBot = Boolean(p.bot || p.isBot);
+  if (isRealSummonerName(pRawName, undefined, { hasIdentity: pHasIdentity, isBot: pIsBot })) {
     const norm = normalizeLookupName(pRawName);
     if (norm) {
       const match = lookup.get(`n:${norm}`);

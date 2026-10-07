@@ -59,11 +59,14 @@ const TIER_MAP = computed<Record<string, string>>(() => ({
   CHALLENGER: t("tools.spoofTier.CHALLENGER"),
 }));
 
-function getKdaClass(kda: number | undefined): string {
-  if (kda === undefined) return "kda-gray";
-  if (kda >= 5.0) return "kda-orange";
-  if (kda >= 4.0) return "kda-blue";
-  if (kda >= 3.0) return "kda-green";
+function getKdaClass(kda: number | string | undefined): string {
+  if (kda === undefined || kda === null || kda === "") return "kda-gray";
+  if (kda === "Perfect") return "kda-orange";
+  const val = typeof kda === "number" ? kda : parseFloat(kda);
+  if (isNaN(val)) return "kda-orange";
+  if (val >= 5.0) return "kda-orange";
+  if (val >= 4.0) return "kda-blue";
+  if (val >= 3.0) return "kda-green";
   return "kda-gray";
 }
 
@@ -656,7 +659,7 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
                       <span class="stats-divider">·</span>
                       <span>{{ c.wins }}胜 {{ c.losses }}负</span>
                       <span class="stats-divider">·</span>
-                      <span :class="getKdaClass(parseFloat(c.kda))">KDA {{ c.kda }}</span>
+                      <span :class="getKdaClass(c.kda)">KDA {{ c.kda }}</span>
                     </div>
                   </div>
                 </div>
