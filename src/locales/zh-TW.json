@@ -706,7 +706,10 @@
     "dodgeConfirm": "跳game將受到官方正常的扣勝點與匹配等待懲罰，確認退出當前對局？",
     "dodgeConfirmBtn": "確認跳game",
     "dodgeSuccess": "跳game成功",
-    "dodgeFailed": "跳game失敗: {error}"
+    "dodgeFailed": "跳game失敗: {error}",
+    "gameModeLabel": "遊戲模式",
+    "positionLabel": "位置",
+    "dateLabel": "日期"
   },
   "career": {
     "summonerInfo": "召喚師信息",

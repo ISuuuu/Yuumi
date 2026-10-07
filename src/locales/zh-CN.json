@@ -709,7 +709,10 @@
     "dodgeConfirm": "秒退将受到官方正常的扣胜点与匹配等待惩罚，确认退出当前对局？",
     "dodgeConfirmBtn": "确认秒退",
     "dodgeSuccess": "秒退成功",
-    "dodgeFailed": "秒退失败: {error}"
+    "dodgeFailed": "秒退失败: {error}",
+    "gameModeLabel": "游戏模式",
+    "positionLabel": "位置",
+    "dateLabel": "日期"
   },
   "career": {
     "summonerInfo": "召唤师信息",

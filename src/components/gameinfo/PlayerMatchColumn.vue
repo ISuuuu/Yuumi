@@ -195,6 +195,24 @@ function formatMatchDate(shortTime: string): string {
   return shortTime.split(" ")[0] || "";
 }
 
+function getMatchTopTooltip(m: MatchDisplay): string {
+  const mode = getQueueName(m.queueId, m.name);
+  const posName = m.position ? getPositionName(m.position) : "";
+  const date = m.time || m.shortTime || formatMatchDate(m.shortTime);
+  const modeLabel = te("gameInfo.gameModeLabel") ? t("gameInfo.gameModeLabel") : "游戏模式";
+  const posLabel = te("gameInfo.positionLabel") ? t("gameInfo.positionLabel") : "位置";
+  const dateLabel = te("gameInfo.dateLabel") ? t("gameInfo.dateLabel") : "日期";
+
+  const lines: string[] = [`${modeLabel}: ${mode}`];
+  if (posName) {
+    lines.push(`${posLabel}: ${posName}`);
+  }
+  if (date) {
+    lines.push(`${dateLabel}: ${date}`);
+  }
+  return lines.join("\n");
+}
+
 function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
   if (!props.appConfig?.Personalization) return {};
 
@@ -275,6 +293,11 @@ const posTooltip = computed(() => {
   }
   return lines.join("\n");
 });
+
+// 战绩卡片列表严格只显示前 10 局（后台拉取的 50 场用于常用英雄与常玩位置等样本分析）
+const displayedMatches = computed(() => {
+  return (props.playerData?.matches || []).slice(0, 10);
+});
 </script>
 
 <template>
@@ -350,10 +373,11 @@ const posTooltip = computed(() => {
             </div>
           </div>
 
-          <!-- 全部战绩十列视图：几胜几负移到头像下方 -->
+          <!-- 全部战绩十列视图：几胜几负移到头像下方（悬停提示常玩位置与英雄分析） -->
           <div
             v-if="compact && playerData?.winCount !== undefined"
             class="col-avatar-summary"
+            :title="posTooltip || undefined"
           >
             <span class="summary-counts">
               <span class="summary-wins">{{ playerData.winCount }}{{ $t("career.win") }}</span>
@@ -361,29 +385,16 @@ const posTooltip = computed(() => {
             </span>
           </div>
 
-          <!-- 全部战绩十列视图：常用英雄位置多加一行显示在胜负下面（支持主选+次选） -->
+          <!-- 全部战绩十列视图：选的英雄（胜负）下方展示常用位置 -->
           <div
             v-if="compact && primaryPos"
             class="col-avatar-pos"
-            :title="posTooltip"
+            :title="posTooltip || undefined"
           >
-            <template v-if="!secondaryPos || !secondaryPosPercent">
-              <PositionIcon :position="primaryPos" :use-position-color="true" :size="9.5" />
-              <span class="avatar-pos-text">
-                {{ getPositionName(primaryPos) }}
-                <template v-if="primaryPosPercent !== undefined">{{ primaryPosPercent }}%</template>
-              </span>
-            </template>
-            <template v-else>
-              <span class="avatar-pos-item">
-                <PositionIcon :position="primaryPos" :use-position-color="true" :size="9" />
-                <span class="avatar-pos-text">{{ getShortPositionName(primaryPos) }}{{ primaryPosPercent }}%</span>
-              </span>
-              <span class="avatar-pos-item">
-                <PositionIcon :position="secondaryPos" :use-position-color="true" :size="9" />
-                <span class="avatar-pos-text">{{ getShortPositionName(secondaryPos) }}{{ secondaryPosPercent }}%</span>
-              </span>
-            </template>
+            <PositionIcon :position="primaryPos" :use-position-color="true" :size="8" />
+            <span class="avatar-pos-text">
+              {{ getShortPositionName(primaryPos) }}<template v-if="primaryPosPercent !== undefined">{{ primaryPosPercent }}%</template>
+            </span>
           </div>
         </div>
 
@@ -486,11 +497,11 @@ const posTooltip = computed(() => {
       </div>
     </template>
 
-    <!-- 战绩列表 -->
-    <template v-else-if="playerData?.matches?.length">
+    <!-- 战绩列表（页面上严格只展示前 10 局） -->
+    <template v-else-if="displayedMatches.length">
       <div class="col-matches-list">
         <div
-          v-for="m in playerData.matches"
+          v-for="m in displayedMatches"
           :key="m.gameId"
           :class="[
             'col-match',
@@ -499,11 +510,11 @@ const posTooltip = computed(() => {
           :style="getMatchCardStyle(m)"
         >
           <!-- 卡片顶部：游戏类型 + 位置 + 对局日期（独立一行） -->
-          <div class="cm-top-row">
-            <span class="cm-mode" :title="getQueueName(m.queueId, m.name)">
+          <div class="cm-top-row" :title="getMatchTopTooltip(m)">
+            <span class="cm-mode" :title="getMatchTopTooltip(m)">
               {{ getQueueName(m.queueId, m.name) }}
             </span>
-            <span v-if="m.position" class="cm-pos-tag" :title="`位置: ${getPositionName(m.position)}`">
+            <span v-if="m.position" class="cm-pos-tag" :title="getMatchTopTooltip(m)">
               <PositionIcon :position="m.position" :use-position-color="true" :size="11" />
             </span>
             <span
@@ -513,7 +524,7 @@ const posTooltip = computed(() => {
             >
               {{ $t("gameInfo.encounteredMatch") }}
             </span>
-            <span class="cm-date">{{ formatMatchDate(m.shortTime) }}</span>
+            <span class="cm-date" :title="getMatchTopTooltip(m)">{{ formatMatchDate(m.shortTime) }}</span>
           </div>
 
           <!-- 卡片主体：大尺寸英雄头像 + 核心战绩数据 -->
@@ -1246,9 +1257,20 @@ const posTooltip = computed(() => {
   padding: 3px 4px;
 }
 .compact .col-header-top {
+  align-items: flex-start;
   gap: 4px;
 }
+.compact .col-avatar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex-shrink: 0;
+  width: 31.5px;
+  min-width: 31.5px;
+  max-width: 31.5px;
+}
 .compact .col-avatar-row {
+  align-self: flex-start;
   height: 26px;
   gap: 2.5px;
 }
@@ -1273,15 +1295,17 @@ const posTooltip = computed(() => {
 .compact .col-avatar-summary {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 100%;
-  margin-top: 2px;
+  justify-content: flex-start;
+  align-self: flex-start;
+  width: auto;
+  margin-top: 1.5px;
   line-height: 1;
+  cursor: help;
 }
 .compact .col-avatar-summary .summary-counts {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 1.5px;
   font-size: 0.54rem;
   line-height: 1;
@@ -1298,17 +1322,16 @@ const posTooltip = computed(() => {
 .compact .col-avatar-pos {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 2.5px;
+  justify-content: flex-start;
+  align-self: flex-start;
+  gap: 1.5px;
   width: 100%;
+  max-width: 31.5px;
   margin-top: 1.5px;
   line-height: 1;
   cursor: help;
-}
-.compact .avatar-pos-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .compact .col-avatar-pos .avatar-pos-text {
   font-size: 0.52rem;
@@ -1317,6 +1340,16 @@ const posTooltip = computed(() => {
   line-height: 1;
   white-space: nowrap;
   letter-spacing: -0.2px;
+}
+.compact .col-header-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  padding-top: 1px;
+  gap: 2px;
 }
 .compact .col-name {
   font-size: 0.72rem;

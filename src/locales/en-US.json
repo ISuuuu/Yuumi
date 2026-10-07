@@ -709,7 +709,10 @@
     "dodgeConfirm": "Dodging will result in official LP penalty and queue queue lockout. Are you sure you want to dodge?",
     "dodgeConfirmBtn": "Confirm Dodge",
     "dodgeSuccess": "Dodged successfully",
-    "dodgeFailed": "Failed to dodge: {error}"
+    "dodgeFailed": "Failed to dodge: {error}",
+    "gameModeLabel": "Game Mode",
+    "positionLabel": "Position",
+    "dateLabel": "Date"
   },
   "career": {
     "summonerInfo": "Summoner Info",

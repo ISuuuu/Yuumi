@@ -180,19 +180,33 @@ pub async fn get_map_side(app_state: tauri::State<'_, AppState>) -> Result<Optio
     // 方法4: 尝试从游戏内 LiveClientData (2999 端口) 推断
     if let Ok(Some(active_name)) = get_liveclient_active_player_name().await {
         if let Ok(players) = get_liveclient_playerlist().await {
-            if let Some(target) = players.iter().find(|p| {
-                p.riot_id_game_name.as_deref() == Some(&active_name)
-                    || p.summoner_name.as_deref() == Some(&active_name)
-                    || p.riot_id.as_deref() == Some(&active_name)
-            }) {
-                if let Some(ref team) = target.team {
-                    let side = if team.eq_ignore_ascii_case("ORDER") {
-                        "blue"
-                    } else {
-                        "red"
-                    };
-                    log::info!("获取队伍信息成功 (liveclient team): {}", side);
-                    return Ok(Some(side.to_string()));
+            let matches: Vec<_> = players
+                .iter()
+                .filter(|p| {
+                    p.riot_id_game_name.as_deref() == Some(&active_name)
+                        || p.summoner_name.as_deref() == Some(&active_name)
+                        || p.riot_id.as_deref() == Some(&active_name)
+                })
+                .collect();
+            // 如果仅有唯一命中项，或者所有命中项阵营完全一致，才可安全采信
+            if !matches.is_empty() {
+                let first_team = matches[0].team.as_deref();
+                let all_same_team = matches.iter().all(|p| p.team.as_deref() == first_team);
+                if all_same_team {
+                    if let Some(team) = first_team {
+                        let side = if team.eq_ignore_ascii_case("ORDER") {
+                            "blue"
+                        } else {
+                            "red"
+                        };
+                        log::info!("获取队伍信息成功 (liveclient team): {}", side);
+                        return Ok(Some(side.to_string()));
+                    }
+                } else {
+                    log::warn!(
+                        "LiveClientData 中存在多个名为 '{}' 且队伍不同的玩家（如盲选同英雄），跳过阵营推导",
+                        active_name
+                    );
                 }
             }
         }

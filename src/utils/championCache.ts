@@ -296,3 +296,51 @@ export function findChampionIdByLiveClientName(
 
   return 0;
 }
+
+/**
+ * 校验一个名字是否是合法的真实召唤师名称
+ * 排除英雄中文名、英雄称号、英文名/别名、脱敏占位名（如“玩家1”~“玩家5”）
+ */
+export function isRealSummonerName(
+  name?: string | null,
+  champList?: ChampionEntry[],
+): boolean {
+  if (!name) return false;
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+
+  // 1. 排除 RiotID 中的 #tag，取主要游戏名
+  const pureName = trimmed.split("#")[0].trim();
+  if (!pureName) return false;
+
+  const lowerPure = pureName.toLowerCase();
+
+  // 2. 占位名判定（国服/外服常见对局匿名占位格式）
+  // 例如：“玩家1”~“玩家10”、“召唤师1”~“召唤师10”、“Player 1”、“Summoner 1”
+  if (/^(玩家|召唤师|player|summoner)\s*[0-9]+$/i.test(pureName)) {
+    return false;
+  }
+
+  // 3. 与英雄库（中文名、称号、alias、别名等）匹配
+  const champions = champList || cachedChampions || [];
+  if (champions.length > 0) {
+    for (const c of champions) {
+      if (c.name && lowerPure === c.name.toLowerCase()) return false;
+      if (c.title && lowerPure === c.title.toLowerCase()) return false;
+      if (c.alias && lowerPure === c.alias.toLowerCase()) return false;
+      // 复合称号+名字（例如“迅捷斥候提莫”、“德玛西亚之力盖伦”）
+      if (c.title && c.name && lowerPure === (c.title + c.name).toLowerCase()) {
+        return false;
+      }
+    }
+  }
+
+  // 4. 特例英文别名表
+  const alphaPure = lowerPure.replace(/[^a-z0-9]/g, "");
+  if (alphaPure && LIVECLIENT_SPECIAL_ALIAS_MAP[alphaPure]) {
+    return false;
+  }
+
+  return true;
+}
+

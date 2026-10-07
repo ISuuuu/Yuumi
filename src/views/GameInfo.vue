@@ -14,6 +14,7 @@ import {
   querySavedPlayersMapDedup,
 } from "../composables/useGamePlayerData";
 import PlayerCard from "../components/gameinfo/PlayerCard.vue";
+import { isRealSummonerName } from "../utils/championCache";
 import LcuOfflineState from "../components/LcuOfflineState.vue";
 import PlayerMatchColumn from "../components/gameinfo/PlayerMatchColumn.vue";
 import PremadeGroupChips from "../components/gameinfo/PremadeGroupChips.vue";
@@ -61,36 +62,64 @@ const {
   premadeColorsTheir,
 );
 
-// 选人阶段敌我 cellId 会碰撞：直接按 key 命中可能拿到异队旧数据，
+// 身份核验：直接按 key 命中可能拿到异队旧数据，
 // 必须先核验身份，不一致就跳过（宁可显示占位，也不显示别人的 ID 和战绩）
 function isSameIdentity(p: PremadePlayerLike, d: PlayerData | undefined): boolean {
   if (!d) return false;
   if (!d.info) return true; // 加载中占位：保留原行为（显示 loading）
-  // 选人阶段匿名查询（敌方未公开）不得借用任何实名数据
-  if (store.gamePhase === "ChampSelect") {
-    const dSidReal = d.info.summonerId && d.info.summonerId !== p.cellId ? d.info.summonerId : 0;
-    if (!p.puuid && !p.summonerId && (d.info.puuid || dSidReal)) return false;
-  }
+  // 任何阶段无实名身份槽位（匿名或脱敏）严禁借用任何实名数据
+  const dSidReal = d.info.summonerId && d.info.summonerId !== p.cellId ? d.info.summonerId : 0;
+  if (!p.puuid && !p.summonerId && (d.info.puuid || dSidReal)) return false;
   return isIdentityCompatible(d, { puuid: p.puuid, summonerId: p.summonerId, cellId: p.cellId });
 }
 
-// 身份反查索引：按 info 内的真实身份键（puuid / summonerId / 名字）建表，
-// 模板每列查询复用，避免渲染期间对 playerData 做全量遍历
-const playerDataLookup = computed(() => {
-  const map = new Map<string, PlayerData>();
+const normalizeLookupName = (name?: string) => {
+  if (!name) return "";
+  return name.split("#")[0].replace(/\s+/g, "").toLowerCase();
+};
+
+// 队伍隔离的身份反查索引：按队伍（ally / enemy）隔离，
+// 仅允许强身份键（puuid / summonerId）或真实召唤师名（严格排除脱敏英雄名与占位名）反查，
+// 彻底废除跨队纯名字兜底，杜绝盲选双同英雄或脱敏同名时跨队同化
+const teamLookups = computed(() => {
+  const allyMap = new Map<string, PlayerData>();
+  const enemyMap = new Map<string, PlayerData>();
+
+  const isAlly = (d: PlayerData): boolean => {
+    if (!d.info) return false;
+    return myTeam.value.some((p) => isSameIdentity(p, d));
+  };
+  const isEnemy = (d: PlayerData): boolean => {
+    if (!d.info) return false;
+    return theirTeam.value.some((p) => isSameIdentity(p, d));
+  };
+
   for (const key of Object.keys(playerData.value)) {
     const d = playerData.value[key];
     if (!d?.info) continue;
-    if (d.info.puuid) map.set(`p:${d.info.puuid}`, d);
-    if (d.info.summonerId) map.set(`s:${d.info.summonerId}`, d);
-    const name = d.info.displayName || d.info.gameName;
-    if (name) map.set(`n:${name}`, d);
+
+    const inAlly = isAlly(d);
+    const inEnemy = isEnemy(d);
+    const targetMaps: Map<string, PlayerData>[] = [];
+    if (inAlly) targetMaps.push(allyMap);
+    if (inEnemy) targetMaps.push(enemyMap);
+
+    for (const map of targetMaps) {
+      if (d.info.puuid) map.set(`p:${d.info.puuid}`, d);
+      if (d.info.summonerId) map.set(`s:${d.info.summonerId}`, d);
+      const rawName = d.info.displayName || d.info.gameName;
+      if (isRealSummonerName(rawName)) {
+        const norm = normalizeLookupName(rawName);
+        if (norm) map.set(`n:${norm}`, d);
+      }
+    }
   }
-  return map;
+
+  return { allyMap, enemyMap };
 });
 
 function getPlayerData(p: PremadePlayerLike, idx: number) {
-  // 身份优先查找：puuid → summonerId → cellId（与数据层顺序一致，身份键优先命中同一玩家）
+  // 1. 身份优先直查：puuid → summonerId → cellId（与数据层顺序一致，身份键优先命中同一玩家）
   if (p.puuid) {
     const byPuuid = playerData.value[p.puuid];
     if (byPuuid && isSameIdentity(p, byPuuid)) return byPuuid;
@@ -108,16 +137,44 @@ function getPlayerData(p: PremadePlayerLike, idx: number) {
     const byIdx = playerData.value[idx];
     if (byIdx && isSameIdentity(p, byIdx)) return byIdx;
   }
-  // 若按真实 stableCellId 或 idx 索引均未直接命中（如 5 列切 Tab 或 10 列合并展示时）：
-  // 按队员已知身份（puuid / summonerId / displayName）从反查索引取
-  const pName = p.displayName || p.gameName || p.summonerName;
-  const fallback =
-    (p.puuid && playerDataLookup.value.get(`p:${p.puuid}`)) ||
-    (p.summonerId && playerDataLookup.value.get(`s:${p.summonerId}`)) ||
-    (pName && playerDataLookup.value.get(`n:${pName}`));
-  if (fallback) return fallback;
+
+  // 2. 确定该玩家是 ally 还是 enemy，选用严格队伍隔离的反查索引
+  const isEnemyPlayer =
+    p.isEnemy === true ||
+    theirTeam.value.some(
+      (tp) =>
+        tp === p ||
+        (p.puuid && tp.puuid === p.puuid) ||
+        (p.cellId !== undefined && tp.cellId === p.cellId),
+    );
+  const lookup = isEnemyPlayer
+    ? teamLookups.value.enemyMap
+    : teamLookups.value.allyMap;
+
+  // 2.1 强身份优先反查
+  if (p.puuid) {
+    const match = lookup.get(`p:${p.puuid}`);
+    if (match && isSameIdentity(p, match)) return match;
+  }
+  if (p.summonerId) {
+    const match = lookup.get(`s:${p.summonerId}`);
+    if (match && isSameIdentity(p, match)) return match;
+  }
+
+  // 2.2 名字反查（严格要求为真实召唤师名称，废除纯名字跨队兜底，脱敏英雄名/占位名严禁反查）
+  const pRawName = p.displayName || p.gameName || p.summonerName;
+  if (isRealSummonerName(pRawName)) {
+    const norm = normalizeLookupName(pRawName);
+    if (norm) {
+      const match = lookup.get(`n:${norm}`);
+      if (match && isSameIdentity(p, match)) return match;
+    }
+  }
+
   if (p.championId || p.botChampionId) {
-    console.debug(`[GameInfo] getPlayerData 未匹配到数据项: name=${p.displayName || p.gameName}, cellId=${p.cellId}, championId=${p.championId || p.botChampionId}, availableKeys=${Object.keys(playerData.value).join(",")}`);
+    console.debug(
+      `[GameInfo] getPlayerData 未匹配到数据项: name=${p.displayName || p.gameName}, cellId=${p.cellId}, championId=${p.championId || p.botChampionId}, availableKeys=${Object.keys(playerData.value).join(",")}`,
+    );
   }
   return undefined;
 }
@@ -434,10 +491,19 @@ onMounted(() => {
 /* 左右分栏 */
 .game-layout {
   display: grid;
-  grid-template-columns: 285px 1fr;
+  grid-template-columns: 250px 1fr;
   gap: 16px;
   flex: 1;
   min-height: 0;
+}
+
+/* 窄窗口：左右改为上下堆叠，避免右侧战绩列被压扁
+   （.game-layout.layout-ten 的选择器权重更高，10 列模式仍保持单行占满） */
+@media (max-width: 1100px) {
+  .game-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(180px, 34vh) 1fr;
+  }
 }
 
 /* 10 列并排模式：隐藏左侧面板，右侧占满整行 */

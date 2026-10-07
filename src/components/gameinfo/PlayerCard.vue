@@ -252,7 +252,7 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
     }"
     :style="premadeCardStyle"
   >
-    <!-- 第一层：上部主体（左侧头像 + 右侧召唤师与段位信息） -->
+    <!-- 第一层：主体（左侧头像 + 右侧召唤师名称 / 段位 / KDA，独占整行宽度） -->
     <div class="pc-top-section">
       <div class="pc-avatar-area">
         <div
@@ -296,7 +296,7 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
       </div>
 
       <div class="pc-info">
-        <!-- 第 1 行：召唤师名称 + 战绩隐藏锁 + 宿命/标记 + 连胜连败 -->
+          <!-- 第 1 行：召唤师名称 + 战绩隐藏锁 + 宿命/标记 + 连胜连败 -->
         <div class="pc-row pc-name-row">
           <span
             class="name-text"
@@ -433,7 +433,7 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
           </template>
         </div>
 
-        <!-- 战绩行：近 10 场胜率与 KDA 及常玩位置（战绩隐藏时不展示） -->
+        <!-- 战绩行：近 10 场胜率与 KDA -->
         <div
           class="pc-row pc-stats-row"
           v-if="!playerData?.matchHistoryHidden && !playerData?.isProfilePrivate && (playerData?.winRate !== undefined || playerData?.avgKda !== undefined)"
@@ -519,75 +519,19 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
               </div>
             </div>
           </n-tooltip>
-
-          <!-- 近期常玩位置微标与分布弹窗 -->
-          <template v-if="primaryPos && primaryPosPercent !== undefined">
-            <span class="stats-divider">·</span>
-            <n-popover
-              trigger="hover"
-              placement="top"
-              :delay="120"
-              style="border-radius: 8px; padding: 8px 12px; max-width: 260px;"
-            >
-              <template #trigger>
-                <span class="pc-pos-pill" :title="$t('career.positions') || '常玩位置'">
-                  <span class="pc-pos-item">
-                    <PositionIcon
-                      :position="primaryPos"
-                      :use-position-color="true"
-                      :size="11"
-                    />
-                    <span class="pos-text">{{ POSITION_NAMES[primaryPos] }} {{ primaryPosPercent }}%</span>
-                  </span>
-                  <template v-if="secondaryPos && secondaryPosPercent">
-                    <span class="pc-pos-sep">/</span>
-                    <span class="pc-pos-item">
-                      <PositionIcon
-                        :position="secondaryPos"
-                        :use-position-color="true"
-                        :size="11"
-                      />
-                      <span class="pos-text">{{ POSITION_NAMES[secondaryPos] }} {{ secondaryPosPercent }}%</span>
-                    </span>
-                  </template>
-                </span>
-              </template>
-              <div class="pos-popover-box">
-                <div class="pos-popover-title">近期位置分布 ({{ playerData?.positions?.totalValid }}场)</div>
-                <div class="pos-popover-list">
-                  <div
-                    v-for="e in playerData?.positions?.entries"
-                    :key="e.position"
-                    class="pos-popover-item"
-                  >
-                    <PositionIcon :position="e.position" :use-position-color="true" :size="13" />
-                    <span class="pop-name">{{ e.name }}</span>
-                    <div class="pop-bar-wrap">
-                      <div
-                        class="pop-bar-fill"
-                        :style="{ width: `${e.percentage}%`, backgroundColor: e.color }"
-                      ></div>
-                    </div>
-                    <span class="pop-val">{{ e.count }}场 · {{ e.percentage }}%</span>
-                  </div>
-                </div>
-              </div>
-            </n-popover>
-          </template>
         </div>
       </div>
     </div>
 
-    <!-- 第二层：下部整行（纯粹的英雄资产区：左侧熟练度，右侧常用英雄，两端对齐） -->
+    <!-- 第二层：底部资产行（左侧熟练度两行，右侧位置 + 常用英雄两行） -->
     <div
-      v-if="masteryDetail || topChamps.length > 0"
+      v-if="masteryDetail || (primaryPos && primaryPosPercent !== undefined) || topChamps.length > 0"
       class="pc-bottom-bar"
     >
-      <div class="pc-bottom-left">
-        <!-- 熟练度等级与点数 -->
+      <!-- 左侧：所选英雄熟练度（等级点数 / 招牌·练英雄 分两行） -->
+      <div v-if="masteryDetail" class="pc-bottom-left">
         <div
-          v-if="masteryDetail"
-          class="mastery-pill"
+          class="avatar-sub-pill"
           :class="{ 'is-top': masteryDetail.isTopChampion }"
           :title="$t('gameInfo.masteryTooltip', { level: masteryDetail.level, points: masteryDetail.points.toLocaleString() })"
         >
@@ -595,9 +539,8 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
           <span class="mastery-pts">{{ masteryDetail.formattedPoints }}</span>
         </div>
 
-        <!-- 招牌 / 练英雄微标 -->
         <span
-          v-if="masteryDetail?.isTopChampion"
+          v-if="masteryDetail.isTopChampion"
           class="mastery-role-badge top"
           :title="$t('gameInfo.topChampionTitle')"
         >
@@ -607,7 +550,7 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
           {{ $t('gameInfo.topChampion') }}
         </span>
         <span
-          v-else-if="masteryDetail?.isPracticing"
+          v-else-if="masteryDetail.isPracticing"
           class="mastery-role-badge practice"
           :title="$t('gameInfo.practicingTitle')"
         >
@@ -615,58 +558,119 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
         </span>
       </div>
 
-      <!-- 右侧：近期常玩英雄小头像组（前 3 个） -->
-      <div v-if="topChamps.length > 0" class="pc-bottom-right">
-        <div class="pc-top-champs-bar">
+      <!-- 右侧：近期画像（上行位置分布，下行常用英雄） -->
+      <div
+        v-if="(primaryPos && primaryPosPercent !== undefined) || topChamps.length > 0"
+        class="pc-bottom-right"
+      >
+          <!-- 第一行：常玩位置微标与分布弹窗 -->
           <n-popover
-            v-for="c in topChamps.slice(0, 3)"
-            :key="c.championId"
+            v-if="primaryPos && primaryPosPercent !== undefined"
             trigger="hover"
             placement="top"
             :delay="120"
-            style="border-radius: 8px; padding: 8px 10px;"
+            style="border-radius: 8px; padding: 8px 12px; max-width: 260px;"
           >
             <template #trigger>
-              <div class="pc-mini-champ-tag">
-                <LcuImage :src="c.championIconUrl" class="mini-champ-avatar" alt="champ" />
-                <span
-                  class="mini-champ-badge"
-                  :class="c.winRate >= 60 ? 'wr-high' : c.winRate < 45 ? 'wr-low' : 'wr-mid'"
-                >
-                  {{ c.games }}
+              <span class="pc-pos-pill" :title="$t('career.positions') || '常玩位置'">
+                <span class="pc-pos-item">
+                  <PositionIcon
+                    :position="primaryPos"
+                    :use-position-color="true"
+                    :size="11"
+                  />
+                  <span class="pos-text">{{ POSITION_NAMES[primaryPos] }} {{ primaryPosPercent }}%</span>
                 </span>
-              </div>
+                <template v-if="secondaryPos && secondaryPosPercent">
+                  <span class="pc-pos-sep">/</span>
+                  <span
+                    class="pc-pos-item is-secondary"
+                    :title="`${POSITION_NAMES[secondaryPos]} ${secondaryPosPercent}%`"
+                  >
+                    <PositionIcon
+                      :position="secondaryPos"
+                      :use-position-color="true"
+                      :size="11"
+                    />
+                    <span class="pos-text">{{ secondaryPosPercent }}%</span>
+                  </span>
+                </template>
+              </span>
             </template>
-            <div class="champ-hover-card">
-              <div class="champ-hover-head">
-                <LcuImage :src="c.championIconUrl" class="champ-hover-icon" />
-                <div class="champ-hover-info">
-                  <div class="champ-hover-title">
-                    近期出场 {{ c.games }} 次
-                    <span v-if="c.primaryPosition" class="champ-hover-pos">
-                      <PositionIcon :position="c.primaryPosition" :use-position-color="true" :size="12" />
-                      {{ POSITION_NAMES[c.primaryPosition] }}
-                    </span>
+            <div class="pos-popover-box">
+              <div class="pos-popover-title">近期位置分布 ({{ playerData?.positions?.totalValid }}场)</div>
+              <div class="pos-popover-list">
+                <div
+                  v-for="e in playerData?.positions?.entries"
+                  :key="e.position"
+                  class="pos-popover-item"
+                >
+                  <PositionIcon :position="e.position" :use-position-color="true" :size="13" />
+                  <span class="pop-name">{{ e.name }}</span>
+                  <div class="pop-bar-wrap">
+                    <div
+                      class="pop-bar-fill"
+                      :style="{ width: `${e.percentage}%`, backgroundColor: e.color }"
+                    ></div>
                   </div>
-                  <div class="champ-hover-line">
-                    <span :class="getWinRateClass(c.winRate)">{{ c.winRate }}% 胜率</span>
-                    <span class="stats-divider">·</span>
-                    <span>{{ c.wins }}胜 {{ c.losses }}负</span>
-                    <span class="stats-divider">·</span>
-                    <span :class="getKdaClass(parseFloat(c.kda))">KDA {{ c.kda }}</span>
-                  </div>
+                  <span class="pop-val">{{ e.count }}场 · {{ e.percentage }}%</span>
                 </div>
               </div>
             </div>
           </n-popover>
+
+          <!-- 第二行：近期常玩英雄小头像组（前 3 个） -->
+          <div v-if="topChamps.length > 0" class="pc-top-champs-bar">
+            <n-popover
+              v-for="c in topChamps.slice(0, 3)"
+              :key="c.championId"
+              trigger="hover"
+              placement="top"
+              :delay="120"
+              style="border-radius: 8px; padding: 8px 10px;"
+            >
+              <template #trigger>
+                <div class="pc-mini-champ-tag">
+                  <LcuImage :src="c.championIconUrl" class="mini-champ-avatar" alt="champ" />
+                  <span
+                    class="mini-champ-badge"
+                    :class="c.winRate >= 60 ? 'wr-high' : c.winRate < 45 ? 'wr-low' : 'wr-mid'"
+                  >
+                    {{ c.games }}
+                  </span>
+                </div>
+              </template>
+              <div class="champ-hover-card">
+                <div class="champ-hover-head">
+                  <LcuImage :src="c.championIconUrl" class="champ-hover-icon" />
+                  <div class="champ-hover-info">
+                    <div class="champ-hover-title">
+                      近期出场 {{ c.games }} 次
+                      <span v-if="c.primaryPosition" class="champ-hover-pos">
+                        <PositionIcon :position="c.primaryPosition" :use-position-color="true" :size="12" />
+                        {{ POSITION_NAMES[c.primaryPosition] }}
+                      </span>
+                    </div>
+                    <div class="champ-hover-line">
+                      <span :class="getWinRateClass(c.winRate)">{{ c.winRate }}% 胜率</span>
+                      <span class="stats-divider">·</span>
+                      <span>{{ c.wins }}胜 {{ c.losses }}负</span>
+                      <span class="stats-divider">·</span>
+                      <span :class="getKdaClass(parseFloat(c.kda))">KDA {{ c.kda }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </n-popover>
+          </div>
         </div>
       </div>
     </div>
-  </div>
 </template>
 
 <style scoped>
 .player-card {
+  --pc-sub-row-h: 16px;
   position: relative;
   overflow: hidden;
   flex: 1;
@@ -699,7 +703,7 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
   transform: translateY(-2px) scale(1.01);
 }
 
-/* ─── 第一层：上部主体（头像 + 信息） ─── */
+/* ─── 主体：头像 + 召唤师名称/段位/KDA（保证完整宽度，不被画像挤压） ─── */
 .pc-top-section {
   display: flex;
   align-items: center;
@@ -716,6 +720,64 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
   justify-content: center;
   flex-shrink: 0;
 }
+.avatar-sub-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.60rem;
+  line-height: 1;
+  padding: 1px 4.5px;
+  border-radius: 3px;
+  background: var(--hover-bg-strong);
+  border: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+.avatar-sub-pill.is-top {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.avatar-sub-pill.is-top .mastery-lvl {
+  color: #d97706;
+}
+.mastery-lvl {
+  font-weight: 800;
+  color: var(--text-color);
+}
+.mastery-pts {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* ─── 底部资产行（左侧熟练度两行 + 右侧位置/常用英雄两行） ─── */
+.pc-bottom-bar {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 5px;
+  background: rgba(0, 0, 0, 0.025);
+  border-top: 1px dashed var(--border-color);
+  border-radius: 4px;
+}
+.pc-bottom-left {
+  display: grid;
+  grid-auto-rows: var(--pc-sub-row-h);
+  align-items: center;
+  justify-items: start;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.pc-bottom-right {
+  display: grid;
+  grid-auto-rows: var(--pc-sub-row-h);
+  align-items: center;
+  justify-items: end;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .profile-icon-wrapper-mini {
   position: relative;
   width: 48px;
@@ -1011,7 +1073,7 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
   font-size: 0.64rem;
 }
 
-/* 战绩行：近 10 场胜率与 KDA 及常玩位置 */
+/* 战绩行：近 10 场胜率与 KDA */
 .pc-stats-row {
   display: flex;
   align-items: center;
@@ -1111,62 +1173,7 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
   color: var(--text-dimmed);
 }
 
-/* ─── 第二层：全宽底栏（英雄资产区） ─── */
-.pc-bottom-bar {
-  width: 100%;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 2.5px 5px;
-  background: rgba(0, 0, 0, 0.025);
-  border-top: 1px dashed var(--border-color);
-  border-radius: 4px;
-}
-.pc-bottom-left {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
-}
-.pc-bottom-right {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-/* 熟练度胶囊微标 */
-.mastery-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 0.60rem;
-  line-height: 1;
-  padding: 1px 4.5px;
-  border-radius: 3px;
-  background: var(--hover-bg-strong);
-  border: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-.mastery-pill.is-top {
-  background: rgba(245, 158, 11, 0.08);
-  border-color: rgba(245, 158, 11, 0.3);
-}
-.mastery-lvl {
-  font-weight: 800;
-  color: var(--text-color);
-}
-.mastery-pill.is-top .mastery-lvl {
-  color: #d97706;
-}
-.mastery-pts {
-  color: var(--text-muted);
-  font-weight: 600;
-}
-
-/* 招牌 / 练英雄微标 */
+/* 招牌 / 练英雄微标（位于头像下方第二行） */
 .mastery-role-badge {
   display: inline-flex;
   align-items: center;
@@ -1207,7 +1214,7 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
   color: var(--text-dimmed);
 }
 
-/* ─── 常玩位置微标 ─── */
+/* ─── 常玩位置微标（紧凑版：主位置带名称，次位置仅图标+占比） ─── */
 .pc-pos-pill {
   display: inline-flex;
   align-items: center;
@@ -1216,16 +1223,21 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
   background: var(--hover-bg);
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  font-size: 0.64rem;
+  font-size: 0.62rem;
   line-height: 1;
   cursor: pointer;
-  margin-left: 1px;
+  margin-left: 0;
+  white-space: nowrap;
   transition: all 0.15s ease;
 }
 .pc-pos-item {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+}
+.pc-pos-item.is-secondary .pos-text {
+  color: var(--text-muted);
+  font-weight: 600;
 }
 .pc-pos-sep {
   color: var(--text-dimmed);
@@ -1294,8 +1306,8 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
 }
 .pc-mini-champ-tag {
   position: relative;
-  width: 18px;
-  height: 18px;
+  width: var(--pc-sub-row-h);
+  height: var(--pc-sub-row-h);
   border-radius: 3px;
   cursor: pointer;
   flex-shrink: 0;
