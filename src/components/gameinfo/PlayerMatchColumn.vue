@@ -17,7 +17,7 @@ import { usePlayerChampionId } from "../../composables/usePlayerChampionId";
 import LcuImage from "../LcuImage.vue";
 import PositionIcon from "../PositionIcon.vue";
 import RankedIcon from "../RankedIcon.vue";
-import { getPositionName, getShortPositionName } from "../../utils/matchAnalysis";
+import { getPositionName, getShortPositionName, inferMatchPosition } from "../../utils/matchAnalysis";
 
 const props = defineProps<{
   player: PremadePlayerLike;
@@ -41,13 +41,22 @@ const { savedInfo, savedBadgeTitle, getFateBadgeText, getFateTitle } = useFateBa
   () => props.selfPuuid,
 );
 
+const encounteredGameIdSet = computed<Set<number>>(() => {
+  const set = new Set<number>();
+  const ids = savedInfo.value?.encounteredGameIds;
+  if (ids && ids.length > 0) {
+    for (const id of ids) {
+      set.add(id);
+    }
+  } else if (savedInfo.value?.lastEncounteredGameId) {
+    set.add(savedInfo.value.lastEncounteredGameId);
+  }
+  return set;
+});
+
 function isEncounteredMatch(gameId: number | string | undefined): boolean {
   if (!gameId) return false;
-  const numId = Number(gameId);
-  if (savedInfo.value?.lastEncounteredGameId && savedInfo.value.lastEncounteredGameId === numId) {
-    return true;
-  }
-  return false;
+  return encounteredGameIdSet.value.has(Number(gameId));
 }
 
 const premadeColor = computed(() => {
@@ -384,18 +393,6 @@ const displayedMatches = computed(() => {
               <span class="summary-losses">{{ playerData.lossesCount }}{{ $t("career.lose") }}</span>
             </span>
           </div>
-
-          <!-- 全部战绩十列视图：选的英雄（胜负）下方展示常用位置 -->
-          <div
-            v-if="compact && primaryPos"
-            class="col-avatar-pos"
-            :title="posTooltip || undefined"
-          >
-            <PositionIcon :position="primaryPos" :use-position-color="true" :size="8" />
-            <span class="avatar-pos-text">
-              {{ getShortPositionName(primaryPos) }}<template v-if="primaryPosPercent !== undefined">{{ primaryPosPercent }}%</template>
-            </span>
-          </div>
         </div>
 
         <div class="col-header-info">
@@ -428,8 +425,9 @@ const displayedMatches = computed(() => {
                 />
               </svg>
             </span>
+            <!-- 全部战绩十列视图下标识徽标移到第三行（见 col-header-flag-row） -->
             <span
-              v-if="playerData?.fateFlag"
+              v-if="!compact && playerData?.fateFlag"
               :class="['fate-badge', playerData.fateFlag]"
               :title="getFateTitle(playerData)"
             >
@@ -437,15 +435,22 @@ const displayedMatches = computed(() => {
             </span>
             <!-- 标记玩家 / 曾同局（若已有上一局友/敌徽标，则隐藏默认的无标签'历史'标记，但保留用户手动备注的自定义标签） -->
             <span
-              v-if="savedInfo && (savedInfo.tag || !playerData?.fateFlag)"
+              v-if="!compact && savedInfo && (savedInfo.tag || !playerData?.fateFlag)"
               :class="['saved-badge', { 'met-only': !savedInfo.tag }]"
               :title="savedBadgeTitle(savedInfo)"
             >{{ savedInfo.tag || $t("gameInfo.savedPlayerMark") }}</span>
           </div>
 
-          <!-- 全部战绩(10列)模式下：排位段位（图标+短名）与英雄熟练度并存展示，段位图标始终可见 -->
+          <!-- 全部战绩(10列)模式下：英雄熟练度徽章在左，排位段位（图标+短名）在右，段位图标始终可见 -->
           <template v-if="compact">
             <div class="col-rank-mastery-row" :title="rankDetailedTooltip">
+              <!-- 英雄熟练度微徽章（若已选英雄且有熟练度） -->
+              <span
+                v-if="masteryDetail"
+                class="col-mastery-badge"
+                :class="{ 'is-top': masteryDetail.isTopChampion }"
+              >Lv.{{ masteryDetail.level }}</span>
+
               <!-- 排位段位（优先单双，无单双则灵活） -->
               <span v-if="activeRankTier" class="col-rank-tag">
                 <RankedIcon :tier="activeRankTier" :size="12" class="col-rank-icon" />
@@ -454,13 +459,6 @@ const displayedMatches = computed(() => {
               <span v-else class="col-rank-tag unranked">
                 <span class="col-rank-unranked">{{ $t("gameInfo.noRank") }}</span>
               </span>
-
-              <!-- 英雄熟练度微徽章（若已选英雄且有熟练度） -->
-              <span
-                v-if="masteryDetail"
-                class="col-mastery-badge"
-                :class="{ 'is-top': masteryDetail.isTopChampion }"
-              >Lv.{{ masteryDetail.level }}</span>
             </div>
           </template>
 
@@ -486,6 +484,46 @@ const displayedMatches = computed(() => {
               >Lv.{{ masteryDetail.level }}</span>
             </div>
           </template>
+        </div>
+      </div>
+
+      <!-- 全部战绩十列视图第三行：左侧常用位置（主选 + 次选横排单行），右侧召唤师标识徽标 -->
+      <div v-if="compact" class="col-header-flag-row">
+        <div
+          v-if="primaryPos"
+          class="col-avatar-pos"
+          :title="posTooltip || undefined"
+        >
+          <span class="avatar-pos-item">
+            <PositionIcon :position="primaryPos" :use-position-color="true" :size="8" />
+            <span class="avatar-pos-text">
+              {{ getShortPositionName(primaryPos) }}<template v-if="primaryPosPercent !== undefined">{{ primaryPosPercent }}%</template>
+            </span>
+          </span>
+          <template v-if="secondaryPos && secondaryPosPercent">
+            <span class="avatar-pos-sep">/</span>
+            <span class="avatar-pos-item is-secondary">
+              <PositionIcon :position="secondaryPos" :use-position-color="true" :size="8" />
+              <span class="avatar-pos-text secondary-text">
+                {{ getShortPositionName(secondaryPos) }}{{ secondaryPosPercent }}%
+              </span>
+            </span>
+          </template>
+        </div>
+
+        <div class="col-flag-group">
+          <span
+            v-if="playerData?.fateFlag"
+            :class="['fate-badge', playerData.fateFlag]"
+            :title="getFateTitle(playerData)"
+          >
+            {{ getFateBadgeText(playerData) }}
+          </span>
+          <span
+            v-if="savedInfo && (savedInfo.tag || !playerData?.fateFlag)"
+            :class="['saved-badge', { 'met-only': !savedInfo.tag }]"
+            :title="savedBadgeTitle(savedInfo)"
+          >{{ savedInfo.tag || $t("gameInfo.savedPlayerMark") }}</span>
         </div>
       </div>
     </div>
@@ -514,8 +552,8 @@ const displayedMatches = computed(() => {
             <span class="cm-mode" :title="getMatchTopTooltip(m)">
               {{ getQueueName(m.queueId, m.name) }}
             </span>
-            <span v-if="m.position" class="cm-pos-tag" :title="getMatchTopTooltip(m)">
-              <PositionIcon :position="m.position" :use-position-color="true" :size="11" />
+            <span v-if="m.position || inferMatchPosition(m)" class="cm-pos-tag" :title="getMatchTopTooltip(m)">
+              <PositionIcon :position="m.position || inferMatchPosition(m)" :use-position-color="true" :size="11" />
             </span>
             <span
               v-if="isEncounteredMatch(m.gameId)"
@@ -1253,7 +1291,11 @@ const displayedMatches = computed(() => {
   border-top-width: 3px;
 }
 .compact .col-header {
-  height: 54px;
+  /* 十列视图头部改为三行布局：前两行（头像/胜负 + 名字/段位），第三行（常用位置 + 标识徽标） */
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  height: 58px;
   padding: 3px 4px;
 }
 .compact .col-header-top {
@@ -1324,22 +1366,55 @@ const displayedMatches = computed(() => {
   align-items: center;
   justify-content: flex-start;
   align-self: flex-start;
-  gap: 1.5px;
-  width: 100%;
-  max-width: 31.5px;
+  gap: 2px;
+  width: max-content;
   margin-top: 1.5px;
   line-height: 1;
   cursor: help;
   white-space: nowrap;
-  overflow: hidden;
+}
+.compact .col-avatar-pos .avatar-pos-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.5px;
+  line-height: 1;
+}
+.compact .col-avatar-pos .avatar-pos-sep {
+  font-size: 0.5rem;
+  color: var(--text-dimmed);
+  opacity: 0.6;
+  margin: 0 0.5px;
+  line-height: 1;
 }
 .compact .col-avatar-pos .avatar-pos-text {
-  font-size: 0.52rem;
+  font-size: 0.5rem;
   font-weight: 600;
   color: var(--text-muted);
   line-height: 1;
   white-space: nowrap;
   letter-spacing: -0.2px;
+}
+.compact .col-avatar-pos .avatar-pos-item.is-secondary .avatar-pos-text {
+  opacity: 0.85;
+}
+.compact .col-header-flag-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  margin-top: 1.5px;
+}
+.compact .col-header-flag-row .col-avatar-pos {
+  align-self: center;
+  margin-top: 0;
+}
+.compact .col-flag-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
 }
 .compact .col-header-info {
   display: flex;

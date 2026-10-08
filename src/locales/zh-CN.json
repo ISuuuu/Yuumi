@@ -747,7 +747,8 @@
     "all": "全部",
     "victory": "胜利",
     "defeat": "失败",
-    "gameId": "游戏 ID"
+    "gameId": "游戏 ID",
+    "positions": "常玩位置"
   },
   "search": {
     "searchPlaceholder": "输入召唤师名称进行搜索...",

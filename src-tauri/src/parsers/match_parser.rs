@@ -88,6 +88,8 @@ pub struct LcuMatchStats {
     pub player_augment4: i32,
     #[serde(default)]
     pub player_augment5: i32,
+    #[serde(default)]
+    pub role_bound_item: Option<i32>,
 }
 
 // ─── 前端展示用的清洗结构体 ───
@@ -134,34 +136,98 @@ pub struct MatchDisplay {
     // 召唤师峡谷等 5v5 模式的位置归一化（"TOP" | "JUNGLE" | "MIDDLE" | "BOTTOM" | "UTILITY"）
     #[serde(default)]
     pub position: Option<String>,
+    // 官方分路任务/专属装备 ID
+    #[serde(default)]
+    pub role_bound_item: Option<i32>,
 }
 
 // ─── 数据清洗 ───
 
-/// 将 LCU 的 lane 和 role 推导为标准 5 峡谷位置（TOP, JUNGLE, MIDDLE, BOTTOM, UTILITY）
-pub fn resolve_position(lane: Option<&str>, role: Option<&str>) -> Option<String> {
-    let lane = lane?.trim();
-    if lane.is_empty() || lane.eq_ignore_ascii_case("NONE") {
-        return None;
-    }
-    let role = role.map(|r| r.trim()).unwrap_or("");
+/// 判断是否为具备分路的召唤师峡谷类 5v5 模式
+pub fn is_laned_mode(queue_id: i32) -> bool {
+    matches!(
+        queue_id,
+        400 | 420
+            | 430
+            | 440
+            | 480
+            | 490
+            | 700
+            | 800
+            | 810
+            | 820
+            | 830
+            | 840
+            | 850
+            | 1300
+            | 1400
+            | 1900
+    )
+}
 
-    let lane_upper = lane.to_ascii_uppercase();
-    let role_upper = role.to_ascii_uppercase();
-
-    match lane_upper.as_str() {
-        "TOP" => Some("TOP".to_string()),
-        "JUNGLE" => Some("JUNGLE".to_string()),
-        "MIDDLE" | "MID" => Some("MIDDLE".to_string()),
-        "BOTTOM" | "BOT" => {
-            if role_upper.contains("SUPPORT") {
-                Some("UTILITY".to_string())
-            } else {
-                Some("BOTTOM".to_string())
-            }
-        }
+/// 根据官方分路任务/专属装备 ID 解析分路（TOP / MIDDLE / BOTTOM / UTILITY / JUNGLE）
+pub fn resolve_role_bound_item_position(item_id: i32) -> Option<&'static str> {
+    match item_id {
+        // 上路任务与奖励道具（1090 任务: 上路, 1200 上路任务, 1220 解封的传送/上路奖励, 1221, 1222）
+        1090 | 1200 | 1220 | 1221 | 1222 => Some("TOP"),
+        // 中路任务与奖励道具（1091 任务: 中路, 1201 中路任务, 1206 中路奖励）
+        1091 | 1201 | 1206 => Some("MIDDLE"),
+        // 下路任务与奖励道具（1092 任务: 下路, 1202 下路任务, 1207 下路奖励）
+        1092 | 1202 | 1207 => Some("BOTTOM"),
+        // 辅助任务与奖励道具（1093 任务: 辅助, 1203 辅助任务, 1208 辅助奖励）
+        1093 | 1203 | 1208 => Some("UTILITY"),
+        // 打野任务与奖励道具（1094 任务: 打野, 1204 打野任务, 1205/1209/1210/1211 打野升级幼体）
+        1094 | 1204 | 1205 | 1209 | 1210 | 1211 => Some("JUNGLE"),
         _ => None,
     }
+}
+
+/// 判断是否为辅助装备
+pub fn is_support_item(item_id: i32) -> bool {
+    matches!(item_id, 3850..=3871 | 3876..=3884)
+}
+
+/// 判断是否为打野专属装备/幼体
+pub fn is_jungle_item(item_id: i32) -> bool {
+    matches!(item_id, 1101..=1103)
+}
+
+/// 将 LCU 的 lane 和 role 推导为标准 5 峡谷位置（TOP, JUNGLE, MIDDLE, BOTTOM, UTILITY）
+pub fn resolve_position(lane: Option<&str>, role: Option<&str>) -> Option<String> {
+    let lane_clean = lane.map(|l| l.trim()).unwrap_or("");
+    let role_clean = role.map(|r| r.trim()).unwrap_or("");
+
+    let lane_upper = lane_clean.to_ascii_uppercase();
+    let role_upper = role_clean.to_ascii_uppercase();
+
+    // 1. 如果角色明确为辅助（SUPPORT / DUO_SUPPORT），不论 lane 是 BOTTOM 还是 NONE / 空，均归为 UTILITY
+    if role_upper.contains("SUPPORT") {
+        return Some("UTILITY".to_string());
+    }
+
+    // 2. 如果 lane 有具体值且不是 NONE
+    if !lane_upper.is_empty() && lane_upper != "NONE" {
+        match lane_upper.as_str() {
+            "TOP" => return Some("TOP".to_string()),
+            "JUNGLE" => return Some("JUNGLE".to_string()),
+            "MIDDLE" | "MID" => return Some("MIDDLE".to_string()),
+            "BOTTOM" | "BOT" => {
+                if role_upper.contains("SUPPORT") {
+                    return Some("UTILITY".to_string());
+                } else {
+                    return Some("BOTTOM".to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 3. 当 lane 为 NONE 或空时，从 role 进一步兜底
+    if role_upper.contains("CARRY") || role_upper.contains("DUO") {
+        return Some("BOTTOM".to_string());
+    }
+
+    None
 }
 
 /// 归一化 SGP teamPosition
@@ -291,10 +357,42 @@ impl LcuMatchGame {
         let augment_ids = extract_augment_ids(stats);
         let (augment_icon_urls, augment_names) = resolve_augment_details(&augment_ids, assets);
 
-        let position = participant
-            .timeline
-            .as_ref()
-            .and_then(|t| resolve_position(t.lane.as_deref(), t.role.as_deref()));
+        let position = if !is_laned_mode(self.queue_id) {
+            // 大乱斗（450/2400/2450）、斗魂竞技场（1700）等娱乐模式无分路
+            None
+        } else {
+            // 1. 优先通过官方分路任务/专属装备 (roleBoundItem) 判定（最权威，彻底解决匹配/自选模式分路缺失与 timeline 误判）
+            stats
+                .role_bound_item
+                .and_then(resolve_role_bound_item_position)
+                .map(|pos| pos.to_string())
+                // 2. 检查装备栏 (item0~item6) 是否含有专属分路任务装备
+                .or_else(|| {
+                    item_ids
+                        .iter()
+                        .find_map(|&id| resolve_role_bound_item_position(id))
+                        .map(|pos| pos.to_string())
+                })
+                // 3. 惩戒技能（Smite, ID 11）必定为打野
+                .or_else(|| {
+                    if participant.spell1_id == 11 || participant.spell2_id == 11 {
+                        Some("JUNGLE".to_string())
+                    } else if item_ids.iter().any(|&id| is_support_item(id)) {
+                        Some("UTILITY".to_string())
+                    } else if item_ids.iter().any(|&id| is_jungle_item(id)) {
+                        Some("JUNGLE".to_string())
+                    } else {
+                        None
+                    }
+                })
+                // 4. LCU timeline (lane / role) 解析
+                .or_else(|| {
+                    participant
+                        .timeline
+                        .as_ref()
+                        .and_then(|t| resolve_position(t.lane.as_deref(), t.role.as_deref()))
+                })
+        };
 
         Some(MatchDisplay {
             queue_id: self.queue_id,
@@ -331,6 +429,7 @@ impl LcuMatchGame {
             augment_icon_urls,
             augment_names,
             position,
+            role_bound_item: stats.role_bound_item,
         })
     }
 }
@@ -836,8 +935,39 @@ pub async fn get_match_history_sgp(
             .filter_map(|id| assets.items.get(id).cloned())
             .collect();
 
-        let position =
-            normalize_sgp_position(participant.get("teamPosition").and_then(|v| v.as_str()))
+        let role_bound_item = stats
+            .get("roleBoundItem")
+            .or_else(|| participant.get("roleBoundItem"))
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32);
+
+        let position = if !is_laned_mode(queue_id) {
+            // 大乱斗（450/2400/2450）、斗魂竞技场（1700）等娱乐模式无分路
+            None
+        } else {
+            role_bound_item
+                .and_then(resolve_role_bound_item_position)
+                .map(|pos| pos.to_string())
+                .or_else(|| {
+                    item_ids
+                        .iter()
+                        .find_map(|&id| resolve_role_bound_item_position(id))
+                        .map(|pos| pos.to_string())
+                })
+                .or_else(|| {
+                    if spell1_id == 11 || spell2_id == 11 {
+                        Some("JUNGLE".to_string())
+                    } else if item_ids.iter().any(|&id| is_support_item(id)) {
+                        Some("UTILITY".to_string())
+                    } else if item_ids.iter().any(|&id| is_jungle_item(id)) {
+                        Some("JUNGLE".to_string())
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    normalize_sgp_position(participant.get("teamPosition").and_then(|v| v.as_str()))
+                })
                 .or_else(|| {
                     normalize_sgp_position(
                         participant.get("selectedPosition").and_then(|v| v.as_str()),
@@ -853,7 +983,8 @@ pub async fn get_match_history_sgp(
                         .and_then(|t| t.get("role"))
                         .and_then(|v| v.as_str());
                     resolve_position(lane, role)
-                });
+                })
+        };
 
         displays.push(MatchDisplay {
             queue_id,
@@ -890,6 +1021,7 @@ pub async fn get_match_history_sgp(
             augment_icon_urls,
             augment_names,
             position,
+            role_bound_item,
         });
     }
 
@@ -1382,6 +1514,23 @@ mod tests {
             resolve_position(Some("BOT"), Some("SUPPORT")),
             Some("UTILITY".to_string())
         );
+        // 关键场景：LCU 中排位/匹配的大量辅助玩家 lane 为 NONE 但 role 为 SUPPORT
+        assert_eq!(
+            resolve_position(Some("NONE"), Some("SUPPORT")),
+            Some("UTILITY".to_string())
+        );
+        assert_eq!(
+            resolve_position(Some(""), Some("SUPPORT")),
+            Some("UTILITY".to_string())
+        );
+        assert_eq!(
+            resolve_position(Some("NONE"), Some("DUO_SUPPORT")),
+            Some("UTILITY".to_string())
+        );
+        assert_eq!(
+            resolve_position(Some("NONE"), Some("DUO_CARRY")),
+            Some("BOTTOM".to_string())
+        );
         assert_eq!(resolve_position(Some("NONE"), Some("NONE")), None);
         assert_eq!(resolve_position(None, None), None);
         assert_eq!(resolve_position(Some(""), Some("")), None);
@@ -1424,5 +1573,95 @@ mod tests {
         });
         let d = game.to_display(&GameDataAssets::default()).unwrap();
         assert_eq!(d.position, Some("UTILITY".to_string()));
+    }
+
+    #[test]
+    fn to_display_extracts_support_when_lane_is_none() {
+        let mut game = sample_game(420);
+        game.participants[0].timeline = Some(LcuParticipantTimeline {
+            lane: Some("NONE".into()),
+            role: Some("SUPPORT".into()),
+        });
+        let d = game.to_display(&GameDataAssets::default()).unwrap();
+        assert_eq!(d.position, Some("UTILITY".to_string()));
+    }
+
+    #[test]
+    fn to_display_extracts_jungle_from_smite_spell() {
+        let mut game = sample_game(420);
+        game.participants[0].spell1_id = 11; // Smite
+        game.participants[0].timeline = Some(LcuParticipantTimeline {
+            lane: Some("NONE".into()),
+            role: Some("NONE".into()),
+        });
+        let d = game.to_display(&GameDataAssets::default()).unwrap();
+        assert_eq!(d.position, Some("JUNGLE".to_string()));
+    }
+
+    #[test]
+    fn to_display_returns_none_position_for_aram_and_entertainment_modes() {
+        // 极地大乱斗 450
+        let mut game_aram = sample_game(450);
+        game_aram.participants[0].timeline = Some(LcuParticipantTimeline {
+            lane: Some("TOP".into()),
+            role: Some("SOLO".into()),
+        });
+        let d_aram = game_aram.to_display(&GameDataAssets::default()).unwrap();
+        assert_eq!(d_aram.position, None);
+
+        // 海克斯大乱斗 2400
+        let mut game_hex = sample_game(2400);
+        game_hex.participants[0].timeline = Some(LcuParticipantTimeline {
+            lane: Some("BOTTOM".into()),
+            role: Some("SUPPORT".into()),
+        });
+        let d_hex = game_hex.to_display(&GameDataAssets::default()).unwrap();
+        assert_eq!(d_hex.position, None);
+    }
+
+    #[test]
+    fn resolve_role_bound_item_position_maps_all_classes() {
+        assert_eq!(resolve_role_bound_item_position(1090), Some("TOP"));
+        assert_eq!(resolve_role_bound_item_position(1200), Some("TOP"));
+        assert_eq!(resolve_role_bound_item_position(1220), Some("TOP"));
+        assert_eq!(resolve_role_bound_item_position(1091), Some("MIDDLE"));
+        assert_eq!(resolve_role_bound_item_position(1206), Some("MIDDLE"));
+        assert_eq!(resolve_role_bound_item_position(1092), Some("BOTTOM"));
+        assert_eq!(resolve_role_bound_item_position(1207), Some("BOTTOM"));
+        assert_eq!(resolve_role_bound_item_position(1093), Some("UTILITY"));
+        assert_eq!(resolve_role_bound_item_position(1208), Some("UTILITY"));
+        assert_eq!(resolve_role_bound_item_position(1094), Some("JUNGLE"));
+        assert_eq!(resolve_role_bound_item_position(1209), Some("JUNGLE"));
+        assert_eq!(resolve_role_bound_item_position(0), None);
+        assert_eq!(resolve_role_bound_item_position(9999), None);
+    }
+
+    #[test]
+    fn to_display_prioritizes_role_bound_item_over_erroneous_timeline() {
+        let mut game = sample_game(430); // 430 匹配模式
+        game.participants[0].champion_id = 68; // 兰博
+        game.participants[0].stats.role_bound_item = Some(1220); // 官方上路任务道具/奖励
+                                                                 // 关键复现场景：Riot 算法赛后将兰博误标为 lane: NONE, role: SUPPORT
+        game.participants[0].timeline = Some(LcuParticipantTimeline {
+            lane: Some("NONE".into()),
+            role: Some("SUPPORT".into()),
+        });
+        let d = game.to_display(&GameDataAssets::default()).unwrap();
+        // 必须优先按专属任务道具 1220 正确推导为 TOP，而非被错误的 SUPPORT 误导为 UTILITY
+        assert_eq!(d.position, Some("TOP".to_string()));
+        assert_eq!(d.role_bound_item, Some(1220));
+    }
+
+    #[test]
+    fn to_display_detects_role_bound_item_in_item_ids() {
+        let mut game = sample_game(430);
+        game.participants[0].champion_id = 517; // 塞拉斯
+        game.participants[0].stats.item0 = 1206; // 中路任务奖励在装备栏中
+        game.participants[0].timeline = Some(LcuParticipantTimeline {
+            lane: Some("NONE".into()),
+            role: Some("NONE".into()),
+        });
+        let d = game.to_display(&GameDataAssets::default()).unwrap();
+        assert_eq!(d.position, Some("MIDDLE".to_string()));
     }
 }

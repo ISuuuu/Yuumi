@@ -3,7 +3,8 @@ import { inject, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import LcuImage from "../LcuImage.vue";
 import ReplayButton from "../ReplayButton.vue";
-import type { GameDetail } from "../../types/search";
+import RankedIcon from "../RankedIcon.vue";
+import type { GameDetail, ParticipantRankInfo } from "../../types/search";
 import type { SummonerDisplay } from "../../api/lcu";
 import { getQueueName } from "../../utils/queueName";
 
@@ -11,7 +12,7 @@ defineProps<{
   details: GameDetail | null;
   loading: boolean;
   queueId: number | null;
-  participantRanks: Record<string, string>;
+  participantRanks: Record<string, ParticipantRankInfo | string>;
   participantPrivacies?: Record<string, boolean>;
   myPuuid?: string;
 }>();
@@ -22,6 +23,14 @@ const emit = defineEmits<{
 }>();
 
 const { t, te } = useI18n();
+
+function getRankInfo(rank: ParticipantRankInfo | string | undefined): { tier: string; text: string } | null {
+  if (!rank) return null;
+  if (typeof rank === "string") {
+    return { tier: "", text: rank };
+  }
+  return { tier: rank.tier || "", text: rank.rankText || "" };
+}
 
 const navigateCareerPayload = inject<
   Ref<{ puuid: string; summoner?: SummonerDisplay } | null>
@@ -265,11 +274,17 @@ function queueName(queueId: number, backendName: string): string {
                   </svg>
                 </span>
                 <span
-                  v-if="participantRanks[p.puuid]"
+                  v-if="getRankInfo(participantRanks[p.puuid])"
                   class="row-rank-badge"
-                  :title="`段位: ${participantRanks[p.puuid]}`"
+                  :title="`段位: ${getRankInfo(participantRanks[p.puuid])!.text}`"
                 >
-                  {{ participantRanks[p.puuid] }}
+                  <RankedIcon
+                    v-if="getRankInfo(participantRanks[p.puuid])!.tier"
+                    :tier="getRankInfo(participantRanks[p.puuid])!.tier"
+                    :size="13"
+                    class="row-rank-icon"
+                  />
+                  <span>{{ getRankInfo(participantRanks[p.puuid])!.text }}</span>
                 </span>
               </div>
 
@@ -711,7 +726,9 @@ function queueName(queueId: number, backendName: string): string {
 }
 
 .row-rank-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 10px;
   line-height: 1.2;
   color: var(--primary-color);
@@ -720,6 +737,10 @@ function queueName(queueId: number, backendName: string): string {
   border-radius: 4px;
   font-weight: 500;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.row-rank-icon {
   flex-shrink: 0;
 }
 

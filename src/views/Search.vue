@@ -36,7 +36,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useToast } from "../composables/useToast";
 import { runWithConcurrency } from "../utils/runWithConcurrency";
-import type { GameDetail, GameDetailPlayer } from "../types/search";
+import type { GameDetail, GameDetailPlayer, ParticipantRankInfo } from "../types/search";
 
 const store = useLcuStore();
 const { t } = useI18n();
@@ -110,7 +110,7 @@ function searchPlayerBySummonerId(summonerId: number, displayName: string) {
 const selectedGameId = ref<number | null>(null);
 const selectedGame = ref<MatchDetail | null>(null);
 const gameLoading = ref(false);
-const participantRanks = ref<Record<string, string>>({});
+const participantRanks = ref<Record<string, ParticipantRankInfo>>({});
 const participantPrivacies = ref<Record<string, boolean>>({});
 
 const appConfig = ref<AppConfig | null>(null);
@@ -140,7 +140,7 @@ interface CacheEntry<T> {
   ts: number;
 }
 const gameDetailCache = new Map<number, CacheEntry<MatchDetail>>();
-const rankCache = new Map<string, CacheEntry<string>>();
+const rankCache = new Map<string, CacheEntry<ParticipantRankInfo>>();
 const privacyCache = new Map<string, CacheEntry<boolean>>();
 
 function cacheGet<K, T>(
@@ -721,7 +721,7 @@ async function loadRanksInBackground(g: MatchDetail, requestId: number) {
   }
   if (playerPuuids.length === 0) return;
 
-  const rankResults: Record<string, string> = {};
+  const rankResults: Record<string, ParticipantRankInfo> = {};
 
   // 并发拉取段位数据（命中缓存则直接复用），限流并发避免请求风暴
   await runWithConcurrency(playerPuuids, 3, async (puuid) => {
@@ -737,23 +737,32 @@ async function loadRanksInBackground(g: MatchDetail, requestId: number) {
       );
       if (rResp.success && rResp.data?.queues) {
         const queues = rResp.data.queues;
-        // 优先单双排，其次灵活排位
+        // 优先单双排，其次灵活排位（参考对局信息的段位取值）
         const solo = queues.find(
           (q) => q.queueType === "RANKED_SOLO_5x5",
         );
         const flex = queues.find(
           (q) => q.queueType === "RANKED_FLEX_SR",
         );
-        const activeQueue = solo || flex;
-        if (activeQueue && activeQueue.tier && activeQueue.tier !== "NONE") {
+        const hasSoloRank = Boolean(
+          solo?.tier && solo.tier !== "NONE" && solo.tier !== "UNRANKED",
+        );
+        const hasFlexRank = Boolean(
+          flex?.tier && flex.tier !== "NONE" && flex.tier !== "UNRANKED",
+        );
+        const activeQueue = hasSoloRank ? solo : hasFlexRank ? flex : null;
+        if (activeQueue && activeQueue.tier && activeQueue.tier !== "NONE" && activeQueue.tier !== "UNRANKED") {
           const tier = TIER_MAP[activeQueue.tier] || activeQueue.tier;
           const div =
             activeQueue.rank && activeQueue.rank !== "NA"
               ? activeQueue.rank
               : "";
-          const rankStr = `${tier}${div}`;
-          cacheSet(rankCache, puuid, rankStr);
-          rankResults[puuid] = rankStr;
+          const rankInfo: ParticipantRankInfo = {
+            tier: activeQueue.tier,
+            rankText: `${tier}${div}`,
+          };
+          cacheSet(rankCache, puuid, rankInfo);
+          rankResults[puuid] = rankInfo;
         }
       }
     } catch (e) {

@@ -594,7 +594,7 @@ export function useGamePlayerData(
           const prevLen = targetEntries[0].matches?.length ?? 0;
           const stats = computeMatchStats(filtered);
           for (const entry of targetEntries) {
-            entry.matches = filtered;
+            entry.matches = filtered.slice(0, 10);
             entry.matchHistoryHidden = false;
             entry.winCount = stats.winCount;
             entry.lossesCount = stats.lossesCount;
@@ -1034,11 +1034,15 @@ export function useGamePlayerData(
             /* ignore */
           });
       }
-      // 若复用的是当前玩家，后台异步核对最新战绩并同步
+      // 若复用的是当前玩家，后台异步核对最新战绩并同步（仅在非游戏加载/进行阶段执行）
       const isMe =
         realSummonerId === currentSummonerId.value ||
         (!!playerPuuid && playerPuuid === currentSummonerPuuid.value);
-      if (isMe) {
+      if (
+        isMe &&
+        store.gamePhase !== "GameStart" &&
+        store.gamePhase !== "InProgress"
+      ) {
         syncCurrentPlayerMatches();
       }
       return;
@@ -1211,11 +1215,11 @@ export function useGamePlayerData(
       }
 
       const filterEnabled = appConfig.value?.Functions?.GameInfoFilter ?? false;
-      const maxMatches = 50;
+      const initialMatchesCount = 10;
 
       const [rawMatches, rankedResp, masteryData] = await Promise.all([
         safeInfo.puuid
-          ? fetchMatchHistorySmart(safeInfo.puuid, 0, maxMatches - 1)
+          ? fetchMatchHistorySmart(safeInfo.puuid, 0, initialMatchesCount - 1)
               .then((res) => {
                 if (!res || res.length === 0) {
                   // 对局中只要战绩返回空，即代表隐藏战绩（或被隐私设置拦截）
@@ -1361,6 +1365,44 @@ export function useGamePlayerData(
       if (currentSummonerId.value && !isCurrentPlayer && safeInfo.puuid) {
         void backfillFateInfo(dataObj, safeInfo, matches);
       }
+
+      // 第二阶段：后台静默拉取第 11~50 局（40 场），扩充样本池用于精确统计常用位置和常用英雄
+      if (safeInfo.puuid && !matchHistoryHidden && !isProfilePrivate) {
+        void fetchMatchHistorySmart(safeInfo.puuid, 10, 49, { forceSgp: true })
+          .then((extraMatches) => {
+            const currentEntry = playerData.value[safeInfo.puuid];
+            if (!currentEntry || toRaw(currentEntry) !== dataObj) return;
+            if (!extraMatches || extraMatches.length === 0) return;
+
+            let validExtra = extraMatches;
+            if (filterEnabled && currentQueueId.value !== null) {
+              validExtra = validExtra.filter(
+                (m: MatchDisplay) => m.queueId === currentQueueId.value,
+              );
+            }
+            // 将前 10 局与后 40 局合并去重构成完整样本池
+            const combinedMap = new Map<number, MatchDisplay>();
+            for (const m of matches) combinedMap.set(m.gameId, m);
+            for (const m of validExtra) combinedMap.set(m.gameId, m);
+            const allMatches = Array.from(combinedMap.values()).sort(
+              (a, b) => b.timeStamp - a.timeStamp,
+            );
+
+            if (allMatches.length > matches.length) {
+              const fullStats = computeMatchStats(allMatches);
+              currentEntry.winCount = fullStats.winCount;
+              currentEntry.lossesCount = fullStats.lossesCount;
+              currentEntry.winRate = fullStats.winRate;
+              currentEntry.avgKda = fullStats.avgKda;
+              currentEntry.positions = fullStats.positions;
+              currentEntry.topChampions = fullStats.topChampions;
+              debouncedSavePlayerData();
+            }
+          })
+          .catch(() => {
+            /* ignore background extra fetch failure */
+          });
+      }
     } catch (err) {
       const existingInfo =
         playerData.value[cellId]?.info ||
@@ -1408,7 +1450,13 @@ export function useGamePlayerData(
         try {
           const savedMap = await getSavedPlayersMapCached();
           targetSaved = savedMap[safeInfo.puuid];
-          if (
+          if (targetSaved?.encounteredGameIds && targetSaved.encounteredGameIds.length > 0) {
+            for (const gid of targetSaved.encounteredGameIds) {
+              if (!candidateIds.includes(gid)) {
+                candidateIds.push(gid);
+              }
+            }
+          } else if (
             targetSaved?.lastEncounteredGameId &&
             !candidateIds.includes(targetSaved.lastEncounteredGameId)
           ) {
@@ -1773,10 +1821,10 @@ export function useGamePlayerData(
         championId: resolvedChampId,
         teamParticipantId: resolvedTeamParticipantId ?? p.teamParticipantId,
         partyId: resolvedTeamParticipantId ?? p.partyId,
-        summonerId: p.summonerId,
-        puuid: p.puuid,
-        gameName: p.gameName,
-        tagLine: p.tagLine,
+        summonerId: p.summonerId || snap?.summonerId,
+        puuid: p.puuid || snap?.puuid,
+        gameName: p.gameName || snap?.gameName,
+        tagLine: p.tagLine || snap?.tagLine,
         profileIconId,
         displayName: resolvedName,
         bot: Boolean(p.bot || p.isBot),
@@ -2054,10 +2102,13 @@ export function useGamePlayerData(
       if (liveGameId) {
         const savedId = Number(localStorage.getItem("yuumi_last_game_id")) || 0;
         // 检测到新真实 gameId（与之前保存的 savedId 或已记录的 currentGameId 不一致）：
-        // 彻底清空上一局残留的所有旧数据，并清除 localStorage 保留，严格防范跨局幽灵继承
+        // 若经历过本局选人阶段（champSelectTeamSnapshot 有队员），我方 5 人数据已在选人阶段完整就绪，严禁清空！
+        // 仅在未经历选人阶段（直连进游戏、大乱斗或游戏中途中断重连）且 gameId 变化时，才清空上一局残留
+        const hasChampSelectSnapshot = champSelectTeamSnapshot.value.length > 0;
         const isNewGame =
-          (savedId > 0 && savedId !== liveGameId) ||
-          (currentGameId.value !== null && currentGameId.value !== liveGameId);
+          !hasChampSelectSnapshot &&
+          ((savedId > 0 && savedId !== liveGameId) ||
+            (currentGameId.value !== null && currentGameId.value !== liveGameId));
         if (isNewGame) {
           console.debug(
             `[GamePlayerData] 检测到全新对局 gameId=${liveGameId} (上一局 savedId=${savedId}, curId=${currentGameId.value})，彻底清空上一局数据`,

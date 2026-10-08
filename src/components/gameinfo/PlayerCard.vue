@@ -223,10 +223,10 @@ const matchStatsDetail = computed(() => {
     }
   }
   const fallbackTotal = (props.playerData?.winCount || 0) + (props.playerData?.lossesCount || 0);
-  const games = validMatches > 0 ? validMatches : (matches.length > 0 ? matches.length : fallbackTotal);
-  const avgKills = games > 0 && validMatches > 0 ? (totalKills / games).toFixed(1) : null;
-  const avgDeaths = games > 0 && validMatches > 0 ? (totalDeaths / games).toFixed(1) : null;
-  const avgAssists = games > 0 && validMatches > 0 ? (totalAssists / games).toFixed(1) : null;
+  const games = fallbackTotal > 0 ? fallbackTotal : (validMatches > 0 ? validMatches : (matches.length > 0 ? matches.length : 0));
+  const avgKills = validMatches > 0 ? (totalKills / validMatches).toFixed(1) : null;
+  const avgDeaths = validMatches > 0 ? (totalDeaths / validMatches).toFixed(1) : null;
+  const avgAssists = validMatches > 0 ? (totalAssists / validMatches).toFixed(1) : null;
 
   return {
     totalGames: games,
@@ -758,10 +758,7 @@ const topChamps = computed(() => props.playerData?.topChampions || []);
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 3px 5px;
-  background: rgba(0, 0, 0, 0.025);
-  border-top: 1px dashed var(--border-color);
-  border-radius: 4px;
+  padding: 0;
 }
 .pc-bottom-left {
   display: grid;

@@ -1,5 +1,11 @@
 /** Search 页对局详情的视图模型（gameDetails 计算产物） */
 
+/** 详情页玩家段位信息 */
+export interface ParticipantRankInfo {
+  tier?: string;
+  rankText: string;
+}
+
 /** 详情页单名玩家的展示数据 */
 export interface GameDetailPlayer {
   participantId: number;

@@ -117,6 +117,113 @@ export function getShortPositionName(pos?: string | null): string {
 }
 
 /**
+ * 判断是否为辅助装备
+ */
+export function isSupportItemId(itemId: number): boolean {
+  return (itemId >= 3850 && itemId <= 3871) || (itemId >= 3876 && itemId <= 3884);
+}
+
+/**
+ * 判断是否为打野装备
+ */
+export function isJungleItemId(itemId: number): boolean {
+  return itemId >= 1101 && itemId <= 1103;
+}
+
+/**
+ * 判断是否为具备分路的召唤师峡谷类 5v5 模式
+ */
+export function isLanedQueue(queueId?: number | null): boolean {
+  if (queueId === undefined || queueId === null) return true;
+  return [400, 420, 430, 440, 480, 490, 700, 800, 810, 820, 830, 840, 850, 1300, 1400, 1900].includes(queueId);
+}
+
+/**
+ * 官方分路任务/专属装备 ID 解析分路（TOP / MIDDLE / BOTTOM / UTILITY / JUNGLE）
+ */
+export function resolveRoleBoundItemId(itemId: number): PositionKey | null {
+  switch (itemId) {
+    // 上路任务与奖励道具（1090 任务: 上路, 1200 上路任务, 1220 解封的传送/上路奖励, 1221, 1222）
+    case 1090:
+    case 1200:
+    case 1220:
+    case 1221:
+    case 1222:
+      return "TOP";
+    // 中路任务与奖励道具（1091 任务: 中路, 1201 中路任务, 1206 中路奖励）
+    case 1091:
+    case 1201:
+    case 1206:
+      return "MIDDLE";
+    // 下路任务与奖励道具（1092 任务: 下路, 1202 下路任务, 1207 下路奖励）
+    case 1092:
+    case 1202:
+    case 1207:
+      return "BOTTOM";
+    // 辅助任务与奖励道具（1093 任务: 辅助, 1203 辅助任务, 1208 辅助奖励）
+    case 1093:
+    case 1203:
+    case 1208:
+      return "UTILITY";
+    // 打野任务与奖励道具（1094 任务: 打野, 1204 打野任务, 1205/1209/1210/1211 打野升级幼体）
+    case 1094:
+    case 1204:
+    case 1205:
+    case 1209:
+    case 1210:
+    case 1211:
+      return "JUNGLE";
+    default:
+      return null;
+  }
+}
+
+/**
+ * 兜底从 MatchDisplay 尝试推导/规范化位置（针对旧快照或缺少 position 字段的对局）
+ */
+export function inferMatchPosition(m: MatchDisplay): PositionKey | null {
+  // 1. 大乱斗（450 / 2400 / 2450）、斗魂竞技场（1700）等娱乐模式全员无分路，绝不分配位置
+  if (!isLanedQueue(m.queueId)) {
+    return null;
+  }
+
+  // 2. 官方分路专属装备字段 (roleBoundItem) - 最权威直接匹配
+  if (m.roleBoundItem) {
+    const rolePos = resolveRoleBoundItemId(m.roleBoundItem);
+    if (rolePos) return rolePos;
+  }
+
+  // 3. 装备栏中若包含专属任务/奖励装备
+  if (m.itemIds && m.itemIds.length > 0) {
+    for (const id of m.itemIds) {
+      const pos = resolveRoleBoundItemId(id);
+      if (pos) return pos;
+    }
+  }
+
+  // 4. 已有规范化位置
+  if (m.position) {
+    const norm = normalizePosition(m.position);
+    if (norm) return norm;
+  }
+
+  // 5. 召唤师技能惩戒 (Smite, ID 11) -> 必定打野
+  if (m.spell1Id === 11 || m.spell2Id === 11) {
+    return "JUNGLE";
+  }
+  // 6. 装备中存在辅助装备 -> 辅助
+  if (m.itemIds && m.itemIds.some(isSupportItemId)) {
+    return "UTILITY";
+  }
+  // 7. 装备中存在打野装备 -> 打野
+  if (m.itemIds && m.itemIds.some(isJungleItemId)) {
+    return "JUNGLE";
+  }
+
+  return null;
+}
+
+/**
  * 统计近期对局中的位置分布占比
  */
 export function computeAggregatedPositions(
@@ -137,7 +244,7 @@ export function computeAggregatedPositions(
   for (const m of matches) {
     // 忽略重开局
     if (m.remake) continue;
-    const pos = normalizePosition(m.position);
+    const pos = inferMatchPosition(m);
     if (pos && counts[pos] !== undefined) {
       counts[pos]++;
       totalValid++;

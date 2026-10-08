@@ -411,9 +411,11 @@ pub struct SavedPlayerMarker {
     pub encounter_count: i32,
     pub last_encountered_game_id: Option<i64>,
     pub last_met_at: Option<i64>,
+    #[serde(default)]
+    pub encountered_game_ids: Vec<i64>,
 }
 
-/// 获取全部保存玩家的精简映射：puuid → 标记信息（tag + 相遇次数 + 最近相遇对局 + 最近相遇时间）
+/// 获取全部保存玩家的精简映射：puuid → 标记信息（tag + 相遇次数 + 最近相遇对局 + 最近相遇时间 + 所有相遇对局ID列表）
 #[tauri::command]
 pub async fn get_saved_players_map(
     app_state: tauri::State<'_, AppState>,
@@ -432,13 +434,23 @@ pub async fn get_saved_players_map(
                         (SELECT eg.game_id FROM encountered_games eg
                          WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid
                          ORDER BY eg.update_at DESC LIMIT 1),
-                        sp.last_met_at
+                        sp.last_met_at,
+                        (SELECT GROUP_CONCAT(DISTINCT eg.game_id) FROM encountered_games eg
+                         WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid)
                  FROM saved_players sp WHERE sp.self_puuid = ?1",
             )
             .map_err(|e| e.to_string())?;
         let mut map = HashMap::new();
         let rows = stmt
             .query_map(params![self_puuid], |r| {
+                let game_ids_str: Option<String> = r.get(5)?;
+                let encountered_game_ids = match game_ids_str {
+                    Some(s) => s
+                        .split(',')
+                        .filter_map(|id_str| id_str.trim().parse::<i64>().ok())
+                        .collect(),
+                    None => Vec::new(),
+                };
                 Ok((
                     r.get::<_, String>(0)?,
                     SavedPlayerMarker {
@@ -446,6 +458,7 @@ pub async fn get_saved_players_map(
                         encounter_count: r.get::<_, i32>(2).unwrap_or(1),
                         last_encountered_game_id: r.get(3)?,
                         last_met_at: r.get(4)?,
+                        encountered_game_ids,
                     },
                 ))
             })

@@ -747,7 +747,8 @@
     "all": "All",
     "victory": "Victory",
     "defeat": "Defeat",
-    "gameId": "Game ID"
+    "gameId": "Game ID",
+    "positions": "Preferred Positions"
   },
   "search": {
     "searchPlaceholder": "Enter summoner name to search...",

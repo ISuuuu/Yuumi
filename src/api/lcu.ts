@@ -147,6 +147,7 @@ export interface MatchDisplay {
   augmentIconUrls: string[];
   augmentNames: string[];
   position?: string | null;
+  roleBoundItem?: number | null;
 }
 
 /** 获取当前召唤师信息（Rust 解析层清洗后，404 时自动重试） */
@@ -246,8 +247,9 @@ export async function fetchMatchHistorySmart(
   const isHomePage = begIndex === 0;
 
   // 1. 发起 LCU 请求
+  let lcuError: unknown = null;
   const lcuPromise = fetchMatchHistory(puuid, begIndex, endIndex).catch((e) => {
-    console.warn(`[fetchMatchHistorySmart] LCU 拉取战绩失败 (puuid: ${puuid}):`, e);
+    lcuError = e;
     return [] as MatchDisplay[];
   });
 
@@ -256,9 +258,8 @@ export async function fetchMatchHistorySmart(
     return lcuPromise;
   }
 
-  // 2. 首屏拉取时：同时拉取 SGP 前 10 场实时权威对局进行合并
-  const sgpCount = Math.min(Math.max(endIndex - begIndex, 0), 9);
-  const sgpPromise = fetchMatchHistorySgp(puuid, begIndex, begIndex + sgpCount).catch((e) => {
+  // 2. 首屏拉取时：同时拉取 SGP 实时权威对局进行合并（参考 LeagueAkari 全量加载，确保获取完整官方 teamPosition 分路数据）
+  const sgpPromise = fetchMatchHistorySgp(puuid, begIndex, endIndex).catch((e) => {
     console.debug(`[fetchMatchHistorySmart] SGP 战绩获取跳过或失败:`, e);
     return [] as MatchDisplay[];
   });
@@ -266,9 +267,15 @@ export async function fetchMatchHistorySmart(
   const [lcuMatches, sgpMatches] = await Promise.all([lcuPromise, sgpPromise]);
 
   if (!sgpMatches || sgpMatches.length === 0) {
+    if (lcuError) {
+      console.warn(`[fetchMatchHistorySmart] LCU 拉取战绩失败 (puuid: ${puuid}):`, lcuError);
+    }
     return lcuMatches;
   }
   if (!lcuMatches || lcuMatches.length === 0) {
+    if (lcuError) {
+      console.debug(`[fetchMatchHistorySmart] LCU 战绩拉取跳过/失败，已使用 SGP 战绩 (puuid: ${puuid})`);
+    }
     return sgpMatches;
   }
 
@@ -588,6 +595,7 @@ export interface SavedPlayerMarker {
   encounterCount: number;
   lastEncounteredGameId?: number | null;
   lastMetAt?: number | null;
+  encounteredGameIds?: number[];
 }
 
 export interface SaveSavedPlayerInput {
