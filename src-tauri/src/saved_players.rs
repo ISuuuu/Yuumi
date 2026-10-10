@@ -354,7 +354,7 @@ pub async fn save_saved_player(
     .await
 }
 
-/// 分页查询全部保存玩家（按最近相遇/更新时间倒序）
+/// 分页查询全部保存玩家（按最近相遇/更新时间倒序，支持模糊搜索召唤师名、tagLine、自定义tag）
 /// filter: "tagged" 只看已标记玩家，"multiple" 只看多次相遇玩家，其他为全部
 #[tauri::command]
 pub async fn query_all_saved_players(
@@ -363,6 +363,7 @@ pub async fn query_all_saved_players(
     page: Option<i64>,
     page_size: Option<i64>,
     filter: Option<String>,
+    search: Option<String>,
 ) -> Result<PageResult<SavedPlayerDto>, String> {
     let page = page.unwrap_or(1).max(1);
     let page_size = page_size.unwrap_or(50).clamp(1, 200);
@@ -372,33 +373,66 @@ pub async fn query_all_saved_players(
         _ => "",
     }
     .to_string();
+    let search_kw = search.unwrap_or_default().trim().to_string();
+
     with_db(app_state.inner(), move |conn| {
-        let count: i64 = conn
-            .query_row(
-                &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{where_clause}"),
-                params![self_puuid],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT {}, \
-                 (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
-                 (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
-                 FROM saved_players WHERE self_puuid = ?1{where_clause} \
-                 ORDER BY last_met_at DESC, update_at DESC LIMIT ?2 OFFSET ?3",
-                SAVED_PLAYER_COLS
-            ))
-            .map_err(|e| e.to_string())?;
-        let data = stmt
-            .query_map(
-                params![self_puuid, page_size, (page - 1) * page_size],
-                row_to_saved_player,
-            )
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        Ok(PageResult { data, count })
+        if search_kw.is_empty() {
+            let count: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{where_clause}"),
+                    params![self_puuid],
+                    |r| r.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT {}, \
+                     (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
+                     (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
+                     FROM saved_players WHERE self_puuid = ?1{where_clause} \
+                     ORDER BY last_met_at DESC, update_at DESC LIMIT ?2 OFFSET ?3",
+                    SAVED_PLAYER_COLS
+                ))
+                .map_err(|e| e.to_string())?;
+            let data = stmt
+                .query_map(
+                    params![self_puuid, page_size, (page - 1) * page_size],
+                    row_to_saved_player,
+                )
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            Ok(PageResult { data, count })
+        } else {
+            let pattern = format!("%{}%", search_kw);
+            let search_clause = " AND (summoner_name LIKE ?2 OR COALESCE(tag_line, '') LIKE ?2 OR COALESCE(tag, '') LIKE ?2 OR (summoner_name || '#' || COALESCE(tag_line, '')) LIKE ?2)";
+            let count: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{where_clause}{search_clause}"),
+                    params![self_puuid, pattern],
+                    |r| r.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT {}, \
+                     (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
+                     (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
+                     FROM saved_players WHERE self_puuid = ?1{where_clause}{search_clause} \
+                     ORDER BY last_met_at DESC, update_at DESC LIMIT ?3 OFFSET ?4",
+                    SAVED_PLAYER_COLS
+                ))
+                .map_err(|e| e.to_string())?;
+            let data = stmt
+                .query_map(
+                    params![self_puuid, pattern, page_size, (page - 1) * page_size],
+                    row_to_saved_player,
+                )
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            Ok(PageResult { data, count })
+        }
     })
     .await
 }
@@ -789,4 +823,128 @@ pub async fn import_tagged_players_from_json_file(
         Ok(count)
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_test_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE saved_players (
+                puuid TEXT NOT NULL,
+                self_puuid TEXT NOT NULL,
+                region TEXT NOT NULL DEFAULT '',
+                rso_platform_id TEXT NOT NULL DEFAULT '',
+                tag TEXT,
+                summoner_name TEXT NOT NULL DEFAULT '',
+                profile_icon_id INTEGER NOT NULL DEFAULT 0,
+                tag_line TEXT,
+                champion_id INTEGER NOT NULL DEFAULT 0,
+                update_at INTEGER NOT NULL,
+                last_met_at INTEGER,
+                PRIMARY KEY (puuid, self_puuid, region, rso_platform_id)
+            );
+            CREATE TABLE encountered_games (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL,
+                puuid TEXT NOT NULL,
+                self_puuid TEXT NOT NULL,
+                region TEXT NOT NULL DEFAULT '',
+                rso_platform_id TEXT NOT NULL DEFAULT '',
+                queue_type TEXT NOT NULL DEFAULT '',
+                update_at INTEGER NOT NULL
+            );",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_saved_players_fuzzy_search() {
+        let conn = setup_test_db();
+        let self_puuid = "self-1";
+
+        // 插入测试数据
+        conn.execute(
+            "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
+             VALUES (?1, ?2, '', '', ?3, ?4, 1, ?5, 157, 1000, 1000)",
+            params!["p1", self_puuid, "亚索绝活", "疾风剑豪", "001"],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
+             VALUES (?1, ?2, '', '', NULL, ?3, 2, ?4, 1, 2000, 2000)",
+            params!["p2", self_puuid, "Faker", "KR1"],
+        ).unwrap();
+
+        let search_clause = " AND (summoner_name LIKE ?2 OR COALESCE(tag_line, '') LIKE ?2 OR COALESCE(tag, '') LIKE ?2 OR (summoner_name || '#' || COALESCE(tag_line, '')) LIKE ?2)";
+
+        // 1. 模糊搜索召唤师中文名字
+        let pattern = "%疾风%";
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{search_clause}"),
+                params![self_puuid, pattern],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // 2. 模糊搜索 tagLine
+        let pattern = "%001%";
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{search_clause}"),
+                params![self_puuid, pattern],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // 3. 完整 Name#TagLine 搜索
+        let pattern = "%疾风剑豪#001%";
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{search_clause}"),
+                params![self_puuid, pattern],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // 4. 自定义备注 tag 搜索
+        let pattern = "%绝活%";
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{search_clause}"),
+                params![self_puuid, pattern],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // 5. 大小写不敏感搜索 ASCII (faker -> Faker)
+        let pattern = "%faker%";
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{search_clause}"),
+                params![self_puuid, pattern],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // 6. 不匹配的关键字
+        let pattern = "%nonexistent%";
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{search_clause}"),
+                params![self_puuid, pattern],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 }

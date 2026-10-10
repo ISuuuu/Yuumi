@@ -906,6 +906,9 @@
     "loadFailed": "加载失败",
     "filterAll": "全部",
     "filterTagged": "标记玩家",
-    "filterMultiple": "多次相遇"
+    "filterMultiple": "多次相遇",
+    "searchPlaceholder": "搜索召唤师名称、TagLine 或标记...",
+    "searchEmpty": "未找到与 “{keyword}” 相关的玩家",
+    "clearSearch": "清空搜索"
   }
 }

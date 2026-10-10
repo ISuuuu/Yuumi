@@ -609,18 +609,20 @@ export interface SaveSavedPlayerInput {
   encountered?: boolean;
 }
 
-/** 分页查询保存的玩家，filter: "tagged" | "multiple" | undefined */
+/** 分页查询保存的玩家，filter: "tagged" | "multiple" | undefined, search: 模糊搜索关键字 */
 export const queryAllSavedPlayers = (
   selfPuuid: string,
   page?: number,
   pageSize?: number,
-  filter?: string
+  filter?: string,
+  search?: string,
 ) =>
   invoke<PageResult<SavedPlayer>>("query_all_saved_players", {
     selfPuuid,
     page,
     pageSize,
     filter,
+    search,
   });
 
 /** 获取全部保存玩家的精简映射：puuid → 标记信息（对局信息页徽章用） */

@@ -906,6 +906,9 @@
     "loadFailed": "Failed to load",
     "filterAll": "All",
     "filterTagged": "Tagged",
-    "filterMultiple": "Met Multiple Times"
+    "filterMultiple": "Met Multiple Times",
+    "searchPlaceholder": "Search summoner name, TagLine, or tags...",
+    "searchEmpty": "No players found matching \"{keyword}\"",
+    "clearSearch": "Clear Search"
   }
 }

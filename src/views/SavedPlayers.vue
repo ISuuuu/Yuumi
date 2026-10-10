@@ -31,6 +31,8 @@ const total = ref(0);
 const page = ref(1);
 const pageSize = 50;
 const filter = ref<"tagged" | "multiple" | "all">("all");
+const searchQuery = ref("");
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
 const selfPuuid = ref("");
 const expandedPuuid = ref<string | null>(null);
 const encounteredGames = ref<EncounteredGame[]>([]);
@@ -98,11 +100,13 @@ async function loadPlayers(append = false) {
   }
   loading.value = true;
   try {
+    const trimmed = searchQuery.value.trim();
     const res: PageResult<SavedPlayer> = await queryAllSavedPlayers(
       selfPuuid.value,
       page.value,
       pageSize,
       filter.value === "all" ? undefined : filter.value,
+      trimmed || undefined,
     );
     if (append) {
       players.value = [...players.value, ...res.data];
@@ -116,6 +120,24 @@ async function loadPlayers(append = false) {
   } finally {
     loading.value = false;
   }
+}
+
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    loadPlayers();
+  }, 300);
+}
+
+function triggerSearch() {
+  if (searchTimer) clearTimeout(searchTimer);
+  loadPlayers();
+}
+
+function clearSearch() {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchQuery.value = "";
+  loadPlayers();
 }
 
 function switchFilter(next: "tagged" | "multiple" | "all") {
@@ -285,39 +307,77 @@ watch(isConnected, (connected) => {
 
     <div v-else class="saved-players-content">
       <div class="page-header">
-        <div>
+        <div class="header-left">
           <h1 class="page-title">{{ $t("savedPlayersPage.title") }}</h1>
-          <span class="page-desc">{{ $t("savedPlayersPage.desc") }}</span>
+          <span v-if="total > 0" class="player-count-badge">{{ total }}</span>
+          <span class="desc-dot">·</span>
+          <span class="page-desc" :title="$t('savedPlayersPage.desc')">
+            {{ $t("savedPlayersPage.desc") }}
+          </span>
         </div>
         <div class="page-actions">
-          <div class="filter-group">
-            <button
-              class="filter-btn"
-              :class="{ active: filter === 'all' }"
-              @click="switchFilter('all')"
-            >
-              {{ $t("savedPlayersPage.filterAll") }}
-            </button>
-            <button
-              class="filter-btn"
-              :class="{ active: filter === 'tagged' }"
-              @click="switchFilter('tagged')"
-            >
-              {{ $t("savedPlayersPage.filterTagged") }}
-            </button>
-            <button
-              class="filter-btn"
-              :class="{ active: filter === 'multiple' }"
-              @click="switchFilter('multiple')"
-            >
-              {{ $t("savedPlayersPage.filterMultiple") }}
-            </button>
-          </div>
-          <button class="action-btn" @click="handleImport">
-            {{ $t("savedPlayersPage.import") }}
+          <button class="action-btn" :title="$t('savedPlayersPage.import')" @click="handleImport">
+            <svg class="action-btn-icon" viewBox="0 0 24 24" width="13" height="13">
+              <path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+            </svg>
+            <span>{{ $t("savedPlayersPage.import") }}</span>
           </button>
-          <button class="action-btn" @click="handleExport">
-            {{ $t("savedPlayersPage.export") }}
+          <button class="action-btn" :title="$t('savedPlayersPage.export')" @click="handleExport">
+            <svg class="action-btn-icon" viewBox="0 0 24 24" width="13" height="13">
+              <path fill="currentColor" d="M5 15v4h14v-4h2v4c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-4h2zm7-13l7 7h-4v6H9V9H5l7-7z"/>
+            </svg>
+            <span>{{ $t("savedPlayersPage.export") }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="toolbar-row">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14">
+            <path
+              fill="currentColor"
+              d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"
+            />
+          </svg>
+          <input
+            v-model="searchQuery"
+            class="search-input"
+            type="text"
+            :placeholder="$t('savedPlayersPage.searchPlaceholder')"
+            @input="onSearchInput"
+            @keyup.enter="triggerSearch"
+          />
+          <button
+            v-if="searchQuery"
+            class="search-clear-btn"
+            title="清空"
+            @click="clearSearch"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div class="filter-group">
+          <button
+            class="filter-btn"
+            :class="{ active: filter === 'all' }"
+            @click="switchFilter('all')"
+          >
+            {{ $t("savedPlayersPage.filterAll") }}
+          </button>
+          <button
+            class="filter-btn"
+            :class="{ active: filter === 'tagged' }"
+            @click="switchFilter('tagged')"
+          >
+            {{ $t("savedPlayersPage.filterTagged") }}
+          </button>
+          <button
+            class="filter-btn"
+            :class="{ active: filter === 'multiple' }"
+            @click="switchFilter('multiple')"
+          >
+            {{ $t("savedPlayersPage.filterMultiple") }}
           </button>
         </div>
       </div>
@@ -328,8 +388,18 @@ watch(isConnected, (connected) => {
       </div>
 
       <div v-else-if="players.length === 0" class="empty-container">
-        <p class="empty-tip">{{ $t("savedPlayersPage.empty") }}</p>
-        <p class="empty-hint">{{ $t("savedPlayersPage.emptyHint") }}</p>
+        <template v-if="searchQuery.trim()">
+          <p class="empty-tip">
+            {{ $t("savedPlayersPage.searchEmpty", { keyword: searchQuery.trim() }) }}
+          </p>
+          <button class="mini-btn clear-search-btn" @click="clearSearch">
+            {{ $t("savedPlayersPage.clearSearch") }}
+          </button>
+        </template>
+        <template v-else>
+          <p class="empty-tip">{{ $t("savedPlayersPage.empty") }}</p>
+          <p class="empty-hint">{{ $t("savedPlayersPage.emptyHint") }}</p>
+        </template>
       </div>
 
     <div v-else class="player-list">
@@ -463,45 +533,176 @@ watch(isConnected, (connected) => {
 
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
 }
 
 .page-title {
-  font-size: 1.4rem;
+  font-size: 1.35rem;
   font-weight: 800;
   color: var(--text-color);
-  margin: 0 0 0.4rem 0;
+  margin: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.player-count-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--primary-color-alpha-15);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color-alpha-30);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.desc-dot {
+  color: var(--text-dimmed);
+  opacity: 0.5;
+  font-weight: 700;
+  font-size: 12px;
+  user-select: none;
 }
 
 .page-desc {
-  display: block;
-  margin-top: 4px;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-dimmed);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .page-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .action-btn {
-  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   background: var(--card-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   color: var(--text-color);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 500;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
 .action-btn:hover:not(:disabled) {
   border-color: var(--primary-color);
   color: var(--primary-color);
+  background: var(--primary-color-alpha-10, rgba(0, 210, 196, 0.1));
 }
+
+.action-btn-icon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.action-btn:hover:not(:disabled) .action-btn-icon {
+  opacity: 1;
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 240px;
+  max-width: 360px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0 8px 0 10px;
+  height: 32px;
+  box-sizing: border-box;
+  transition: all 0.2s ease;
+}
+
+.search-box:focus-within {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--primary-color-alpha-15, rgba(99, 102, 241, 0.15));
+}
+
+.search-icon {
+  color: var(--text-dimmed);
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 13px;
+}
+
+.search-input::placeholder {
+  color: var(--text-dimmed);
+}
+
+.search-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: var(--border-color);
+  color: var(--text-muted);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0;
+  line-height: 1;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.search-clear-btn:hover {
+  background: var(--primary-color);
+  color: #fff;
+}
+
+.clear-search-btn {
+  margin-top: 6px;
+}
+
 
 .filter-group {
   display: flex;
