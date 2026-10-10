@@ -643,7 +643,7 @@ const displayedMatches = computed(() => {
   height: 48px;
   padding: 5px 8px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--hover-bg);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1019,7 +1019,7 @@ const displayedMatches = computed(() => {
 .mini-spinner {
   width: 22px;
   height: 22px;
-  border: 2px solid rgba(0, 0, 0, 0.06);
+  border: 2px solid var(--border-color);
   border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;

@@ -36,14 +36,17 @@ import NavigationSidebar from "./components/layout/NavigationSidebar.vue";
 
 function applyThemeMode(mode: string) {
   const root = document.documentElement;
-  if (mode === "Auto") {
-    root.removeAttribute("data-theme");
-    localStorage.setItem("yuumi_theme", "Auto");
-  } else if (mode === "Light" || mode === "Dark") {
-    root.setAttribute("data-theme", mode.toLowerCase());
-    localStorage.setItem("yuumi_theme", mode);
-  }
+  const isDark =
+    mode === "Dark" ||
+    (mode !== "Light" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches);
+  root.setAttribute("data-theme", isDark ? "dark" : "light");
+  localStorage.setItem("yuumi_theme", mode);
+  getCurrentWindow()
+    .setTheme(isDark ? "dark" : "light")
+    .catch(() => {});
 }
+provide("applyThemeMode", applyThemeMode);
 
 function applyMicaEffect(enabled: boolean) {
   const root = document.documentElement;
@@ -62,7 +65,7 @@ provide("applyMicaEffect", applyMicaEffect);
 const themeOverrides = computed<GlobalThemeOverrides>(() => {
   const customColor = appConfig.value?.Personalization?.ThemeColor
     ? toHex6(appConfig.value.Personalization.ThemeColor)
-    : "#a78bfa";
+    : "#00d2c4";
 
   const isDark = isDarkTheme.value;
 
@@ -74,21 +77,21 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => {
       borderRadius: "10px",
     },
     Card: {
-      color: "rgba(255, 255, 255, 0.15)",
-      borderColor: "rgba(255, 255, 255, 0.2)",
+      color: isDark ? "rgba(26, 38, 59, 0.75)" : "rgba(255, 255, 255, 0.75)",
+      borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)",
     },
     Tooltip: {
-      color: isDark ? "rgba(28, 28, 30, 0.95)" : "rgba(255, 255, 255, 0.95)",
+      color: isDark ? "rgba(20, 29, 46, 0.96)" : "rgba(255, 255, 255, 0.95)",
       textColor: isDark ? "#f8fafc" : "#0f172a",
       borderRadius: "8px",
     },
     Popover: {
-      color: isDark ? "rgba(28, 28, 30, 0.95)" : "rgba(255, 255, 255, 0.95)",
+      color: isDark ? "rgba(20, 29, 46, 0.96)" : "rgba(255, 255, 255, 0.95)",
       textColor: isDark ? "#f8fafc" : "#0f172a",
       borderRadius: "8px",
     },
     Dialog: {
-      color: isDark ? "rgba(28, 28, 30, 0.92)" : "rgba(255, 255, 255, 0.90)",
+      color: isDark ? "rgba(20, 29, 46, 0.96)" : "rgba(255, 255, 255, 0.90)",
       borderColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
       iconColorWarning: customColor,
       iconColorError: "#ec4899",
@@ -177,6 +180,24 @@ const isDarkTheme = computed(() => {
   if (mode === "Light") return false;
   return isSystemDark.value;
 });
+
+watch(
+  isDarkTheme,
+  (isDark) => {
+    const root = document.documentElement;
+    root.setAttribute("data-theme", isDark ? "dark" : "light");
+    getCurrentWindow()
+      .setTheme(isDark ? "dark" : "light")
+      .catch(() => {});
+    if (appConfig.value?.Personalization) {
+      updateDeathColor(
+        appConfig.value.Personalization.LightDeathsNumberColor,
+        appConfig.value.Personalization.DarkDeathsNumberColor,
+      );
+    }
+  },
+  { immediate: true },
+);
 
 // 供子组件跳转页面
 function navigateTo(page: string) {
@@ -992,7 +1013,7 @@ async function handleClose() {
 .collapse-card .n-collapse-item__content {
   padding: 20px 48px !important;
   border-top: 1px dashed var(--border-color) !important;
-  background-color: rgba(0, 0, 0, 0.015) !important;
+  background-color: var(--hover-bg) !important;
   width: 100% !important;
   box-sizing: border-box !important;
   display: flex !important;
@@ -1158,36 +1179,46 @@ async function handleClose() {
     #e2e8f0 100%
   );
   --bg-color: #f8fafc;
+  --mica-bg-tint: rgba(248, 250, 252, 0.75);
   --sidebar-bg: rgba(255, 255, 255, 0.75);
-  --card-bg: rgba(255, 255, 255, 0.7);
-  --card-bg-hover: rgba(255, 255, 255, 0.9);
-  --border-color: rgba(0, 0, 0, 0.05);
-  --border-color-hover: rgba(0, 210, 196, 0.25);
+  --card-bg: rgba(255, 255, 255, 0.75);
+  --card-bg-hover: rgba(255, 255, 255, 0.95);
+  --popover-bg: rgba(255, 255, 255, 0.98);
+  --popover-border: rgba(0, 0, 0, 0.08);
+  --border-color: rgba(0, 0, 0, 0.06);
+  --border-color-hover: rgba(0, 210, 196, 0.35);
   --hover-bg: rgba(0, 0, 0, 0.03);
   --hover-bg-strong: rgba(0, 0, 0, 0.06);
-  --titlebar-bg: rgba(255, 255, 255, 0.8);
+  --titlebar-bg: rgba(255, 255, 255, 0.85);
 
   --text-color: #0f172a;
   --text-muted: #475569;
   --text-dimmed: #64748b;
 
-  --win-color: #065f46;
-  --win-bg: rgba(57, 176, 27, 0.20);
-  --win-bg-hover: rgba(57, 176, 27, 0.32);
-  --win-border: rgba(57, 176, 27, 0.40);
-  --win-glow: rgba(57, 176, 27, 0.10);
+  --win-color: #059669;
+  --win-bg: rgba(16, 185, 129, 0.14);
+  --win-bg-hover: rgba(16, 185, 129, 0.24);
+  --win-border: rgba(16, 185, 129, 0.35);
+  --win-glow: rgba(16, 185, 129, 0.10);
 
-  --loss-color: #9f1239;
-  --loss-bg: rgba(211, 25, 12, 0.20);
-  --loss-bg-hover: rgba(211, 25, 12, 0.32);
-  --loss-border: rgba(211, 25, 12, 0.40);
-  --loss-glow: rgba(211, 25, 12, 0.10);
+  --loss-color: #e11d48;
+  --loss-bg: rgba(244, 63, 94, 0.14);
+  --loss-bg-hover: rgba(244, 63, 94, 0.24);
+  --loss-border: rgba(244, 63, 94, 0.35);
+  --loss-glow: rgba(244, 63, 94, 0.10);
+
+  --remake-color: #64748b;
+  --remake-bg: rgba(148, 163, 184, 0.14);
+  --remake-bg-hover: rgba(148, 163, 184, 0.24);
+  --remake-border: rgba(148, 163, 184, 0.30);
+
   --death-color: #f43f5e;
   --accent-color: #f59e0b;
   --accent-bg: rgba(245, 158, 11, 0.08);
   --tier-blue: #3b82f6;
   --tier-blue-bg: rgba(59, 130, 246, 0.08);
   --tier-blue-border: rgba(59, 130, 246, 0.15);
+  --gauge-track-color: #e2e8f0;
 
   --font-sans:
     'Outfit', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
@@ -1202,6 +1233,20 @@ async function handleClose() {
     0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   --glass-filter: blur(20px) saturate(190%);
 
+  /* Settings UI 亮色专用 */
+  --toggle-track-off: rgba(0, 0, 0, 0.1);
+  --toggle-slider: #ffffff;
+  --toggle-glow: 0 0 10px rgba(0, 210, 196, 0.35);
+  --segmented-bg: rgba(0, 0, 0, 0.04);
+  --card-glow-hover:
+    0 0 0 1px rgba(0, 210, 196, 0.3), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --settings-card-bg: rgba(255, 255, 255, 0.8);
+  --settings-card-bg-hover: rgba(255, 255, 255, 0.95);
+  --settings-card-border: rgba(0, 0, 0, 0.06);
+  --settings-card-border-hover: rgba(0, 210, 196, 0.5);
+  --settings-collapse-bg: rgba(243, 244, 246, 0.8);
+  --settings-separator: rgba(0, 0, 0, 0.04);
+
   /* Settings UI 亮色子行卡片变量 */
   --settings-row-bg: rgba(255, 255, 255, 0.45);
   --settings-row-bg-hover: rgba(255, 255, 255, 0.75);
@@ -1215,39 +1260,49 @@ async function handleClose() {
     135deg,
     #0b0f19 0%,
     #111827 50%,
-    #172033 100%
+    #151f32 100%
   );
   --bg-color: #0b0f19;
-  --sidebar-bg: rgba(17, 24, 39, 0.75);
-  --card-bg: rgba(30, 41, 59, 0.55);
-  --card-bg-hover: rgba(30, 41, 59, 0.75);
-  --border-color: rgba(255, 255, 255, 0.06);
-  --border-color-hover: rgba(0, 210, 196, 0.35);
-  --hover-bg: rgba(255, 255, 255, 0.04);
-  --hover-bg-strong: rgba(255, 255, 255, 0.08);
-  --titlebar-bg: rgba(11, 15, 25, 0.8);
+  --mica-bg-tint: rgba(11, 15, 25, 0.78);
+  --sidebar-bg: rgba(17, 24, 39, 0.85);
+  --card-bg: rgba(26, 38, 59, 0.70);
+  --card-bg-hover: rgba(34, 50, 77, 0.85);
+  --popover-bg: rgba(20, 29, 46, 0.96);
+  --popover-border: rgba(255, 255, 255, 0.12);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-hover: rgba(0, 210, 196, 0.45);
+  --hover-bg: rgba(255, 255, 255, 0.06);
+  --hover-bg-strong: rgba(255, 255, 255, 0.10);
+  --titlebar-bg: rgba(11, 15, 25, 0.90);
 
   --text-color: #f8fafc;
-  --text-muted: #cbd5e1;
-  --text-dimmed: #94a3b8;
+  --text-muted: #94a3b8;
+  --text-dimmed: #64748b;
 
-  --win-color: #34d399;
-  --win-bg: rgba(57, 176, 27, 0.20);
-  --win-bg-hover: rgba(57, 176, 27, 0.32);
-  --win-border: rgba(57, 176, 27, 0.40);
-  --win-glow: rgba(57, 176, 27, 0.12);
+  --win-color: #10b981;
+  --win-bg: rgba(16, 185, 129, 0.16);
+  --win-bg-hover: rgba(16, 185, 129, 0.28);
+  --win-border: rgba(16, 185, 129, 0.35);
+  --win-glow: rgba(16, 185, 129, 0.15);
 
-  --loss-color: #fb7185;
-  --loss-bg: rgba(211, 25, 12, 0.20);
-  --loss-bg-hover: rgba(211, 25, 12, 0.32);
-  --loss-border: rgba(211, 25, 12, 0.40);
-  --loss-glow: rgba(211, 25, 12, 0.12);
+  --loss-color: #f43f5e;
+  --loss-bg: rgba(244, 63, 94, 0.16);
+  --loss-bg-hover: rgba(244, 63, 94, 0.28);
+  --loss-border: rgba(244, 63, 94, 0.35);
+  --loss-glow: rgba(244, 63, 94, 0.15);
+
+  --remake-color: #94a3b8;
+  --remake-bg: rgba(148, 163, 184, 0.14);
+  --remake-bg-hover: rgba(148, 163, 184, 0.24);
+  --remake-border: rgba(148, 163, 184, 0.30);
+
   --death-color: #fb7185;
   --accent-color: #fbbf24;
-  --accent-bg: rgba(251, 191, 36, 0.12);
+  --accent-bg: rgba(251, 191, 36, 0.14);
   --tier-blue: #60a5fa;
-  --tier-blue-bg: rgba(96, 165, 250, 0.12);
+  --tier-blue-bg: rgba(96, 165, 250, 0.14);
   --tier-blue-border: rgba(96, 165, 250, 0.25);
+  --gauge-track-color: rgba(255, 255, 255, 0.12);
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-md:
@@ -1257,24 +1312,24 @@ async function handleClose() {
   --glass-filter: blur(25px) saturate(200%);
 
   /* Settings UI 暗色专用 */
-  --toggle-track-off: rgba(255, 255, 255, 0.08);
+  --toggle-track-off: rgba(255, 255, 255, 0.12);
   --toggle-slider: #ffffff;
   --toggle-glow: 0 0 14px rgba(0, 210, 196, 0.4);
   --segmented-bg: rgba(255, 255, 255, 0.05);
   --card-glow-hover:
     0 0 0 1px rgba(0, 210, 196, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
-  --settings-card-bg: rgba(24, 34, 54, 0.7);
-  --settings-card-bg-hover: rgba(30, 41, 64, 0.85);
-  --settings-card-border: rgba(255, 255, 255, 0.06);
-  --settings-card-border-hover: rgba(0, 210, 196, 0.4);
-  --settings-collapse-bg: rgba(17, 24, 39, 0.8);
-  --settings-separator: rgba(255, 255, 255, 0.04);
+  --settings-card-bg: rgba(26, 38, 59, 0.75);
+  --settings-card-bg-hover: rgba(34, 50, 77, 0.90);
+  --settings-card-border: rgba(255, 255, 255, 0.08);
+  --settings-card-border-hover: rgba(0, 210, 196, 0.45);
+  --settings-collapse-bg: rgba(17, 24, 39, 0.85);
+  --settings-separator: rgba(255, 255, 255, 0.05);
 
   /* Settings UI 暗色子行卡片变量 */
   --settings-row-bg: rgba(255, 255, 255, 0.04);
   --settings-row-bg-hover: rgba(255, 255, 255, 0.08);
-  --settings-row-border: rgba(255, 255, 255, 0.03);
-  --settings-row-border-hover: rgba(255, 255, 255, 0.08);
+  --settings-row-border: rgba(255, 255, 255, 0.06);
+  --settings-row-border-hover: rgba(255, 255, 255, 0.12);
 }
 
 [data-theme="light"] {
@@ -1351,15 +1406,21 @@ html[data-mica="true"] body {
   --titlebar-bg: #ffffff;
   --settings-row-bg: #f1f5f9;
   --settings-row-bg-hover: #e2e8f0;
+  --settings-card-bg: #ffffff;
+  --settings-card-bg-hover: #f8fafc;
+  --popover-bg: #ffffff;
   --glass-filter: none;
 }
 [data-theme="dark"]:not([data-mica="true"]) {
   --sidebar-bg: #111827;
-  --card-bg: #1e293b;
-  --card-bg-hover: #334155;
+  --card-bg: #1a263b;
+  --card-bg-hover: #22324d;
   --titlebar-bg: #0b0f19;
-  --settings-row-bg: #1e293b;
-  --settings-row-bg-hover: #334155;
+  --settings-card-bg: #1a263b;
+  --settings-card-bg-hover: #22324d;
+  --settings-row-bg: #152033;
+  --settings-row-bg-hover: #1e2c44;
+  --popover-bg: #141d2e;
   --glass-filter: none;
 }
 
@@ -1369,9 +1430,9 @@ html[data-mica="true"] body {
 .n-select-menu,
 .n-modal,
 .n-drawer {
-  background-color: var(--card-bg) !important;
+  background-color: var(--popover-bg) !important;
   color: var(--text-color) !important;
-  border: 1px solid var(--border-color) !important;
+  border: 1px solid var(--popover-border) !important;
   box-shadow: var(--shadow-lg) !important;
   transform: translateZ(0); /* 开启 GPU 硬件加速 */
 }
@@ -1439,7 +1500,7 @@ html[data-mica="true"] .n-drawer {
 }
 
 html[data-mica="true"] .app-layout {
-  background: transparent !important;
+  background: var(--mica-bg-tint) !important;
 }
 
 .main-row {

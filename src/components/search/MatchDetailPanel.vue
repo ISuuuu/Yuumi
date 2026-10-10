@@ -397,7 +397,7 @@ function queueName(queueId: number, backendName: string): string {
 .loading-spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid rgba(0, 0, 0, 0.05);
+  border: 3px solid var(--border-color);
   border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -417,7 +417,7 @@ function queueName(queueId: number, backendName: string): string {
   justify-content: space-between;
   padding: 12px 16px;
   margin: 12px 12px 0 12px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   box-shadow: var(--shadow-sm);
 }
@@ -443,7 +443,7 @@ function queueName(queueId: number, backendName: string): string {
   height: 54px;
   border-radius: 6px;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
@@ -859,10 +859,10 @@ function queueName(queueId: number, backendName: string): string {
 .row-item-slot {
   width: 28px;
   height: 28px;
-  background: rgba(0, 0, 0, 0.03);
+  background: var(--hover-bg);
   border-radius: 3px;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-color);
 }
 
 .row-item-img {

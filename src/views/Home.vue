@@ -374,7 +374,7 @@ watch(
 .path-radio.checked {
   border-color: var(--primary-color);
   background: var(--primary-color);
-  box-shadow: inset 0 0 0 3px white;
+  box-shadow: inset 0 0 0 3px var(--card-bg, #ffffff);
 }
 .path-text {
   display: flex;
@@ -425,7 +425,7 @@ watch(
 .ring-dot {
   width: 14px;
   height: 14px;
-  border: 2.5px solid rgba(0, 0, 0, 0.06);
+  border: 2.5px solid var(--border-color);
   border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;

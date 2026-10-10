@@ -117,16 +117,7 @@ function resetDeathColors() {
   autoSave();
 }
 
-function applyThemeMode(mode: string) {
-  const root = document.documentElement;
-  if (mode === "Auto") {
-    root.removeAttribute("data-theme");
-    localStorage.setItem("yuumi_theme", "Auto");
-  } else if (mode === "Light" || mode === "Dark") {
-    root.setAttribute("data-theme", mode.toLowerCase());
-    localStorage.setItem("yuumi_theme", mode);
-  }
-}
+const applyThemeMode = inject<(mode: string) => void>("applyThemeMode");
 </script>
 
 <template>
@@ -166,7 +157,7 @@ function applyThemeMode(mode: string) {
         ]"
         @update:value="
           (val) => {
-            applyThemeMode(val);
+            applyThemeMode?.(val);
             autoSave();
           }
         "

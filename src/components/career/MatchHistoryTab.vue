@@ -922,7 +922,7 @@ watch(
 }
 
 .rank-table th {
-  background-color: rgba(0, 0, 0, 0.01);
+  background-color: var(--hover-bg);
   color: var(--text-muted);
   font-weight: 600;
   border-bottom: 1.5px solid var(--border-color);
@@ -1187,7 +1187,7 @@ watch(
 .pop-bar-wrap {
   flex: 1;
   height: 5px;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--hover-bg-strong, var(--border-color));
   border-radius: 2.5px;
   overflow: hidden;
 }
@@ -1262,18 +1262,15 @@ watch(
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  background: #ffffff;
-  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+  background: var(--popover-bg);
+  border: 1px solid var(--popover-border);
   border-radius: 8px;
   box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   z-index: 100;
   min-width: 130px;
   padding: 4px 0;
-}
-
-[data-theme="dark"] .queue-dropdown-menu {
-  background: #18181c;
-  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .queue-dropdown-item {
@@ -1597,10 +1594,10 @@ watch(
 .ward-slot {
   width: 28px;
   height: 28px;
-  background-color: rgba(0, 0, 0, 0.04);
+  background-color: var(--hover-bg);
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-color);
 }
 
 .item-img {

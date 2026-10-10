@@ -48,7 +48,11 @@ export function toHex6(color: string): string {
  */
 export function updateDeathColor(lightColor: string, darkColor: string) {
   const root = document.documentElement;
-  const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const dataTheme = root.getAttribute("data-theme");
+  const isDark =
+    dataTheme === "dark" ||
+    (dataTheme !== "light" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches);
   const color = toHex6(isDark ? darkColor : lightColor);
   if (color) {
     root.style.setProperty("--death-color", color);

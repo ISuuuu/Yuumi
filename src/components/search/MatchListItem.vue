@@ -47,7 +47,7 @@ function queueName(queueId: number, backendName: string): string {
   align-items: center;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--border-color);
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
   background: var(--card-bg);
@@ -102,7 +102,7 @@ function queueName(queueId: number, backendName: string): string {
   height: 36px;
   border-radius: 50%;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-color);
   margin-right: 10px;
   flex-shrink: 0;
 }

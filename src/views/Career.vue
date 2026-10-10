@@ -364,7 +364,7 @@ function refreshSummoner() {
 }
 
 .gauge-track {
-  stroke: #d9d9d9;
+  stroke: var(--gauge-track-color, #e2e8f0);
 }
 
 .gauge-progress {
@@ -466,7 +466,7 @@ function refreshSummoner() {
   height: 28px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--hover-bg);
   cursor: pointer;
   color: var(--text-muted);
   transition: all 0.2s;
@@ -474,7 +474,7 @@ function refreshSummoner() {
 }
 
 .copy-riot-id-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--hover-bg-strong);
   color: var(--text-color);
   border-color: var(--primary-color);
 }

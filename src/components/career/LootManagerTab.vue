@@ -611,7 +611,7 @@ onUnmounted(() => {
   height: 52px;
   border-radius: 10px;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--hover-bg);
   border: 1px solid var(--border-color);
   display: flex;
   align-items: center;
@@ -792,7 +792,7 @@ onUnmounted(() => {
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--border-color);
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--hover-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1042,7 +1042,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 20px;
   align-items: center;
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--hover-bg);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   padding: 10px 16px;
