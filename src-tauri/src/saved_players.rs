@@ -376,61 +376,123 @@ pub async fn query_all_saved_players(
     let search_kw = search.unwrap_or_default().trim().to_string();
 
     with_db(app_state.inner(), move |conn| {
+        let is_all = self_puuid.trim().is_empty();
         if search_kw.is_empty() {
-            let count: i64 = conn
-                .query_row(
-                    &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{where_clause}"),
-                    params![self_puuid],
-                    |r| r.get(0),
-                )
-                .map_err(|e| e.to_string())?;
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT {}, \
-                     (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
-                     (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
-                     FROM saved_players WHERE self_puuid = ?1{where_clause} \
-                     ORDER BY last_met_at DESC, update_at DESC LIMIT ?2 OFFSET ?3",
-                    SAVED_PLAYER_COLS
-                ))
-                .map_err(|e| e.to_string())?;
-            let data = stmt
-                .query_map(
-                    params![self_puuid, page_size, (page - 1) * page_size],
-                    row_to_saved_player,
-                )
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
+            let (count, data) = if is_all {
+                let count: i64 = conn
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM saved_players WHERE 1=1{where_clause}"),
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "SELECT {}, \
+                         (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
+                         (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
+                         FROM saved_players WHERE 1=1{where_clause} \
+                         ORDER BY last_met_at DESC, update_at DESC LIMIT ?1 OFFSET ?2",
+                        SAVED_PLAYER_COLS
+                    ))
+                    .map_err(|e| e.to_string())?;
+                let data = stmt
+                    .query_map(
+                        params![page_size, (page - 1) * page_size],
+                        row_to_saved_player,
+                    )
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                (count, data)
+            } else {
+                let count: i64 = conn
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{where_clause}"),
+                        params![self_puuid],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "SELECT {}, \
+                         (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
+                         (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
+                         FROM saved_players WHERE self_puuid = ?1{where_clause} \
+                         ORDER BY last_met_at DESC, update_at DESC LIMIT ?2 OFFSET ?3",
+                        SAVED_PLAYER_COLS
+                    ))
+                    .map_err(|e| e.to_string())?;
+                let data = stmt
+                    .query_map(
+                        params![self_puuid, page_size, (page - 1) * page_size],
+                        row_to_saved_player,
+                    )
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                (count, data)
+            };
             Ok(PageResult { data, count })
         } else {
             let pattern = format!("%{}%", search_kw);
-            let search_clause = " AND (summoner_name LIKE ?2 OR COALESCE(tag_line, '') LIKE ?2 OR COALESCE(tag, '') LIKE ?2 OR (summoner_name || '#' || COALESCE(tag_line, '')) LIKE ?2)";
-            let count: i64 = conn
-                .query_row(
-                    &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{where_clause}{search_clause}"),
-                    params![self_puuid, pattern],
-                    |r| r.get(0),
-                )
-                .map_err(|e| e.to_string())?;
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT {}, \
-                     (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
-                     (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
-                     FROM saved_players WHERE self_puuid = ?1{where_clause}{search_clause} \
-                     ORDER BY last_met_at DESC, update_at DESC LIMIT ?3 OFFSET ?4",
-                    SAVED_PLAYER_COLS
-                ))
-                .map_err(|e| e.to_string())?;
-            let data = stmt
-                .query_map(
-                    params![self_puuid, pattern, page_size, (page - 1) * page_size],
-                    row_to_saved_player,
-                )
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
+            let (count, data) = if is_all {
+                let search_clause = " AND (summoner_name LIKE ?1 OR COALESCE(tag_line, '') LIKE ?1 OR COALESCE(tag, '') LIKE ?1 OR (summoner_name || '#' || COALESCE(tag_line, '')) LIKE ?1)";
+                let count: i64 = conn
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM saved_players WHERE 1=1{where_clause}{search_clause}"),
+                        params![pattern],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "SELECT {}, \
+                         (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
+                         (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
+                         FROM saved_players WHERE 1=1{where_clause}{search_clause} \
+                         ORDER BY last_met_at DESC, update_at DESC LIMIT ?2 OFFSET ?3",
+                        SAVED_PLAYER_COLS
+                    ))
+                    .map_err(|e| e.to_string())?;
+                let data = stmt
+                    .query_map(
+                        params![pattern, page_size, (page - 1) * page_size],
+                        row_to_saved_player,
+                    )
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                (count, data)
+            } else {
+                let search_clause = " AND (summoner_name LIKE ?2 OR COALESCE(tag_line, '') LIKE ?2 OR COALESCE(tag, '') LIKE ?2 OR (summoner_name || '#' || COALESCE(tag_line, '')) LIKE ?2)";
+                let count: i64 = conn
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM saved_players WHERE self_puuid = ?1{where_clause}{search_clause}"),
+                        params![self_puuid, pattern],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "SELECT {}, \
+                         (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid ORDER BY eg.update_at DESC LIMIT 1), \
+                         (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = saved_players.puuid AND eg.self_puuid = saved_players.self_puuid) AS encounter_cnt \
+                         FROM saved_players WHERE self_puuid = ?1{where_clause}{search_clause} \
+                         ORDER BY last_met_at DESC, update_at DESC LIMIT ?3 OFFSET ?4",
+                        SAVED_PLAYER_COLS
+                    ))
+                    .map_err(|e| e.to_string())?;
+                let data = stmt
+                    .query_map(
+                        params![self_puuid, pattern, page_size, (page - 1) * page_size],
+                        row_to_saved_player,
+                    )
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                (count, data)
+            };
             Ok(PageResult { data, count })
         }
     })
@@ -519,52 +581,105 @@ pub async fn query_encountered_games(
     let page = page.unwrap_or(1).max(1);
     let page_size = page_size.unwrap_or(20).clamp(1, 100);
     let q = queue_type.unwrap_or_default();
+    let is_all = self_puuid.trim().is_empty();
 
     with_db(app_state.inner(), move |conn| {
-        let count: i64 = if q.is_empty() {
-            conn.query_row(
-                "SELECT COUNT(*) FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2",
-                params![self_puuid, puuid],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?
+        let (count, data) = if is_all {
+            if q.is_empty() {
+                let count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM encountered_games WHERE puuid = ?1",
+                        params![puuid],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT id, game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at FROM encountered_games WHERE puuid = ?1 ORDER BY update_at DESC LIMIT ?2 OFFSET ?3",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map(
+                        params![puuid, page_size, (page - 1) * page_size],
+                        row_to_encountered,
+                    )
+                    .map_err(|e| e.to_string())?;
+                (
+                    count,
+                    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?,
+                )
+            } else {
+                let count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM encountered_games WHERE puuid = ?1 AND queue_type = ?2",
+                        params![puuid, q],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT id, game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at FROM encountered_games WHERE puuid = ?1 AND queue_type = ?2 ORDER BY update_at DESC LIMIT ?3 OFFSET ?4",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map(
+                        params![puuid, q, page_size, (page - 1) * page_size],
+                        row_to_encountered,
+                    )
+                    .map_err(|e| e.to_string())?;
+                (
+                    count,
+                    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?,
+                )
+            }
         } else {
-            conn.query_row(
-                "SELECT COUNT(*) FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 AND queue_type = ?3",
-                params![self_puuid, puuid, q],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?
-        };
-
-        let data = if q.is_empty() {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 ORDER BY update_at DESC LIMIT ?3 OFFSET ?4",
+            if q.is_empty() {
+                let count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2",
+                        params![self_puuid, puuid],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT id, game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 ORDER BY update_at DESC LIMIT ?3 OFFSET ?4",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map(
+                        params![self_puuid, puuid, page_size, (page - 1) * page_size],
+                        row_to_encountered,
+                    )
+                    .map_err(|e| e.to_string())?;
+                (
+                    count,
+                    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?,
                 )
-                .map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map(
-                    params![self_puuid, puuid, page_size, (page - 1) * page_size],
-                    row_to_encountered,
+            } else {
+                let count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 AND queue_type = ?3",
+                        params![self_puuid, puuid, q],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT id, game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 AND queue_type = ?3 ORDER BY update_at DESC LIMIT ?4 OFFSET ?5",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map(
+                        params![self_puuid, puuid, q, page_size, (page - 1) * page_size],
+                        row_to_encountered,
+                    )
+                    .map_err(|e| e.to_string())?;
+                (
+                    count,
+                    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?,
                 )
-                .map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?
-        } else {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at FROM encountered_games WHERE self_puuid = ?1 AND puuid = ?2 AND queue_type = ?3 ORDER BY update_at DESC LIMIT ?4 OFFSET ?5",
-                )
-                .map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map(
-                    params![self_puuid, puuid, q, page_size, (page - 1) * page_size],
-                    row_to_encountered,
-                )
-                .map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?
+            }
         };
         Ok(PageResult { data, count })
     })
@@ -579,16 +694,26 @@ pub async fn delete_saved_player(
     self_puuid: String,
 ) -> Result<(), String> {
     with_db(app_state.inner(), move |conn| {
-        conn.execute(
-            "DELETE FROM saved_players WHERE puuid = ?1 AND self_puuid = ?2",
-            params![puuid, self_puuid],
-        )
-        .map_err(|e| e.to_string())?;
-        conn.execute(
-            "DELETE FROM encountered_games WHERE puuid = ?1 AND self_puuid = ?2",
-            params![puuid, self_puuid],
-        )
-        .map_err(|e| e.to_string())?;
+        if self_puuid.trim().is_empty() {
+            conn.execute("DELETE FROM saved_players WHERE puuid = ?1", params![puuid])
+                .map_err(|e| e.to_string())?;
+            conn.execute(
+                "DELETE FROM encountered_games WHERE puuid = ?1",
+                params![puuid],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            conn.execute(
+                "DELETE FROM saved_players WHERE puuid = ?1 AND self_puuid = ?2",
+                params![puuid, self_puuid],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute(
+                "DELETE FROM encountered_games WHERE puuid = ?1 AND self_puuid = ?2",
+                params![puuid, self_puuid],
+            )
+            .map_err(|e| e.to_string())?;
+        }
         Ok(())
     })
     .await
@@ -946,5 +1071,43 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_saved_players_offline_empty_self_puuid_queries_all() {
+        let conn = setup_test_db();
+
+        // 插入属于两个不同本地账号 (self-1, self-2) 的数据
+        conn.execute(
+            "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
+             VALUES (?1, ?2, '', '', ?3, ?4, 1, ?5, 157, 1000, 1000)",
+            params!["p1", "self-1", "绝活", "亚索", "001"],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
+             VALUES (?1, ?2, '', '', NULL, ?3, 2, ?4, 1, 2000, 2000)",
+            params!["p2", "self-2", "Faker", "KR1"],
+        ).unwrap();
+
+        // 当 self_puuid 为空（未启动英雄联盟客户端）时，WHERE 1=1 查全部
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM saved_players WHERE 1=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 2);
+
+        // 离线带搜索词
+        let search_clause = " AND (summoner_name LIKE ?1 OR COALESCE(tag_line, '') LIKE ?1 OR COALESCE(tag, '') LIKE ?1 OR (summoner_name || '#' || COALESCE(tag_line, '')) LIKE ?1)";
+        let pattern = "%亚索%";
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM saved_players WHERE 1=1{search_clause}"),
+                params![pattern],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

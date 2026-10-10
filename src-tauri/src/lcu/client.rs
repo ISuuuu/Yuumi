@@ -381,71 +381,72 @@ async fn resolve_asset(app_state: &AppState, path: &str) -> Result<(Vec<u8>, Str
     if is_lcu_asset || is_loot_asset {
         // 锁内只提取连接参数（http_client 克隆是 Arc 浅拷贝），立即释放读锁，
         // 避免跨 HTTP await 持有锁阻塞 monitor 重连写锁
-        let (port, token, http_client) = {
+        let lcu_opt = {
             let lcu_guard = app_state.lcu_client.read().await;
-            match lcu_guard.as_ref() {
-                Some(lcu) => (lcu.port, lcu.token.clone(), lcu.http_client.clone()),
-                None => return Err("LCU 未连接".to_string()),
-            }
+            lcu_guard
+                .as_ref()
+                .map(|lcu| (lcu.port, lcu.token.clone(), lcu.http_client.clone()))
         };
-        // 战利品资源（/fe/lol-loot/...）路径区分大小写，直接透传；游戏资源则统一小写
-        let clean_path = if is_lcu_asset {
-            path.strip_prefix("/lol-game-data/assets/")
-                .map(|s| format!("/lol-game-data/assets/{}", s.to_lowercase()))
-                .unwrap_or_else(|| path.to_string())
-        } else {
-            path.to_string()
-        };
-        let lcu_url = format!("https://127.0.0.1:{}{}", port, clean_path);
-        let auth = build_auth_header(&token);
+        if let Some((port, token, http_client)) = lcu_opt {
+            // 战利品资源（/fe/lol-loot/...）路径区分大小写，直接透传；游戏资源则统一小写
+            let clean_path = if is_lcu_asset {
+                path.strip_prefix("/lol-game-data/assets/")
+                    .map(|s| format!("/lol-game-data/assets/{}", s.to_lowercase()))
+                    .unwrap_or_else(|| path.to_string())
+            } else {
+                path.to_string()
+            };
+            let lcu_url = format!("https://127.0.0.1:{}{}", port, clean_path);
+            let auth = build_auth_header(&token);
 
-        if let Ok(resp) = http_client
-            .get(&lcu_url)
-            .header("Authorization", auth)
-            .send()
-            .await
-        {
-            if resp.status().is_success() {
-                let content_type = resp
-                    .headers()
-                    .get("content-type")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string())
-                    .filter(|s| s.starts_with("image/"))
-                    .unwrap_or_else(|| guess_content_type(path));
-
-                if let Ok(bytes) = resp.bytes().await {
-                    let bytes = bytes.to_vec();
-                    save_asset_to_cache(path, &bytes);
-                    return Ok((bytes, content_type));
-                }
-            } else if resp.status().as_u16() == 404
-                && is_lcu_asset
-                && clean_path.contains("/assets/assets/")
+            if let Ok(resp) = http_client
+                .get(&lcu_url)
+                .header("Authorization", auth)
+                .send()
+                .await
             {
-                // 如果双重 assets/assets/ 404，尝试降级为单重 assets/ 再发一次请求
-                let retry_path = clean_path.replace("/assets/assets/", "/assets/");
-                let retry_url = format!("https://127.0.0.1:{}{}", port, retry_path);
-                let auth_retry = build_auth_header(&token);
-                if let Ok(retry_resp) = http_client
-                    .get(&retry_url)
-                    .header("Authorization", auth_retry)
-                    .send()
-                    .await
-                {
-                    if retry_resp.status().is_success() {
-                        let content_type = retry_resp
-                            .headers()
-                            .get("content-type")
-                            .and_then(|v| v.to_str().ok())
-                            .map(|s| s.to_string())
-                            .filter(|s| s.starts_with("image/"))
-                            .unwrap_or_else(|| guess_content_type(path));
+                if resp.status().is_success() {
+                    let content_type = resp
+                        .headers()
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string())
+                        .filter(|s| s.starts_with("image/"))
+                        .unwrap_or_else(|| guess_content_type(path));
 
-                        if let Ok(bytes) = retry_resp.bytes().await {
-                            let bytes = bytes.to_vec();
-                            save_asset_to_cache(path, &bytes);
-                            return Ok((bytes, content_type));
+                    if let Ok(bytes) = resp.bytes().await {
+                        let bytes = bytes.to_vec();
+                        save_asset_to_cache(path, &bytes);
+                        return Ok((bytes, content_type));
+                    }
+                } else if resp.status().as_u16() == 404
+                    && is_lcu_asset
+                    && clean_path.contains("/assets/assets/")
+                {
+                    // 如果双重 assets/assets/ 404，尝试降级为单重 assets/ 再发一次请求
+                    let retry_path = clean_path.replace("/assets/assets/", "/assets/");
+                    let retry_url = format!("https://127.0.0.1:{}{}", port, retry_path);
+                    let auth_retry = build_auth_header(&token);
+                    if let Ok(retry_resp) = http_client
+                        .get(&retry_url)
+                        .header("Authorization", auth_retry)
+                        .send()
+                        .await
+                    {
+                        if retry_resp.status().is_success() {
+                            let content_type = retry_resp
+                                .headers()
+                                .get("content-type")
+                                .and_then(|v| v.to_str().ok())
+                                .map(|s| s.to_string())
+                                .filter(|s| s.starts_with("image/"))
+                                .unwrap_or_else(|| guess_content_type(path));
+
+                            if let Ok(bytes) = retry_resp.bytes().await {
+                                let bytes = bytes.to_vec();
+                                save_asset_to_cache(path, &bytes);
+                                return Ok((bytes, content_type));
+                            }
                         }
                     }
                 }
@@ -455,36 +456,7 @@ async fn resolve_asset(app_state: &AppState, path: &str) -> Result<(Vec<u8>, Str
 
     // 2. 备用：LCU 不可用、未连上或返回 404 时，向 CDragon CDN 发起请求
     let client = cdn_client();
-
-    let url = if is_http_cdn {
-        path.to_string()
-    } else if is_lcu_asset {
-        let mut sub_path = path
-            .strip_prefix("/lol-game-data/")
-            .unwrap_or(path)
-            .to_lowercase();
-        if sub_path.starts_with("assets/assets/") {
-            sub_path = sub_path
-                .strip_prefix("assets/")
-                .unwrap_or(&sub_path)
-                .to_string();
-        }
-        if sub_path.starts_with("assets/") {
-            format!("https://raw.communitydragon.org/latest/game/{}", sub_path)
-        } else {
-            format!(
-                "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{}",
-                sub_path
-            )
-        }
-    } else {
-        // /fe/lol-loot/assets/... → CommunityDragon CDN
-        let sub_path = path.strip_prefix("/fe/lol-loot/").unwrap_or(path);
-        format!(
-            "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-loot/global/default/{}",
-            sub_path
-        )
-    };
+    let url = map_asset_path_to_cdragon_url(path);
 
     let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
 
@@ -579,6 +551,44 @@ pub async fn get_lcu_assets(
     Ok(results)
 }
 
+/// 将 LCU 或战利品资源路径映射到 CommunityDragon CDN 地址
+pub fn map_asset_path_to_cdragon_url(path: &str) -> String {
+    if path.starts_with("http://") || path.starts_with("https://") {
+        return path.to_string();
+    }
+
+    if let Some(stripped) = path.strip_prefix("/lol-game-data/assets/") {
+        let sub = stripped.to_lowercase();
+        if sub.starts_with("assets/") {
+            format!("https://raw.communitydragon.org/latest/game/{}", sub)
+        } else if sub.starts_with("v1/") {
+            format!(
+                "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{}",
+                sub
+            )
+        } else {
+            format!("https://raw.communitydragon.org/latest/game/assets/{}", sub)
+        }
+    } else if let Some(stripped) = path.strip_prefix("/lol-game-data/") {
+        let sub = stripped.to_lowercase();
+        if sub.starts_with("assets/") {
+            format!("https://raw.communitydragon.org/latest/game/{}", sub)
+        } else {
+            format!(
+                "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/{}",
+                sub
+            )
+        }
+    } else if let Some(stripped) = path.strip_prefix("/fe/lol-loot/") {
+        format!(
+            "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-loot/global/default/{}",
+            stripped
+        )
+    } else {
+        path.to_string()
+    }
+}
+
 /// 供 Builder 链式注册 `yuumi-asset://` 自定义协议的扩展 trait
 pub trait TauriBuilderExt {
     fn register_asset_protocol(self) -> Self;
@@ -632,5 +642,38 @@ impl TauriBuilderExt for tauri::Builder<tauri::Wry> {
                 responder.respond(response);
             });
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_map_asset_path_to_cdragon_url() {
+        assert_eq!(
+            map_asset_path_to_cdragon_url("/lol-game-data/assets/v1/champion-icons/54.png"),
+            "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/54.png"
+        );
+        assert_eq!(
+            map_asset_path_to_cdragon_url("/lol-game-data/assets/v1/profile-icons/29.jpg"),
+            "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/profile-icons/29.jpg"
+        );
+        assert_eq!(
+            map_asset_path_to_cdragon_url("/lol-game-data/assets/ASSETS/Items/Icons2D/1001_Class_T1_BootsofSpeed.png"),
+            "https://raw.communitydragon.org/latest/game/assets/items/icons2d/1001_class_t1_bootsofspeed.png"
+        );
+        assert_eq!(
+            map_asset_path_to_cdragon_url("/lol-game-data/assets/assets/characters/malphite/hud/malphite_square.png"),
+            "https://raw.communitydragon.org/latest/game/assets/characters/malphite/hud/malphite_square.png"
+        );
+        assert_eq!(
+            map_asset_path_to_cdragon_url("/fe/lol-loot/assets/loot_item.png"),
+            "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-loot/global/default/assets/loot_item.png"
+        );
+        assert_eq!(
+            map_asset_path_to_cdragon_url("https://example.com/pic.png"),
+            "https://example.com/pic.png"
+        );
     }
 }

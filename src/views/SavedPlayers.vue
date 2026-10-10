@@ -19,7 +19,6 @@ import type {
 } from "../api/lcu";
 import { useToast } from "../composables/useToast";
 import LcuImage from "../components/LcuImage.vue";
-import LcuOfflineState from "../components/LcuOfflineState.vue";
 
 const { t: $t } = useI18n();
 const { showToast } = useToast();
@@ -94,7 +93,6 @@ function getQueueName(queueType: string | undefined | null): string {
 }
 
 async function loadPlayers(append = false) {
-  if (!selfPuuid.value) return;
   if (!append) {
     page.value = 1;
   }
@@ -145,7 +143,7 @@ function switchFilter(next: "tagged" | "multiple" | "all") {
   loadPlayers();
 }
 
-async function loadGames(puuid: string) {
+async function loadGames(puuid: string, playerSelfPuuid?: string) {
   if (expandedPuuid.value === puuid) {
     expandedPuuid.value = null;
     encounteredGames.value = [];
@@ -154,8 +152,9 @@ async function loadGames(puuid: string) {
   expandedPuuid.value = puuid;
   gamesLoading.value = true;
   try {
+    const targetSelfPuuid = playerSelfPuuid || selfPuuid.value || "";
     const res: PageResult<EncounteredGame> = await queryEncounteredGames(
-      selfPuuid.value,
+      targetSelfPuuid,
       puuid,
       undefined,
       1,
@@ -176,10 +175,12 @@ async function loadGames(puuid: string) {
 async function loadMoreGames() {
   const puuid = expandedPuuid.value;
   if (!puuid || gamesLoading.value) return;
+  const targetPlayer = players.value.find((p) => p.puuid === puuid);
   gamesLoading.value = true;
   try {
+    const targetSelfPuuid = targetPlayer?.selfPuuid || selfPuuid.value || "";
     const res: PageResult<EncounteredGame> = await queryEncounteredGames(
-      selfPuuid.value,
+      targetSelfPuuid,
       puuid,
       undefined,
       encounteredPage.value + 1,
@@ -269,20 +270,20 @@ async function refreshRoster() {
   if (refreshing) return;
   refreshing = true;
   try {
-    if (!selfPuuid.value) {
-      const me = await fetchCurrentSummoner(5);
-      selfPuuid.value = me.puuid;
-    }
     if (isConnected.value) {
       try {
+        if (!selfPuuid.value) {
+          const me = await fetchCurrentSummoner(5);
+          selfPuuid.value = me.puuid;
+        }
         await backfillSavedPlayerIdentity();
       } catch (e) {
-        console.warn("[SavedPlayers] 回填召唤师 ID 失败:", e);
+        console.warn("[SavedPlayers] 回填召唤师 ID 或获取当前召唤师失败:", e);
       }
     }
     await loadPlayers();
   } catch (e) {
-    console.warn("[SavedPlayers] 未连接客户端:", e);
+    console.warn("[SavedPlayers] 刷新路人集失败:", e);
   } finally {
     refreshing = false;
   }
@@ -303,9 +304,7 @@ watch(isConnected, (connected) => {
 
 <template>
   <div class="saved-players-view">
-    <LcuOfflineState v-if="!isConnected" />
-
-    <div v-else class="saved-players-content">
+    <div class="saved-players-content">
       <div class="page-header">
         <div class="header-left">
           <h1 class="page-title">{{ $t("savedPlayersPage.title") }}</h1>
@@ -403,8 +402,12 @@ watch(isConnected, (connected) => {
       </div>
 
     <div v-else class="player-list">
-      <div v-for="player in players" :key="player.puuid" class="player-card">
-        <div class="player-main" @click="loadGames(player.puuid)">
+      <div
+        v-for="player in players"
+        :key="player.puuid + '_' + player.selfPuuid"
+        class="player-card"
+      >
+        <div class="player-main" @click="loadGames(player.puuid, player.selfPuuid)">
           <div class="player-avatar">
             <LcuImage
               :src="profileIconUrl(player.profileIconId)"
