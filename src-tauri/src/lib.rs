@@ -364,6 +364,7 @@ pub fn run() {
             commands::tools::select_folder,
             commands::tools::open_screenshot_folder,
             commands::tools::set_mica_effect,
+            commands::tools::get_system_theme,
             commands::tools::launch_lol_client,
             commands::lcu::get_game_data_assets,
             commands::lcu::get_bench_my_champions,

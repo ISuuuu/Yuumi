@@ -447,6 +447,41 @@ pub async fn open_screenshot_folder(state: tauri::State<'_, AppState>) -> Result
     Ok(())
 }
 
+/// 获取系统当前实际的主题（深色/浅色，避免 WebView2 matchMedia 缓存或失步）
+#[tauri::command]
+pub fn get_system_theme() -> String {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+        // CREATE_NO_WINDOW = 0x08000000
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let output = Command::new("reg")
+            .args([
+                "query",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                "/v",
+                "AppsUseLightTheme",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+
+        if let Ok(out) = output {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                if line.contains("AppsUseLightTheme") {
+                    if line.contains("0x0") {
+                        return "dark".to_string();
+                    } else if line.contains("0x1") {
+                        return "light".to_string();
+                    }
+                }
+            }
+        }
+    }
+    "light".to_string()
+}
+
 /// 运行时切换云母效果
 #[tauri::command]
 pub fn set_mica_effect(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {

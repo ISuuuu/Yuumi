@@ -34,20 +34,6 @@ import UpdateDialog, { type UpdateInfo } from "./components/UpdateDialog.vue";
 import CustomTitleBar from "./components/layout/CustomTitleBar.vue";
 import NavigationSidebar from "./components/layout/NavigationSidebar.vue";
 
-function applyThemeMode(mode: string) {
-  const root = document.documentElement;
-  const isDark =
-    mode === "Dark" ||
-    (mode !== "Light" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches);
-  root.setAttribute("data-theme", isDark ? "dark" : "light");
-  localStorage.setItem("yuumi_theme", mode);
-  getCurrentWindow()
-    .setTheme(isDark ? "dark" : "light")
-    .catch(() => {});
-}
-provide("applyThemeMode", applyThemeMode);
-
 function applyMicaEffect(enabled: boolean) {
   const root = document.documentElement;
   if (enabled) {
@@ -163,13 +149,41 @@ const navigateCareerPayload = ref<{
 
 provide("navigateCareerPayload", navigateCareerPayload);
 
-const isSystemDark = ref(
-  window.matchMedia("(prefers-color-scheme: dark)").matches,
-);
-onMounted(() => {
+const isSystemDark = ref(false);
+
+async function syncSystemTheme() {
+  try {
+    const sys = await invoke<string>("get_system_theme");
+    isSystemDark.value = sys === "dark";
+  } catch {
+    isSystemDark.value = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+}
+
+async function applyThemeMode(mode: string) {
+  if (appConfig.value?.Personalization) {
+    appConfig.value.Personalization.ThemeMode = mode;
+  }
+  if (mode === "Auto") {
+    await syncSystemTheme();
+  }
+  const isDark =
+    mode === "Dark" ||
+    (mode !== "Light" && isSystemDark.value);
+  const root = document.documentElement;
+  root.setAttribute("data-theme", isDark ? "dark" : "light");
+  localStorage.setItem("yuumi_theme", mode);
+  getCurrentWindow()
+    .setTheme(isDark ? "dark" : "light")
+    .catch(() => {});
+}
+provide("applyThemeMode", applyThemeMode);
+
+onMounted(async () => {
+  await syncSystemTheme();
   const media = window.matchMedia("(prefers-color-scheme: dark)");
-  const handler = (e: MediaQueryListEvent) => {
-    isSystemDark.value = e.matches;
+  const handler = async () => {
+    await syncSystemTheme();
   };
   media.addEventListener("change", handler);
 });
@@ -1195,17 +1209,17 @@ async function handleClose() {
   --text-muted: #475569;
   --text-dimmed: #64748b;
 
-  --win-color: #059669;
-  --win-bg: rgba(16, 185, 129, 0.14);
-  --win-bg-hover: rgba(16, 185, 129, 0.24);
-  --win-border: rgba(16, 185, 129, 0.35);
-  --win-glow: rgba(16, 185, 129, 0.10);
+  --win-color: #065f46;
+  --win-bg: rgba(57, 176, 27, 0.20);
+  --win-bg-hover: rgba(57, 176, 27, 0.32);
+  --win-border: rgba(57, 176, 27, 0.40);
+  --win-glow: rgba(57, 176, 27, 0.10);
 
-  --loss-color: #e11d48;
-  --loss-bg: rgba(244, 63, 94, 0.14);
-  --loss-bg-hover: rgba(244, 63, 94, 0.24);
-  --loss-border: rgba(244, 63, 94, 0.35);
-  --loss-glow: rgba(244, 63, 94, 0.10);
+  --loss-color: #9f1239;
+  --loss-bg: rgba(211, 25, 12, 0.20);
+  --loss-bg-hover: rgba(211, 25, 12, 0.32);
+  --loss-border: rgba(211, 25, 12, 0.40);
+  --loss-glow: rgba(211, 25, 12, 0.10);
 
   --remake-color: #64748b;
   --remake-bg: rgba(148, 163, 184, 0.14);
