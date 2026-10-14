@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from "vue";
+import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useLcuStore } from "../store/lcuStore";
 import {
@@ -25,6 +25,8 @@ const { showToast } = useToast();
 const store = useLcuStore();
 
 const loading = ref(false);
+const loadingMore = ref(false);
+const loadMoreError = ref(false);
 const players = ref<SavedPlayer[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -42,7 +44,12 @@ const gamesLoading = ref(false);
 const editingPuuid = ref<string | null>(null);
 const editingTag = ref("");
 
+const scrollContainerRef = ref<HTMLElement | null>(null);
+const sentinelRef = ref<HTMLElement | null>(null);
+let observer: IntersectionObserver | null = null;
+
 const isConnected = computed(() => store.isConnected);
+const hasMore = computed(() => players.value.length < total.value);
 
 function profileIconUrl(id: number): string {
   return id > 0
@@ -92,31 +99,69 @@ function getQueueName(queueType: string | undefined | null): string {
   return fallbackMap[queueType] || queueType;
 }
 
-async function loadPlayers(append = false) {
-  if (!append) {
-    page.value = 1;
-  }
+async function loadPlayers() {
+  page.value = 1;
   loading.value = true;
+  loadMoreError.value = false;
   try {
     const trimmed = searchQuery.value.trim();
     const res: PageResult<SavedPlayer> = await queryAllSavedPlayers(
       selfPuuid.value,
-      page.value,
+      1,
       pageSize,
       filter.value === "all" ? undefined : filter.value,
       trimmed || undefined,
     );
-    if (append) {
-      players.value = [...players.value, ...res.data];
-    } else {
-      players.value = res.data;
-    }
+    players.value = res.data;
     total.value = res.count;
+    if (scrollContainerRef.value) {
+      scrollContainerRef.value.scrollTop = 0;
+    }
   } catch (e) {
     console.error("[SavedPlayers] 加载失败:", e);
     showToast($t("savedPlayersPage.loadFailed"), "error");
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadMorePlayers() {
+  if (loading.value || loadingMore.value || !hasMore.value) return;
+  loadingMore.value = true;
+  loadMoreError.value = false;
+  const nextPage = page.value + 1;
+  try {
+    const trimmed = searchQuery.value.trim();
+    const res: PageResult<SavedPlayer> = await queryAllSavedPlayers(
+      selfPuuid.value,
+      nextPage,
+      pageSize,
+      filter.value === "all" ? undefined : filter.value,
+      trimmed || undefined,
+    );
+    page.value = nextPage;
+    const existingKeys = new Set(
+      players.value.map((p) => `${p.puuid}_${p.selfPuuid}`),
+    );
+    const newItems = res.data.filter(
+      (p) => !existingKeys.has(`${p.puuid}_${p.selfPuuid}`),
+    );
+    players.value = [...players.value, ...newItems];
+    total.value = res.count;
+  } catch (e) {
+    console.error("[SavedPlayers] 加载更多失败:", e);
+    loadMoreError.value = true;
+  } finally {
+    loadingMore.value = false;
+  }
+}
+
+function onScroll(e: Event) {
+  if (loading.value || loadingMore.value || !hasMore.value) return;
+  const target = e.target as HTMLElement;
+  if (!target) return;
+  if (target.scrollHeight - target.scrollTop - target.clientHeight <= 300) {
+    void loadMorePlayers();
   }
 }
 
@@ -289,8 +334,52 @@ async function refreshRoster() {
   }
 }
 
+function initObserver() {
+  if (typeof IntersectionObserver === "undefined") return;
+  cleanupObserver();
+  observer = new IntersectionObserver(
+    (entries) => {
+      const entry = entries[0];
+      if (entry?.isIntersecting) {
+        void loadMorePlayers();
+      }
+    },
+    {
+      root: scrollContainerRef.value || null,
+      rootMargin: "0px 0px 300px 0px",
+    },
+  );
+  if (sentinelRef.value) {
+    observer.observe(sentinelRef.value);
+  }
+}
+
+function cleanupObserver() {
+  if (observer) {
+    observer.disconnect();
+    observer = null;
+  }
+}
+
+watch(sentinelRef, (el) => {
+  if (!observer) return;
+  observer.disconnect();
+  if (el) {
+    observer.observe(el);
+  }
+});
+
 onMounted(() => {
   void refreshRoster();
+  initObserver();
+});
+
+onUnmounted(() => {
+  cleanupObserver();
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
 });
 
 let connectedBefore = isConnected.value;
@@ -304,7 +393,11 @@ watch(isConnected, (connected) => {
 
 <template>
   <div class="saved-players-view">
-    <div class="saved-players-content">
+    <div
+      ref="scrollContainerRef"
+      class="saved-players-content"
+      @scroll.passive="onScroll"
+    >
       <div class="page-header">
         <div class="header-left">
           <h1 class="page-title">{{ $t("savedPlayersPage.title") }}</h1>
@@ -498,15 +591,23 @@ watch(isConnected, (connected) => {
         </div>
       </div>
 
-      <div v-if="total > players.length" class="pagination-row">
-        <button
-          class="mini-btn"
-          @click="page++; loadPlayers(true)"
-          :disabled="loading"
-        >
-          {{ $t("savedPlayersPage.loadMore") }}
-        </button>
-      </div>
+        <!-- 底部哨兵与自动加载更多状态 -->
+        <div ref="sentinelRef" class="scroll-sentinel">
+          <div v-if="loadingMore" class="scroll-status loading">
+            <div class="mini-spinner"></div>
+            <span>{{ $t("savedPlayersPage.loadingMore") }}</span>
+          </div>
+          <button
+            v-else-if="loadMoreError"
+            class="mini-btn retry-btn"
+            @click="loadMorePlayers"
+          >
+            {{ $t("savedPlayersPage.loadMoreRetry") }}
+          </button>
+          <div v-else-if="!hasMore && players.length > 0" class="scroll-status ended">
+            <span>{{ $t("savedPlayersPage.allLoaded") }}</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1017,5 +1118,40 @@ watch(isConnected, (connected) => {
   display: flex;
   justify-content: center;
   padding: 12px 0;
+}
+
+.scroll-sentinel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 48px;
+  padding: 12px 0 20px 0;
+}
+
+.scroll-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dimmed);
+}
+
+.scroll-status.ended {
+  opacity: 0.6;
+}
+
+.mini-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.retry-btn {
+  color: var(--primary-color);
+  border-color: var(--primary-color-alpha-30);
 }
 </style>
