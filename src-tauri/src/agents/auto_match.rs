@@ -202,6 +202,22 @@ async fn handle_phase_change(
 ) {
     log::info!("游戏阶段: {}", phase);
 
+    let state = app_handle.state::<crate::AppState>();
+    // 当离开 ReadyCheck 阶段时，立即协同取消正在等待中的自动接受任务
+    if phase != "ReadyCheck" {
+        state
+            .supervisor
+            .cancel_kind(&crate::agents::supervisor::TaskKind::AutoAccept)
+            .await;
+    }
+    // 当离开结算相关阶段时，立即协同取消正在等待中的再来一局任务
+    if !matches!(phase, "WaitingForStats" | "PreEndOfGame" | "EndOfGame") {
+        state
+            .supervisor
+            .cancel_kind(&crate::agents::supervisor::TaskKind::AutoPlayAgain)
+            .await;
+    }
+
     // 进入对局阶段时开启自动截图事件监听，退出对局阶段时关闭
     if phase == "InProgress" {
         super::auto_screenshot::set_in_game(true);
@@ -271,15 +287,6 @@ async fn handle_phase_change(
         lobby.idle_handled = false;
     }
     *last_phase = phase.to_string();
-
-    // 每当游戏阶段变化时，通过 AtomicBool 标记 BP agent 重置状态
-    // （不经过通道，无阻塞、无丢失）
-    {
-        let state = app_handle.state::<crate::AppState>();
-        state
-            .bp_reset_flag
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
 
     // 空闲状态 → 自动创建预设大厅（重试循环在后台任务中执行，不阻塞事件循环）
     if phase == "None" && cfg.enable_auto_create_lobby {
@@ -537,57 +544,86 @@ fn try_create_default_lobby(
     });
 }
 
-/// 异步执行延迟接受匹配任务，不阻塞主事件循环。
+/// 异步执行延迟接受匹配任务，由 TaskSupervisor 统一管理生命周期与去重。
 fn spawn_auto_accept(app_handle: AppHandle, delay_secs: u32) {
+    let state = app_handle.state::<crate::AppState>();
+    let supervisor = state.supervisor.clone();
+    let lifecycle = state.lifecycle.clone();
+    let app_handle_clone = app_handle.clone();
+
     crate::spawn_log_panic(async move {
-        if delay_secs > 0 {
-            log::info!("将在 {} 秒后自动接受匹配...", delay_secs);
-            tokio::time::sleep(std::time::Duration::from_secs(delay_secs as u64)).await;
-        } else {
-            log::info!("立即自动接受匹配");
-        }
+        let guard = lifecycle.capture_guard(false).await;
+        let res = supervisor
+            .spawn(
+                crate::agents::supervisor::TaskKind::AutoAccept,
+                format!("AutoAccept(delay={}s)", delay_secs),
+                move |cancel_token| async move {
+                    if delay_secs > 0 {
+                        log::info!("将在 {} 秒后自动接受匹配...", delay_secs);
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => {
+                                log::info!("自动接受匹配任务已协同取消");
+                                return;
+                            }
+                            _ = tokio::time::sleep(Duration::from_secs(delay_secs as u64)) => {}
+                        }
+                    } else {
+                        log::info!("立即自动接受匹配");
+                    }
 
-        // 延迟后，先检查当前游戏阶段是否仍然是 ReadyCheck
-        match get_current_phase(&app_handle).await {
-            Some(current_phase) => {
-                if current_phase != "ReadyCheck" {
-                    log::info!(
-                        "延迟后当前游戏阶段为 {}，不再是 ReadyCheck，取消自动接受",
-                        current_phase
-                    );
-                    return;
-                }
-            }
-            None => {
-                log::warn!("延迟后无法获取当前游戏阶段，取消自动接受");
-                return;
-            }
-        }
-
-        // 再次获取当前 ready check 状态以确认是否已被响应
-        match get_ready_check_status(&app_handle).await {
-            Some(status) => {
-                // 检查玩家响应状态
-                if let Some(ref response) = status.player_response {
-                    if response == "Accepted" || response == "Declined" {
-                        log::debug!("延迟后玩家已响应匹配: {}，跳过自动接受", response);
+                    if cancel_token.is_cancelled() {
                         return;
                     }
-                }
-                // 检查是否有错误
-                if let Some(ref error_code) = status.error_code {
-                    log::warn!("延迟后 Ready check 发生错误: {}，取消自动接受", error_code);
-                    return;
-                }
-            }
-            None => {
-                log::debug!("延迟后无法获取 ready check 状态，取消自动接受");
-                return;
-            }
-        }
 
-        log::info!("自动接受匹配");
-        lcu_post(&app_handle, "/lol-matchmaking/v1/ready-check/accept").await;
+                    // 延迟后，先校验生命周期与对局代际
+                    let current_lifecycle = lifecycle.snapshot().await;
+                    if let Err(e) = guard.ensure_valid(&current_lifecycle) {
+                        log::info!("自动接受匹配放弃: 生命周期失效 ({})", e);
+                        return;
+                    }
+
+                    if current_lifecycle.phase != crate::agents::lifecycle::GamePhase::ReadyCheck {
+                        log::info!(
+                            "延迟后当前游戏阶段为 {}，不再是 ReadyCheck，取消自动接受",
+                            current_lifecycle.phase.as_str()
+                        );
+                        return;
+                    }
+
+                    // 再次获取当前 ready check 状态以确认是否已被响应
+                    match get_ready_check_status(&app_handle_clone).await {
+                        Some(status) => {
+                            // 检查玩家响应状态
+                            if let Some(ref response) = status.player_response {
+                                if response == "Accepted" || response == "Declined" {
+                                    log::debug!("延迟后玩家已响应匹配: {}，跳过自动接受", response);
+                                    return;
+                                }
+                            }
+                            // 检查是否有错误
+                            if let Some(ref error_code) = status.error_code {
+                                log::warn!(
+                                    "延迟后 Ready check 发生错误: {}，取消自动接受",
+                                    error_code
+                                );
+                                return;
+                            }
+                        }
+                        None => {
+                            log::debug!("延迟后无法获取 ready check 状态，取消自动接受");
+                            return;
+                        }
+                    }
+
+                    log::info!("自动接受匹配");
+                    lcu_post(&app_handle_clone, "/lol-matchmaking/v1/ready-check/accept").await;
+                },
+            )
+            .await;
+
+        if let Err(e) = res {
+            log::debug!("启动自动接受匹配任务未执行: {}", e);
+        }
     });
 }
 
@@ -719,12 +755,60 @@ fn spawn_handle_invitations(app_handle: AppHandle, invitations: Vec<ReceivedInvi
 
 // ─── 自动再来一局 ───
 
-/// 延迟后执行"再来一局"，不阻塞主事件循环。
+/// 延迟后执行"再来一局"，由 TaskSupervisor 统一管理生命周期与去重。
 fn spawn_auto_play_again(app_handle: AppHandle, delay: Duration) {
+    let state = app_handle.state::<crate::AppState>();
+    let supervisor = state.supervisor.clone();
+    let lifecycle = state.lifecycle.clone();
+    let app_handle_clone = app_handle.clone();
+
     crate::spawn_log_panic(async move {
-        sleep(delay).await;
-        log::info!("自动再来一局");
-        lcu_post(&app_handle, "/lol-lobby/v2/play-again").await;
+        let guard = lifecycle.capture_guard(false).await;
+        let res = supervisor
+            .spawn(
+                crate::agents::supervisor::TaskKind::AutoPlayAgain,
+                format!("AutoPlayAgain(delay={:?})", delay),
+                move |cancel_token| async move {
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            log::info!("自动再来一局任务已协同取消");
+                            return;
+                        }
+                        _ = sleep(delay) => {}
+                    }
+
+                    if cancel_token.is_cancelled() {
+                        return;
+                    }
+
+                    // 延迟后，校验生命周期与对局代际
+                    let current_lifecycle = lifecycle.snapshot().await;
+                    if let Err(e) = guard.ensure_valid(&current_lifecycle) {
+                        log::info!("自动再来一局放弃: 生命周期代际已失效 ({})", e);
+                        return;
+                    }
+
+                    match current_lifecycle.phase {
+                        crate::agents::lifecycle::GamePhase::WaitingForStats
+                        | crate::agents::lifecycle::GamePhase::PreEndOfGame
+                        | crate::agents::lifecycle::GamePhase::EndOfGame => {
+                            log::info!("生命周期校验通过，自动再来一局");
+                            lcu_post(&app_handle_clone, "/lol-lobby/v2/play-again").await;
+                        }
+                        _ => {
+                            log::info!(
+                                "当前游戏阶段已变为 {}，取消自动再来一局",
+                                current_lifecycle.phase.as_str()
+                            );
+                        }
+                    }
+                },
+            )
+            .await;
+
+        if let Err(e) = res {
+            log::debug!("启动自动再来一局任务未执行: {}", e);
+        }
     });
 }
 

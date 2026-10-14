@@ -16,7 +16,7 @@ pub mod upload;
 use crate::updater::{PendingUpdate, UpdateInfo};
 use base64::Engine;
 use lcu::client::TauriBuilderExt;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -66,10 +66,10 @@ pub struct AppState {
     pub ws_cancel_tx: Mutex<Option<watch::Sender<bool>>>,
     /// LCU API 并发信号量（由 config.ApiConcurrencyNumber 控制）
     pub api_semaphore: RwLock<Arc<Semaphore>>,
-    /// BP 状态重置标志（gameflow 阶段变化时置为 true，BP agent 检查后置 false）
-    pub bp_reset_flag: AtomicBool,
-    /// BP 锁定后台任务版本号（用于标记和防止残留协程竞态）
-    pub bp_task_id: AtomicU64,
+    /// 统一游戏生命周期管理器
+    pub lifecycle: Arc<agents::lifecycle::LifecycleManager>,
+    /// 后台异步任务监管中心
+    pub supervisor: Arc<agents::supervisor::TaskSupervisor>,
     /// 后台下载进行中标志，防止重复启动多个下载
     pub is_downloading: AtomicBool,
     /// 正在后台下载的更新信息
@@ -198,8 +198,8 @@ pub fn run() {
                 upload_queue,
                 ws_cancel_tx: Mutex::new(None),
                 api_semaphore: RwLock::new(Arc::new(Semaphore::new(api_concurrency))),
-                bp_reset_flag: AtomicBool::new(false),
-                bp_task_id: AtomicU64::new(0),
+                lifecycle: Arc::new(agents::lifecycle::LifecycleManager::new()),
+                supervisor: Arc::new(agents::supervisor::TaskSupervisor::new()),
                 is_downloading: AtomicBool::new(false),
                 downloading_update: Mutex::new(None),
                 pending_update: Mutex::new(None),

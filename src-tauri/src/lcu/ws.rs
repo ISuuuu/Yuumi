@@ -151,6 +151,8 @@ pub fn connect(app_handle: AppHandle, port: u16, token: String) {
                                         if let Ok(phase) = resp.text().await {
                                             let phase = phase.trim_matches('"');
                                             log::info!("[WS] 获取到初始游戏阶段: {}", phase);
+                                            let transition = state.lifecycle.update_phase(phase).await;
+                                            log::info!("[WS] 初始生命周期状态: {:?}", transition);
                                             let _ = state.gameflow_tx.try_send(
                                                 crate::agents::auto_match::GameflowEvent::PhaseChanged(
                                                     phase.to_string(),
@@ -269,7 +271,7 @@ async fn handle_messages(
         match msg_result {
             Ok(Message::Text(text)) => {
                 // 对齐 Python: json.loads(msg.data)[2]
-                process_event(text.as_str(), app_handle);
+                process_event(text.as_str(), app_handle).await;
             }
             Ok(Message::Close(_)) => {
                 log::info!("[WS] 收到关闭帧");
@@ -287,7 +289,7 @@ async fn handle_messages(
 /// 解析 LCU 事件并广播给前端。
 /// LCU WAMP 格式: [8, "OnJsonApiEvent_xxx", { "uri": "...", "eventType": "...", "data": ... }]
 /// 对齐 Python matchUri：检查 uri 和 eventType
-fn process_event(text: &str, app_handle: &AppHandle) {
+async fn process_event(text: &str, app_handle: &AppHandle) {
     let value: Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(_) => return,
@@ -326,6 +328,14 @@ fn process_event(text: &str, app_handle: &AppHandle) {
         if let Some(data) = event_data.get("data") {
             match crate::agents::auto_bp::ChampSelectSession::deserialize(data) {
                 Ok(session) => {
+                    // 同步更新生命周期管理器的选人会话标识
+                    if session.local_player_cell_id != -1 {
+                        let sid = format!("session-cell-{}", session.local_player_cell_id);
+                        state.lifecycle.update_session_id(Some(sid)).await;
+                    } else {
+                        state.lifecycle.update_session_id(None).await;
+                    }
+
                     if let Err(e) = state.bp_session_tx.try_send(session) {
                         match e {
                             tokio::sync::mpsc::error::TrySendError::Full(_) => {
@@ -419,26 +429,48 @@ fn process_event(text: &str, app_handle: &AppHandle) {
 
     if uri.starts_with("/lol-gameflow/v1/gameflow-phase") {
         if let Some(phase) = event_data.get("data").and_then(|v| v.as_str()) {
-            if let Err(e) =
-                state
-                    .gameflow_tx
-                    .try_send(crate::agents::auto_match::GameflowEvent::PhaseChanged(
-                        phase.to_string(),
-                    ))
-            {
-                log::warn!("[WS] 推送 Gameflow PhaseChanged 失败: {}", e);
-            }
-            // 只有当真正从非 ChampSelect 阶段跨阶段进入 ChampSelect 时，才清空上局历史英雄缓存
-            if let Ok(mut last_phase) = state.last_gameflow_phase.lock() {
-                if *last_phase != "ChampSelect" && phase == "ChampSelect" {
-                    if let Ok(mut list) = state.bench_my_champions.lock() {
-                        list.clear();
-                        log::info!("[WS] 跨阶段进入选人阶段，已清空板凳席历史英雄缓存");
+            let transition = state.lifecycle.update_phase(phase).await;
+            match transition {
+                crate::agents::lifecycle::PhaseTransition::NoChange => {
+                    log::debug!("[WS] 阶段无实质变化 (已去重过滤): {}", phase);
+                    return;
+                }
+                crate::agents::lifecycle::PhaseTransition::PhaseChanged {
+                    ref current,
+                    ref previous,
+                    ..
+                }
+                | crate::agents::lifecycle::PhaseTransition::NewMatchStarted {
+                    ref current,
+                    ref previous,
+                    ..
+                }
+                | crate::agents::lifecycle::PhaseTransition::MatchTerminated {
+                    ref current,
+                    ref previous,
+                    ..
+                } => {
+                    log::info!("[WS] 游戏生命周期变迁: {:?}", transition);
+                    if let Err(e) = state.gameflow_tx.try_send(
+                        crate::agents::auto_match::GameflowEvent::PhaseChanged(phase.to_string()),
+                    ) {
+                        log::warn!("[WS] 推送 Gameflow PhaseChanged 失败: {}", e);
+                    }
+
+                    // 跨阶段进入选人阶段时清空板凳席历史英雄缓存
+                    if previous != &crate::agents::lifecycle::GamePhase::ChampSelect
+                        && current == &crate::agents::lifecycle::GamePhase::ChampSelect
+                    {
+                        if let Ok(mut list) = state.bench_my_champions.lock() {
+                            list.clear();
+                            log::info!("[WS] 跨阶段进入选人阶段，已清空板凳席历史英雄缓存");
+                        }
+                    }
+
+                    if let Ok(mut last_phase) = state.last_gameflow_phase.lock() {
+                        *last_phase = phase.to_string();
                     }
                 }
-                *last_phase = phase.to_string();
-            } else {
-                log::warn!("[WS] last_gameflow_phase 锁中毒，跳过板凳席缓存清空");
             }
         }
     }

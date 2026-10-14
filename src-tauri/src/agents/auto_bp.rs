@@ -3,6 +3,8 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
+use crate::agents::action::ActionLease;
+use crate::agents::supervisor::TaskKind;
 use crate::config::FunctionsConfig;
 use crate::lcu::client::lcu_request;
 
@@ -97,8 +99,6 @@ struct ChampionSelection {
     is_summoner_spell_set: bool,
     is_champion_picked_completed: bool,
     _opgg_show_champion_id: i32,
-    /// 已调度延迟禁人的 action id（防止高频 session 事件重复调度）
-    ban_scheduled_action_id: Option<i32>,
 }
 
 // ─── OPGG 事件数据 ───
@@ -116,6 +116,7 @@ pub struct OpggBuildEvent {
 pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSession>) {
     crate::spawn_log_panic(async move {
         let mut selection = ChampionSelection::default();
+        let mut last_epoch = 0u64;
 
         while let Some(session) = session_rx.recv().await {
             log::debug!(
@@ -125,28 +126,41 @@ pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSe
                 session.my_team.len()
             );
 
-            // 检查 AtomicBool 重置标志（gameflow 阶段变化时设置，零阻塞、零丢失）
+            let state = app_handle.state::<crate::AppState>();
+            let lifecycle_snapshot = state.lifecycle.snapshot().await;
+
+            // 依据权威生命周期管理器的代际检查：若跨入新对局或不在 ChampSelect 阶段，重置选择状态
+            if lifecycle_snapshot.match_epoch != last_epoch
+                || lifecycle_snapshot.phase != crate::agents::lifecycle::GamePhase::ChampSelect
             {
-                let state = app_handle.state::<crate::AppState>();
-                if state
-                    .bp_reset_flag
-                    .swap(false, std::sync::atomic::Ordering::SeqCst)
-                {
-                    log::info!("BP状态重置（gameflow阶段变化）");
-                    state
-                        .bp_task_id
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    selection = ChampionSelection::default();
-                }
+                log::info!(
+                    "生命周期代际变迁 (epoch {} -> {})，重置 BP 跟踪状态",
+                    last_epoch,
+                    lifecycle_snapshot.match_epoch
+                );
+                last_epoch = lifecycle_snapshot.match_epoch;
+                selection = ChampionSelection::default();
             }
 
-            // 收到重置信号时，重置 BP 跟踪状态并进入下一次循环
+            // 收到重置信号时，重置 BP 跟踪状态并协同取消在册 BP 任务
             if session.local_player_cell_id == -1 {
-                log::info!("收到重置选人代理状态的信号");
-                let state = app_handle.state::<crate::AppState>();
+                log::info!("收到重置选人代理状态信号，取消在册 BP 任务");
                 state
-                    .bp_task_id
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    .supervisor
+                    .cancel_kind(&crate::agents::supervisor::TaskKind::AutoPickLock)
+                    .await;
+                state
+                    .supervisor
+                    .cancel_kind(&crate::agents::supervisor::TaskKind::AutoBanLock)
+                    .await;
+                state
+                    .supervisor
+                    .cancel_kind(&crate::agents::supervisor::TaskKind::AutoSwap)
+                    .await;
+                state
+                    .supervisor
+                    .cancel_kind(&crate::agents::supervisor::TaskKind::AutoTrade)
+                    .await;
                 selection = ChampionSelection::default();
                 continue;
             }
@@ -195,30 +209,39 @@ async fn do_auto_swap(
             // 重置选人状态，以便重新触发
             selection.is_champion_picked_completed = false;
 
-            // 递增全局任务版本，产生本次独占任务 ID（对齐 do_auto_complete）
-            let current_id = {
-                let state = app_handle.state::<crate::AppState>();
-                state
-                    .bp_task_id
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                    + 1
-            };
+            let state = app_handle.state::<crate::AppState>();
+            let guard = state.lifecycle.capture_guard(true).await;
+            let app_handle_clone = app_handle.clone();
 
-            // 延迟接受放入后台任务，不阻塞 BP 主循环（秒退/阶段变化时由版本号取消）
-            let app_handle = app_handle.clone();
-            crate::spawn_log_panic(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let _ = state
+                .supervisor
+                .spawn(
+                    crate::agents::supervisor::TaskKind::AutoSwap,
+                    format!("AutoSwap(id={})", swap.id),
+                    move |cancel_token| async move {
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => {
+                                log::info!("后台交换接受任务已协同取消");
+                                return;
+                            }
+                            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+                        }
 
-                {
-                    let state = app_handle.state::<crate::AppState>();
-                    if state.bp_task_id.load(std::sync::atomic::Ordering::SeqCst) != current_id {
-                        log::info!("后台交换接受任务已失效 (版本不匹配)，退出");
-                        return;
-                    }
-                }
+                        if cancel_token.is_cancelled() {
+                            return;
+                        }
 
-                lcu_post(&app_handle, &url).await;
-            });
+                        let state = app_handle_clone.state::<crate::AppState>();
+                        let current_lifecycle = state.lifecycle.snapshot().await;
+                        if let Err(e) = guard.ensure_valid(&current_lifecycle) {
+                            log::info!("后台交换接受任务已失效 (生命周期变迁: {})", e);
+                            return;
+                        }
+
+                        lcu_post(&app_handle_clone, &url).await;
+                    },
+                )
+                .await;
             return;
         }
     }
@@ -241,30 +264,39 @@ async fn do_auto_trade(
             log::info!("自动接受英雄交换: tradeId={}", trade.id);
             let url = format!("/lol-champ-select/v1/session/trades/{}/accept", trade.id);
 
-            // 递增全局任务版本，产生本次独占任务 ID（对齐 do_auto_complete）
-            let current_id = {
-                let state = app_handle.state::<crate::AppState>();
-                state
-                    .bp_task_id
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                    + 1
-            };
+            let state = app_handle.state::<crate::AppState>();
+            let guard = state.lifecycle.capture_guard(true).await;
+            let app_handle_clone = app_handle.clone();
 
-            // 延迟接受放入后台任务，不阻塞 BP 主循环（秒退/阶段变化时由版本号取消）
-            let app_handle = app_handle.clone();
-            crate::spawn_log_panic(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let _ = state
+                .supervisor
+                .spawn(
+                    crate::agents::supervisor::TaskKind::AutoTrade,
+                    format!("AutoTrade(id={})", trade.id),
+                    move |cancel_token| async move {
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => {
+                                log::info!("后台英雄交换接受任务已协同取消");
+                                return;
+                            }
+                            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+                        }
 
-                {
-                    let state = app_handle.state::<crate::AppState>();
-                    if state.bp_task_id.load(std::sync::atomic::Ordering::SeqCst) != current_id {
-                        log::info!("后台交易接受任务已失效 (版本不匹配)，退出");
-                        return;
-                    }
-                }
+                        if cancel_token.is_cancelled() {
+                            return;
+                        }
 
-                lcu_post(&app_handle, &url).await;
-            });
+                        let state = app_handle_clone.state::<crate::AppState>();
+                        let current_lifecycle = state.lifecycle.snapshot().await;
+                        if let Err(e) = guard.ensure_valid(&current_lifecycle) {
+                            log::info!("后台英雄交换接受任务已失效 (生命周期变迁: {})", e);
+                            return;
+                        }
+
+                        lcu_post(&app_handle_clone, &url).await;
+                    },
+                )
+                .await;
             return;
         }
     }
@@ -357,14 +389,15 @@ async fn do_auto_complete(
 
     let cell_id = session.local_player_cell_id;
 
-    // 找到 pick action 并检查状态 — 确认是进行中的 pick 即可
-    let has_in_progress_pick = session.actions.iter().rev().flatten().any(|a| {
+    // 找到当前进行中的 pick action
+    let target_action = session.actions.iter().flatten().find(|a| {
         a.actor_cell_id == cell_id && a.action_type == "pick" && a.is_in_progress && !a.completed
     });
 
-    if !has_in_progress_pick {
-        return;
-    }
+    let action = match target_action {
+        Some(a) => a,
+        None => return,
+    };
 
     // 计算等待时间：剩余时间 - 4 秒
     let sleep_ms = session
@@ -374,82 +407,135 @@ async fn do_auto_complete(
         .unwrap_or(10000);
     let sleep_secs = (sleep_ms / 1000).saturating_sub(4);
 
+    let state = app_handle.state::<crate::AppState>();
+    let lifecycle_state = state.lifecycle.snapshot().await;
+    let session_id = match lifecycle_state.session_id.clone() {
+        Some(sid) => sid,
+        None => {
+            log::warn!("自动锁定跳过: 当前未处于有效的选人生命周期中");
+            return;
+        }
+    };
+    let guard = state.lifecycle.capture_guard(true).await;
+
+    let mut initial_champion_id = action.champion_id;
+    if initial_champion_id == 0 {
+        if let Some(player) = session.my_team.iter().find(|p| p.cell_id == cell_id) {
+            if player.champion_pick_intent > 0 {
+                initial_champion_id = player.champion_pick_intent;
+            } else if player.champion_id > 0 {
+                initial_champion_id = player.champion_id;
+            }
+        }
+    }
+
+    let lease = crate::agents::action::ActionLease::new(
+        guard,
+        session_id,
+        action.id,
+        cell_id,
+        "pick".to_string(),
+        initial_champion_id,
+    );
+
     // 标记防止重复进入
     selection.is_champion_picked_completed = true;
 
-    // 递增全局任务版本，产生本次独占任务 ID
-    let current_id = {
-        let state = app_handle.state::<crate::AppState>();
-        state
-            .bp_task_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1
-    };
-
     log::info!(
-        "自动锁定: 等待 {} 秒后锁定 (任务版本: {})",
-        sleep_secs,
-        current_id
+        "自动锁定: 签发 ActionLease (action={}, cell={}), 等待 {} 秒后校验锁定",
+        action.id,
+        cell_id,
+        sleep_secs
     );
 
-    // 在后台任务中等待并锁定，不阻塞主循环（否则秒退后新选人事件无法处理）
-    let app_handle = app_handle.clone();
-    crate::spawn_log_panic(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(sleep_secs)).await;
-
-        // 验证该任务是否已被取消或被后续任务覆盖
-        {
-            let state = app_handle.state::<crate::AppState>();
-            if state.bp_task_id.load(std::sync::atomic::Ordering::SeqCst) != current_id {
-                log::info!("后台锁定任务已失效 (版本不匹配，可能已重置或有新任务)，退出");
-                return;
-            }
-        }
-
-        // 重新获取会话数据（经过等待后状态可能已变化）
-        let fresh_session = match lcu_get_session(&app_handle).await {
-            Some(s) => s,
-            None => return,
-        };
-
-        // 收集不可选的英雄（已被其他人选走 + 已禁用）
-        let mut cant_select: Vec<i32> = Vec::new();
-        for ag in &fresh_session.actions {
-            for a in ag {
-                if a.action_type == "pick" && a.completed && a.actor_cell_id != cell_id {
-                    cant_select.push(a.champion_id);
+    let app_handle_clone = app_handle.clone();
+    let desc = format!("AutoPickLock(action={}, cell={})", action.id, cell_id);
+    let spawn_res = state
+        .supervisor
+        .spawn(
+            crate::agents::supervisor::TaskKind::AutoPickLock,
+            desc,
+            move |cancel_token| async move {
+                tokio::select! {
+                    _ = cancel_token.cancelled() => {
+                        log::info!("自动锁定任务在等待期被协同取消");
+                        return;
+                    }
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(sleep_secs)) => {}
                 }
-            }
-        }
-        cant_select.extend(fresh_session.bans.my_team_bans.iter());
-        cant_select.extend(fresh_session.bans.their_team_bans.iter());
 
-        // 找到当前玩家的 pick action
-        let mut champion_intent = 0;
-        let mut action_id = 0;
-        for ag in &fresh_session.actions {
-            for a in ag {
-                if a.actor_cell_id != cell_id || a.action_type != "pick" {
-                    continue;
+                if cancel_token.is_cancelled() {
+                    return;
                 }
-                if a.completed {
-                    return; // 已锁定，无需操作
+
+                // 重新获取最新会话数据
+                let fresh_session = match lcu_get_session(&app_handle_clone).await {
+                    Some(s) => s,
+                    None => return,
+                };
+
+                let state = app_handle_clone.state::<crate::AppState>();
+                let current_lifecycle = state.lifecycle.snapshot().await;
+
+                // 核心：使用 ActionLease 进行目标一致性终极双重断言（消除 TOCTOU）
+                if let Err(e) = lease.verify_target(&current_lifecycle, &fresh_session) {
+                    log::warn!("自动锁定因目标校验不通过而放弃: {}", e);
+                    return;
                 }
-                champion_intent = a.champion_id;
-                action_id = a.id;
-            }
-        }
 
-        if champion_intent == 0 || action_id == 0 {
-            return;
-        }
+                // 收集不可选的英雄（已被他人选走 + 已禁用）
+                let mut cant_select: Vec<i32> = Vec::new();
+                for ag in &fresh_session.actions {
+                    for a in ag {
+                        if a.action_type == "pick" && a.completed && a.actor_cell_id != cell_id {
+                            cant_select.push(a.champion_id);
+                        }
+                    }
+                }
+                cant_select.extend(fresh_session.bans.my_team_bans.iter());
+                cant_select.extend(fresh_session.bans.their_team_bans.iter());
 
-        // 只有当英雄未被其他人选走时才锁定
-        if !cant_select.contains(&champion_intent) {
-            log::info!("超时自动锁定英雄: {}", champion_intent);
-            lcu_patch_action(&app_handle, action_id, champion_intent, true).await;
-        }
-    });
+                // 再次从 fresh_session 提取实际选定的 champion_id
+                let actual_champion_id = fresh_session
+                    .actions
+                    .iter()
+                    .flatten()
+                    .find(|a| a.id == lease.action_id)
+                    .map(|a| a.champion_id)
+                    .unwrap_or(0);
+
+                let target_champion_id = if actual_champion_id > 0 {
+                    actual_champion_id
+                } else {
+                    lease.expected_champion_id
+                };
+
+                if target_champion_id == 0 {
+                    log::warn!("自动锁定放弃: 玩家尚未选择任何英雄");
+                    return;
+                }
+
+                if cant_select.contains(&target_champion_id) {
+                    log::warn!(
+                        "自动锁定放弃: 目标英雄 {} 已被禁用或被选走",
+                        target_champion_id
+                    );
+                    return;
+                }
+
+                log::info!(
+                    "ActionLease 验证通过，向 LCU 提交超时自动锁定: champion={}",
+                    target_champion_id
+                );
+                lcu_patch_action(&app_handle_clone, lease.action_id, target_champion_id, true)
+                    .await;
+            },
+        )
+        .await;
+
+    if let Err(e) = spawn_res {
+        log::warn!("自动锁定任务派发失败: {}", e);
+    }
 }
 
 // ─── 2.5 自动展示 OPGG 推荐配置 ───
@@ -536,7 +622,7 @@ async fn do_auto_ban(
     app_handle: &AppHandle,
     session: &ChampSelectSession,
     cfg: &FunctionsConfig,
-    selection: &mut ChampionSelection,
+    _selection: &mut ChampionSelection,
 ) {
     if !cfg.enable_auto_ban_champion {
         return;
@@ -590,41 +676,58 @@ async fn do_auto_ban(
     }
 
     let action_id = action.id;
+    let state = app_handle.state::<crate::AppState>();
+    let current_lifecycle = state.lifecycle.snapshot().await;
+    let guard = state.lifecycle.capture_guard(true).await;
+    let session_id = current_lifecycle
+        .session_id
+        .clone()
+        .unwrap_or_else(|| "unknown-session".to_string());
 
-    // 延迟禁人放入后台任务，不阻塞 BP 主循环。
-    // 注意：同一 action 只允许调度一次 —— 选人阶段 session 事件高频推送，
-    // 若每次事件都重新调度，每次 fetch_add 产生的任务版本号会把上一个待执行的
-    // 禁人任务作废，导致延迟禁人被无限顺延直至动作超时失效。
-    if cfg.auto_ban_delay > 0.0 {
-        if selection.ban_scheduled_action_id == Some(action_id) {
-            return;
-        }
-        selection.ban_scheduled_action_id = Some(action_id);
+    let lease = ActionLease::new(
+        guard,
+        session_id,
+        action_id,
+        cell_id,
+        "ban".to_string(),
+        candidates[0],
+    );
 
-        let delay = cfg.auto_ban_delay;
-        let candidates = candidates.clone();
-        let app_handle = app_handle.clone();
-        crate::spawn_log_panic(async move {
-            tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+    let delay = cfg.auto_ban_delay;
+    let candidates = candidates.clone();
+    let app_handle = app_handle.clone();
 
-            // 延迟结束后重取会话：秒退/阶段结束时拿不到会话，或动作已完成/失效时直接放弃。
-            // 因此无需依赖任务版本号取消机制（版本号会被交换/锁定等任务的调度互相作废）。
+    let desc = format!("AutoBanLock(action={}, cell={})", action_id, cell_id);
+    let _ = state
+        .supervisor
+        .spawn(TaskKind::AutoBanLock, desc, move |cancel_token| async move {
+            if delay > 0.0 {
+                tokio::select! {
+                    _ = cancel_token.cancelled() => {
+                        log::info!("[supervisor] 自动禁人任务被协作取消: action_id={}", action_id);
+                        return;
+                    }
+                    _ = tokio::time::sleep(std::time::Duration::from_secs_f64(delay)) => {}
+                }
+            }
+
+            // 延迟或等待结束后重新拉取最新 session，结合当前生命周期执行 TOCTOU 校验
             let fresh_session = match lcu_get_session(&app_handle).await {
                 Some(s) => s,
-                None => return,
+                None => {
+                    log::warn!("[supervisor] 自动禁人放弃: 无法获取最新 session");
+                    return;
+                }
             };
-            let still_active = fresh_session.actions.iter().flatten().any(|a| {
-                a.id == action_id
-                    && a.actor_cell_id == cell_id
-                    && a.action_type == "ban"
-                    && a.is_in_progress
-                    && !a.completed
-            });
-            if !still_active {
+            let state = app_handle.state::<crate::AppState>();
+            let fresh_lifecycle = state.lifecycle.snapshot().await;
+
+            if let Err(e) = lease.verify_target(&fresh_lifecycle, &fresh_session) {
+                log::warn!("[supervisor] 自动禁人前置校验未通过 (TOCTOU防护生效): {}", e);
                 return;
             }
 
-            // 过滤延迟期间新出现的禁用英雄，取第一个仍可选的候选
+            // 过滤期间新出现的禁用英雄，取第一个仍可选的候选
             let new_bans: Vec<i32> = fresh_session
                 .bans
                 .my_team_bans
@@ -634,16 +737,16 @@ async fn do_auto_ban(
                 .collect();
             let champion_id = match candidates.iter().find(|c| !new_bans.contains(c)) {
                 Some(c) => *c,
-                None => return,
+                None => {
+                    log::warn!("[supervisor] 自动禁人放弃: 候选英雄已被全部禁用");
+                    return;
+                }
             };
 
-            log::info!("自动禁用英雄: {}", champion_id);
+            log::info!("自动禁用英雄: {} (action_id={})", champion_id, action_id);
             lcu_patch_action(&app_handle, action_id, champion_id, true).await;
-        });
-    } else {
-        log::info!("自动禁用英雄: {}", candidates[0]);
-        lcu_patch_action(app_handle, action_id, candidates[0], true).await;
-    }
+        })
+        .await;
 }
 
 // ─── 自动选人 ───
