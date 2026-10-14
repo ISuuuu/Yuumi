@@ -47,6 +47,29 @@ pub fn init() {
         unsafe {
             std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_dir);
         }
+    } else if cfg!(debug_assertions) && cfg!(windows) {
+        // 开发模式（pnpm tauri dev）自动隔离到 target 编译目录下的独立数据目录，杜绝与正式版抢占锁导致 0x800700AA
+        if let Some(exe_dir) = current_exe_dir() {
+            let webview_dev_dir = exe_dir.join("webview2_dev");
+            match std::fs::create_dir_all(&webview_dev_dir) {
+                Ok(_) => {
+                    println!(
+                        "[runtime] 开发模式已隔离 WebView2 数据目录: {:?}",
+                        webview_dev_dir
+                    );
+                    #[cfg(windows)]
+                    unsafe {
+                        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_dev_dir);
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "警告: 创建开发版 WebView2 缓存目录失败 ({:?}): {e}",
+                        webview_dev_dir
+                    );
+                }
+            }
+        }
     }
 }
 
