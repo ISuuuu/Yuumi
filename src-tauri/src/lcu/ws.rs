@@ -430,47 +430,30 @@ async fn process_event(text: &str, app_handle: &AppHandle) {
     if uri.starts_with("/lol-gameflow/v1/gameflow-phase") {
         if let Some(phase) = event_data.get("data").and_then(|v| v.as_str()) {
             let transition = state.lifecycle.update_phase(phase).await;
-            match transition {
-                crate::agents::lifecycle::PhaseTransition::NoChange => {
-                    log::debug!("[WS] 阶段无实质变化 (已去重过滤): {}", phase);
-                    return;
+            if let Some((previous, current)) = transition.phases() {
+                log::info!("[WS] 游戏生命周期变迁: {:?}", transition);
+                if let Err(e) = state.gameflow_tx.try_send(
+                    crate::agents::auto_match::GameflowEvent::PhaseChanged(phase.to_string()),
+                ) {
+                    log::warn!("[WS] 推送 Gameflow PhaseChanged 失败: {}", e);
                 }
-                crate::agents::lifecycle::PhaseTransition::PhaseChanged {
-                    ref current,
-                    ref previous,
-                    ..
-                }
-                | crate::agents::lifecycle::PhaseTransition::NewMatchStarted {
-                    ref current,
-                    ref previous,
-                    ..
-                }
-                | crate::agents::lifecycle::PhaseTransition::MatchTerminated {
-                    ref current,
-                    ref previous,
-                    ..
-                } => {
-                    log::info!("[WS] 游戏生命周期变迁: {:?}", transition);
-                    if let Err(e) = state.gameflow_tx.try_send(
-                        crate::agents::auto_match::GameflowEvent::PhaseChanged(phase.to_string()),
-                    ) {
-                        log::warn!("[WS] 推送 Gameflow PhaseChanged 失败: {}", e);
-                    }
 
-                    // 跨阶段进入选人阶段时清空板凳席历史英雄缓存
-                    if previous != &crate::agents::lifecycle::GamePhase::ChampSelect
-                        && current == &crate::agents::lifecycle::GamePhase::ChampSelect
-                    {
-                        if let Ok(mut list) = state.bench_my_champions.lock() {
-                            list.clear();
-                            log::info!("[WS] 跨阶段进入选人阶段，已清空板凳席历史英雄缓存");
-                        }
-                    }
-
-                    if let Ok(mut last_phase) = state.last_gameflow_phase.lock() {
-                        *last_phase = phase.to_string();
+                // 跨阶段进入选人阶段时清空板凳席历史英雄缓存
+                if previous != &crate::agents::lifecycle::GamePhase::ChampSelect
+                    && current == &crate::agents::lifecycle::GamePhase::ChampSelect
+                {
+                    if let Ok(mut list) = state.bench_my_champions.lock() {
+                        list.clear();
+                        log::info!("[WS] 跨阶段进入选人阶段，已清空板凳席历史英雄缓存");
                     }
                 }
+
+                if let Ok(mut last_phase) = state.last_gameflow_phase.lock() {
+                    *last_phase = phase.to_string();
+                }
+            } else {
+                // 去重过滤：不广播，但也不能 return —— 避免跳过下方的 SignalR 阶段转发
+                log::debug!("[WS] 阶段无实质变化 (已去重过滤): {}", phase);
             }
         }
     }

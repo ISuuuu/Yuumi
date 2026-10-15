@@ -210,6 +210,13 @@ async fn handle_phase_change(
             .cancel_kind(&crate::agents::supervisor::TaskKind::AutoAccept)
             .await;
     }
+    // 当离开对局或重连阶段时，立即协同取消正在退避等待中的自动重连任务
+    if phase != "InProgress" && phase != "Reconnect" {
+        state
+            .supervisor
+            .cancel_kind(&crate::agents::supervisor::TaskKind::AutoReconnect)
+            .await;
+    }
     // 当离开结算相关阶段时，立即协同取消正在等待中的再来一局任务
     if !matches!(phase, "WaitingForStats" | "PreEndOfGame" | "EndOfGame") {
         state
@@ -218,12 +225,13 @@ async fn handle_phase_change(
             .await;
     }
 
-    // 进入对局阶段时开启自动截图事件监听，退出对局阶段时关闭
+    // 进入对局阶段时开启自动截图事件监听，退出对局阶段时关闭；
+    // Reconnect 期间保持局内监听，避免因网络抖动误关截图
     if phase == "InProgress" {
         super::auto_screenshot::set_in_game(true);
         // 缓存本局信息，供对局结束自动记录相遇玩家
         spawn_cache_current_game(app_handle.clone());
-    } else {
+    } else if phase != "Reconnect" {
         super::auto_screenshot::set_in_game(false);
     }
 
@@ -293,24 +301,13 @@ async fn handle_phase_change(
         try_create_default_lobby(app_handle.clone(), cfg, lobby_state.clone());
     }
 
-    // 游戏进行中 → 自动重连（指数退避，最多 5 次）
-    if phase == "InProgress" && cfg.enable_auto_reconnect {
-        log::info!("检测到游戏进行中，尝试自动重连...");
-        for attempt in 1..=5 {
-            if lcu_post(app_handle, "/lol-gameflow/v1/reconnect").await {
-                log::info!("自动重连成功");
-                break;
-            }
-            if attempt < 5 {
-                let delay = Duration::from_millis(500 * (1 << (attempt - 1)));
-                log::info!(
-                    "重连失败，{}s 后重试（第 {}/5 次）",
-                    delay.as_secs_f32(),
-                    attempt + 1
-                );
-                sleep(delay).await;
-            }
-        }
+    // 游戏进行中 / 断线重连中 → 自动重连（指数退避，最多 5 次）。
+    // 重试链整条交给 supervisor 后台执行：阻塞在主循环里会让后续 ReadyCheck /
+    // HonorBallot / ReceivedInvitations 事件最长积压约 7.5 秒。
+    // AutoReconnect 采用 RejectNew 策略，重复的事件只会有一条重试链。
+    if (phase == "InProgress" || phase == "Reconnect") && cfg.enable_auto_reconnect {
+        log::info!("检测到对局进行中或断线 ({})，尝试自动重连...", phase);
+        spawn_auto_reconnect(app_handle.clone());
     }
 
     // 再来一局：进入结算相关阶段后，延迟触发"再来一局"
@@ -623,6 +620,77 @@ fn spawn_auto_accept(app_handle: AppHandle, delay_secs: u32) {
 
         if let Err(e) = res {
             log::debug!("启动自动接受匹配任务未执行: {}", e);
+        }
+    });
+}
+
+/// 自动重连：指数退避，最多 5 次。
+/// 整条重试链由 supervisor 以 `RejectNew` 策略托管，因此同一时刻只会有一条重试链；
+/// 重试期间退避 sleep 不会阻塞 gameflow 事件主循环。
+fn spawn_auto_reconnect(app_handle: AppHandle) {
+    let state = app_handle.state::<crate::AppState>();
+    let supervisor = state.supervisor.clone();
+    let lifecycle = state.lifecycle.clone();
+
+    crate::spawn_log_panic(async move {
+        let guard = lifecycle.capture_guard(false).await;
+        let res = supervisor
+            .spawn(
+                crate::agents::supervisor::TaskKind::AutoReconnect,
+                "AutoReconnect".to_string(),
+                move |cancel_token| async move {
+                    for attempt in 1..=5u64 {
+                        if cancel_token.is_cancelled() {
+                            log::info!("自动重连任务已协同取消");
+                            return;
+                        }
+
+                        // 每次重试前都校验仍在同一局游戏中（仅允许处于游戏中或断线重连中）
+                        let current_lifecycle = lifecycle.snapshot().await;
+                        if let Err(e) = guard.ensure_valid(&current_lifecycle) {
+                            log::info!("自动重连放弃: 生命周期失效 ({})", e);
+                            return;
+                        }
+                        if current_lifecycle.phase
+                            != crate::agents::lifecycle::GamePhase::InProgress
+                            && current_lifecycle.phase
+                                != crate::agents::lifecycle::GamePhase::Reconnect
+                        {
+                            log::info!(
+                                "当前游戏阶段为 {}，已脱离对局，取消自动重连",
+                                current_lifecycle.phase.as_str()
+                            );
+                            return;
+                        }
+
+                        if lcu_post(&app_handle, "/lol-gameflow/v1/reconnect").await {
+                            log::info!("自动重连成功");
+                            return;
+                        }
+
+                        if attempt < 5 {
+                            let delay = Duration::from_millis(500 * (1u64 << (attempt - 1)));
+                            log::info!(
+                                "重连失败，{}s 后重试（第 {}/5 次）",
+                                delay.as_secs_f32(),
+                                attempt + 1
+                            );
+                            tokio::select! {
+                                _ = cancel_token.cancelled() => {
+                                    log::info!("自动重连任务在退避期被协同取消");
+                                    return;
+                                }
+                                _ = tokio::time::sleep(delay) => {}
+                            }
+                        }
+                    }
+                    log::warn!("自动重连 5 次尝试均失败");
+                },
+            )
+            .await;
+
+        if let Err(e) = res {
+            log::debug!("启动自动重连任务未执行: {}", e);
         }
     });
 }

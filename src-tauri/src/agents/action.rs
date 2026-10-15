@@ -1,6 +1,5 @@
 use super::auto_bp::ChampSelectSession;
 use super::lifecycle::{GenerationGuard, LifecycleState, StaleGenerationError};
-use serde::{Deserialize, Serialize};
 
 /// 写操作目标验证错误
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,10 +14,6 @@ pub enum ActionVerificationError {
     ActorMismatch { expected: i32, actual: i32 },
     /// Action 已经处于完成状态，无需/不可重复提交
     ActionAlreadyCompleted(i32),
-    /// Action 不是当前进行中的操作 (is_in_progress == false)
-    ActionNotInProgress(i32),
-    /// 会话已被他人占用或已失效
-    TargetChampionUnavailable(i32),
 }
 
 impl std::fmt::Display for ActionVerificationError {
@@ -35,12 +30,6 @@ impl std::fmt::Display for ActionVerificationError {
             ActionVerificationError::ActionAlreadyCompleted(id) => {
                 write!(f, "Action {} 已完成，拒绝重复写入", id)
             }
-            ActionVerificationError::ActionNotInProgress(id) => {
-                write!(f, "Action {} 当前未处于进行中", id)
-            }
-            ActionVerificationError::TargetChampionUnavailable(id) => {
-                write!(f, "目标英雄 {} 已不可选或被禁用", id)
-            }
         }
     }
 }
@@ -54,11 +43,10 @@ impl From<StaleGenerationError> for ActionVerificationError {
 }
 
 /// 受保护的 BP 操作租约 (ActionLease)
-/// 绑定了生命周期 Guard、会话全局唯一 ID 与具体操作槽位
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// 绑定了生命周期 Guard 与具体操作槽位，在写操作前做终极双重断言
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionLease {
     pub guard: GenerationGuard,
-    pub session_id: String,
     pub action_id: i32,
     pub actor_cell_id: i32,
     pub action_type: String,
@@ -68,7 +56,6 @@ pub struct ActionLease {
 impl ActionLease {
     pub fn new(
         guard: GenerationGuard,
-        session_id: String,
         action_id: i32,
         actor_cell_id: i32,
         action_type: String,
@@ -76,7 +63,6 @@ impl ActionLease {
     ) -> Self {
         Self {
             guard,
-            session_id,
             action_id,
             actor_cell_id,
             action_type,
@@ -172,14 +158,7 @@ mod tests {
             required_session_id: Some("session-abc".to_string()),
         };
 
-        let lease = ActionLease::new(
-            guard,
-            "session-abc".to_string(),
-            10,
-            2,
-            "pick".to_string(),
-            103,
-        );
+        let lease = ActionLease::new(guard, 10, 2, "pick".to_string(), 103);
 
         let lifecycle = LifecycleState {
             match_epoch: 2,

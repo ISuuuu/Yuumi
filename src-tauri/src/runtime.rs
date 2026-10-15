@@ -53,6 +53,8 @@ pub fn init() {
             let webview_dev_dir = exe_dir.join("webview2_dev");
             match std::fs::create_dir_all(&webview_dev_dir) {
                 Ok(_) => {
+                    // runtime::init() 早于 logging::init() 执行，此时日志器尚未安装，
+                    // 故此处只能用 println! 让信息出现在 dev 控制台
                     println!(
                         "[runtime] 开发模式已隔离 WebView2 数据目录: {:?}",
                         webview_dev_dir

@@ -1,9 +1,8 @@
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::RwLock;
 
 /// 游戏流程阶段枚举
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GamePhase {
     None,
     Lobby,
@@ -72,6 +71,11 @@ impl GamePhase {
                 | GamePhase::EndOfGame
         )
     }
+
+    /// 是否处于局内加载或对局运行中
+    pub fn is_in_game(&self) -> bool {
+        matches!(self, GamePhase::GameStart | GamePhase::InProgress)
+    }
 }
 
 /// 生命周期代际失效错误
@@ -126,7 +130,7 @@ impl std::fmt::Display for StaleGenerationError {
 impl std::error::Error for StaleGenerationError {}
 
 /// 当前游戏世界权威状态快照
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LifecycleState {
     /// 对局代际：标识一局完整对局生命周期
     pub match_epoch: u64,
@@ -139,7 +143,7 @@ pub struct LifecycleState {
 }
 
 /// 任务代际守卫：在产生外部副作用前验证有效性
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenerationGuard {
     pub epoch: u64,
     pub revision: u64,
@@ -208,6 +212,25 @@ pub enum PhaseTransition {
         finished_epoch: u64,
         phase_revision: u64,
     },
+}
+
+impl PhaseTransition {
+    /// 取本次变迁的前后阶段；`NoChange`（重复推送被去重过滤）时返回 None。
+    /// 供调用方在不穷举全部变体的前提下判断「是否跨入了某个阶段」。
+    pub fn phases(&self) -> Option<(&GamePhase, &GamePhase)> {
+        match self {
+            PhaseTransition::NoChange => None,
+            PhaseTransition::PhaseChanged {
+                previous, current, ..
+            }
+            | PhaseTransition::NewMatchStarted {
+                previous, current, ..
+            }
+            | PhaseTransition::MatchTerminated {
+                previous, current, ..
+            } => Some((previous, current)),
+        }
+    }
 }
 
 /// 统一生命周期管理器
@@ -281,11 +304,41 @@ impl LifecycleManager {
         }
 
         let old_phase = state.phase.clone();
+
+        // 1. 同一对局内的瞬时重连连接态往返 (InProgress/GameStart <-> Reconnect)：
+        // 游戏客户端网络抖动或断线重连是同一局游戏内的瞬时连接态，既不产生新对局，
+        // 也不推进 revision，使在册任务和代际守卫完全透明存续。
+        if (old_phase.is_in_game() && new_phase == GamePhase::Reconnect)
+            || (old_phase == GamePhase::Reconnect && new_phase.is_in_game())
+        {
+            state.phase = new_phase.clone();
+            return PhaseTransition::PhaseChanged {
+                previous: old_phase,
+                current: new_phase,
+                match_epoch: state.match_epoch,
+                phase_revision: state.phase_revision,
+            };
+        }
+
+        // 2. 观战中性态：观战不属于玩家活跃对局，进出观战不影响对局代际
+        if old_phase == GamePhase::WatchInProgress || new_phase == GamePhase::WatchInProgress {
+            state.phase = new_phase.clone();
+            return PhaseTransition::PhaseChanged {
+                previous: old_phase,
+                current: new_phase,
+                match_epoch: state.match_epoch,
+                phase_revision: state.phase_revision,
+            };
+        }
+
         let new_revision = self.phase_revision_counter.fetch_add(1, Ordering::SeqCst) + 1;
         state.phase_revision = new_revision;
 
-        // 判定生命周期边界跃迁
-        let transition = if !old_phase.is_match_active() && new_phase.is_match_active() {
+        // 判定生命周期边界跃迁（Reconnect 阶段在对局未终结前同样视作活跃对局的一部分）
+        let old_is_match = old_phase.is_match_active() || old_phase == GamePhase::Reconnect;
+        let new_is_match = new_phase.is_match_active() || new_phase == GamePhase::Reconnect;
+
+        let transition = if !old_is_match && new_is_match {
             // 从非对局阶段进入对局活跃阶段（新对局诞生）
             let new_epoch = self.match_epoch_counter.fetch_add(1, Ordering::SeqCst) + 1;
             state.match_epoch = new_epoch;
@@ -299,8 +352,8 @@ impl LifecycleManager {
                 match_epoch: new_epoch,
                 phase_revision: new_revision,
             }
-        } else if old_phase.is_match_active() && !new_phase.is_match_active() {
-            // 对局结束或秒退，脱离活跃对局状态
+        } else if old_is_match && !new_is_match {
+            // 对局结束或秒退，脱离活跃对局状态（包括掉线重连期间游戏结束退出到 Lobby/None）
             let finished_epoch = state.match_epoch;
             state.phase = new_phase.clone();
             state.session_id = None; // 退出选人/对局会话
@@ -412,6 +465,87 @@ mod tests {
             }
             _ => panic!("Expected MatchTerminated"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_neutral_phases_do_not_bump_match_epoch() {
+        let manager = LifecycleManager::new();
+
+        // 进入对局
+        manager.update_phase("InProgress").await;
+        let before = manager.snapshot().await;
+        assert_eq!(before.match_epoch, 2);
+        assert_eq!(before.phase, GamePhase::InProgress);
+
+        // 游戏中断线重连：InProgress -> Reconnect -> InProgress 必须是同一局
+        let t1 = manager.update_phase("Reconnect").await;
+        assert!(
+            matches!(t1, PhaseTransition::PhaseChanged { .. }),
+            "Reconnect 不应被判定为对局终结"
+        );
+        assert_eq!(manager.snapshot().await.match_epoch, 2);
+
+        let t2 = manager.update_phase("InProgress").await;
+        assert!(
+            matches!(t2, PhaseTransition::PhaseChanged { .. }),
+            "从 Reconnect 回到 InProgress 不应被判定为新对局诞生"
+        );
+        let after = manager.snapshot().await;
+        assert_eq!(after.match_epoch, 2, "重连往返不得虚增对局代际");
+        assert_eq!(after.phase, GamePhase::InProgress);
+
+        // 观战同样是中性态，None -> WatchInProgress -> None 不产生新对局
+        manager.update_phase("None").await;
+        manager.update_phase("WatchInProgress").await;
+        assert_eq!(manager.snapshot().await.match_epoch, 2);
+        manager.update_phase("None").await;
+
+        // 真正的新对局仍然正常递增
+        let t3 = manager.update_phase("ReadyCheck").await;
+        assert!(
+            matches!(t3, PhaseTransition::NewMatchStarted { .. }),
+            "中性态修复不能影响真实的新对局跃迁"
+        );
+        assert_eq!(manager.snapshot().await.match_epoch, 3);
+    }
+
+    #[tokio::test]
+    async fn test_generation_guard_survives_reconnect_blip() {
+        let manager = LifecycleManager::new();
+        manager.update_phase("InProgress").await;
+
+        // 重连闪烁期间签发的守卫，重连结束后必须仍然有效
+        let guard = manager.capture_guard(false).await;
+        manager.update_phase("Reconnect").await;
+        manager.update_phase("InProgress").await;
+        assert!(guard.ensure_valid(&manager.snapshot().await).is_ok());
+
+        // 但真正开启新对局后必须失效
+        manager.update_phase("Lobby").await;
+        manager.update_phase("ChampSelect").await;
+        assert!(guard.ensure_valid(&manager.snapshot().await).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_reconnect_to_lobby_terminates_match_and_invalidates_guard() {
+        let manager = LifecycleManager::new();
+        manager.update_phase("InProgress").await;
+        let guard = manager.capture_guard(false).await;
+
+        // 掉线进入 Reconnect，守卫仍然有效
+        manager.update_phase("Reconnect").await;
+        assert!(guard.ensure_valid(&manager.snapshot().await).is_ok());
+
+        // 掉线期间对局结束回到 Lobby，必须触发 MatchTerminated 且使守卫失效
+        let t = manager.update_phase("Lobby").await;
+        assert!(
+            matches!(t, PhaseTransition::MatchTerminated { .. }),
+            "从 Reconnect 退出到 Lobby 必须判定为对局终结"
+        );
+        assert!(
+            guard.ensure_valid(&manager.snapshot().await).is_err(),
+            "对局终结后 revision 推进，守卫必须失效"
+        );
     }
 
     #[tokio::test]

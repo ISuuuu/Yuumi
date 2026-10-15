@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 pub type TaskId = u64;
 
 /// 任务类型枚举
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TaskKind {
     AutoPickLock,
     AutoBanLock,
@@ -74,7 +73,7 @@ impl std::fmt::Display for SpawnError {
 impl std::error::Error for SpawnError {}
 
 /// 在册运行中的任务信息快照
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskSnapshot {
     pub id: TaskId,
     pub kind: TaskKind,
@@ -163,7 +162,7 @@ impl TaskSupervisor {
         );
         drop(tasks_lock);
 
-        // 构造任务结束清理守卫 (RAII)
+        // 任务正常结束时自行摘除在册记录；Drop 作为任务 panic/unwind 时的兜底。
         let tasks_ref = Arc::clone(&self.tasks);
         struct TaskCleanupGuard {
             task_id: TaskId,
@@ -171,20 +170,30 @@ impl TaskSupervisor {
         }
         impl Drop for TaskCleanupGuard {
             fn drop(&mut self) {
-                let tasks = Arc::clone(&self.tasks);
-                let task_id = self.task_id;
-                tokio::spawn(async move {
-                    tasks.lock().await.remove(&task_id);
-                });
+                // 快速路径：无竞争时同步直接移除
+                if let Ok(mut tasks) = self.tasks.try_lock() {
+                    tasks.remove(&self.task_id);
+                    return;
+                }
+                // 兜底路径：存在锁竞争时，利用当前 runtime 异步等待锁并移除；
+                // 仅在 runtime 存活时 spawn，规避 shutdown 期 double panic
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let tasks = Arc::clone(&self.tasks);
+                    let task_id = self.task_id;
+                    handle.spawn(async move {
+                        tasks.lock().await.remove(&task_id);
+                    });
+                }
             }
         }
 
         tokio::spawn(async move {
             let _guard = TaskCleanupGuard {
                 task_id,
-                tasks: tasks_ref,
+                tasks: Arc::clone(&tasks_ref),
             };
             task_fn(token).await;
+            tasks_ref.lock().await.remove(&task_id);
         });
 
         Ok(task_id)
