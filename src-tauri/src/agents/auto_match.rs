@@ -301,12 +301,12 @@ async fn handle_phase_change(
         try_create_default_lobby(app_handle.clone(), cfg, lobby_state.clone());
     }
 
-    // 游戏进行中 / 断线重连中 → 自动重连（指数退避，最多 5 次）。
+    // 游戏进行中 → 自动重连（指数退避，最多 5 次）。
     // 重试链整条交给 supervisor 后台执行：阻塞在主循环里会让后续 ReadyCheck /
     // HonorBallot / ReceivedInvitations 事件最长积压约 7.5 秒。
     // AutoReconnect 采用 RejectNew 策略，重复的事件只会有一条重试链。
-    if (phase == "InProgress" || phase == "Reconnect") && cfg.enable_auto_reconnect {
-        log::info!("检测到对局进行中或断线 ({})，尝试自动重连...", phase);
+    if phase == "InProgress" && cfg.enable_auto_reconnect {
+        log::info!("检测到游戏进行中，尝试自动重连...");
         spawn_auto_reconnect(app_handle.clone());
     }
 
