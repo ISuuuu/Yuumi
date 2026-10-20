@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import type { MatchDisplay, AppConfig, SavedPlayerMarker } from "../../api/lcu";
 import type { RankedQueueEntry } from "../../types/lcu";
@@ -32,7 +32,7 @@ const props = defineProps<{
 }>();
 
 const store = useLcuStore();
-const { t, te } = useI18n();
+const { t, te, locale } = useI18n();
 const { getPlayerSearchName, getPlayerDisplayName, handleNameClick } = usePlayerSearch();
 
 const { savedInfo, savedBadgeTitle, getFateBadgeText, getFateTitle } = useFateBadge(
@@ -187,16 +187,45 @@ function getQueueName(queueId: number, backendName: string): string {
   return backendName;
 }
 
+let kdaRatioCache = new WeakMap<MatchDisplay, { text: string; clazz: string }>();
+let tooltipCache = new WeakMap<MatchDisplay, string>();
+let cardStyleCache = new WeakMap<MatchDisplay, Record<string, string>>();
+const cardStyleVersion = ref(0);
+
+// 语言切换或个性化颜色配置变动时，及时重置 WeakMap 缓存并递增响应式版本号
+watch(
+  () => props.appConfig?.Personalization,
+  () => {
+    cardStyleCache = new WeakMap();
+    cardStyleVersion.value++;
+  },
+  { deep: true },
+);
+
+watch(
+  () => locale.value,
+  () => {
+    tooltipCache = new WeakMap();
+  },
+);
+
 function formatKdaRatio(m: MatchDisplay): { text: string; clazz: string } {
+  const cached = kdaRatioCache.get(m);
+  if (cached) return cached;
+
+  let res: { text: string; clazz: string };
   if (m.deaths === 0) {
-    return { text: "Perf", clazz: "kda-gold" };
+    res = { text: "Perf", clazz: "kda-gold" };
+  } else {
+    const ratio = (m.kills + m.assists) / m.deaths;
+    const text = ratio >= 10 ? ratio.toFixed(0) : ratio.toFixed(1);
+    if (ratio >= 5.0) res = { text, clazz: "kda-gold" };
+    else if (ratio >= 3.0) res = { text, clazz: "kda-blue" };
+    else if (ratio >= 2.0) res = { text, clazz: "kda-green" };
+    else res = { text, clazz: "kda-gray" };
   }
-  const ratio = (m.kills + m.assists) / m.deaths;
-  const text = ratio >= 10 ? ratio.toFixed(0) : ratio.toFixed(1);
-  if (ratio >= 5.0) return { text, clazz: "kda-gold" };
-  if (ratio >= 3.0) return { text, clazz: "kda-blue" };
-  if (ratio >= 2.0) return { text, clazz: "kda-green" };
-  return { text, clazz: "kda-gray" };
+  kdaRatioCache.set(m, res);
+  return res;
 }
 
 function formatMatchDate(shortTime: string): string {
@@ -205,6 +234,9 @@ function formatMatchDate(shortTime: string): string {
 }
 
 function getMatchTopTooltip(m: MatchDisplay): string {
+  const cached = tooltipCache.get(m);
+  if (cached) return cached;
+
   const mode = getQueueName(m.queueId, m.name);
   const posName = m.position ? getPositionName(m.position) : "";
   const date = m.time || m.shortTime || formatMatchDate(m.shortTime);
@@ -219,36 +251,45 @@ function getMatchTopTooltip(m: MatchDisplay): string {
   if (date) {
     lines.push(`${dateLabel}: ${date}`);
   }
-  return lines.join("\n");
+  const res = lines.join("\n");
+  tooltipCache.set(m, res);
+  return res;
 }
 
 function getMatchCardStyle(m: MatchDisplay): Record<string, string> {
-  if (!props.appConfig?.Personalization) return {};
+  void cardStyleVersion.value;
+  const cached = cardStyleCache.get(m);
+  if (cached) return cached;
 
-  const colors = props.appConfig.Personalization;
-  let color = "";
+  let res: Record<string, string> = {};
+  if (props.appConfig?.Personalization) {
+    const colors = props.appConfig.Personalization;
+    let color = "";
 
-  if (m.remake) {
-    color = colors.RemakeCardColor || "";
-  } else if (m.win) {
-    color = colors.WinCardColor || "";
-  } else {
-    color = colors.LoseCardColor || "";
-  }
-
-  if (color) {
-    if (color.startsWith("#") && color.length === 9) {
-      const alpha = parseInt(color.slice(1, 3), 16) / 255;
-      const r = parseInt(color.slice(3, 5), 16);
-      const g = parseInt(color.slice(5, 7), 16);
-      const b = parseInt(color.slice(7, 9), 16);
-      return { background: `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})` };
-    } else if (color.startsWith("#") && color.length === 7) {
-      return { background: `${color}1a` };
+    if (m.remake) {
+      color = colors.RemakeCardColor || "";
+    } else if (m.win) {
+      color = colors.WinCardColor || "";
+    } else {
+      color = colors.LoseCardColor || "";
     }
-    return { background: color };
+
+    if (color) {
+      if (color.startsWith("#") && color.length === 9) {
+        const alpha = parseInt(color.slice(1, 3), 16) / 255;
+        const r = parseInt(color.slice(3, 5), 16);
+        const g = parseInt(color.slice(5, 7), 16);
+        const b = parseInt(color.slice(7, 9), 16);
+        res = { background: `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})` };
+      } else if (color.startsWith("#") && color.length === 7) {
+        res = { background: `${color}1a` };
+      } else {
+        res = { background: color };
+      }
+    }
   }
-  return {};
+  cardStyleCache.set(m, res);
+  return res;
 }
 
 const columnSideColorClass = computed(() => {
@@ -547,12 +588,12 @@ const displayedMatches = computed(() => {
           ]"
           :style="getMatchCardStyle(m)"
         >
-          <!-- 卡片顶部：游戏类型 + 位置 + 对局日期（独立一行） -->
+          <!-- 卡片顶部：游戏类型 + 位置 + 对局日期（独立一行，hover 展示详情 tooltip） -->
           <div class="cm-top-row" :title="getMatchTopTooltip(m)">
-            <span class="cm-mode" :title="getMatchTopTooltip(m)">
+            <span class="cm-mode">
               {{ getQueueName(m.queueId, m.name) }}
             </span>
-            <span v-if="m.position || inferMatchPosition(m)" class="cm-pos-tag" :title="getMatchTopTooltip(m)">
+            <span v-if="m.position || inferMatchPosition(m)" class="cm-pos-tag">
               <PositionIcon :position="m.position || inferMatchPosition(m)" :use-position-color="true" :size="11" />
             </span>
             <span
@@ -562,7 +603,7 @@ const displayedMatches = computed(() => {
             >
               {{ $t("gameInfo.encounteredMatch") }}
             </span>
-            <span class="cm-date" :title="getMatchTopTooltip(m)">{{ formatMatchDate(m.shortTime) }}</span>
+            <span class="cm-date">{{ formatMatchDate(m.shortTime) }}</span>
           </div>
 
           <!-- 卡片主体：大尺寸英雄头像 + 核心战绩数据 -->

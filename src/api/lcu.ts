@@ -253,12 +253,12 @@ export async function fetchMatchHistorySmart(
     return [] as MatchDisplay[];
   });
 
-  // 非首屏拉取不并发 SGP（翻页由 Search.vue 的 loadMoreMatches 自行按需 fallback）
+  // 非首屏拉取且未显式指定 forceSgp 时不并发 SGP（翻页由 Search.vue 的 loadMoreMatches 自行按需 fallback）
   if (!isHomePage && !options?.forceSgp) {
     return lcuPromise;
   }
 
-  // 2. 首屏拉取时：同时拉取 SGP 实时权威对局进行合并（参考 LeagueAkari 全量加载，确保获取完整官方 teamPosition 分路数据）
+  // 2. 默认首屏拉取时：同时拉取 SGP 实时权威对局进行合并（用于战绩查询/生涯页权威分路数据）
   const sgpPromise = fetchMatchHistorySgp(puuid, begIndex, endIndex).catch((e) => {
     console.debug(`[fetchMatchHistorySmart] SGP 战绩获取跳过或失败:`, e);
     return [] as MatchDisplay[];

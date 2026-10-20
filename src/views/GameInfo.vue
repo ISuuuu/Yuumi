@@ -94,30 +94,28 @@ const teamLookups = computed(() => {
     return theirTeam.value.some((p) => isSameIdentity(p, d));
   };
 
-  for (const key of Object.keys(playerData.value)) {
-    const d = playerData.value[key];
+  // 通过 Set 对重复 key 的同一玩家实例快速去重（从 30 个 key 骤降为 10 个唯一对象）
+  const uniqueEntries = Array.from(new Set(Object.values(playerData.value)));
+  for (const d of uniqueEntries) {
     if (!d?.info) continue;
 
     const inAlly = isAlly(d);
-    const inEnemy = isEnemy(d);
-    const targetMaps: Map<string, PlayerData>[] = [];
-    if (inAlly) targetMaps.push(allyMap);
-    if (inEnemy) targetMaps.push(enemyMap);
+    const inEnemy = !inAlly && isEnemy(d);
+    const targetMap = inAlly ? allyMap : inEnemy ? enemyMap : null;
+    if (!targetMap) continue;
 
-    for (const map of targetMaps) {
-      if (d.info.puuid) map.set(`p:${d.info.puuid}`, d);
-      if (d.info.summonerId) map.set(`s:${d.info.summonerId}`, d);
-      const rawName = d.info.displayName || d.info.gameName;
-      const dHasIdentity = Boolean(
-        d.info.puuid ||
-          d.info.tagLine ||
-          (d.info.summonerId && d.info.summonerId > 10) ||
-          (rawName && rawName.includes("#")),
-      );
-      if (isRealSummonerName(rawName, undefined, { hasIdentity: dHasIdentity })) {
-        const norm = normalizeLookupName(rawName);
-        if (norm) map.set(`n:${norm}`, d);
-      }
+    if (d.info.puuid) targetMap.set(`p:${d.info.puuid}`, d);
+    if (d.info.summonerId) targetMap.set(`s:${d.info.summonerId}`, d);
+    const rawName = d.info.displayName || d.info.gameName;
+    const dHasIdentity = Boolean(
+      d.info.puuid ||
+        d.info.tagLine ||
+        (d.info.summonerId && d.info.summonerId > 10) ||
+        (rawName && rawName.includes("#")),
+    );
+    if (isRealSummonerName(rawName, undefined, { hasIdentity: dHasIdentity })) {
+      const norm = normalizeLookupName(rawName);
+      if (norm) targetMap.set(`n:${norm}`, d);
     }
   }
 

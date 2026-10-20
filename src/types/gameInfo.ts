@@ -23,6 +23,7 @@ export interface PlayerData {
   fateAllyCount?: number;
   fateEnemyCount?: number;
   masteries?: ChampionMasteryItem[];
+  masteryFetched?: boolean;
   streak?: StreakInfo | null;
   positions?: AggregatedPositions | null;
   topChampions?: AggregatedChampion[];
