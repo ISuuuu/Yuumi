@@ -39,6 +39,23 @@ export interface ChampionMasteryItem {
   tokensEarned?: number;
 }
 
+/** LCU 英雄熟练度接口的原始返回（新旧版本字段名并存，统一按可选收敛） */
+export interface RawChampionMastery {
+  championId?: number;
+  champion_id?: number;
+  championLevel?: number;
+  masteryLevel?: number;
+  level?: number;
+  championPoints?: number;
+  points?: number;
+  score?: number;
+  highestGrade?: string;
+  highest_grade?: string;
+  championPointsSinceLastLevel?: number;
+  championPointsUntilNextLevel?: number;
+  tokensEarned?: number;
+}
+
 export interface StreakInfo {
   type: "win" | "loss";
   count: number;

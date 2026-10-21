@@ -18,11 +18,13 @@ import {
   type MatchDisplay,
   type AppConfig,
   type SavedPlayerMarker,
+  type LcuApiResponse,
 } from "../api/lcu";
 import type {
   PlayerData,
   PremadePlayerLike,
   ChampionMasteryItem,
+  RawChampionMastery,
   StreakInfo,
 } from "../types/gameInfo";
 import { resolvePlayerChampionId } from "../types/gameInfo";
@@ -132,9 +134,9 @@ export async function fetchPlayerMastery(
   }
 
   // 1. 优先按 puuid 查询
-  let mResp: { success: boolean; data?: any; error?: any } = { success: false };
+  let mResp: LcuApiResponse<RawChampionMastery[]> = { success: false };
   if (puuid) {
-    mResp = await lcuRequest<any>(
+    mResp = await lcuRequest<RawChampionMastery[]>(
       "GET",
       `/lol-champion-mastery/v1/${puuid}/champion-mastery`,
     );
@@ -142,7 +144,7 @@ export async function fetchPlayerMastery(
 
   // 2. 若是当前玩家且按 puuid 失败（或无 puuid），降级到 local-player
   if ((!mResp.success || !mResp.data) && isMe) {
-    mResp = await lcuRequest<any>(
+    mResp = await lcuRequest<RawChampionMastery[]>(
       "GET",
       "/lol-champion-mastery/v1/local-player/champion-mastery",
     );
@@ -150,26 +152,28 @@ export async function fetchPlayerMastery(
 
   // 3. 如果仍未成功，尝试按 summonerId 查询
   if ((!mResp.success || !mResp.data) && summonerId) {
-    mResp = await lcuRequest<any>(
+    mResp = await lcuRequest<RawChampionMastery[]>(
       "GET",
       `/lol-champion-mastery/v1/summoners/${summonerId}/champion-mastery`,
     );
   }
 
   if (mResp.success && Array.isArray(mResp.data)) {
-    const normalized: ChampionMasteryItem[] = mResp.data.map((item: any) => ({
-      championId: Number(item.championId ?? item.champion_id ?? 0),
-      championLevel: Number(
-        item.championLevel ?? item.masteryLevel ?? item.level ?? 0,
-      ),
-      championPoints: Number(
-        item.championPoints ?? item.points ?? item.score ?? 0,
-      ),
-      highestGrade: item.highestGrade ?? item.highest_grade,
-      championPointsSinceLastLevel: item.championPointsSinceLastLevel,
-      championPointsUntilNextLevel: item.championPointsUntilNextLevel,
-      tokensEarned: item.tokensEarned,
-    }));
+    const normalized: ChampionMasteryItem[] = mResp.data.map(
+      (item: RawChampionMastery): ChampionMasteryItem => ({
+        championId: Number(item.championId ?? item.champion_id ?? 0),
+        championLevel: Number(
+          item.championLevel ?? item.masteryLevel ?? item.level ?? 0,
+        ),
+        championPoints: Number(
+          item.championPoints ?? item.points ?? item.score ?? 0,
+        ),
+        highestGrade: item.highestGrade ?? item.highest_grade,
+        championPointsSinceLastLevel: item.championPointsSinceLastLevel,
+        championPointsUntilNextLevel: item.championPointsUntilNextLevel,
+        tokensEarned: item.tokensEarned,
+      }),
+    );
     if (puuid) {
       setMasteryToCache(puuid, normalized);
     }

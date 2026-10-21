@@ -639,21 +639,46 @@ fn get_cmdline_windows(pid: u32) -> Option<String> {
             return None;
         }
 
-        let unicode_str = *(buffer.as_ptr() as *const UNICODE_STRING);
+        let header_size = std::mem::size_of::<UNICODE_STRING>();
+        if buffer.len() < header_size {
+            return None;
+        }
 
-        let offset = unicode_str.buffer as usize - buffer.as_ptr() as usize;
-        if offset + (unicode_str.length as usize) <= buffer.len() {
-            let u16_slice =
-                std::slice::from_raw_parts(unicode_str.buffer, (unicode_str.length / 2) as usize);
-            return Some(String::from_utf16_lossy(u16_slice));
-        } else {
-            let header_size = std::mem::size_of::<UNICODE_STRING>();
-            if header_size + (unicode_str.length as usize) <= buffer.len() {
-                let ptr = buffer.as_ptr().add(header_size) as *const u16;
-                let u16_slice = std::slice::from_raw_parts(ptr, (unicode_str.length / 2) as usize);
-                return Some(String::from_utf16_lossy(u16_slice));
+        // buffer 是 Vec<u8> 的堆内存，起点只保证 1 字节对齐，直接解引用结构体属未对齐访问（UB），
+        // 必须用 read_unaligned 读取首部结构体。
+        let unicode_str = std::ptr::read_unaligned(buffer.as_ptr() as *const UNICODE_STRING);
+
+        // 长度按 u16 向下取整到偶数，避免半个字符
+        let byte_len = (unicode_str.length as usize) & !1;
+        if byte_len == 0 {
+            return None;
+        }
+
+        // 统一按字节切片解码，彻底规避指针对齐要求
+        let decode = |start: usize, byte_len: usize| -> String {
+            let units: Vec<u16> = buffer[start..start + byte_len]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16_lossy(&units)
+        };
+
+        let buf_start = buffer.as_ptr() as usize;
+        let str_start = unicode_str.buffer as usize;
+
+        // 常规情况：命令行字符串就在我们分配的缓冲区内部（先比较再相减，避免下溢）
+        if str_start >= buf_start {
+            let offset = str_start - buf_start;
+            if offset + byte_len <= buffer.len() {
+                return Some(decode(offset, byte_len));
             }
         }
+
+        // 兜底情况：内核返回的 Buffer 指针不可用（含空指针），此时字符串紧跟在结构体之后
+        if header_size + byte_len <= buffer.len() {
+            return Some(decode(header_size, byte_len));
+        }
+
         None
     }
 }

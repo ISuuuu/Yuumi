@@ -173,6 +173,8 @@ const allMatchesSearch = ref<MatchDisplay[]>([]); // 全量数据，本地翻页
 const loadedGameIndex = ref(0); // 已加载到的游标
 const loadingMore = ref(false); // 防止重复触发 SGP 加载
 const pageSwitching = ref(false); // 防止翻页期间重复触发
+// 对局结束后的后台静默刷新：不走 searching 全屏遮罩，只显示顶部细进度条
+const backgroundRefreshing = ref(false);
 const INITIAL_BATCH = 20; // 首次加载 20 条（2 页）
 const LOAD_MORE_COUNT = 30; // 每次增量加载 30 条
 const PREFETCH_PAGES = 1; // 提前 1 页预拉取
@@ -337,8 +339,8 @@ watch(
     try {
       const currentSummoner = await fetchCurrentSummoner();
       if (currentSummoner?.puuid && summoner.value.puuid === currentSummoner.puuid) {
-        console.log("[Search] 对局结束，检测到当前查看本人战绩，自动刷新战绩列表");
-        await doSearch();
+        console.log("[Search] 对局结束，检测到当前查看本人战绩，静默刷新战绩列表");
+        await doSearch({ silent: true });
       }
     } catch {
       // 忽略检查异常
@@ -377,16 +379,26 @@ watch(
 /** 等待当前进行中的搜索结束（轮询 searching，超时返回 false） */
 async function waitForSearchIdle(timeoutMs = 30000): Promise<boolean> {
   const start = Date.now();
-  while (searching.value && Date.now() - start < timeoutMs) {
+  while ((searching.value || backgroundRefreshing.value) && Date.now() - start < timeoutMs) {
     await new Promise((r) => setTimeout(r, 50));
   }
-  return !searching.value;
+  return !searching.value && !backgroundRefreshing.value;
 }
 
-async function doSearch(): Promise<boolean> {
+/**
+ * 执行搜索。
+ * @param options.silent 后台静默刷新（对局结束自动重搜）：不置 searching，
+ *   因此不显示全屏模糊遮罩，仅在面板顶部显示细进度条，避免遮住用户正在看的内容。
+ */
+async function doSearch(options: { silent?: boolean } = {}): Promise<boolean> {
   if (!searchName.value.trim()) return false;
-  if (searching.value) return false; // 防重入：进行中直接忽略重复点击
-  searching.value = true;
+  if (searching.value || backgroundRefreshing.value) return false; // 防重入：进行中直接忽略重复点击
+  const silent = options.silent === true;
+  if (silent) {
+    backgroundRefreshing.value = true;
+  } else {
+    searching.value = true;
+  }
   error.value = "";
   searchGeneration++; // 使上一次搜索的后台预取结果失效
   // 保留旧数据作为模糊背景，等拉取成功后再覆盖，防止界面生硬闪烁
@@ -419,6 +431,11 @@ async function doSearch(): Promise<boolean> {
     }
 
     if (!resp.success || !resp.data) {
+      if (silent) {
+        // 静默刷新失败不打断用户：保留现有列表，不弹错误、不清空数据
+        console.warn("[Search] 静默刷新未找到召唤师，保留现有战绩列表");
+        return true;
+      }
       error.value = resp.error || "未找到该召唤师";
       summoner.value = null;
       matches.value = [];
@@ -428,13 +445,22 @@ async function doSearch(): Promise<boolean> {
       return true;
     }
 
+    // 静默刷新前记录：用户是否正停留在「最新一局」上，是则刷新后跟随到新打完的那一局
+    const followNewest =
+      silent &&
+      currentPageNum.value === 1 &&
+      matches.value[0]?.gameId === selectedGameId.value;
+
     // 成功后，开始准备赋新值前，清空旧的分页/详情等局部变量
     allMatchesSearch.value = [];
     loadedGameIndex.value = 0;
-    selectedGame.value = null;
-    selectedGameId.value = null;
-    currentPageNum.value = 1;
     uploadedGameIds.value = new Set();
+    // 静默刷新不打断用户：保留当前页码与已选对局，避免被拉回第 1 页并切到最新一局
+    if (!silent) {
+      currentPageNum.value = 1;
+      selectedGame.value = null;
+      selectedGameId.value = null;
+    }
 
     const data = resp.data;
     let parsedGameName = data.gameName ?? "";
@@ -483,11 +509,23 @@ async function doSearch(): Promise<boolean> {
     if (summoner.value.puuid) {
       await loadMatchHistoryList();
       // 双重保障：如果在查询新人数据后，确认第一局战绩正确载入，强制调用 selectMatch 载入右侧详情
-      if (matches.value.length > 0) {
+      // 静默刷新时若已选对局仍在当前页则不重选，只有「原本无选中」「正在看最新一局」
+      // 或「对局被挤出当前页」时才切到当前页第一局
+      const keepSelection =
+        silent &&
+        !followNewest &&
+        selectedGameId.value !== null &&
+        matches.value.some((m) => m.gameId === selectedGameId.value);
+      if (matches.value.length > 0 && !keepSelection) {
         await selectMatch(matches.value[0].gameId);
       }
     }
   } catch (e: unknown) {
+    if (silent) {
+      // 静默刷新异常不打断用户：保留现有列表
+      console.warn("[Search] 静默刷新异常，保留现有战绩列表:", e);
+      return true;
+    }
     error.value = String(e);
     summoner.value = null;
     matches.value = [];
@@ -495,7 +533,11 @@ async function doSearch(): Promise<boolean> {
     selectedGame.value = null;
     selectedGameId.value = null;
   } finally {
-    searching.value = false;
+    if (silent) {
+      backgroundRefreshing.value = false;
+    } else {
+      searching.value = false;
+    }
   }
   return true;
 }
@@ -519,14 +561,19 @@ async function loadMatchHistoryList() {
     // 首次加载一波 + 翻到尽头时增量拉取
     if (allMatchesSearch.value.length === 0) {
       // 首次加载: 并发智能合并 LCU + SGP 战绩（国服下如果 LCU 本地接口刚打完未同步，可秒级拉取 SGP 最新一把）
+      // 静默刷新保留页码时，需一次拉够能覆盖当前页的数据，否则当前页会切片为空
+      const initialCount = Math.max(
+        INITIAL_BATCH,
+        currentPageNum.value * matchesPerPage,
+      );
       const raw = await fetchMatchHistorySmart(
         summoner.value.puuid,
         0,
-        INITIAL_BATCH - 1,
+        initialCount - 1,
       );
       console.log(`[Search] 首次加载: raw.length=${raw.length}`);
       allMatchesSearch.value = raw;
-      loadedGameIndex.value = Math.max(INITIAL_BATCH, raw.length);
+      loadedGameIndex.value = Math.max(initialCount, raw.length);
     } else if (
       currentPageNum.value >= 2 &&
       end + matchesPerPage * PREFETCH_PAGES >= allFilteredMatches.value.length
@@ -815,7 +862,7 @@ async function loadPrivaciesInBackground(g: MatchDetail, requestId: number) {
 }
 
 async function handlePrevPage() {
-  if (searching.value || pageSwitching.value) return; // 防重入
+  if (searching.value || pageSwitching.value || backgroundRefreshing.value) return; // 防重入
   if (currentPageNum.value > 1) {
     pageSwitching.value = true;
     try {
@@ -831,7 +878,8 @@ async function handlePrevPage() {
 }
 
 async function handleNextPage() {
-  if (!hasMore.value || pageSwitching.value || searching.value) return;
+  if (!hasMore.value || pageSwitching.value || searching.value || backgroundRefreshing.value)
+    return;
   pageSwitching.value = true;
   try {
     const targetPage = currentPageNum.value + 1;
@@ -1147,9 +1195,9 @@ const gameDetails = computed<GameDetail | null>(() => {
           <n-input
             v-model:value="searchName"
             :placeholder="t('search.searchPlaceholder')"
-            :disabled="searching"
+            :disabled="searching || backgroundRefreshing"
             clearable
-            @keyup.enter="doSearch"
+            @keyup.enter="doSearch()"
             @focus="showHistory = true"
             @click="showHistory = true"
             @blur="hideHistoryDelayed"
@@ -1161,8 +1209,8 @@ const gameDetails = computed<GameDetail | null>(() => {
                 quaternary
                 circle
                 size="tiny"
-                :disabled="searching || !searchName.trim()"
-                @click="doSearch"
+                :disabled="searching || backgroundRefreshing || !searchName.trim()"
+                @click="doSearch()"
               >
                 <template #icon>
                   <svg
@@ -1240,6 +1288,12 @@ const gameDetails = computed<GameDetail | null>(() => {
       <!-- 分栏对局面板 -->
       <!-- 分栏对局面板容器 -->
       <div class="panel-layout-container">
+        <!-- 后台静默刷新（对局结束自动重搜）：顶部细进度条，不遮挡面板内容 -->
+        <Transition name="fade">
+          <div v-if="backgroundRefreshing" class="panel-refresh-bar">
+            <span class="panel-refresh-bar-inner"></span>
+          </div>
+        </Transition>
         <div class="panel-layout">
           <!-- 左侧：迷你对局卡片列表 -->
           <div class="left-match-list-panel">
@@ -1249,6 +1303,7 @@ const gameDetails = computed<GameDetail | null>(() => {
                 :selected-game-id="selectedGameId"
                 :current-page-num="currentPageNum"
                 :has-more="hasMore"
+                :loading="pageSwitching || backgroundRefreshing"
                 @select="selectMatch"
                 @prev="handlePrevPage"
                 @next="handleNextPage"
@@ -1657,6 +1712,43 @@ const gameDetails = computed<GameDetail | null>(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+/* 后台静默刷新进度条（对局结束自动重搜时不遮挡内容） */
+.panel-refresh-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px 2px 0 0;
+  background: rgba(0, 0, 0, 0.04);
+  z-index: 1001;
+  pointer-events: none;
+}
+
+[data-theme="dark"] .panel-refresh-bar {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.panel-refresh-bar-inner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: 2px;
+  background: var(--primary-color);
+  animation: panel-refresh-slide 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes panel-refresh-slide {
+  from {
+    left: -40%;
+  }
+  to {
+    left: 100%;
+  }
 }
 
 .panel-searching-overlay {

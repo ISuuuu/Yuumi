@@ -7,6 +7,8 @@ defineProps<{
   selectedGameId: number | null;
   currentPageNum: number;
   hasMore: boolean;
+  /** 翻页请求进行中：禁用按钮并显示页码转圈 */
+  loading?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -28,10 +30,10 @@ const emit = defineEmits<{
   </div>
 
   <!-- 翻页控制 -->
-  <div class="pagination">
+  <div class="pagination" :aria-busy="loading ? 'true' : 'false'">
     <button
       class="page-btn"
-      :disabled="currentPageNum <= 1"
+      :disabled="currentPageNum <= 1 || loading"
       @click="emit('prev')"
     >
       <svg
@@ -43,10 +45,13 @@ const emit = defineEmits<{
         <polyline points="15 18 9 12 15 6" />
       </svg>
     </button>
-    <span class="page-num">{{ currentPageNum }}</span>
+    <span class="page-num">
+      <span v-if="loading" class="page-spinner" aria-hidden="true"></span>
+      <span class="page-num-text">{{ currentPageNum }}</span>
+    </span>
     <button
       class="page-btn"
-      :disabled="!hasMore"
+      :disabled="!hasMore || loading"
       @click="emit('next')"
     >
       <svg
@@ -115,8 +120,34 @@ const emit = defineEmits<{
 }
 
 .page-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
   font-size: 0.82rem;
   font-weight: 700;
   color: var(--text-color);
+}
+
+/* 翻页中：页码左侧的小转圈，提示"正在加载下一页" */
+.page-spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.12);
+  border-top-color: var(--primary-color);
+  animation: page-spin 0.7s linear infinite;
+}
+
+[data-theme="dark"] .page-spinner {
+  border-color: rgba(255, 255, 255, 0.18);
+  border-top-color: var(--primary-color);
+}
+
+@keyframes page-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>
