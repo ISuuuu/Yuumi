@@ -619,13 +619,26 @@ async fn fetch_payload_from_lcu(
     Ok(payload)
 }
 
-/// 发送 UploadPayload 至外部 API（内部最多重试 5 次）
+/// 内层重试总预算。
+/// 必须显著小于 upload_worker 的 35s 外层超时：外层 timeout 触发会 drop future，
+/// upload_single_task 的落盘分支（add_or_update_pending_upload）将永不执行，
+/// 该局战绩既不进本地库也不重试，静默丢失。
+/// 单次请求 30s 超时 × 6 次远超 35s，因此以总预算而非次数作为退出条件。
+const UPLOAD_RETRY_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// 发送 UploadPayload 至外部 API（预算内最多重试 5 次）
 async fn post_payload_to_api(payload: &UploadPayload, upload_url: &str) -> Result<String, String> {
     let game_id = payload.match_info.match_id;
     let ext_client = external_http_client();
     let mut last_err = String::new();
+    let deadline = tokio::time::Instant::now() + UPLOAD_RETRY_BUDGET;
 
     for retry in 0..=5 {
+        // 预算耗尽后立即返回 Err，让调用方落盘而非被外层超时打断
+        if tokio::time::Instant::now() >= deadline {
+            last_err = format!("重试预算耗尽: {}", last_err);
+            break;
+        }
         match ext_client
             .post(upload_url)
             .header("Content-Type", "application/json")
@@ -684,13 +697,17 @@ async fn post_payload_to_api(payload: &UploadPayload, upload_url: &str) -> Resul
         }
 
         if retry < 5 {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
             log::warn!(
                 "对局 {} 上传失败 ({}), 重试 {}/5",
                 game_id,
                 last_err,
                 retry + 1
             );
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(1).min(remaining)).await;
         }
     }
 
