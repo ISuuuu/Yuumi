@@ -3,6 +3,7 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, Error as TlsError, SignatureScheme};
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, watch};
@@ -78,6 +79,11 @@ static SIGNALR_TX: tokio::sync::Mutex<Option<mpsc::Sender<SignalrCommand>>> =
 static SIGNALR_CANCEL_TX: tokio::sync::Mutex<Option<watch::Sender<bool>>> =
     tokio::sync::Mutex::const_new(None);
 
+/// SignalR 连接代际，每次 start() 递增。
+/// 旧任务退出时只能清理属于自己这一代的状态：否则它会把新连接刚写入的
+/// SIGNALR_TX 清成 None，表现为"界面显示已连接，但事件永久发不出去"。
+static SIGNALR_EPOCH: AtomicU64 = AtomicU64::new(0);
+
 static CURRENT_SUMMONER_NAME: tokio::sync::Mutex<String> =
     tokio::sync::Mutex::const_new(String::new());
 
@@ -139,6 +145,7 @@ fn clean_server_url(url: &str) -> String {
 pub fn start(app_handle: AppHandle, server_url: String, user_id: String) {
     crate::spawn_log_panic(async move {
         let server_url = clean_server_url(&server_url);
+        let my_epoch = SIGNALR_EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
 
         let (cancel_tx, mut cancel_rx) = watch::channel(false);
         {
@@ -167,7 +174,7 @@ pub fn start(app_handle: AppHandle, server_url: String, user_id: String) {
                             log::info!("[SignalR] WebSocket 连接成功！开始握手...");
                             let mut rx_clone = cancel_rx.clone();
                             tokio::select! {
-                                _ = handle_connection(ws_stream, &app_handle, &user_id, &mut rx_clone) => {}
+                                _ = handle_connection(ws_stream, &app_handle, &user_id, &mut rx_clone, my_epoch) => {}
                                 _ = cancel_rx.changed() => {
                                     log::info!("[SignalR] 连接运行期间收到停止信号，断开连接");
                                     break;
@@ -198,8 +205,8 @@ pub fn start(app_handle: AppHandle, server_url: String, user_id: String) {
             }
         }
 
-        // 清理状态
-        {
+        // 清理状态：仅当本代仍是当前代时才清，避免误清新连接的发送端
+        if SIGNALR_EPOCH.load(Ordering::SeqCst) == my_epoch {
             let mut lock = SIGNALR_TX.lock().await;
             *lock = None;
         }
@@ -332,6 +339,7 @@ async fn handle_connection(
     app_handle: &AppHandle,
     user_id: &str,
     cancel_rx: &mut watch::Receiver<bool>,
+    epoch: u64,
 ) {
     let (mut write, mut read) = ws_stream.split();
 
@@ -475,7 +483,8 @@ async fn handle_connection(
     }
 
     let _ = heartbeat_cancel_tx.send(());
-    {
+    // 同样做代际校验：本连接已过期时不要清掉新代连接的发送端
+    if SIGNALR_EPOCH.load(Ordering::SeqCst) == epoch {
         let mut lock = SIGNALR_TX.lock().await;
         *lock = None;
     }

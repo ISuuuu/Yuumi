@@ -99,7 +99,11 @@ function getQueueName(queueType: string | undefined | null): string {
   return fallbackMap[queueType] || queueType;
 }
 
+/// 列表请求代际：快速改搜索词/切筛选时，只让最后一次请求的结果落地
+let listReqSeq = 0;
+
 async function loadPlayers() {
+  const reqId = ++listReqSeq;
   page.value = 1;
   loading.value = true;
   loadMoreError.value = false;
@@ -112,21 +116,24 @@ async function loadPlayers() {
       filter.value === "all" ? undefined : filter.value,
       trimmed || undefined,
     );
+    if (reqId !== listReqSeq) return;
     players.value = res.data;
     total.value = res.count;
     if (scrollContainerRef.value) {
       scrollContainerRef.value.scrollTop = 0;
     }
   } catch (e) {
+    if (reqId !== listReqSeq) return;
     console.error("[SavedPlayers] 加载失败:", e);
     showToast($t("savedPlayersPage.loadFailed"), "error");
   } finally {
-    loading.value = false;
+    if (reqId === listReqSeq) loading.value = false;
   }
 }
 
 async function loadMorePlayers() {
   if (loading.value || loadingMore.value || !hasMore.value) return;
+  const reqId = listReqSeq;
   loadingMore.value = true;
   loadMoreError.value = false;
   const nextPage = page.value + 1;
@@ -139,6 +146,8 @@ async function loadMorePlayers() {
       filter.value === "all" ? undefined : filter.value,
       trimmed || undefined,
     );
+    // 期间搜索条件已变，丢弃这一页的追加结果
+    if (reqId !== listReqSeq) return;
     page.value = nextPage;
     const existingKeys = new Set(
       players.value.map((p) => `${p.puuid}_${p.selfPuuid}`),
@@ -188,12 +197,16 @@ function switchFilter(next: "tagged" | "multiple" | "all") {
   loadPlayers();
 }
 
+/// 相遇记录请求代际：快速展开不同玩家时，只让最后一次请求的结果落地
+let gamesReqSeq = 0;
+
 async function loadGames(puuid: string, playerSelfPuuid?: string) {
   if (expandedPuuid.value === puuid) {
     expandedPuuid.value = null;
     encounteredGames.value = [];
     return;
   }
+  const reqId = ++gamesReqSeq;
   expandedPuuid.value = puuid;
   gamesLoading.value = true;
   try {
@@ -205,15 +218,17 @@ async function loadGames(puuid: string, playerSelfPuuid?: string) {
       1,
       encounteredPageSize,
     );
+    if (reqId !== gamesReqSeq) return;
     encounteredGames.value = res.data;
     encounteredTotal.value = res.count;
     encounteredPage.value = 1;
   } catch (e) {
+    if (reqId !== gamesReqSeq) return;
     console.error("[SavedPlayers] 相遇记录加载失败:", e);
     encounteredGames.value = [];
     encounteredTotal.value = 0;
   } finally {
-    gamesLoading.value = false;
+    if (reqId === gamesReqSeq) gamesLoading.value = false;
   }
 }
 
@@ -231,6 +246,8 @@ async function loadMoreGames() {
       encounteredPage.value + 1,
       encounteredPageSize,
     );
+    // 翻页期间可能已切换到其他玩家，丢弃过期响应
+    if (expandedPuuid.value !== puuid) return;
     encounteredGames.value = [...encounteredGames.value, ...res.data];
     encounteredTotal.value = res.count;
     encounteredPage.value += 1;

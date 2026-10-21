@@ -32,6 +32,8 @@ const premadeColorsTheir = ref<Record<string | number, number>>({});
 
 const {
   playerData,
+  loading,
+  error,
   sessionAllyTeam,
   sessionEnemyTeam,
   isTftMode,
@@ -45,6 +47,15 @@ const {
   premadeColorsMy,
   premadeColorsTheir,
   activeTab,
+);
+
+/// 对局已开始但两侧队伍都还没就绪时的加载中状态。
+/// 之前这里直接渲染空壳，用户会以为页面卡死，最长可达 10 秒。
+const isLoadingTeams = computed(
+  () =>
+    loading.value &&
+    myTeam.value.length === 0 &&
+    theirTeam.value.length === 0,
 );
 
 const {
@@ -254,9 +265,19 @@ onMounted(() => {
       <p class="tip">云顶之弈对局中，对局信息页面不显示数据</p>
     </div>
 
+    <div v-else-if="error" class="tip-container">
+      <div class="offline-logo">⚠️</div>
+      <p class="tip">{{ error }}，稍候会自动重试</p>
+    </div>
+
     <div v-else-if="!shouldShowContent" class="tip-container">
       <div class="offline-logo">⏳</div>
       <p class="tip">{{ $t("gameInfo.awaitingLoad") }}</p>
+    </div>
+
+    <div v-else-if="isLoadingTeams" class="tip-container">
+      <div class="offline-logo">⏳</div>
+      <p class="tip">正在读取对局玩家信息…</p>
     </div>
 
     <div v-else class="game-layout" :class="{ 'layout-ten': viewMode === 'ten' }">

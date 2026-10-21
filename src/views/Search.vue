@@ -1243,7 +1243,7 @@ const gameDetails = computed<GameDetail | null>(() => {
         <div class="panel-layout">
           <!-- 左侧：迷你对局卡片列表 -->
           <div class="left-match-list-panel">
-            <template v-if="summoner && (matches.length > 0 || currentPageNum > 1)">
+            <template v-if="summoner && matches.length > 0">
               <MiniMatchList
                 :matches="matches"
                 :selected-game-id="selectedGameId"
@@ -1254,7 +1254,17 @@ const gameDetails = computed<GameDetail | null>(() => {
                 @next="handleNextPage"
               />
             </template>
-            <!-- 如果没有战绩，左侧展示 10 个等高的骨架空白卡片框 -->
+            <!-- 搜索已完成但当前筛选下确实没有对局：给出明确空状态，避免永远停在骨架卡片 -->
+            <template v-else-if="summoner && !searching && !loadingMore">
+              <div class="mini-match-empty">
+                <div class="mini-match-empty-icon">🔍</div>
+                <p class="mini-match-empty-title">当前筛选条件下没有对局</p>
+                <p class="mini-match-empty-sub">
+                  可切回「全部」模式，或继续加载更多战绩后再试
+                </p>
+              </div>
+            </template>
+            <!-- 仍未出结果时展示 10 个等高的骨架空白卡片框 -->
             <template v-else>
               <div class="mini-match-list-skeleton">
                 <div
@@ -1702,6 +1712,38 @@ const gameDetails = computed<GameDetail | null>(() => {
   color: var(--text-color);
   font-size: 0.92rem;
   font-weight: 600;
+}
+
+/* 筛选无结果时的空状态（避免停在骨架卡片上看起来像一直在加载） */
+.mini-match-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.mini-match-empty-icon {
+  font-size: 1.8rem;
+  opacity: 0.7;
+  margin-bottom: 2px;
+}
+
+.mini-match-empty-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.mini-match-empty-sub {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-dimmed);
+  line-height: 1.5;
 }
 
 /* 首次欢迎与加载占位 */

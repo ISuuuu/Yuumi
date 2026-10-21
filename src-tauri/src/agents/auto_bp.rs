@@ -99,6 +99,11 @@ struct ChampionSelection {
     is_summoner_spell_set: bool,
     is_champion_picked_completed: bool,
     last_opgg_champion_id: i32,
+    /// 最近一次已发出「亮英雄」请求的 (pick action, champion)。
+    /// LCU 回写 my_team.champion_id 有延迟，仅靠会话数据判断会在延迟窗口内
+    /// 以帧频重复 PATCH，占满 LCU 并发信号量并拖慢后续禁人/锁定。
+    last_preset_action_id: Option<i32>,
+    last_preset_champion_id: i32,
 }
 
 // ─── OPGG 事件数据 ───
@@ -172,7 +177,7 @@ pub fn start(app_handle: AppHandle, mut session_rx: mpsc::Receiver<ChampSelectSe
             };
 
             // 执行顺序：亮英雄/预选 → 禁人 → 技能 → 交换 → 交易 → 锁定 → OPGG
-            do_auto_preset_champion(&app_handle, &session, &cfg).await;
+            do_auto_preset_champion(&app_handle, &session, &cfg, &mut selection).await;
             do_auto_ban(&app_handle, &session, &cfg).await;
             do_auto_spell(&app_handle, &session, &cfg, &mut selection).await;
             do_auto_swap(&app_handle, &session, &cfg, &mut selection).await;
@@ -309,6 +314,7 @@ async fn do_auto_preset_champion(
     app_handle: &AppHandle,
     session: &ChampSelectSession,
     cfg: &FunctionsConfig,
+    selection: &mut ChampionSelection,
 ) {
     if !cfg.enable_auto_hover_champion && !cfg.enable_auto_select_champion {
         return;
@@ -375,11 +381,20 @@ async fn do_auto_preset_champion(
         return;
     }
 
+    // 已对同一 action 发过同一英雄的亮人请求则不重复发送
+    if selection.last_preset_action_id == Some(action.id)
+        && selection.last_preset_champion_id == champion_id
+    {
+        return;
+    }
+
     log::debug!(
         "[autoPreset] PATCH action {} with champion_id={}",
         action.id,
         champion_id
     );
+    selection.last_preset_action_id = Some(action.id);
+    selection.last_preset_champion_id = champion_id;
     let ok = lcu_patch_action(app_handle, action.id, champion_id, false).await;
     log::debug!("[autoPreset] PATCH result: {}", ok);
 }
@@ -790,6 +805,11 @@ async fn do_auto_spell(
     )
     .await;
     if ok {
+        selection.is_summoner_spell_set = true;
+    } else {
+        // 失败也置位：选人阶段 session 每帧推送，失败不置位会以帧频重发 PATCH，
+        // 最长每次 3 次重试，很快占满信号量并拖住 BP 主循环。下一局会重新尝试。
+        log::warn!("自动设置召唤师技能失败，本局不再重试");
         selection.is_summoner_spell_set = true;
     }
 }

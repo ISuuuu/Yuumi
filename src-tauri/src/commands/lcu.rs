@@ -263,12 +263,19 @@ pub struct LiveClientPlayer {
 }
 
 fn create_liveclient_http_client(timeout_ms: u64) -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
+    // 2999 端口固定且仅本机访问，进程级复用：每次调用新建 Client 会让前端轮询
+    // 不断累积 TIME_WAIT 连接。超时参数仅用于首次构建，后续复用同一实例。
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client.clone());
+    }
+    let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .no_proxy()
         .timeout(std::time::Duration::from_millis(timeout_ms))
         .build()
-        .map_err(|e| format!("创建 LiveClient HTTP 客户端失败: {}", e))
+        .map_err(|e| format!("创建 LiveClient HTTP 客户端失败: {}", e))?;
+    Ok(CLIENT.get_or_init(|| client).clone())
 }
 
 /// 从游戏客户端内网端口 (https://127.0.0.1:2999/liveclientdata/playerlist) 获取全部玩家数据

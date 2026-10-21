@@ -95,7 +95,7 @@ const { gamePhase } = storeToRefs(store);
 const currentPage = ref("home");
 const appConfig = ref<AppConfig | null>(null);
 provide("appConfig", appConfig);
-const pageHistory: string[] = [];
+const pageHistory = ref<string[]>([]);
 const isSidebarExpanded = ref(false);
 const noticeVisible = ref(false);
 const summoner = ref<SummonerDisplay | null>(null);
@@ -216,7 +216,7 @@ watch(
 // 供子组件跳转页面
 function navigateTo(page: string) {
   if (currentPage.value !== page) {
-    pageHistory.push(currentPage.value);
+    pageHistory.value.push(currentPage.value);
   }
   currentPage.value = page;
 }
@@ -358,14 +358,14 @@ function navigate(page: string) {
     }
   }
   if (currentPage.value !== page) {
-    pageHistory.push(currentPage.value);
+    pageHistory.value.push(currentPage.value);
   }
   currentPage.value = page;
 }
 
 function goBack() {
-  if (pageHistory.length > 0) {
-    currentPage.value = pageHistory.pop()!;
+  if (pageHistory.value.length > 0) {
+    currentPage.value = pageHistory.value.pop()!;
   }
 }
 
@@ -522,13 +522,20 @@ async function loadLcuState() {
   );
 }
 
+/// 是否已建立过 LCU 连接：用于区分"首次连接自动跳转"与"掉线重连"
+let hadLcuConnection = false;
+
 watch(
   () => store.isConnected,
   (connected) => {
     if (connected) {
       loadLcuState();
-      // 客户端连接成功后自动跳转到生涯页面
-      currentPage.value = "career";
+      // 仅在首次建立连接、且用户仍停留在首页时自动进入生涯页。
+      // LCU 重启或掉线重连时保持当前页面，避免把用户从设置/搜索页踢走。
+      if (!hadLcuConnection && currentPage.value === "home") {
+        currentPage.value = "career";
+      }
+      hadLcuConnection = true;
     } else {
       summoner.value = null;
       store.setCurrentSummoner(null);

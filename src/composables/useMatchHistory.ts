@@ -121,6 +121,10 @@ export function useMatchHistory() {
 
   // ─── 数据加载 ───
 
+  /// 生涯数据请求代际：每次切换查看对象递增，回写前校验，
+  /// 避免"先点 A 再点 B"时 A 的慢响应覆盖 B 的头像/段位/战绩。
+  let careerRequestSeq = 0;
+
   const MATCHES_CACHE_KEY = (puuid: string) => `yuumi_matches_cache_${puuid}`;
 
   async function fetchMatchHistoryWithFallback(
@@ -145,15 +149,17 @@ export function useMatchHistory() {
       return;
     }
 
+    const reqId = ++careerRequestSeq;
     loading.value = true;
     error.value = "";
     try {
       summoner.value = await fetchCurrentSummoner();
+      if (reqId !== careerRequestSeq) return;
       if (summoner.value?.puuid) {
         currentLoginPuuid.value = summoner.value.puuid;
         await Promise.all([
-          loadRankedStats(summoner.value.puuid),
-          loadCareerData(summoner.value.puuid),
+          loadRankedStats(summoner.value.puuid, reqId),
+          loadCareerData(summoner.value.puuid, false, reqId),
         ]);
 
         cachedSummoner = summoner.value;
@@ -163,9 +169,11 @@ export function useMatchHistory() {
         lastFetchedTime = Date.now();
       }
     } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (reqId === careerRequestSeq) {
+        error.value = e instanceof Error ? e.message : String(e);
+      }
     } finally {
-      loading.value = false;
+      if (reqId === careerRequestSeq) loading.value = false;
     }
   }
 
@@ -180,6 +188,7 @@ export function useMatchHistory() {
       return;
     }
 
+    const reqId = ++careerRequestSeq;
     loading.value = true;
     error.value = "";
     try {
@@ -248,15 +257,20 @@ export function useMatchHistory() {
         tagLine: cleanTagLine,
       };
 
+      // 远端资料可能晚于用户的下一次点击返回，已被新请求取代则整体丢弃
+      if (reqId !== careerRequestSeq) return;
+
       summoner.value = targetSummoner;
       await Promise.all([
-        loadRankedStats(targetPuuid),
-        loadCareerData(targetPuuid),
+        loadRankedStats(targetPuuid, reqId),
+        loadCareerData(targetPuuid, false, reqId),
       ]);
     } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (reqId === careerRequestSeq) {
+        error.value = e instanceof Error ? e.message : String(e);
+      }
     } finally {
-      loading.value = false;
+      if (reqId === careerRequestSeq) loading.value = false;
     }
   }
 
@@ -264,12 +278,13 @@ export function useMatchHistory() {
     await loadSummoner(false);
   }
 
-  async function loadRankedStats(puuid: string) {
+  async function loadRankedStats(puuid: string, reqId?: number) {
     try {
       const resp = await lcuRequest<RankedStats>(
         "GET",
         `/lol-ranked/v1/ranked-stats/${puuid}`,
       );
+      if (reqId !== undefined && reqId !== careerRequestSeq) return;
       if (resp.success && resp.data && resp.data.queues) {
         rankedQueues.value = resp.data.queues;
         if (!isViewingOther.value) {
@@ -298,12 +313,18 @@ export function useMatchHistory() {
   }
 
   // 一次拉取战绩：matches 与 recentMatches 共用同一份数据，避免重复请求同一接口
-  async function loadCareerData(puuid: string, isGameEndSync = false) {
+  async function loadCareerData(
+    puuid: string,
+    isGameEndSync = false,
+    reqId?: number,
+  ) {
     try {
       const targetCount = careerGamesNumber.value;
       const raw = await fetchMatchHistoryWithFallback(
         puuid, 0, targetCount, isGameEndSync,
       );
+      // 目标已切换时抛弃这批数据，避免"名字是 B、战绩是 A"
+      if (reqId !== undefined && reqId !== careerRequestSeq) return;
       matches.value = raw.slice(0, targetCount);
       if (!isViewingOther.value) {
         cachedMatches = matches.value;

@@ -28,6 +28,18 @@ const PROBE_INTERVAL: Duration = Duration::from_secs(2);
 /// 避免 LOL 未运行期间每 2 秒同步 spawn 一次子进程
 const WMIC_THROTTLE_ROUNDS: u32 = 5;
 
+/// 重连探测标志的 RAII 守卫。
+/// 探测任务无论正常结束还是 panic 展开都会复位标志；若只在任务末尾复位，
+/// 一次 panic（如 ws::connect 内的锁中毒）就会让标志永久为 true，
+/// 导致本进程内 LCU 再也不会重连。
+struct ReconnectGuard(Arc<AtomicBool>);
+
+impl Drop for ReconnectGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// 启动 LCU 进程轮询监测器。
 /// 两种检测方式并用，确保可靠连接：
 /// 1. 读取 lockfile（更快、更可靠）
@@ -161,6 +173,7 @@ pub fn start(
                         let reconnect_in_flight = reconnect_in_flight.clone();
                         let app_handle = app_handle.clone();
                         crate::spawn_log_panic(async move {
+                            let _reconnect_guard = ReconnectGuard(reconnect_in_flight);
                             if let Err(msg) = probe_lcu_readiness(port, &token).await {
                                 log::warn!("LCU 就绪探测失败，跳过本轮: {}", msg);
                                 // 不写入状态，下个轮询周期自动重试
@@ -213,8 +226,7 @@ pub fn start(
                                     super::ws::connect(app_handle.clone(), port, token);
                                 }
                             }
-                            // 无论成功失败都要释放标志，否则探测失败后永远无法重试
-                            reconnect_in_flight.store(false, Ordering::SeqCst);
+                            // 标志由 _reconnect_guard 在作用域结束（含 panic 展开）时复位
                         });
                     }
                 }

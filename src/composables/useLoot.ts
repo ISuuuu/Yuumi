@@ -440,27 +440,39 @@ export function useLoot() {
       return;
     }
 
+    // 防止连点：从校验通过到 listen 注册完成之间存在 await 窗口，
+    // 期间 isOpening 仍为 false，重复点击会二次进入并双倍消耗钥匙/碎片
+    if (isOpening.value) return;
+    isOpening.value = true;
+
     const ingredients = [loot.lootId];
     if (!isFragment && loot.keyLootId && loot.needKey) {
       ingredients.push(loot.keyLootId);
     }
 
     if (unlistenProgress) unlistenProgress();
-    unlistenProgress = await listen<LootProgressEvent>(
-      "loot-open-progress",
-      (event) => {
-        const evt = event.payload;
-        openProgress.value = evt.current;
-        openTotal.value = evt.total;
-        openResults.value.push(evt);
-        if (evt.current === evt.total) {
-          isOpening.value = false;
-          loadLootData();
-          loadLootInventory();
-          if (refreshCallback) refreshCallback();
-        }
-      },
-    );
+    try {
+      unlistenProgress = await listen<LootProgressEvent>(
+        "loot-open-progress",
+        (event) => {
+          const evt = event.payload;
+          openProgress.value = evt.current;
+          openTotal.value = evt.total;
+          openResults.value.push(evt);
+          if (evt.current === evt.total) {
+            isOpening.value = false;
+            loadLootData();
+            loadLootInventory();
+            if (refreshCallback) refreshCallback();
+          }
+        },
+      );
+    } catch (e: unknown) {
+      // 注册失败也要复位，否则按钮会被永久禁用
+      isOpening.value = false;
+      showToast(String(e), "error");
+      return;
+    }
 
     actionProgressTitle.value = isFragment ? (t("tools.lootOpener.forgingKey") || "正在合成钥匙...") : t("tools.lootOpener.opening");
     showOpenPanel.value = true;

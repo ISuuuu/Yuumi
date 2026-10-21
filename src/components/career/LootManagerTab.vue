@@ -463,7 +463,7 @@ onUnmounted(() => {
                 </button>
                 <button
                   class="action-btn"
-                  :disabled="maxOpenQuantity <= 0"
+                  :disabled="maxOpenQuantity <= 0 || isOpening"
                   @click="handleBatchOpenWithRefresh"
                 >
                   {{ isKeyFragmentLoot(selectedLoot) ? $t("tools.lootOpener.startForge", { count: openQuantity }) : $t("tools.lootOpener.startOpen", { count: openQuantity }) }}

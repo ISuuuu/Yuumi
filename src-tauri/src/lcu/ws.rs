@@ -23,16 +23,18 @@ const SUBSCRIBE_MSG: &str = r#"[5, "OnJsonApiEvent"]"#;
 /// 选人阶段 LCU 每秒推送多次（倒计时/悬停/动作变更），前端与各 Agent 只需要最新状态，
 /// 50ms 合并一次既保证了毫秒级的换英雄实时刷新，又能消除同一毫秒内的瞬间重复帧
 const SESSION_THROTTLE_MS: u64 = 50;
+/// 节流基准时刻（进程启动后首次使用时固定），配合单调时钟避免墙钟跳变
+static SESSION_EPOCH: OnceLock<std::time::Instant> = OnceLock::new();
 static LAST_SESSION_TS: AtomicU64 = AtomicU64::new(0);
 
-/// 判断 session 事件是否放行（处于节流窗口内则丢弃中间帧）
+/// 判断 session 事件是否放行（处于节流窗口内则丢弃中间帧）。
+/// 用单调时钟而非 SystemTime：系统休眠唤醒/NTP 校时会让墙钟回拨，
+/// 导致 saturating_sub 恒为 0、事件被持续丢弃。
 fn session_throttle_allowed() -> bool {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let epoch = SESSION_EPOCH.get_or_init(std::time::Instant::now);
+    let now = epoch.elapsed().as_micros() as u64;
     let last = LAST_SESSION_TS.load(Ordering::Relaxed);
-    if now.saturating_sub(last) < SESSION_THROTTLE_MS {
+    if now.saturating_sub(last) < SESSION_THROTTLE_MS * 1000 {
         return false;
     }
     LAST_SESSION_TS

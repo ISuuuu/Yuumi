@@ -217,7 +217,7 @@ pub async fn lcu_request(
         // 先取并发许可，再读取连接参数。
         // 排队期间 LCU 可能已重启换代（port/token 立即失效），若先读参数再排队，
         // 请求会打到已下线的旧端口，白白消耗整轮重试与信号量许可。
-        let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
+        let permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
 
         let (port, token, http_client) = {
             let lock = app_state.lcu().await?;
@@ -287,6 +287,9 @@ pub async fn lcu_request(
                     last_err
                 );
                 if attempt < MAX_RETRIES {
+                    // 退避期间不占用并发许可：否则几路超时请求就能把许可池占满，
+                    // 连选人阶段的写操作也要排在退避后面
+                    drop(permit);
                     sleep(RETRY_DELAY).await;
                 }
             }
