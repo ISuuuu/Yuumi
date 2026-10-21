@@ -55,6 +55,9 @@ pnpm run check-all  # 执行完整自测（格式校验、类型检查及 clippy
 
 ## 项目结构
 
+<details>
+<summary>展开查看完整目录树</summary>
+
 ```
 Yuumi/
 ├── src/                  # Vue 前端
@@ -73,10 +76,10 @@ Yuumi/
 │   │   ├── UpdateDialog.vue # 自动更新弹窗（下载/安装新版本）
 │   │   └── LcuOfflineState.vue # 统一 LCU 离线未连接状态
 │   ├── types/            # 共享类型定义（LCU 原始响应/战绩查询/OP.GG/对局信息视图模型）
-│   ├── composables/      # 组合式 hooks（useLcuAsset/useToast/usePlayerSearch/useTftData/useLoot/useFateBadge 等）
+│   ├── composables/      # 组合式 hooks（useLcuAsset/useToast/usePlayerSearch/useTftData/useLoot/useFateBadge/useGamePlayerData 等）
 │   ├── api/              # LCU API 封装 + Tauri IPC 调用
 │   ├── store/            # Pinia 全局状态
-│   ├── utils/            # 工具函数（主题色/队列名映射/英雄缓存/并发控制等）
+│   ├── utils/            # 工具函数与对局数据层（阵营映射/玩家缓存/身份判定/战绩统计/会话缓存等）
 │   ├── i18n.ts           # 多语言配置
 │   ├── main.ts           # 主窗口入口
 │   └── opgg.ts           # OP.GG 独立窗口入口
@@ -101,6 +104,8 @@ Yuumi/
 │   └── tauri.conf.json   # Tauri 配置
 └── File/                 # 重构参考文档（不入库）
 ```
+
+</details>
 
 ## 配置
 

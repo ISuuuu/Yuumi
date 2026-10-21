@@ -122,6 +122,9 @@ pnpm check-all       # 一键检查全部 (Format + Type-Check + Clippy)
 
 ## 项目结构
 
+<details>
+<summary>展开查看完整目录树（前端 / Rust 后端）</summary>
+
 ```
 Yuumi/
 ├── src/                            # Vue 前端
@@ -134,7 +137,20 @@ Yuumi/
 │   ├── store/
 │   │   └── lcuStore.ts             # Pinia 全局状态（LCU 事件映射）
 │   ├── utils/
-│   │   └── theme.ts                # 主题色动态更新
+│   │   ├── theme.ts                # 主题色动态更新
+│   │   ├── ranked.ts               # 段位名称与图标映射
+│   │   ├── queueName.ts            # 队列名称显示（i18n 优先）
+│   │   ├── markdown.ts             # Markdown → 安全 HTML（DOMPurify 消毒）
+│   │   ├── lazyStorage.ts          # localStorage 空闲时段延迟写入
+│   │   ├── runWithConcurrency.ts   # 受控并发任务队列
+│   │   ├── championCache.ts        # 英雄列表模块级缓存（Promise 去重）
+│   │   ├── matchAnalysis.ts        # 战绩位置/英雄聚合分析
+│   │   ├── matchStats.ts           # 胜率/KDA/连胜/位置统计
+│   │   ├── playerIdentity.ts       # 玩家身份兼容判定与组队标识提取
+│   │   ├── playerDataCache.ts      # 排位/熟练度缓存 + 路人集去重查询
+│   │   ├── playerPlaceholder.ts    # 玩家占位数据构造
+│   │   ├── gameflowSession.ts      # gameflow session 短期缓存
+│   │   └── teamBuilder.ts          # 对局阵营判定与队伍映射
 │   ├── composables/
 │   │   ├── useLcuAsset.ts          # LCU 资源路径 → data URL（缓存 + 去重）
 │   │   ├── useToast.ts             # Naive UI 消息提示 Hook (多窗口安全降级)
@@ -145,7 +161,7 @@ Yuumi/
 │   │   ├── useMatchHistory.ts      # 战绩历史 Hook
 │   │   ├── usePremadeGroup.ts      # 组队分析 Hook
 │   │   ├── useFateBadge.ts         # 宿命对局与相遇徽章逻辑
-│   │   ├── useGamePlayerData.ts   # 对局玩家数据集中管理
+│   │   ├── useGamePlayerData.ts   # 对局玩家数据编排层（状态/watch/落盘/轮询，纯逻辑见 utils/）
 │   │   ├── usePlayerChampionId.ts  # 对局玩家当前英雄 ID 解析 Hook
 │   │   ├── useSettingsAutoSave.ts  # 设置页自动持久化 Hook
 │   │   └── useAutoSaveConfig.ts    # 配置项自动保存 Hook
@@ -225,6 +241,8 @@ Yuumi/
 └── tsconfig.json
 ```
 
+</details>
+
 ## 架构数据流
 
 ```
@@ -248,6 +266,9 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 - **窗口启动居中**: `tauri.conf.json` 中 `"center": true`
 
 ## Rust Tauri 命令清单
+
+<details>
+<summary>展开查看全部 Tauri 命令（75 条）</summary>
 
 | 命令                         | 来源                    | 说明                                      |
 | :--------------------------- | :---------------------- | :---------------------------------------- |
@@ -327,6 +348,8 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 | `import_tagged_players_from_json_file` | saved_players.rs| 从 JSON 导入标记玩家                      |
 | `backfill_saved_player_identity`     | saved_players.rs| 异步补全已记录玩家的召唤师身份            |
 
+</details>
+
 新命令需在 `lib.rs` 的 `invoke_handler` 中注册。
 
 ## Agent 后台任务
@@ -335,6 +358,27 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 | :--------- | :----------------------------- | :--------------------------------------- |
 | auto_bp    | `/lol-champ-select/v1/session` | 自动选人/禁人/设置召唤师技能/推送板凳席  |
 | auto_match | gameflow-phase + ready-check   | 自动接受匹配/自动接受邀请/自动点赞/延时再来一局/自动重连/标记提醒 + 游戏结束触发上传 |
+
+## 对局数据层 (GameInfo)
+
+对局信息页的数据管线按「编排 / 纯逻辑」两层划分，新增逻辑请按下表归位，**不要继续往 `useGamePlayerData` 主函数里堆**：
+
+| 模块                               | 职责                                                                |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| `composables/useGamePlayerData.ts` | 编排层：ref 状态机、watch 联动、快照落盘、LiveClient 轮询、并发调度 |
+| `utils/teamBuilder.ts`             | 阵营判定（含脱敏推断）、gameflow → 队伍成员映射、占位播种、组队配色 |
+| `utils/playerDataCache.ts`         | 排位/熟练度 LRU 缓存、路人集去重查询、熟练度拉取                    |
+| `utils/playerIdentity.ts`          | 身份门禁 `isIdentityCompatible`、槽位英雄继承、组队标识提取         |
+| `utils/playerPlaceholder.ts`       | 占位 `PlayerData` / 兜底 `SummonerDisplay` 构造                     |
+| `utils/matchStats.ts`              | 胜率 / KDA / 连胜 / 位置英雄聚合                                    |
+| `utils/gameflowSession.ts`         | gameflow session 30 秒短期缓存与主动失效                            |
+
+约定：
+
+- 跨层数据通过 `TeamBuildContext` 之类的**显式上下文对象**传值，不要让 utils 反向持有 composable 的闭包状态。
+- `rankCache` / `masteryCache` / `cachedSession` / `savedPlayersMapInflight` 均为**模块级单例**，抽模块时必须保持“全应用一份”，不可退化为每次调用新建。
+- 选中快照匹配在阵营判定与队伍映射两处的条件**不完全相同**（后者额外比较 `displayName`），复用查找函数时需保留该差异。
+- `isIdentityCompatible`、`querySavedPlayersMapDedup`、`fetchPlayerMastery`、`NEW_PLAYER_MAX_LEVEL` 经 `useGamePlayerData.ts` re-export，视图层导入路径保持不变。
 
 ## 云顶之弈模块 (parsers/tft.rs & src/components/tft)
 
