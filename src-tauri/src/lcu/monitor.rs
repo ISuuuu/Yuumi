@@ -657,8 +657,10 @@ fn get_cmdline_windows(pid: u32) -> Option<String> {
         // 统一按字节切片解码，彻底规避指针对齐要求
         let decode = |start: usize, byte_len: usize| -> String {
             let units: Vec<u16> = buffer[start..start + byte_len]
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&c| u16::from_le_bytes(c))
                 .collect();
             String::from_utf16_lossy(&units)
         };
