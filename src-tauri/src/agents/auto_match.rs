@@ -745,11 +745,12 @@ pub async fn lcu_post(app_handle: &AppHandle, path: &str) -> bool {
 /// 收到荣誉投票后异步执行点赞，不阻塞主事件循环。
 fn spawn_auto_honor(app_handle: AppHandle, ballot: HonorBallot) {
     crate::spawn_log_panic(async move {
-        // 过滤掉人机
-        let allies: Vec<&HonorEligiblePlayer> = ballot
+        // 过滤掉人机与无 puuid 的条目，直接收集可点赞的 puuid（避免后续 unwrap）
+        let allies: Vec<&String> = ballot
             .eligible_allies
             .iter()
-            .filter(|p| !p.bot_player && p.puuid.is_some())
+            .filter(|p| !p.bot_player)
+            .filter_map(|p| p.puuid.as_ref())
             .collect();
 
         if allies.is_empty() {
@@ -764,10 +765,10 @@ fn spawn_auto_honor(app_handle: AppHandle, ballot: HonorBallot) {
         let state = app_handle.state::<crate::AppState>();
         let app_state = state.inner();
 
-        for p in allies.iter().take(count) {
+        for puuid in allies.iter().take(count) {
             let body = serde_json::json!({
                 "honorType": "HEART",
-                "recipientPuuid": p.puuid.as_ref().unwrap(),
+                "recipientPuuid": puuid,
             });
             if let Err(e) = lcu_request(
                 app_state,

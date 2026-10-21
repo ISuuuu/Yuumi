@@ -2,10 +2,15 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
 
 pub type TaskId = u64;
+
+/// ReplaceOld 策略下等待旧任务真正退出的上限。
+/// 协作式取消需要旧任务自己跑到下一个取消检查点；若它正阻塞在一次 LCU 写请求上，
+/// 无限等待会拖死选人倒计时，因此设上限并在超时后放行新任务。
+const REPLACE_GRACE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
 
 /// 任务类型枚举
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -81,11 +86,13 @@ pub struct TaskSnapshot {
 }
 
 /// 在册运行中的任务句柄
-#[derive(Clone)]
 struct TaskEntry {
     kind: TaskKind,
     description: String,
     token: CancellationToken,
+    /// 任务退出信号：正常结束时显式通知，panic 时 sender 随栈展开释放同样会唤醒等待方。
+    /// 供 ReplaceOld 策略等待旧任务真正让出执行权后再启动新任务。
+    done: oneshot::Receiver<()>,
 }
 
 /// 异步任务监管中心
@@ -123,44 +130,85 @@ impl TaskSupervisor {
         let strategy = kind.default_strategy();
         let desc_str = desc.into();
 
-        let mut tasks_lock = self.tasks.lock().await;
+        // ── 阶段一：按去重策略处理同类在册任务，并摘下需要等待其真正退出的旧任务
+        let mut replaced: Vec<(TaskId, oneshot::Receiver<()>)> = Vec::new();
+        {
+            let mut tasks_lock = self.tasks.lock().await;
 
-        match strategy {
-            DuplicateStrategy::RejectNew => {
-                let already_running = tasks_lock.values().any(|t| t.kind == kind);
-                if already_running {
-                    return Err(SpawnError::DuplicateRejected(kind));
+            match strategy {
+                DuplicateStrategy::RejectNew => {
+                    let already_running = tasks_lock.values().any(|t| t.kind == kind);
+                    if already_running {
+                        return Err(SpawnError::DuplicateRejected(kind));
+                    }
                 }
+                DuplicateStrategy::ReplaceOld => {
+                    // 找出同类任务并通知取消
+                    let old_task_ids: Vec<TaskId> = tasks_lock
+                        .iter()
+                        .filter(|(_, t)| t.kind == kind)
+                        .map(|(id, _)| *id)
+                        .collect();
+
+                    for old_id in old_task_ids {
+                        if let Some(entry) = tasks_lock.remove(&old_id) {
+                            entry.token.cancel();
+                            replaced.push((old_id, entry.done));
+                        }
+                    }
+                }
+                DuplicateStrategy::AllowConcurrent => {}
             }
-            DuplicateStrategy::ReplaceOld => {
-                // 找出同类任务并通知取消
-                let old_task_ids: Vec<TaskId> = tasks_lock
+        }
+
+        // ── 阶段二：等待旧任务真正退出。
+        // 取消是协作式的，仅 remove + cancel 就立刻启动新任务会让两次 LCU 写并发命中同一 action
+        // （自动选人/技能/交换/交易皆为此类），因此在锁外等它收尾，超时兜底放行。
+        for (old_id, done) in replaced {
+            match tokio::time::timeout(REPLACE_GRACE_TIMEOUT, done).await {
+                Ok(Ok(())) => log::debug!("[supervisor] 旧任务 #{} 已退出，接力启动新任务", old_id),
+                // 旧任务 panic 时 sender 提前释放，同样视为已退出
+                Ok(Err(_)) => log::debug!("[supervisor] 旧任务 #{} 已终止（信号提前释放）", old_id),
+                Err(_) => log::warn!(
+                    "[supervisor] 旧任务 #{} 在 {:?} 内未退出，仍继续启动新任务",
+                    old_id,
+                    REPLACE_GRACE_TIMEOUT
+                ),
+            }
+        }
+
+        // ── 阶段三：入册并启动
+        let task_id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let token = CancellationToken::new();
+        let (done_tx, done_rx) = oneshot::channel();
+
+        {
+            let mut tasks_lock = self.tasks.lock().await;
+
+            // 阶段二等待期间可能有同类任务插队入册（并发触发），让位于本次最新请求
+            if matches!(strategy, DuplicateStrategy::ReplaceOld) {
+                let racing_ids: Vec<TaskId> = tasks_lock
                     .iter()
                     .filter(|(_, t)| t.kind == kind)
                     .map(|(id, _)| *id)
                     .collect();
-
-                for old_id in old_task_ids {
-                    if let Some(entry) = tasks_lock.remove(&old_id) {
+                for racing_id in racing_ids {
+                    if let Some(entry) = tasks_lock.remove(&racing_id) {
                         entry.token.cancel();
                     }
                 }
             }
-            DuplicateStrategy::AllowConcurrent => {}
+
+            tasks_lock.insert(
+                task_id,
+                TaskEntry {
+                    kind,
+                    description: desc_str,
+                    token: token.clone(),
+                    done: done_rx,
+                },
+            );
         }
-
-        let task_id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let token = CancellationToken::new();
-
-        tasks_lock.insert(
-            task_id,
-            TaskEntry {
-                kind,
-                description: desc_str,
-                token: token.clone(),
-            },
-        );
-        drop(tasks_lock);
 
         // 任务正常结束时自行摘除在册记录；Drop 作为任务 panic/unwind 时的兜底。
         let tasks_ref = Arc::clone(&self.tasks);
@@ -194,6 +242,8 @@ impl TaskSupervisor {
             };
             task_fn(token).await;
             tasks_ref.lock().await.remove(&task_id);
+            // 在册记录摘除后再通知等待方，确保 ReplaceOld 的继任任务看到的是干净的注册表
+            let _ = done_tx.send(());
         });
 
         Ok(task_id)
@@ -389,6 +439,47 @@ mod tests {
 
         let cancelled = supervisor.cancel_all().await;
         assert_eq!(cancelled, 2);
+        assert_eq!(supervisor.active_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_replace_old_waits_previous_task_exit() {
+        use std::sync::Mutex as StdMutex;
+
+        let supervisor = TaskSupervisor::new();
+        let order: Arc<StdMutex<Vec<&'static str>>> = Arc::new(StdMutex::new(Vec::new()));
+
+        // 旧任务：收到取消后仍需一段时间收尾（模拟已发出的 LCU 写请求仍在途）
+        let old_order = Arc::clone(&order);
+        supervisor
+            .spawn(
+                TaskKind::AutoPickLock,
+                "old pick",
+                move |token: CancellationToken| async move {
+                    token.cancelled().await;
+                    sleep(Duration::from_millis(40)).await;
+                    if let Ok(mut o) = old_order.lock() {
+                        o.push("old_exit");
+                    }
+                },
+            )
+            .await
+            .unwrap();
+
+        // 替换任务必须等旧任务真正退出后才开始执行，杜绝两次写并发命中同一 action
+        let new_order = Arc::clone(&order);
+        supervisor
+            .spawn(TaskKind::AutoPickLock, "new pick", move |_| async move {
+                if let Ok(mut o) = new_order.lock() {
+                    o.push("new_start");
+                }
+            })
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(80)).await;
+        let recorded = order.lock().expect("order lock").clone();
+        assert_eq!(recorded, vec!["old_exit", "new_start"]);
         assert_eq!(supervisor.active_count().await, 0);
     }
 }
