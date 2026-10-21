@@ -723,9 +723,24 @@ export function useGamePlayerData(
   function debouncedSavePlayerData() {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
+      saveTimer = null;
       writeReserveData();
     }, 1000);
   }
+
+  /// 立即执行挂起中的防抖写入：卸载/即将丢失上下文时调用，避免落在 1s 窗口内的最后一次快照被丢弃
+  function flushPendingSave() {
+    if (!saveTimer) return;
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    writeReserveData();
+  }
+
+  // 窗口关闭 / 页面转入后台时兜底落盘：Tauri 直接关窗不一定会触发组件的 onUnmounted
+  const handleFlushOnUnload = () => flushPendingSave();
+  const handleFlushOnHidden = () => {
+    if (document.visibilityState === "hidden") flushPendingSave();
+  };
 
   // ── 低优先级静默扩充样本队列（单任务顺序执行，排在首屏之后，避免争抢信号量通道）
   const extraMatchesQueue: Array<() => Promise<void>> = [];
@@ -2775,14 +2790,31 @@ export function useGamePlayerData(
   let lastSessionTeamSig = "";
   let lastSessionRosterSig = "";
 
-  // 对局结束延时定时器引用池与会话版本，支持链式串行等待中随时安全注销与中断
-  const gameEndedTimers: Array<ReturnType<typeof setTimeout>> = [];
+  // 对局结束延时等待池与会话版本：清理时必须先 resolve 再 clearTimeout。
+  // 仅 clearTimeout 会让 `await new Promise(resolve => setTimeout(resolve, delay))` 永不返回，
+  // 等待中的协程连同其闭包引用将永久挂起泄漏。
+  const gameEndedWaits = new Set<() => void>();
   let currentGameEndedSessionId = 0;
+
+  function waitGameEndedDelay(delay: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const cancel = () => {
+        clearTimeout(timer);
+        gameEndedWaits.delete(cancel);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        gameEndedWaits.delete(cancel);
+        resolve();
+      }, delay);
+      gameEndedWaits.add(cancel);
+    });
+  }
+
   function clearGameEndedTimers() {
     currentGameEndedSessionId++;
-    while (gameEndedTimers.length > 0) {
-      const t = gameEndedTimers.pop();
-      if (t) clearTimeout(t);
+    for (const cancel of [...gameEndedWaits]) {
+      cancel();
     }
   }
 
@@ -3083,10 +3115,7 @@ export function useGamePlayerData(
       const delays = [2000, 3500, 5000];
       void (async () => {
         for (const delay of delays) {
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, delay);
-            gameEndedTimers.push(timer);
-          });
+          await waitGameEndedDelay(delay);
           if (sessionId !== currentGameEndedSessionId) return;
           try {
             await syncCurrentPlayerMatches(true);
@@ -3165,6 +3194,9 @@ export function useGamePlayerData(
   );
 
   onMounted(async () => {
+    window.addEventListener("beforeunload", handleFlushOnUnload);
+    document.addEventListener("visibilitychange", handleFlushOnHidden);
+
     if (!appConfig.value) {
       try {
         appConfig.value = await fetchConfig();
@@ -3208,10 +3240,10 @@ export function useGamePlayerData(
 
   onUnmounted(() => {
     clearGameEndedTimers();
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
-    }
+    // 卸载前把仍在防抖窗口内未落盘的快照立刻写出，避免丢失最后一次数据
+    flushPendingSave();
+    window.removeEventListener("beforeunload", handleFlushOnUnload);
+    document.removeEventListener("visibilitychange", handleFlushOnHidden);
     extraMatchesQueue.length = 0;
   });
 
