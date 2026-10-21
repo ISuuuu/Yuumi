@@ -252,12 +252,16 @@ pub async fn lcu_request(
                     return serde_json::from_str(&text)
                         .map_err(|e| format!("JSON 解析失败: {}", e));
                 } else {
-                    // 对于非选人阶段请求选人接口、或按 puuid 查找未命名召唤师产生的常规 404 返回，降级为 debug 日志防止刷屏爆红
-                    if status.as_u16() == 404
+                    // 预期内的「接口未开放」响应降级为 debug 日志防止刷屏爆红：
+                    // 1) 非选人阶段请求选人接口、按 puuid 查找未命名召唤师的常规 404；
+                    // 2) 对局正常进行（加载/游戏内）时客户端不开放重连接口，一律返回 403。
+                    //    该接口的 403 只表示当前阶段不允许重连，与响应文本无关，故不匹配具体 message。
+                    let expected_unavailable = (status.as_u16() == 404
                         && (path.contains("pickable-champion-ids")
                             || path.contains("/lol-champ-select/v1/session")
-                            || path.contains("/lol-summoner/v2/summoners/puuid/"))
-                    {
+                            || path.contains("/lol-summoner/v2/summoners/puuid/")))
+                        || (status.as_u16() == 403 && path.contains("/lol-gameflow/v1/reconnect"));
+                    if expected_unavailable {
                         log::debug!(
                             "LCU API 常规未激活/未找到提示: {} {}, 状态码: {}, 响应: {}",
                             method,

@@ -15,6 +15,12 @@ const LOBBY_FLICKER_WINDOW: std::time::Duration = std::time::Duration::from_mill
 /// 十余轮足够覆盖；过长的重试链会在 LCU 换代时拖住全局 API 信号量。
 const LOBBY_CREATE_MAX_ATTEMPTS: u32 = 12;
 
+/// 自动重连的稳定等待窗口。
+/// 对局结束退出时客户端会短暂闪现 Reconnect 阶段，此时立即发重连请求会误把客户端
+/// 拉起重连流程（弹出网络连接错误窗口）。先等待该窗口再校验阶段，期间阶段若已离开
+/// 断线状态，handle_phase_change 会协同取消本任务。
+const RECONNECT_SETTLE_WINDOW: std::time::Duration = std::time::Duration::from_millis(3000);
+
 /// 自动创建大厅的共享状态（建厅重试在后台任务中执行，需跨任务共享标志）
 #[derive(Default)]
 struct LobbyState {
@@ -210,8 +216,10 @@ async fn handle_phase_change(
             .cancel_kind(&crate::agents::supervisor::TaskKind::AutoAccept)
             .await;
     }
-    // 当离开对局或重连阶段时，立即协同取消正在退避等待中的自动重连任务
-    if phase != "InProgress" && phase != "Reconnect" {
+    // 当离开断线重连阶段时，立即协同取消正在稳定等待/退避等待中的自动重连任务。
+    // 自动重连只在 Reconnect 阶段有意义，回到 InProgress 说明客户端已自行恢复连接，
+    // 此时必须先唤醒任务终止，而不是让它空等剩余 sleep 再靠阶段校验退出。
+    if phase != "Reconnect" {
         state
             .supervisor
             .cancel_kind(&crate::agents::supervisor::TaskKind::AutoReconnect)
@@ -301,12 +309,14 @@ async fn handle_phase_change(
         try_create_default_lobby(app_handle.clone(), cfg, lobby_state.clone());
     }
 
-    // 游戏进行中 → 自动重连（指数退避，最多 5 次）。
+    // 断线重连阶段 → 自动重连（指数退避，最多 5 次）。
+    // 仅在 Reconnect 阶段触发：对局正常进行（加载/游戏内）时客户端不开放重连接口，
+    // 恒返回 403 "Reconnect is not available"，在 InProgress 阶段发起只是无效请求。
     // 重试链整条交给 supervisor 后台执行：阻塞在主循环里会让后续 ReadyCheck /
     // HonorBallot / ReceivedInvitations 事件最长积压约 7.5 秒。
     // AutoReconnect 采用 RejectNew 策略，重复的事件只会有一条重试链。
-    if phase == "InProgress" && cfg.enable_auto_reconnect {
-        log::info!("检测到游戏进行中，尝试自动重连...");
+    if phase == "Reconnect" && cfg.enable_auto_reconnect {
+        log::info!("检测到断线重连阶段，准备自动重连...");
         spawn_auto_reconnect(app_handle.clone());
     }
 
@@ -624,7 +634,7 @@ fn spawn_auto_accept(app_handle: AppHandle, delay_secs: u32) {
     });
 }
 
-/// 自动重连：指数退避，最多 5 次。
+/// 自动重连：稳定等待窗口后发起，失败指数退避，最多 5 次。
 /// 整条重试链由 supervisor 以 `RejectNew` 策略托管，因此同一时刻只会有一条重试链；
 /// 重试期间退避 sleep 不会阻塞 gameflow 事件主循环。
 fn spawn_auto_reconnect(app_handle: AppHandle) {
@@ -639,31 +649,60 @@ fn spawn_auto_reconnect(app_handle: AppHandle) {
                 crate::agents::supervisor::TaskKind::AutoReconnect,
                 "AutoReconnect".to_string(),
                 move |cancel_token| async move {
+                    // 对局结束时的 Reconnect 闪现期间不发起重连，先等待稳定窗口
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            log::debug!("自动重连任务在稳定等待窗口内被协同取消");
+                            return;
+                        }
+                        _ = sleep(RECONNECT_SETTLE_WINDOW) => {}
+                    }
+
                     for attempt in 1..=5u64 {
                         if cancel_token.is_cancelled() {
                             log::info!("自动重连任务已协同取消");
                             return;
                         }
 
-                        // 每次重试前都校验仍在同一局游戏中（仅允许处于游戏中或断线重连中）
+                        // 每次重试前都校验仍处于断线重连状态（同一对局内的重连连接态）
                         let current_lifecycle = lifecycle.snapshot().await;
                         if let Err(e) = guard.ensure_valid(&current_lifecycle) {
                             log::info!("自动重连放弃: 生命周期失效 ({})", e);
                             return;
                         }
-                        if current_lifecycle.phase
-                            != crate::agents::lifecycle::GamePhase::InProgress
-                            && current_lifecycle.phase
-                                != crate::agents::lifecycle::GamePhase::Reconnect
+                        if current_lifecycle.phase != crate::agents::lifecycle::GamePhase::Reconnect
                         {
                             log::info!(
-                                "当前游戏阶段为 {}，已脱离对局，取消自动重连",
+                                "当前游戏阶段为 {}，已脱离断线状态，取消自动重连",
                                 current_lifecycle.phase.as_str()
                             );
                             return;
                         }
 
-                        if lcu_post(&app_handle, "/lol-gameflow/v1/reconnect").await {
+                        // 重连接口在客户端不允许重连时直接返回 HTTP 403。这属确定性的状态前置
+                        // 条件不满足（非瞬态故障），重试无意义，立即结束本轮重连链，
+                        // 避免退避重试把同一失败重复打满 5 次。
+                        // 注意：不再匹配响应文本，避免 Riot 调整 message 后判定失效。
+                        let reconnect_ok = {
+                            let app_state = app_handle.state::<crate::AppState>();
+                            match lcu_request(
+                                app_state.inner(),
+                                "POST",
+                                "/lol-gameflow/v1/reconnect",
+                                None,
+                            )
+                            .await
+                            {
+                                Ok(_) => true,
+                                Err(e) if is_reconnect_unavailable(&e) => {
+                                    log::debug!("客户端当前不允许重连（HTTP 403），跳过自动重连");
+                                    return;
+                                }
+                                Err(_) => false,
+                            }
+                        };
+
+                        if reconnect_ok {
                             log::info!("自动重连成功");
                             return;
                         }
@@ -693,6 +732,13 @@ fn spawn_auto_reconnect(app_handle: AppHandle) {
             log::debug!("启动自动重连任务未执行: {}", e);
         }
     });
+}
+
+/// 判断重连请求是否因「客户端当前不允许重连」而失败。
+/// 依据 HTTP 状态码（`lcu_request` 的错误格式为 `LCU 返回错误 [状态码]: 响应体`），
+/// 不依赖 Riot 的响应文本，避免 message 变更后判定失效并重新进入无意义重试。
+fn is_reconnect_unavailable(error: &str) -> bool {
+    error.contains("LCU 返回错误 [403]")
 }
 
 /// 获取当前 ready check 状态
