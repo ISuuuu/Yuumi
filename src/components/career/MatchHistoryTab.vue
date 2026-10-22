@@ -9,6 +9,7 @@ import PositionIcon from "../PositionIcon.vue";
 import RankedIcon from "../RankedIcon.vue";
 import MatchCard from "../match-card/MatchCard.vue";
 import { formatLocalDateTime } from "../../utils/matchTime";
+import { useVirtualList } from "../../composables/useVirtualList";
 import {
   computeAggregatedPositions,
   computeAggregatedChampions,
@@ -92,6 +93,34 @@ const aggregatedPositions = computed<AggregatedPositions | null>(() => {
 const aggregatedTopChamps = computed<AggregatedChampion[]>(() => {
   return computeAggregatedChampions(recentMatches.value, 6);
 });
+
+// ─── 虚拟列表状态 ───
+// 单张卡片固定高度：头像 52px + 上下 padding 14px*2 + 列表 gap 10px ≈ 90px
+const VIRTUAL_ITEM_HEIGHT = 90;
+const scrollTop = ref(0);
+const viewportHeight = ref(0);
+const scrollContainerRef = ref<HTMLElement | null>(null);
+
+const virtualList = useVirtualList({
+  total: computed(() => filteredMatches.value.length),
+  scrollTop,
+  viewportHeight,
+  itemHeight: VIRTUAL_ITEM_HEIGHT,
+  overscan: 3,
+});
+const { containerHeight, offsetY, visibleItems } = virtualList;
+
+function onScroll() {
+  const el = scrollContainerRef.value;
+  if (!el) return;
+  scrollTop.value = el.scrollTop;
+  viewportHeight.value = el.clientHeight;
+}
+
+function updateViewportHeight() {
+  const el = scrollContainerRef.value;
+  if (el) viewportHeight.value = el.clientHeight;
+}
 
 const statsSummary = computed(() => {
   if (recentMatches.value.length === 0) return null;
@@ -242,10 +271,13 @@ onMounted(async () => {
     console.warn("加载 CareerGamesNumber 配置失败，使用默认值 20:", e);
   }
   document.addEventListener("click", onDocClick);
+  window.addEventListener("resize", updateViewportHeight);
+  updateViewportHeight();
 });
 
 onUnmounted(() => {
   document.removeEventListener("click", onDocClick);
+  window.removeEventListener("resize", updateViewportHeight);
 });
 
 // 召唤师变更时清空队友缓存
@@ -634,15 +666,29 @@ watch(
     </div>
 
     <!-- 局部滚动包裹区域：保留头像、排位与近期对局看板，仅滚动对局战绩列表 -->
-    <div class="career-scroll-area">
-      <!-- 战绩对局历史列表 -->
+    <div
+      ref="scrollContainerRef"
+      class="career-scroll-area"
+      @scroll.passive="onScroll"
+    >
+      <!-- 战绩对局历史列表（虚拟化：仅渲染可视区附近卡片） -->
       <div v-if="filteredMatches.length > 0" class="match-history-list">
-        <MatchCard
-          v-for="m in filteredMatches"
-          :key="m.gameId"
-          :match="m"
-          @select="goToMatchDetail"
-        />
+        <div
+          class="virtual-list"
+          :style="{ height: containerHeight + 'px' }"
+        >
+          <div
+            class="virtual-list-viewport"
+            :style="{ transform: `translateY(${offsetY}px)` }"
+          >
+            <MatchCard
+              v-for="item in visibleItems"
+              :key="filteredMatches[item.index].gameId"
+              :match="filteredMatches[item.index]"
+              @select="goToMatchDetail"
+            />
+          </div>
+        </div>
       </div>
       <div v-else-if="!loading" class="tip-container">
         <p class="tip">{{ $t("career.empty") }}</p>
@@ -1108,6 +1154,23 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* 虚拟列表：外层撑起总高，内层按 offsetY 平移定位可视卡片 */
+.virtual-list {
+  position: relative;
+  width: 100%;
+}
+
+.virtual-list-viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  will-change: transform;
 }
 
 /*

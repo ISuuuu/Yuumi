@@ -18,7 +18,7 @@ import LcuImage from "../LcuImage.vue";
 import PositionIcon from "../PositionIcon.vue";
 import RankedIcon from "../RankedIcon.vue";
 import { getPositionName, getShortPositionName, inferMatchPosition } from "../../utils/matchAnalysis";
-import { formatLocalDate, formatLocalDateTime } from "../../utils/matchTime";
+import { formatLocalDateTime, formatLocalMonthDay } from "../../utils/matchTime";
 
 const props = defineProps<{
   player: PremadePlayerLike;
@@ -227,10 +227,6 @@ function formatKdaRatio(m: MatchDisplay): { text: string; clazz: string } {
   }
   kdaRatioCache.set(m, res);
   return res;
-}
-
-function formatMatchDate(ts?: number | null): string {
-  return formatLocalDate(ts);
 }
 
 function getMatchTopTooltip(m: MatchDisplay): string {
@@ -604,7 +600,7 @@ const displayedMatches = computed(() => {
             >
               {{ $t("gameInfo.encounteredMatch") }}
             </span>
-            <span class="cm-date">{{ formatMatchDate(m.timeStamp) }}</span>
+            <span class="cm-date">{{ formatLocalMonthDay(m.timeStamp) }}</span>
           </div>
 
           <!-- 卡片主体：大尺寸英雄头像 + 核心战绩数据 -->
