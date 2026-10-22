@@ -3,6 +3,7 @@ import { useI18n } from "vue-i18n";
 import LcuImage from "../LcuImage.vue";
 import type { MatchDisplay } from "../../api/lcu";
 import { getQueueName } from "../../utils/queueName";
+import { formatLocalMonthDay } from "../../utils/matchTime";
 
 defineProps<{
   match: MatchDisplay;
@@ -33,7 +34,7 @@ function queueName(queueId: number, backendName: string): string {
         queueName(match.queueId, match.name)
       }}</span>
       <span class="mini-time-kda">
-        {{ match.shortTime.split(" ")[0] }} &nbsp;&nbsp;
+        {{ formatLocalMonthDay(match.timeStamp) }} &nbsp;&nbsp;
         {{ match.kills }}/<span class="death-red">{{ match.deaths }}</span
         >/{{ match.assists }}
       </span>

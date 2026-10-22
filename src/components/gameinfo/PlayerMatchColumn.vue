@@ -18,6 +18,7 @@ import LcuImage from "../LcuImage.vue";
 import PositionIcon from "../PositionIcon.vue";
 import RankedIcon from "../RankedIcon.vue";
 import { getPositionName, getShortPositionName, inferMatchPosition } from "../../utils/matchAnalysis";
+import { formatLocalDate, formatLocalDateTime } from "../../utils/matchTime";
 
 const props = defineProps<{
   player: PremadePlayerLike;
@@ -228,9 +229,8 @@ function formatKdaRatio(m: MatchDisplay): { text: string; clazz: string } {
   return res;
 }
 
-function formatMatchDate(shortTime: string): string {
-  if (!shortTime) return "";
-  return shortTime.split(" ")[0] || "";
+function formatMatchDate(ts?: number | null): string {
+  return formatLocalDate(ts);
 }
 
 function getMatchTopTooltip(m: MatchDisplay): string {
@@ -239,7 +239,8 @@ function getMatchTopTooltip(m: MatchDisplay): string {
 
   const mode = getQueueName(m.queueId, m.name);
   const posName = m.position ? getPositionName(m.position) : "";
-  const date = m.time || m.shortTime || formatMatchDate(m.shortTime);
+  // 从原始时间戳按本地时区格式化，避免使用后端下发的 UTC 字符串（会早 8 小时）
+  const date = formatLocalDateTime(m.timeStamp);
   const modeLabel = te("gameInfo.gameModeLabel") ? t("gameInfo.gameModeLabel") : "游戏模式";
   const posLabel = te("gameInfo.positionLabel") ? t("gameInfo.positionLabel") : "位置";
   const dateLabel = te("gameInfo.dateLabel") ? t("gameInfo.dateLabel") : "日期";
@@ -603,7 +604,7 @@ const displayedMatches = computed(() => {
             >
               {{ $t("gameInfo.encounteredMatch") }}
             </span>
-            <span class="cm-date">{{ formatMatchDate(m.shortTime) }}</span>
+            <span class="cm-date">{{ formatMatchDate(m.timeStamp) }}</span>
           </div>
 
           <!-- 卡片主体：大尺寸英雄头像 + 核心战绩数据 -->
