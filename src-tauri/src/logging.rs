@@ -199,12 +199,14 @@ impl Log for Logger {
 /// - 日志文件：`<exe_dir>/log/yuumi_2026-06-25.log`，超过 2MB 后 `yuumi_2026-06-25-1.log`
 /// - 日志内容：`2026-06-25 11:55:26.123 [INFO ] module:42 - message`
 /// - Debug 模式下同时输出到 stderr
-/// - log_level: 0=Info(默认), 2=Error
+/// - log_level 取值与设置页下拉选项一致：0=Debug, 1=Info(默认), 2=Error
 pub fn init(log_level: u32) {
     let level = match log_level {
-        0 | 10 | 20 | 30 | 40 => LevelFilter::Info,
+        0 => LevelFilter::Debug,
+        1 => LevelFilter::Info,
         2 => LevelFilter::Error,
-        _ => LevelFilter::Info, // 默认 Info（原为 Debug）
+        // 未知值（含历史遗留的 10/20/30/40）统一回退 Info，避免静默放大日志量
+        _ => LevelFilter::Info,
     };
 
     let log_dir = std::env::current_exe()

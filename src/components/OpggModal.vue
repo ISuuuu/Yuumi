@@ -519,7 +519,7 @@ async function setRunePage(rune: OpggRunePreset) {
 <!-- 非 scoped：CSS 变量需作用于 :root / html 元素，scoped 会加哈希导致选择器失效 -->
 <style>
 :root {
-  --primary-color: #00d2c4;
+  --primary-color: #009faa;
   --primary-color-hover: #00b3a7;
   --primary-color-alpha-15: rgba(0, 210, 196, 0.15);
   --primary-color-alpha-30: rgba(0, 210, 196, 0.3);

@@ -76,7 +76,7 @@ function onDeathColorSelect(
 }
 
 const DEFAULT_COLORS = {
-  ThemeColor: "#00d2c4",
+  ThemeColor: "#009faa",
   WinCardColor: "#3339b01b",
   LoseCardColor: "#33d3190c",
   RemakeCardColor: "#33a2a2a2",

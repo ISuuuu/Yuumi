@@ -90,6 +90,50 @@ pub struct ChampSelectTrade {
 pub struct ChampSelectTimer {
     pub adjusted_time_left_in_phase: Option<u64>,
     pub phase: Option<String>,
+    /// LCU 侧生成该 timer 快照时的 epoch 毫秒。
+    /// 与 `adjusted_time_left_in_phase` 属同一快照，用于反推快照距今已过的毫秒数。
+    #[serde(default)]
+    pub internal_now_in_epoch_ms: Option<u64>,
+}
+
+/// 自动锁定的提前量：在阶段结束前预留的毫秒数。
+const LOCK_BUFFER_MS: u64 = 5_000;
+/// 缺失 timer 数据时的兜底等待时长。
+const DEFAULT_PHASE_LEFT_MS: u64 = 10_000;
+/// timer 异常值上限（选人阶段实际不会超过该量级），防御异常的剩余时间导致长时间空等。
+const MAX_PHASE_WAIT_MS: u64 = 180_000;
+
+fn current_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 计算距「应当发出锁定请求」还需等待的毫秒数。
+///
+/// `adjusted_time_left_in_phase` 是 LCU **推送该 session 那一刻**的剩余时间，直接当作
+/// 当前剩余时间会多等「事件送达延迟 + 本函数调用前的 await 耗时」，把 5 秒缓冲逐步吃光，
+/// 极端情况下锁定请求会在阶段结束前一刻才发出而失败。
+/// 用同一快照里的 `internal_now_in_epoch_ms` 反推已过时间即可校正；
+/// 该字段缺失时退化为原有行为。
+fn compute_lock_delay_ms(timer: Option<&ChampSelectTimer>, now_ms: u64) -> u64 {
+    let Some(timer) = timer else {
+        return DEFAULT_PHASE_LEFT_MS.saturating_sub(LOCK_BUFFER_MS);
+    };
+
+    let elapsed_ms = timer
+        .internal_now_in_epoch_ms
+        .map(|lcu_now| now_ms.saturating_sub(lcu_now))
+        .unwrap_or(0);
+
+    let remaining_ms = timer
+        .adjusted_time_left_in_phase
+        .unwrap_or(DEFAULT_PHASE_LEFT_MS)
+        .min(MAX_PHASE_WAIT_MS)
+        .saturating_sub(elapsed_ms);
+
+    remaining_ms.saturating_sub(LOCK_BUFFER_MS)
 }
 
 // ─── BP 状态追踪 ───
@@ -423,14 +467,6 @@ async fn do_auto_complete(
         None => return,
     };
 
-    // 计算等待时间：剩余毫秒 - 5000 毫秒缓冲（全毫秒计算，避免整数除法抹平截断）
-    let remaining_ms = session
-        .timer
-        .as_ref()
-        .and_then(|t| t.adjusted_time_left_in_phase)
-        .unwrap_or(10000);
-    let sleep_ms = remaining_ms.saturating_sub(5000);
-
     let state = app_handle.state::<crate::AppState>();
     let lifecycle_state = state.lifecycle.snapshot().await;
     // guard 自带 session 约束，未处于有效选人会话时直接放弃
@@ -439,6 +475,10 @@ async fn do_auto_complete(
         return;
     }
     let guard = state.lifecycle.capture_guard(true).await;
+
+    // 等待时长在签发 lease 前才计算，使上面两次 await 的耗时也被计入校正。
+    // 阶段剩余时间需按 timer 快照距今已过时间修正，详见 compute_lock_delay_ms。
+    let sleep_ms = compute_lock_delay_ms(session.timer.as_ref(), current_epoch_ms());
 
     let mut initial_champion_id = action.champion_id;
     if initial_champion_id == 0 {
@@ -889,5 +929,76 @@ fn get_position_spell_candidates(pos: &str, cfg: &FunctionsConfig) -> Vec<i32> {
         "bottom" => cfg.auto_set_summoner_spell_bot.clone(),
         "utility" => cfg.auto_set_summoner_spell_sup.clone(),
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn timer(left: Option<u64>, lcu_now: Option<u64>) -> ChampSelectTimer {
+        ChampSelectTimer {
+            adjusted_time_left_in_phase: left,
+            phase: Some("BAN_PICK".into()),
+            internal_now_in_epoch_ms: lcu_now,
+        }
+    }
+
+    #[test]
+    fn lock_delay_subtracts_buffer() {
+        // 快照时刻即当前时刻：剩余 30s → 等待 25s
+        assert_eq!(
+            compute_lock_delay_ms(Some(&timer(Some(30_000), Some(1_000))), 1_000),
+            25_000
+        );
+    }
+
+    #[test]
+    fn lock_delay_compensates_delivery_latency() {
+        // 快照已过去 3s：真实剩余 27s → 等待 22s，而非把缓冲吃掉后仍等 25s
+        assert_eq!(
+            compute_lock_delay_ms(Some(&timer(Some(30_000), Some(1_000))), 4_000),
+            22_000
+        );
+    }
+
+    #[test]
+    fn lock_delay_never_underflows() {
+        // 已过时间超过剩余时间 → 立即锁定
+        assert_eq!(
+            compute_lock_delay_ms(Some(&timer(Some(8_000), Some(1_000))), 20_000),
+            0
+        );
+        // 剩余不足缓冲 → 立即锁定
+        assert_eq!(
+            compute_lock_delay_ms(Some(&timer(Some(3_000), Some(1_000))), 1_000),
+            0
+        );
+    }
+
+    #[test]
+    fn lock_delay_falls_back_without_timer_data() {
+        let fallback = DEFAULT_PHASE_LEFT_MS - LOCK_BUFFER_MS;
+        // timer 整体缺失
+        assert_eq!(compute_lock_delay_ms(None, 1_000), fallback);
+        // 仅有剩余时间，无 LCU 时间基准 → 不做校正，保持原有行为
+        assert_eq!(
+            compute_lock_delay_ms(Some(&timer(Some(30_000), None)), 1_000),
+            25_000
+        );
+        // 仅有 LCU 时间基准，无剩余时间
+        assert_eq!(
+            compute_lock_delay_ms(Some(&timer(None, Some(1_000))), 1_000),
+            fallback
+        );
+    }
+
+    #[test]
+    fn lock_delay_clamps_abnormal_remaining() {
+        // 异常的剩余时间被夹到上限，避免长时间空等
+        assert_eq!(
+            compute_lock_delay_ms(Some(&timer(Some(u64::MAX), Some(1_000))), 1_000),
+            MAX_PHASE_WAIT_MS - LOCK_BUFFER_MS
+        );
     }
 }

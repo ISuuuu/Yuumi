@@ -51,7 +51,7 @@ provide("applyMicaEffect", applyMicaEffect);
 const themeOverrides = computed<GlobalThemeOverrides>(() => {
   const customColor = appConfig.value?.Personalization?.ThemeColor
     ? toHex6(appConfig.value.Personalization.ThemeColor)
-    : "#00d2c4";
+    : "#009faa";
 
   const isDark = isDarkTheme.value;
 
@@ -1175,7 +1175,7 @@ async function handleClose() {
 }
 
 :root {
-  --primary-color: #00d2c4;
+  --primary-color: #009faa;
   --primary-color-hover: #00b3a7;
   --primary-color-alpha-10: rgba(0, 210, 196, 0.10);
   --primary-color-alpha-15: rgba(0, 210, 196, 0.15);

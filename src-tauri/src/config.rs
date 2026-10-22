@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 /// 当前配置版本号。配置结构发生破坏性变更（字段重命名/移动/类型变化）时递增，
 /// 并在 [`AppConfig::migrate`] 中实现从旧版本到新版本的幂等迁移。
-pub const CONFIG_VERSION: u32 = 2;
+pub const CONFIG_VERSION: u32 = 3;
 
 /// lol_path 列表中的特殊标记：表示该条目为「启动 WeGame」而非真实客户端路径。
 /// 真实路径不可能恰好等于该字符串，可作为安全的判别值。
@@ -57,7 +57,7 @@ impl Default for GeneralConfig {
             enable_close_to_tray: None,
             enable_game_start_minimize: false,
             enable_check_update: true,
-            log_level: 0,
+            log_level: 1,
             enable_http_proxy: false,
             http_proxy_addr: "127.0.0.1:7897".into(),
             enable_signalr_hub: false,
@@ -346,9 +346,17 @@ impl AppConfig {
         // v1 → v2：HTTP 代理字段重命名（EnableGithubProxy/GithubProxyAddr
         //   → EnableHttpProxy/HttpProxyAddr），已由 serde alias 在解析时兼容，
         //   无需数据变换，仅递增版本号以触发配置落盘重写为新格式。
+        // v2 → v3：日志等级语义与设置页下拉选项对齐（0=Debug, 1=Info, 2=Error）。
+        //   旧版本的 0 实际映射到 Info（Debug 选项从未生效），因此迁移为 1 以保持
+        //   用户既有观测行为；1/2 语义不变。
         while self.version < CONFIG_VERSION {
             match self.version {
                 1 => {} // v1 → v2 无数据变换
+                2 => {
+                    if self.general.log_level == 0 {
+                        self.general.log_level = 1;
+                    }
+                }
                 _ => log::warn!("未知配置版本 {}，直接升级到当前版本", self.version),
             }
             self.version += 1;
@@ -473,5 +481,53 @@ impl AppConfig {
                 log::error!("序列化配置失败: {}", e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// v2 的 LogLevel=0 在旧实现里实际映射到 Info，迁移后应变为 1(Info)，
+    /// 避免修复级别映射后存量用户被静默切到 Debug。
+    #[test]
+    fn migrate_v2_log_level_zero_becomes_info() {
+        let mut cfg = AppConfig {
+            version: 2,
+            general: GeneralConfig {
+                log_level: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(cfg.migrate());
+        assert_eq!(cfg.version, CONFIG_VERSION);
+        assert_eq!(cfg.general.log_level, 1);
+    }
+
+    /// Info(1) 与 Error(2) 的语义在 v3 中不变，迁移不得改写。
+    #[test]
+    fn migrate_v2_preserves_explicit_log_levels() {
+        for level in [1u32, 2] {
+            let mut cfg = AppConfig {
+                version: 2,
+                general: GeneralConfig {
+                    log_level: level,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            assert!(cfg.migrate());
+            assert_eq!(cfg.general.log_level, level);
+        }
+    }
+
+    #[test]
+    fn migrate_is_idempotent_on_current_version() {
+        let mut cfg = AppConfig::default();
+        assert_eq!(cfg.version, CONFIG_VERSION);
+        assert!(!cfg.migrate());
     }
 }
