@@ -734,7 +734,7 @@ watch(isConnected, (connected) => {
 .action-btn:hover:not(:disabled) {
   border-color: var(--primary-color);
   color: var(--primary-color);
-  background: var(--primary-color-alpha-10, rgba(0, 210, 196, 0.1));
+  background: var(--primary-color-alpha-10, rgba(0, 159, 170, 0.1));
 }
 
 .action-btn-icon {

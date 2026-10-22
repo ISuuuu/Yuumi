@@ -8,10 +8,12 @@ import { computed, type Ref } from "vue";
  * - 由调用方持有滚动容器 DOM，滚动时同步 scrollTop；可视高度变化时同步 viewportHeight。
  *
  * 返回：
- * - containerStyle   外层占位容器样式（height = total * itemHeight）
+ * - containerHeight   外层占位容器样式（height = total * itemHeight）
  * - offsetY          可视区相对列表顶部的偏移，用于 transform 定位可视行
  * - visibleItems     当前应渲染的行（含 index），供 v-for 使用
- * - syncScroll       滚动回调：更新 scrollTop / viewportHeight
+ *
+ * 滚动与尺寸同步由调用方负责（本模块不碰 DOM）：调用方需在滚动时写入 scrollTop /
+ * viewportHeight，并在容器尺寸变化时更新 viewportHeight。
  */
 export function useVirtualList(options: {
   total: Ref<number>;

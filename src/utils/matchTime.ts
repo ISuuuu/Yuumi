@@ -19,13 +19,6 @@ export function formatLocalDateTime(ts?: number | null): string {
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** epoch 毫秒 → 本地 `YYYY/MM/DD` */
-export function formatLocalDate(ts?: number | null): string {
-  if (!ts || ts <= 0) return "";
-  const d = new Date(ts);
-  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
-}
-
 /** epoch 毫秒 → 本地 `MM-DD`（与后端 shortTime 的日期段格式保持一致，便于替换） */
 export function formatLocalMonthDay(ts?: number | null): string {
   if (!ts || ts <= 0) return "";

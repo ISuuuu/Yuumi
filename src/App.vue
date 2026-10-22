@@ -1177,11 +1177,11 @@ async function handleClose() {
 :root {
   --primary-color: #009faa;
   --primary-color-hover: #00b3a7;
-  --primary-color-alpha-10: rgba(0, 210, 196, 0.10);
-  --primary-color-alpha-15: rgba(0, 210, 196, 0.15);
-  --primary-color-alpha-20: rgba(0, 210, 196, 0.20);
-  --primary-color-alpha-30: rgba(0, 210, 196, 0.3);
-  --primary-color-alpha-40: rgba(0, 210, 196, 0.4);
+  --primary-color-alpha-10: rgba(0, 159, 170, 0.10);
+  --primary-color-alpha-15: rgba(0, 159, 170, 0.15);
+  --primary-color-alpha-20: rgba(0, 159, 170, 0.20);
+  --primary-color-alpha-30: rgba(0, 159, 170, 0.3);
+  --primary-color-alpha-40: rgba(0, 159, 170, 0.4);
 
   /* 更新弹窗/旧组件使用的变量 → 映射到主页主题变量（惰性解析，自动跟随亮暗色与用户主题色） */
   --theme-color: var(--primary-color);
@@ -1207,7 +1207,7 @@ async function handleClose() {
   --popover-bg: rgba(255, 255, 255, 0.98);
   --popover-border: rgba(0, 0, 0, 0.08);
   --border-color: rgba(0, 0, 0, 0.06);
-  --border-color-hover: rgba(0, 210, 196, 0.35);
+  --border-color-hover: rgba(0, 159, 170, 0.35);
   --hover-bg: rgba(0, 0, 0, 0.03);
   --hover-bg-strong: rgba(0, 0, 0, 0.06);
   --titlebar-bg: rgba(255, 255, 255, 0.85);
@@ -1257,14 +1257,14 @@ async function handleClose() {
   /* Settings UI 亮色专用 */
   --toggle-track-off: rgba(0, 0, 0, 0.1);
   --toggle-slider: #ffffff;
-  --toggle-glow: 0 0 10px rgba(0, 210, 196, 0.35);
+  --toggle-glow: 0 0 10px rgba(0, 159, 170, 0.35);
   --segmented-bg: rgba(0, 0, 0, 0.04);
   --card-glow-hover:
-    0 0 0 1px rgba(0, 210, 196, 0.3), 0 4px 12px rgba(0, 0, 0, 0.05);
+    0 0 0 1px rgba(0, 159, 170, 0.3), 0 4px 12px rgba(0, 0, 0, 0.05);
   --settings-card-bg: rgba(255, 255, 255, 0.8);
   --settings-card-bg-hover: rgba(255, 255, 255, 0.95);
   --settings-card-border: rgba(0, 0, 0, 0.06);
-  --settings-card-border-hover: rgba(0, 210, 196, 0.5);
+  --settings-card-border-hover: rgba(0, 159, 170, 0.5);
   --settings-collapse-bg: rgba(243, 244, 246, 0.8);
   --settings-separator: rgba(0, 0, 0, 0.04);
 
@@ -1291,7 +1291,7 @@ async function handleClose() {
   --popover-bg: rgba(20, 29, 46, 0.96);
   --popover-border: rgba(255, 255, 255, 0.12);
   --border-color: rgba(255, 255, 255, 0.08);
-  --border-color-hover: rgba(0, 210, 196, 0.45);
+  --border-color-hover: rgba(0, 159, 170, 0.45);
   --hover-bg: rgba(255, 255, 255, 0.06);
   --hover-bg-strong: rgba(255, 255, 255, 0.10);
   --titlebar-bg: rgba(11, 15, 25, 0.90);
@@ -1335,14 +1335,14 @@ async function handleClose() {
   /* Settings UI 暗色专用 */
   --toggle-track-off: rgba(255, 255, 255, 0.12);
   --toggle-slider: #ffffff;
-  --toggle-glow: 0 0 14px rgba(0, 210, 196, 0.4);
+  --toggle-glow: 0 0 14px rgba(0, 159, 170, 0.4);
   --segmented-bg: rgba(255, 255, 255, 0.05);
   --card-glow-hover:
-    0 0 0 1px rgba(0, 210, 196, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
+    0 0 0 1px rgba(0, 159, 170, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
   --settings-card-bg: rgba(26, 38, 59, 0.75);
   --settings-card-bg-hover: rgba(34, 50, 77, 0.90);
   --settings-card-border: rgba(255, 255, 255, 0.08);
-  --settings-card-border-hover: rgba(0, 210, 196, 0.45);
+  --settings-card-border-hover: rgba(0, 159, 170, 0.45);
   --settings-collapse-bg: rgba(17, 24, 39, 0.85);
   --settings-separator: rgba(255, 255, 255, 0.05);
 
@@ -1357,14 +1357,14 @@ async function handleClose() {
   /* Settings UI 亮色专用 */
   --toggle-track-off: rgba(0, 0, 0, 0.1);
   --toggle-slider: #ffffff;
-  --toggle-glow: 0 0 10px rgba(0, 210, 196, 0.35);
+  --toggle-glow: 0 0 10px rgba(0, 159, 170, 0.35);
   --segmented-bg: rgba(0, 0, 0, 0.04);
   --card-glow-hover:
-    0 0 0 1px rgba(0, 210, 196, 0.3), 0 4px 12px rgba(0, 0, 0, 0.05);
+    0 0 0 1px rgba(0, 159, 170, 0.3), 0 4px 12px rgba(0, 0, 0, 0.05);
   --settings-card-bg: rgba(255, 255, 255, 0.8);
   --settings-card-bg-hover: rgba(255, 255, 255, 0.95);
   --settings-card-border: rgba(0, 0, 0, 0.06);
-  --settings-card-border-hover: rgba(0, 210, 196, 0.5);
+  --settings-card-border-hover: rgba(0, 159, 170, 0.5);
   --settings-collapse-bg: rgba(243, 244, 246, 0.8);
   --settings-separator: rgba(0, 0, 0, 0.04);
 

@@ -95,11 +95,13 @@ const aggregatedTopChamps = computed<AggregatedChampion[]>(() => {
 });
 
 // ─── 虚拟列表状态 ───
-// 单张卡片固定高度：头像 52px + 上下 padding 14px*2 + 列表 gap 10px ≈ 90px
-const VIRTUAL_ITEM_HEIGHT = 90;
+// 单行步进 = 卡片固定高度 82px（MatchCard 的 .match-card 显式 height，含 border 与 padding）
+// + 列表 gap 10px。卡片高度被固定以保证行高确定，改动卡片尺寸须同步此处。
+const VIRTUAL_ITEM_HEIGHT = 92;
 const scrollTop = ref(0);
 const viewportHeight = ref(0);
 const scrollContainerRef = ref<HTMLElement | null>(null);
+let resizeObserver: ResizeObserver | null = null;
 
 const virtualList = useVirtualList({
   total: computed(() => filteredMatches.value.length),
@@ -114,13 +116,26 @@ function onScroll() {
   const el = scrollContainerRef.value;
   if (!el) return;
   scrollTop.value = el.scrollTop;
+  // 滚动过程中容器一定可见，此处可无条件同步可视高度
   viewportHeight.value = el.clientHeight;
 }
 
-function updateViewportHeight() {
+/** 容器尺寸变化时同步可视高度。display:none（切到其他页面）期间 clientHeight 为 0，
+ *  写入 0 会让 endIndex 退化为只渲染 overscan 条，因此 0 值直接忽略，保留上次有效值。 */
+function syncViewportHeight() {
   const el = scrollContainerRef.value;
-  if (el) viewportHeight.value = el.clientHeight;
+  if (el && el.clientHeight > 0) viewportHeight.value = el.clientHeight;
 }
+
+/** 列表数据源变化（切换队列筛选 / 切换召唤师）时回到顶部，避免复用旧 scrollTop
+ *  导致可视窗口落在新列表末尾甚至越界。 */
+function resetScroll() {
+  scrollTop.value = 0;
+  const el = scrollContainerRef.value;
+  if (el) el.scrollTop = 0;
+}
+
+watch([selectedQueue, () => summoner.value?.puuid], resetScroll);
 
 const statsSummary = computed(() => {
   if (recentMatches.value.length === 0) return null;
@@ -271,13 +286,19 @@ onMounted(async () => {
     console.warn("加载 CareerGamesNumber 配置失败，使用默认值 20:", e);
   }
   document.addEventListener("click", onDocClick);
-  window.addEventListener("resize", updateViewportHeight);
-  updateViewportHeight();
+  // 监听容器尺寸而非 window.resize：layout 变化（隐藏/显示、右侧面板宽度变化）同样会
+  // 改变可视高度，而 window 未发生 resize 时原实现不会更新
+  if (scrollContainerRef.value) {
+    resizeObserver = new ResizeObserver(syncViewportHeight);
+    resizeObserver.observe(scrollContainerRef.value);
+  }
+  syncViewportHeight();
 });
 
 onUnmounted(() => {
   document.removeEventListener("click", onDocClick);
-  window.removeEventListener("resize", updateViewportHeight);
+  resizeObserver?.disconnect();
+  resizeObserver = null;
 });
 
 // 召唤师变更时清空队友缓存

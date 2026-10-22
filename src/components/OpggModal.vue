@@ -521,9 +521,9 @@ async function setRunePage(rune: OpggRunePreset) {
 :root {
   --primary-color: #009faa;
   --primary-color-hover: #00b3a7;
-  --primary-color-alpha-15: rgba(0, 210, 196, 0.15);
-  --primary-color-alpha-30: rgba(0, 210, 196, 0.3);
-  --primary-color-alpha-40: rgba(0, 210, 196, 0.4);
+  --primary-color-alpha-15: rgba(0, 159, 170, 0.15);
+  --primary-color-alpha-30: rgba(0, 159, 170, 0.3);
+  --primary-color-alpha-40: rgba(0, 159, 170, 0.4);
 
   --bg-color: #f8fafc;
   --card-bg: rgba(255, 255, 255, 0.7);

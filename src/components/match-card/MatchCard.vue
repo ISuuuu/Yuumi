@@ -6,13 +6,14 @@ import LcuImage from "../LcuImage.vue";
 import PositionIcon from "../PositionIcon.vue";
 import ReplayButton from "../ReplayButton.vue";
 import { getPositionName } from "../../utils/matchAnalysis";
+import { getQueueName } from "../../utils/queueName";
 import { formatLocalDateTime } from "../../utils/matchTime";
 
 /**
  * 生涯页单张对局卡片。
  *
- * 从 MatchHistoryTab 拆出，便于后续独立做折叠/展开与虚拟化（列表里绝大多数卡片
- * 只需要 116px 的摘要视图）。本组件只负责「一局」的展示，取数、筛选与分页仍留在父级。
+ * 从 MatchHistoryTab 拆出，便于虚拟列表按行复用它。本组件只负责「一局」的展示，
+ * 取数、筛选与分页仍留在父级。
  *
  * 样式为 scoped，随模板一并迁入；其中 .death-red / .win-text / .lose-text 在父组件
  * 仍有使用，父级各保留了一份同名定义（scoped 样式不跨组件生效）。
@@ -25,7 +26,8 @@ const emit = defineEmits<{
   (e: "select", gameId: number): void;
 }>();
 
-const { t, te } = useI18n();
+const i18n = useI18n();
+const { t } = i18n;
 
 /** 模板内仍以 m 指代当前对局，保持与拆分前一致 */
 const m = computed(() => props.match);
@@ -43,22 +45,6 @@ function translateMapName(name: string): string {
   if (name.includes("闪击") || name.includes("Blitz")) return t("maps.21");
   if (name.includes("大厅") || name.includes("Lobby")) return t("maps.22");
   return name;
-}
-
-function getQueueName(row: MatchDisplay): string {
-  const key = `gameModes.${row.queueId}`;
-  if (te(key)) {
-    const translation = t(key);
-    if (
-      (translation.includes("云顶") || translation.includes("TFT")) &&
-      !row.name.includes("云顶") &&
-      !row.name.includes("TFT")
-    ) {
-      return row.name;
-    }
-    return translation;
-  }
-  return row.name;
 }
 
 const TFT_QUEUES = [1090, 1100, 1130, 1160];
@@ -141,7 +127,7 @@ function getKdaClass(kda: string): string {
         </span>
       </div>
       <div class="result-sub-info">
-        <span class="queue-mode">{{ getQueueName(m) }}</span>
+        <span class="queue-mode">{{ getQueueName(m.queueId, m.name, i18n) }}</span>
         <span class="game-duration">{{ m.duration }}</span>
       </div>
     </div>
@@ -252,6 +238,13 @@ function getKdaClass(kda: string): string {
 .match-card {
   display: flex;
   align-items: center;
+  /**
+   * 高度必须固定：MatchHistoryTab 的虚拟列表按固定行高计算总高与偏移。
+   * 82 = 52（头像，卡内最高元素）+ 14×2（上下 padding）+ 1×2（上下 border），
+   * 改动 padding / 头像尺寸 / 边框时，必须同步 MatchHistoryTab 的 VIRTUAL_ITEM_HEIGHT。
+   */
+  box-sizing: border-box;
+  height: 82px;
   padding: 14px 20px;
   border-radius: 10px;
   border: 1px solid var(--border-color);

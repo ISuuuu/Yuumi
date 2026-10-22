@@ -16,18 +16,13 @@ export function updateThemeColor(color: string) {
   const r = parseInt(hex.substring(0, 2), 16) || 0;
   const g = parseInt(hex.substring(2, 4), 16) || 159;
   const b = parseInt(hex.substring(4, 6), 16) || 170;
-  root.style.setProperty(
-    "--primary-color-alpha-15",
-    `rgba(${r}, ${g}, ${b}, 0.15)`,
-  );
-  root.style.setProperty(
-    "--primary-color-alpha-30",
-    `rgba(${r}, ${g}, ${b}, 0.3)`,
-  );
-  root.style.setProperty(
-    "--primary-color-alpha-40",
-    `rgba(${r}, ${g}, ${b}, 0.4)`,
-  );
+  // 必须覆盖 :root 里定义的全部 alpha 变量，漏掉的那个会永久停留在兜底色的 RGB 上
+  for (const alpha of ["10", "15", "20", "30", "40"]) {
+    root.style.setProperty(
+      `--primary-color-alpha-${alpha}`,
+      `rgba(${r}, ${g}, ${b}, 0.${alpha})`,
+    );
+  }
 }
 
 /**
