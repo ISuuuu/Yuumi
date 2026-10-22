@@ -26,6 +26,9 @@ dist-ssr
 # Tauri
 src-tauri/target/
 
+# LCU 抓包暂存区（fixtures:capture 产出，挑选后迁入 real/）
+src-tauri/testdata/match/_capture/
+
 # 参考文档（不入库）
 File/
 

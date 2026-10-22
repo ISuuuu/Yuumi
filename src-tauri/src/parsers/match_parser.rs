@@ -2047,8 +2047,12 @@ mod tests {
         }
     }
 
-    /// 目录级守卫：testdata/match 下新增任何样本都必须能被当前结构体反序列化。
+    /// 目录级守卫：`real/` 与 `synthetic/` 下新增任何样本都必须能被当前结构体反序列化。
     /// 这是发现「真实载荷多出必填字段 / 改了类型」最直接的手段。
+    ///
+    /// 只扫这两个目录，不递归 `testdata/match` 根：那里还会出现 `manifest.json`（非样本）、
+    /// `_capture/`（`pnpm fixtures:capture` 的暂存区，含 gameflow / champ-select 等非
+    /// matches 结构的会话快照），按本结构体解析必然失败。
     #[test]
     fn all_fixtures_on_disk_deserialize() {
         use std::path::Path;
@@ -2061,9 +2065,7 @@ mod tests {
                 let path = entry.path();
                 if path.is_dir() {
                     collect(&path, out);
-                } else if path.extension().and_then(|e| e.to_str()) == Some("json")
-                    && path.file_name().and_then(|n| n.to_str()) != Some("manifest.json")
-                {
+                } else if path.extension().and_then(|e| e.to_str()) == Some("json") {
                     out.push(path);
                 }
             }
@@ -2071,7 +2073,11 @@ mod tests {
 
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/match");
         let mut files = Vec::new();
-        collect(&root, &mut files);
+        for dir in ["real", "synthetic"] {
+            let path = root.join(dir);
+            assert!(path.is_dir(), "缺少 fixture 目录: {}", path.display());
+            collect(&path, &mut files);
+        }
         assert!(!files.is_empty(), "testdata/match 下未找到任何 fixture");
 
         for file in files {

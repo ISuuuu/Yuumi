@@ -117,7 +117,7 @@ pnpm type-check      # Vue / TS 类型检查 (vue-tsc --noEmit)
 pnpm clippy          # Rust 代码静态检查 (cargo clippy)
 pnpm format          # Rust 代码格式化 (cargo fmt)
 pnpm test:rust       # 运行 Rust 单元测试 (cargo test)
-pnpm fixtures:capture # 用真实 LCU 响应刷新解析层测试快照（需客户端已启动）
+pnpm fixtures:capture # 抓真实 LCU 响应到 testdata/match/_capture/（需客户端已启动，人工挑选后迁入 real/）
 pnpm check-all       # 一键检查全部 (Format + Type-Check + Clippy)
 ```
 
@@ -135,10 +135,16 @@ pnpm check-all       # 一键检查全部 (Format + Type-Check + Clippy)
 内联最小 JSON 的测试永远发现不了「真实载荷多一个字段就解析失败」这类问题。
 
 - 新增解析路径的测试优先写 fixture，而非在测试里内联 `json!({...})`。
-- `all_fixtures_on_disk_deserialize` 会遍历两个目录逐一反序列化，**新增样本无需改测试**。
+- `all_fixtures_on_disk_deserialize` 会遍历 `real/` 与 `synthetic/` 两个目录逐一反序列化，
+  **新增样本无需改测试**（它不扫根目录，因为那里有 `manifest.json` 与 `_capture/`）。
 - 需要真实数据时执行 `pnpm fixtures:capture`（默认对 puuid / summonerId / 召唤师名做脱敏，
   解析层不消费这些字段，加 `--no-redact` 可保留原值）。线索：部分 WeGame 渠道客户端不写
   `lockfile`（0 字节），脚本会自动退化为读取 `LeagueClientUx.exe` 的进程命令行。
+- **脚本只写 `testdata/match/_capture/`（暂存区，已 gitignore）**，不写 `real/`、不覆盖
+  `manifest.json`：抓包结果是一次 20 局的整体快照，且含 gameflow / champ-select 等非 matches
+  结构的会话快照（放在 `_capture/sessions/`），自动覆盖会让「精选样本 + 手写元数据」同时失效。
+  迁入流程见脚本结束时的提示：挑选 → 重命名进 `real/` → 补 `manifest.json` 的 `real[]` →
+  在 `match_parser.rs` 的 `REAL` 登记并用 `dump_real_fixture_results` 生成 `REAL_EXPECT`。
 - 参照 `manifest.json` 的 `observedInRealPayload`，以下几点是实测得出的、容易被误判的载荷事实：
   `roleBoundItem` 经常不是分路任务道具（实测出现 3006、2055），只能作候选；
   存在 `playerAugment6` 但只建模到 5；`stats` 里**没有** `augments` 数组字段。

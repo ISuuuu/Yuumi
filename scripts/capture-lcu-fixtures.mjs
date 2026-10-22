@@ -18,6 +18,11 @@
  *
  * 默认会对 puuid / summonerId / 召唤师名等身份字段做确定性脱敏（解析层不消费这些字段），
  * 避免把个人账号信息提交进仓库；需要原始数据时加 --no-redact。
+ *
+ * 产出落在 `testdata/match/_capture/`（暂存区，已 gitignore），**不会**写入 `real/` 或覆盖
+ * `manifest.json`：新样本要先人工挑选、重命名为语义名放进 `real/`，再补 manifest 的覆盖说明
+ * 与 match_parser 的 REAL / REAL_EXPECT。抓包结果里含 20 局原始数据与若干非 matches 结构的
+ * 会话快照，自动覆盖会让「干净的 fixture 目录 + 手写元数据」同时失效。
  */
 
 import fs from 'node:fs';
@@ -29,7 +34,9 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
-const OUT_DIR = path.join(REPO_ROOT, 'src-tauri', 'testdata', 'match');
+const FIXTURE_ROOT = path.join(REPO_ROOT, 'src-tauri', 'testdata', 'match');
+/** 暂存区：每次抓包先全量覆盖到这里，由人工挑选后迁入 real/ */
+const OUT_DIR = path.join(FIXTURE_ROOT, '_capture');
 
 /** 需要脱敏的字段名（解析层不使用，替换后不影响测试语义） */
 const REDACT_KEYS = new Set([
@@ -231,6 +238,8 @@ async function main() {
   const { port, token, source } = resolveCredentials(opts);
   console.log(`LCU 凭据来源: ${source} (port=${port})`);
 
+  // 暂存区每次重建，避免多次抓包堆积同名旧样本
+  await fsp.rm(OUT_DIR, { recursive: true, force: true });
   await fsp.mkdir(OUT_DIR, { recursive: true });
 
   const summoner = await lcuGet(port, token, '/lol-summoner/v1/current-summoner').catch(
@@ -283,7 +292,11 @@ async function main() {
     'utf8',
   );
 
-  // 只有在对应阶段才有的会话，取不到属正常情况
+  // 只有在对应阶段才有的会话，取不到属正常情况。
+  // 这三份不是 matches 外层结构（没有 games 字段），绝不能放进 real/ 或 synthetic/，
+  // 否则 all_fixtures_on_disk_deserialize 会按 LcuMatchHistoryResponse 反序列化失败。
+  const sessionDir = path.join(OUT_DIR, 'sessions');
+  await fsp.mkdir(sessionDir, { recursive: true });
   for (const [apiPath, fileName] of [
     ['/lol-summoner/v1/current-summoner', 'current-summoner.json'],
     ['/lol-gameflow/v1/session', 'gameflow-session.json'],
@@ -292,34 +305,39 @@ async function main() {
     try {
       const body = await lcuGet(port, token, apiPath);
       await fsp.writeFile(
-        path.join(OUT_DIR, fileName),
+        path.join(sessionDir, fileName),
         `${JSON.stringify(transform(body), null, 2)}\n`,
         'utf8',
       );
-      console.log(`  ✓ ${fileName}`);
+      console.log(`  ✓ sessions/${fileName}`);
     } catch (e) {
-      console.log(`  - ${fileName} 跳过（${e.message}）`);
+      console.log(`  - sessions/${fileName} 跳过（${e.message}）`);
     }
   }
 
-  const manifest = {
-    schemaVersion: 1,
-    capturedAt: new Date().toISOString(),
-    source: {
-      endpoint: historyPath,
-      platformId: summoner?.platformId ?? null,
-      redacted: opts.redact,
-    },
-    games: written,
-  };
+  // 抓包摘要写到 _capture/，**不碰** testdata/match/manifest.json（手写、含 observedInRealPayload）
   await fsp.writeFile(
-    path.join(OUT_DIR, 'manifest.json'),
-    `${JSON.stringify(manifest, null, 2)}\n`,
+    path.join(OUT_DIR, 'capture-summary.json'),
+    `${JSON.stringify(
+      {
+        capturedAt: new Date().toISOString(),
+        endpoint: historyPath,
+        platformId: summoner?.platformId ?? null,
+        redacted: opts.redact,
+        games: written,
+      },
+      null,
+      2,
+    )}\n`,
     'utf8',
   );
 
   console.log(`\n完成：${written.length} 局已写入 ${path.relative(process.cwd(), OUT_DIR)}`);
-  console.log('下一步：pnpm test:rust 确认解析层测试仍通过。');
+  console.log('下一步（需人工挑选，避免把 20 局全量塞进仓库）：');
+  console.log('  1. 从 _capture/ 选出覆盖不同 lane/role 组合的样本，重命名为语义名复制到 real/');
+  console.log('  2. 在 testdata/match/manifest.json 的 real[] 补文件名与覆盖场景说明');
+  console.log('  3. 在 match_parser.rs 的 REAL 常量登记，并跑 dump_real_fixture_results 生成 REAL_EXPECT');
+  console.log('  4. pnpm test:rust 确认全绿');
 }
 
 main().catch((e) => {
