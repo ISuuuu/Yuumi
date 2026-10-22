@@ -63,7 +63,7 @@ Tauri v2 + Vue 3 + TypeScript 桌面应用。
 - **类型安全边界**：所有与前端交互的 Struct/Enum 必须实现 `serde::Serialize` 和 `serde::Deserialize`。
 - **错误传播与序列化**：
   - `#[tauri::command]` 如果可能失败，必须返回 `Result<T, String>`。
-  - 严禁随意使用 `unwrap()` 或 `panic!`，应使用 `map_err(|e| e.to_string())` 或 `thiserror` 将 Error 转化为前端友好的 String，并使用系统 `logging.rs` 的 logger 记录完整堆栈。
+  - 严禁随意使用 `unwrap()` 或 `panic!`，应使用 `map_err(|e| e.to_string())` 将 Error 转化为前端友好的 String，并使用系统 `logging.rs` 的 logger 记录完整堆栈。项目未引入 `thiserror` / `anyhow`，需要结构化错误时按 `agents/lifecycle.rs` 的方式手写自定义枚举并实现 `Display` + `std::error::Error`。
 - **LCU 静态资源与自定义协议规范**：
   - LCU 静态资源（英雄、技能、物品、符文、战利品等图标）由 Rust 端的 `yuumi-asset://` 自定义协议流式返回原始字节，彻底绕开 IPC 与 Base64 传输。
   - WebView2 仅拦截 http/https 协议，前端图片 URL 使用 wry workaround 前缀 `http://yuumi-asset.localhost/`（host 含协议名），由 wry 自动还原为 `yuumi-asset://localhost/` 后再交给 Rust handler。
@@ -178,8 +178,8 @@ Yuumi/
 │   │   └── BenchOverlay.vue        # 大乱斗板凳席悬浮窗
 │   └── components/
 │       ├── tft/                    # 云顶之弈子组件（TftRankHeader/TftMatchCard/TftMatchDetailModal/TftMetaCompsTab/TftAugmentsTab）
-│       ├── gameinfo/               # 对局信息子组件（PlayerCard/PlayerMatchColumn/TeamComposition/PhaseBadge 等）
-│       ├── career/                 # 生涯子组件（SummonerHeader/MatchHistoryTab/ChampionMasteryTab/LootManagerTab）
+│       ├── gameinfo/               # 对局信息子组件（PlayerCard/PlayerMatchColumn/PremadeGroupChips）
+│       ├── career/                 # 生涯子组件（MatchHistoryTab/ChampionMasteryTab/LootManagerTab）
 │       ├── search/                 # 战绩查询子组件（MatchListItem/MiniMatchList/MatchDetailPanel）
 │       ├── settings/               # 设置页模块子组件（PersonalizationSection/LolPathSection/ScreenshotSection/UpdateSection 等）
 │       ├── opgg/                   # OP.GG 子组件（TierListPanel/BuildDetailPanel/RunesSection/ItemsSection 等）
@@ -194,7 +194,7 @@ Yuumi/
 │       ├── LcuImage.vue            # LCU 资源图片组件（loading/error/fallback 状态）
 │       ├── ChampionPicker.vue      # 英雄选择器（v-model: number[]）
 │       ├── SpellPicker.vue         # 召唤师技能选择器（v-model: number[]）
-│       └── NaiveUIBridge.vue       # Naive UI 全局 API 桥接组件
+│       └── NaiveApiCapture.vue     # Naive UI Message/Dialog 实例捕获（供 Provider 子树外的调用方使用）
 ├── src-tauri/                      # Tauri/Rust 后端
 │   ├── src/
 │   │   ├── main.rs                 # Rust 入口（便携升级 helper 判定 / 日志初始化）
@@ -207,7 +207,7 @@ Yuumi/
 │   │   ├── loot.rs                 # 战利品管理系统 (开箱/分解/重铸/精粹查询)
 │   │   ├── updater.rs              # 自动更新机制与更新日志本地缓存
 │   │   ├── tools.rs                # 杂项工具（回放/好友清理/装备页/房间/ARAM摇号/符文/OP.GG抓取/观战）
-│   │   ├── logging.rs              # 日志系统（flexi_logger，日志写入 exe 同级 log/ 目录）
+│   │   ├── logging.rs              # 日志系统（自研 log::Log 实现 + 按天/2MB 轮转，日志写入 exe 同级 log/ 目录）
 │   │   ├── signalr.rs              # SignalR Hub 远程反代（条件启动）
 │   │   ├── upload.rs               # 对局上传队列（包含落盘暂存与重试逻辑）
 │   │   ├── lcu/
@@ -251,11 +251,24 @@ LeagueClientUx.exe
 monitor.rs → AppState.lcu_client + AppState.game_data（预加载英雄/物品/技能/符文）
   ↓
 ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循环）
-  ├─→ 前端: Tauri emit → lcuStore.ts → Vue 组件
+  ├─→ 前端: event_projection 字段投影 + 去重 → Tauri emit → lcuStore.ts → Vue 组件
   ├─→ BP Agent: mpsc → auto_bp.rs (自动选人/禁人/技能)
   ├─→ Match Agent: mpsc → auto_match.rs (自动接受/重连)
   └─→ Upload Trigger: 游戏结束 → UploadQueue → 外部 API
 ```
+
+### LCU 事件投影契约
+
+`ws.rs` 在广播给前端前会经 `lcu/event_projection.rs` 做**字段白名单投影**与**同 URI 内容去重**：
+选人阶段 session 每秒最多推送 20 次，LCU 原始载荷中大量字段（`obfuscatedPuuid`、`selectedSkinId`、
+`spell1Id/2Id`、`playerType`、`chatDetails` 等）前端从不消费，整体透传会放大 IPC 与 WebView 解析开销
+（满编 10 人会话实测 10988 B → 6729 B，约 39%）。
+
+- 白名单严格对齐 `src/store/lcuStore.ts` 与 `src/types/lcu.ts` 中的类型声明（`vue-tsc` 会校验全部消费点）。
+- **前端新增消费字段时必须同步扩展 `event_projection.rs` 的白名单**，否则该字段会被静默丢弃。
+- 只有 `champ-select session` 与 `gameflow session` 做投影；`gameflow-phase`（裸字符串）、
+  `current-champion`（裸数字）、`ready-check`（5 个字段）原样透传。
+- 去重状态按 WS 连接创建（重连自动清空），仅影响前端广播，Agent / SignalR 转发不受影响。
 
 ## 窗口与 UI
 
@@ -268,7 +281,7 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 ## Rust Tauri 命令清单
 
 <details>
-<summary>展开查看全部 Tauri 命令（75 条）</summary>
+<summary>展开查看全部 Tauri 命令（83 条）</summary>
 
 | 命令                         | 来源                    | 说明                                      |
 | :--------------------------- | :---------------------- | :---------------------------------------- |
@@ -409,6 +422,6 @@ ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循�
 ## 开发工具与调试日志
 
 - **前端调试**: 开发模式下自动打开 Chromium DevTools（见 `lib.rs` 的 `setup` 闭包），按 `F12` 可审查组件与网络请求。
-- **日志系统**: 日志由 `flexi_logger` 接管，按天轮转保存 30 天。
-  - 日志文件输出路径：用户目录 `%APPDATA%/Yuumi/log/` 或可执行文件同级 `log/` 目录。
+- **日志系统**: 日志由 `logging.rs` 的自研 `log::Log` 实现接管（非 `flexi_logger`），按天轮转、单文件 2MB 上限、保留 30 天。等级由设置页「日志等级」控制：0=Debug / 1=Info（默认）/ 2=Error。
+  - 日志文件输出路径：可执行文件同级 `log/` 目录（便携版即 `Yuumi-portable/log/`）；单文件超限后为 `yuumi_YYYY-MM-DD-N.log`。
   - 排查 LCU 通信或后台 Task 异常时，请检索最新 `.log` 文件中的 `[LCU]`, `[WS]`, `[Error]` 标记。

@@ -16,6 +16,8 @@ use tokio_tungstenite::{
     Connector,
 };
 
+use super::event_projection::{self, EventDedup, WsEventPayload};
+
 // ── 订阅消息（对齐 Python: [5, "OnJsonApiEvent"]，2 个元素）────────────────
 const SUBSCRIBE_MSG: &str = r#"[5, "OnJsonApiEvent"]"#;
 
@@ -269,11 +271,14 @@ async fn handle_messages(
     }
     log::info!("[WS] 已发送订阅: {}", SUBSCRIBE_MSG);
 
+    // 去重状态按连接创建：重连后清空，确保重连后的首个事件一定下发
+    let mut dedup = EventDedup::default();
+
     while let Some(msg_result) = read.next().await {
         match msg_result {
             Ok(Message::Text(text)) => {
                 // 对齐 Python: json.loads(msg.data)[2]
-                process_event(text.as_str(), app_handle).await;
+                process_event(text.as_str(), app_handle, &mut dedup).await;
             }
             Ok(Message::Close(_)) => {
                 log::info!("[WS] 收到关闭帧");
@@ -291,7 +296,7 @@ async fn handle_messages(
 /// 解析 LCU 事件并广播给前端。
 /// LCU WAMP 格式: [8, "OnJsonApiEvent_xxx", { "uri": "...", "eventType": "...", "data": ... }]
 /// 对齐 Python matchUri：检查 uri 和 eventType
-async fn process_event(text: &str, app_handle: &AppHandle) {
+async fn process_event(text: &str, app_handle: &AppHandle, dedup: &mut EventDedup) {
     let value: Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(_) => return,
@@ -316,11 +321,25 @@ async fn process_event(text: &str, app_handle: &AppHandle) {
         return;
     }
 
-    // 只广播前端关心的 URI（对齐 Python matchUri 的 uri 过滤）
-    let should_emit = WATCHED_URIS.iter().any(|prefix| uri.starts_with(prefix));
-    if should_emit {
-        log::debug!("[WS] 事件: {}", uri);
-        let _ = app_handle.emit("lcu-ws-event", event_data.clone());
+    // 只广播前端关心的 URI（对齐 Python matchUri 的 uri 过滤）。
+    // 先按字段白名单投影以压缩 IPC 载荷，再对同一 URI 的重复内容去重（详见 event_projection 模块说明）。
+    if let Some(watched) = WATCHED_URIS.iter().find(|prefix| uri.starts_with(**prefix)) {
+        let data = event_data.get("data").unwrap_or(&Value::Null);
+        let projected = event_projection::project(watched, data);
+        if dedup.accept(watched, &projected) {
+            log::debug!("[WS] 事件: {}", uri);
+            let _ = app_handle.emit(
+                "lcu-ws-event",
+                WsEventPayload {
+                    uri,
+                    event_type: event_data
+                        .get("eventType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Update"),
+                    data: projected,
+                },
+            );
+        }
     }
 
     // ── 内部 Agent 转发 ──────────────────────────────────────────────────
