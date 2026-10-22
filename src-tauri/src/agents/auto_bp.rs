@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use crate::agents::action::ActionLease;
 use crate::agents::supervisor::TaskKind;
 use crate::config::FunctionsConfig;
-use crate::lcu::client::lcu_request;
+use crate::lcu::client::lcu_request_agent;
 
 // ─── 选人会话数据结构体 ───
 
@@ -854,7 +854,7 @@ async fn do_auto_spell(
     }
 }
 
-// ─── LCU API 调用（统一走 client::lcu_request，复用信号量/重试/白名单） ───
+// ─── LCU API 调用（统一走 client::lcu_request_agent，独占 Agent 许可池） ───
 
 /// PATCH action（选人/禁人/亮英雄）
 async fn lcu_patch_action(
@@ -869,7 +869,7 @@ async fn lcu_patch_action(
         "completed": completed,
     });
     let state = app_handle.state::<crate::AppState>();
-    lcu_request(state.inner(), "PATCH", &url, Some(body))
+    lcu_request_agent(state.inner(), "PATCH", &url, Some(body))
         .await
         .is_ok()
 }
@@ -877,7 +877,7 @@ async fn lcu_patch_action(
 /// 通用 PATCH 请求到 LCU
 async fn lcu_patch_session(app_handle: &AppHandle, path: &str, body: &Value) -> bool {
     let state = app_handle.state::<crate::AppState>();
-    lcu_request(state.inner(), "PATCH", path, Some(body.clone()))
+    lcu_request_agent(state.inner(), "PATCH", path, Some(body.clone()))
         .await
         .is_ok()
 }
@@ -885,13 +885,15 @@ async fn lcu_patch_session(app_handle: &AppHandle, path: &str, body: &Value) -> 
 /// 通用 POST 请求到 LCU
 async fn lcu_post(app_handle: &AppHandle, path: &str) -> bool {
     let state = app_handle.state::<crate::AppState>();
-    lcu_request(state.inner(), "POST", path, None).await.is_ok()
+    lcu_request_agent(state.inner(), "POST", path, None)
+        .await
+        .is_ok()
 }
 
 /// GET 当前选人会话（autoComplete 重取数据用）
 async fn lcu_get_session(app_handle: &AppHandle) -> Option<ChampSelectSession> {
     let state = app_handle.state::<crate::AppState>();
-    let value = lcu_request(state.inner(), "GET", "/lol-champ-select/v1/session", None)
+    let value = lcu_request_agent(state.inner(), "GET", "/lol-champ-select/v1/session", None)
         .await
         .ok()?;
     serde_json::from_value(value).ok()

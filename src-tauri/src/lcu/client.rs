@@ -15,6 +15,21 @@ use crate::{build_auth_header, AppState};
 const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 
+/// 自动化 Agent 专用并发许可数。
+/// 选人阶段的写操作（PATCH action / 报边发消息）有严格时间窗口，
+/// 若与前端只读查询共用同一个许可池，10 人战绩 fan-out 在 LCU 变慢时会占满整池，
+/// 导致自动亮英雄/锁定/报边排队错过窗口，故为 Agent 单独开设小池。
+const AGENT_CONCURRENCY: usize = 3;
+
+/// 等待并发许可的最长时间。超时即放弃本轮，避免 LCU 变慢时请求无界排队。
+const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// 自动化 Agent 专用许可池（进程级单例，与前端共享池完全隔离）
+fn agent_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(AGENT_CONCURRENCY))
+}
+
 /// 批量资源请求的最大并发数（限制同时进行的 LCU/CDN 请求，避免滑枕大量慢请求）
 const ASSET_BATCH_CONCURRENCY: usize = 8;
 
@@ -183,13 +198,33 @@ const ALLOWED_API_PREFIXES: &[&str] = &[
 ];
 
 /// 统一的 LCU API 请求入口（带并发信号量、传输层重试与路径白名单）。
-/// 供 Tauri command `call_lcu_api` 与内部 agent（auto_bp/auto_match）复用，
-/// 避免各模块各写一套 HTTP 调用。
+/// 供 Tauri command `call_lcu_api` 复用，走前端共享许可池。
 pub async fn lcu_request(
     app_state: &AppState,
     method: &str,
     path: &str,
     body: Option<Value>,
+) -> Result<Value, String> {
+    lcu_request_lane(app_state, method, path, body, false).await
+}
+
+/// 自动化 Agent 专用入口：使用独立许可池，确保选人阶段的写操作
+/// 不被前端只读查询（战绩 fan-out 等）挤占而错过窗口。
+pub async fn lcu_request_agent(
+    app_state: &AppState,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Value, String> {
+    lcu_request_lane(app_state, method, path, body, true).await
+}
+
+async fn lcu_request_lane(
+    app_state: &AppState,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+    agent_lane: bool,
 ) -> Result<Value, String> {
     // 路径前缀白名单校验
     let path_allowed = ALLOWED_API_PREFIXES.iter().any(|p| path.starts_with(p));
@@ -198,7 +233,7 @@ pub async fn lcu_request(
     }
 
     // 获取并发许可（每轮重试单独 acquire，避免挂起请求占死并发池）
-    let semaphore = {
+    let shared_semaphore = {
         let lock = app_state.api_semaphore.read().await;
         lock.clone()
     };
@@ -217,7 +252,25 @@ pub async fn lcu_request(
         // 先取并发许可，再读取连接参数。
         // 排队期间 LCU 可能已重启换代（port/token 立即失效），若先读参数再排队，
         // 请求会打到已下线的旧端口，白白消耗整轮重试与信号量许可。
-        let permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
+        let wait = if agent_lane {
+            agent_semaphore().acquire()
+        } else {
+            shared_semaphore.acquire()
+        };
+        let permit = match tokio::time::timeout(ACQUIRE_TIMEOUT, wait).await {
+            Ok(Ok(p)) => p,
+            Ok(Err(e)) => return Err(e.to_string()),
+            Err(_) => {
+                // 许可长时间拿不到说明池已被慢请求占满，继续等待只会错过时间窗口
+                log::warn!(
+                    "LCU 并发许可等待超时 ({} ms)，放弃本轮请求: {} {}",
+                    ACQUIRE_TIMEOUT.as_millis(),
+                    method_upper,
+                    path
+                );
+                return Err(format!("LCU 并发许可等待超时: {} {}", method_upper, path));
+            }
+        };
 
         let (port, token, http_client) = {
             let lock = app_state.lcu().await?;

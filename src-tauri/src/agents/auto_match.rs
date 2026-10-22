@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
 use crate::config::FunctionsConfig;
-use crate::lcu::client::lcu_request;
+use crate::lcu::client::{lcu_request, lcu_request_agent};
 use std::sync::Arc;
 
 /// 创建预设大厅后 LCU 会瞬时闪回 None（Lobby→None 抖动）的防抖窗口。
@@ -1023,7 +1023,8 @@ async fn wait_for_champ_select_conv_id(
         if attempt > 0 {
             sleep(Duration::from_millis(500)).await;
         }
-        if let Ok(v) = lcu_request(app_state, "GET", "/lol-chat/v1/conversations", None).await {
+        if let Ok(v) = lcu_request_agent(app_state, "GET", "/lol-chat/v1/conversations", None).await
+        {
             if let Some(arr) = v.as_array() {
                 // 1. 如果有 room_hint，优先匹配包含该 room name / id 的会话
                 if let Some(hint) = room_hint.filter(|s| !s.is_empty()) {
@@ -1067,7 +1068,8 @@ fn spawn_aram_team_side(app_handle: AppHandle, visible_to_team: bool) {
         let mut session_opt = None;
         for _ in 0..8 {
             sleep(Duration::from_millis(500)).await;
-            if let Ok(v) = lcu_request(app_state, "GET", "/lol-champ-select/v1/session", None).await
+            if let Ok(v) =
+                lcu_request_agent(app_state, "GET", "/lol-champ-select/v1/session", None).await
             {
                 if v.is_object() {
                     session_opt = Some(v);
@@ -1083,7 +1085,7 @@ fn spawn_aram_team_side(app_handle: AppHandle, visible_to_team: bool) {
 
         // 优先从 pin-drop-notification 获取地图阵营
         let mut side = None;
-        if let Ok(data) = lcu_request(
+        if let Ok(data) = lcu_request_agent(
             app_state,
             "GET",
             "/lol-champ-select/v1/pin-drop-notification",
@@ -1160,7 +1162,7 @@ fn spawn_aram_team_side(app_handle: AppHandle, visible_to_team: bool) {
             if attempt > 0 {
                 sleep(Duration::from_millis(600)).await;
             }
-            match lcu_request(app_state, "POST", &path, Some(message.clone())).await {
+            match lcu_request_agent(app_state, "POST", &path, Some(message.clone())).await {
                 Ok(_) => {
                     log::info!(
                         "选人报边成功：我方在{}（队友可见={}）",
@@ -1414,7 +1416,8 @@ fn spawn_tag_reminder(app_handle: AppHandle) {
         let mut session_opt = None;
         for _ in 0..6 {
             sleep(Duration::from_millis(500)).await;
-            if let Ok(v) = lcu_request(app_state, "GET", "/lol-champ-select/v1/session", None).await
+            if let Ok(v) =
+                lcu_request_agent(app_state, "GET", "/lol-champ-select/v1/session", None).await
             {
                 if v.is_object() {
                     session_opt = Some(v);
@@ -1509,7 +1512,7 @@ fn spawn_tag_reminder(app_handle: AppHandle) {
                         "type": "celebration"
                     });
                     let path = format!("/lol-chat/v1/conversations/{}/messages", conv_id);
-                    match lcu_request(app_state, "POST", &path, Some(message)).await {
+                    match lcu_request_agent(app_state, "POST", &path, Some(message)).await {
                         Ok(_) => {
                             log::info!("已提醒标记玩家: {} ({})", name, tag);
                             1
