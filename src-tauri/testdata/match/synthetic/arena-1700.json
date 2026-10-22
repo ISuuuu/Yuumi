@@ -1,0 +1,85 @@
+{
+  "games": {
+    "gameCount": 1,
+    "gameIndexBegin": 0,
+    "gameIndexEnd": 0,
+    "games": [
+      {
+        "gameId": 4839207530,
+        "gameCreation": 1705329000000,
+        "gameCreationDate": "2024-01-15T14:30:00.000Z",
+        "gameDuration": 1210,
+        "gameMode": "CHERRY",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "14.1.486.7324",
+        "mapId": 30,
+        "queueId": 1700,
+        "seasonId": 13,
+        "platformId": "HN1",
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "accountId": 2000000003,
+              "currentAccountId": 2000000003,
+              "currentPlatformId": "HN1",
+              "platformId": "HN1",
+              "puuid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+              "summonerId": 1234567890125,
+              "summonerName": "ArenaPlayer",
+              "matchHistoryUri": "/v1/stats/player_history/HN1/2000000003"
+            }
+          }
+        ],
+        "participants": [
+          {
+            "participantId": 1,
+            "teamId": 100,
+            "championId": 222,
+            "spell1Id": 4,
+            "spell2Id": 7,
+            "timeline": {
+              "participantId": 1,
+              "lane": "NONE",
+              "role": "NONE"
+            },
+            "stats": {
+              "participantId": 1,
+              "win": false,
+              "kills": 4,
+              "deaths": 5,
+              "assists": 6,
+              "champLevel": 15,
+              "item0": 6672,
+              "item1": 3006,
+              "item2": 6676,
+              "item3": 3031,
+              "item4": 3072,
+              "item5": 0,
+              "item6": 3340,
+              "perk0": 8005,
+              "totalMinionsKilled": 58,
+              "neutralMinionsKilled": 0,
+              "goldEarned": 14200,
+              "totalDamageDealtToChampions": 22800,
+              "totalHeal": 4100,
+              "gameEndedInEarlySurrender": false,
+              "gameEndedInSurrender": false,
+              "roleBoundItem": 0,
+              "augments": [],
+              "subteamPlacement": 2
+            }
+          }
+        ],
+        "teams": [
+          {
+            "teamId": 100,
+            "win": "Fail",
+            "subteamPlacement": 2,
+            "bans": []
+          }
+        ]
+      }
+    ]
+  }
+}

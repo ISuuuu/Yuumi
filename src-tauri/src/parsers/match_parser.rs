@@ -1664,4 +1664,425 @@ mod tests {
         let d = game.to_display(&GameDataAssets::default()).unwrap();
         assert_eq!(d.position, Some("MIDDLE".to_string()));
     }
+
+    // ─── 响应快照（fixture）测试 ─────────────────────────────────────────────
+    //
+    // `src-tauri/testdata/match/` 存放 `/lol-match-history/v1/products/lol/{puuid}/matches`
+    // 的**完整外层响应**：`real/` 是从真实客户端抓包（`pnpm fixtures:capture`），
+    // `synthetic/` 是按 schema 合成、仅覆盖真实抓包缺失的场景。用途是防止结构体过度收紧，
+    // 并锁定真实载荷下的分路 / 胜负判定行为。各样本覆盖的场景见同目录 manifest.json。
+
+    struct Fixture {
+        name: &'static str,
+        raw: &'static str,
+    }
+
+    const REAL: &[Fixture] = &[
+        Fixture {
+            name: "real/top-solo",
+            raw: include_str!("../../testdata/match/real/top-solo.json"),
+        },
+        Fixture {
+            name: "real/mid-solo",
+            raw: include_str!("../../testdata/match/real/mid-solo.json"),
+        },
+        Fixture {
+            name: "real/jungle-none",
+            raw: include_str!("../../testdata/match/real/jungle-none.json"),
+        },
+        Fixture {
+            name: "real/bottom-carry",
+            raw: include_str!("../../testdata/match/real/bottom-carry.json"),
+        },
+        Fixture {
+            name: "real/bottom-support",
+            raw: include_str!("../../testdata/match/real/bottom-support.json"),
+        },
+        Fixture {
+            name: "real/none-duo",
+            raw: include_str!("../../testdata/match/real/none-duo.json"),
+        },
+        Fixture {
+            name: "real/remake",
+            raw: include_str!("../../testdata/match/real/remake.json"),
+        },
+        Fixture {
+            name: "real/custom-3100",
+            raw: include_str!("../../testdata/match/real/custom-3100.json"),
+        },
+    ];
+
+    const SYNTHETIC_ARAM: &str = include_str!("../../testdata/match/synthetic/aram-450.json");
+    const SYNTHETIC_ARENA: &str = include_str!("../../testdata/match/synthetic/arena-1700.json");
+    const SYNTHETIC_RANKED: &str = include_str!("../../testdata/match/synthetic/ranked-420.json");
+    const SYNTHETIC_MINIMAL: &str = include_str!("../../testdata/match/synthetic/minimal-420.json");
+
+    fn load_fixture(raw: &str) -> LcuMatchGame {
+        let response: LcuMatchHistoryResponse =
+            serde_json::from_str(raw).expect("fixture 应能按 LCU 外层响应反序列化");
+        assert_eq!(response.games.games.len(), 1, "fixture 约定只含单局");
+        response.games.games.into_iter().next().unwrap()
+    }
+
+    /// 诊断用：打印每份真实样本经当前规则算出的结果，便于核对断言。
+    /// 手动执行 `cargo test --lib -- --ignored --nocapture dump_real_fixture_results`。
+    #[test]
+    #[ignore = "按需手动执行"]
+    fn dump_real_fixture_results() {
+        for fx in REAL {
+            let game = load_fixture(fx.raw);
+            let d = game.to_display(&GameDataAssets::default()).unwrap();
+            println!(
+                "{}: q={} win={} remake={} time={} dur={} kda={} cs={} gold={} dmg={} heal={} lvl={} champ={} rbi={:?} position={:?} items={:?}",
+                fx.name,
+                d.queue_id,
+                d.win,
+                d.remake,
+                d.time,
+                d.duration,
+                d.kda,
+                d.cs,
+                d.gold,
+                d.total_damage,
+                d.total_heal,
+                d.champ_level,
+                d.champion_id,
+                d.role_bound_item,
+                d.position,
+                d.item_ids,
+            );
+        }
+    }
+
+    #[test]
+    fn fixture_ranked_420_parses_full_lcu_payload() {
+        let game = load_fixture(SYNTHETIC_RANKED);
+        let d = game.to_display(&GameDataAssets::default()).unwrap();
+
+        assert_eq!(d.name, "排位单双排");
+        assert_eq!(d.map, "召唤师峡谷");
+        assert_eq!(d.time, "2024-01-15 14:30");
+        assert_eq!(d.duration, "25:30");
+        assert!(d.win);
+        assert!(!d.remake);
+        assert_eq!(d.kda, "5.33");
+        assert_eq!(d.cs, 206);
+        assert_eq!(d.role_bound_item, Some(1204));
+        assert_eq!(d.position, Some("JUNGLE".to_string()));
+        assert_eq!(d.item_ids, vec![6692, 3006, 6675, 6676, 1038, 3364, 3340]);
+        assert!(d.item_icon_urls.is_empty());
+    }
+
+    #[test]
+    fn fixture_aram_has_no_position_and_collects_augments() {
+        let game = load_fixture(SYNTHETIC_ARAM);
+        let d = game.to_display(&GameDataAssets::default()).unwrap();
+
+        assert_eq!(d.name, "极地大乱斗");
+        assert_eq!(d.map, "嚎哭深渊");
+        assert_eq!(d.duration, "18:08");
+        assert!(!d.win);
+        assert_eq!(d.kda, "Perfect");
+        assert_eq!(d.cs, 63);
+        assert_eq!(d.position, None);
+        assert_eq!(d.augment_ids, vec![7010, 7018, 7027, 7022]);
+    }
+
+    #[test]
+    fn fixture_arena_exposes_subteam_placement() {
+        let game = load_fixture(SYNTHETIC_ARENA);
+        let d = game.to_display(&GameDataAssets::default()).unwrap();
+
+        assert_eq!(d.name, "斗魂竞技场");
+        assert_eq!(d.placement, Some(2));
+        assert_eq!(d.position, None);
+    }
+
+    /// 稀疏载荷：只有结构体必填字段，其余全部缺失。
+    /// 必须能解析且各项降级为 0 / None，不得 panic。
+    #[test]
+    fn fixture_minimal_payload_degrades_gracefully() {
+        let game = load_fixture(SYNTHETIC_MINIMAL);
+        let d = game.to_display(&GameDataAssets::default()).unwrap();
+
+        assert_eq!(d.cs, 0);
+        assert_eq!(d.gold, 0);
+        assert_eq!(d.total_damage, 0);
+        assert_eq!(d.total_heal, 0);
+        assert_eq!(d.kda, "2.00");
+        assert!(!d.remake);
+        assert_eq!(d.placement, None);
+        assert_eq!(d.position, None);
+        assert_eq!(d.spell1_icon_url, "");
+        assert_eq!(d.rune_icon_url, "");
+        assert!(d.augment_ids.is_empty());
+    }
+
+    /// 真实样本的期望展示结果，逐份锁定。
+    /// 这些值由真实抓包计算得出（见 `dump_real_fixture_results` 的输出），
+    /// 任何解析规则改动导致行为变化都会在这里暴露。
+    struct RealExpect {
+        name: &'static str,
+        queue_id: i32,
+        win: bool,
+        remake: bool,
+        time: &'static str,
+        duration: &'static str,
+        kda: &'static str,
+        cs: i32,
+        gold: i32,
+        total_damage: i32,
+        total_heal: i32,
+        champ_level: i32,
+        champion_id: i32,
+        role_bound_item: Option<i32>,
+        position: Option<&'static str>,
+        item_ids: [i32; 7],
+    }
+
+    const REAL_EXPECT: &[RealExpect] = &[
+        RealExpect {
+            name: "real/top-solo",
+            queue_id: 430,
+            win: true,
+            remake: false,
+            time: "2026-10-21 10:34",
+            duration: "28:42",
+            kda: "1.40",
+            cs: 218,
+            gold: 11827,
+            total_damage: 14104,
+            total_heal: 2636,
+            champ_level: 17,
+            champion_id: 17,
+            role_bound_item: Some(1220),
+            position: Some("TOP"),
+            item_ids: [1056, 3115, 3006, 3087, 6653, 1028, 3364],
+        },
+        RealExpect {
+            name: "real/mid-solo",
+            queue_id: 430,
+            win: true,
+            remake: false,
+            time: "2026-10-21 14:03",
+            duration: "30:05",
+            kda: "7.00",
+            cs: 244,
+            gold: 15590,
+            total_damage: 29975,
+            total_heal: 4646,
+            champ_level: 17,
+            champion_id: 17,
+            role_bound_item: Some(1206),
+            position: Some("MIDDLE"),
+            item_ids: [1056, 3157, 3115, 3172, 6653, 3087, 3364],
+        },
+        RealExpect {
+            // LCU 报 lane=JUNGLE，但 roleBoundItem=1220（上路任务奖励）且技能为传送而非惩戒，
+            // 实际为上单。与 none-duo 同为「分路任务装备纠正 timeline」的真实案例。
+            name: "real/jungle-none",
+            queue_id: 430,
+            win: true,
+            remake: false,
+            time: "2026-10-20 14:03",
+            duration: "33:00",
+            kda: "2.29",
+            cs: 263,
+            gold: 16626,
+            total_damage: 36782,
+            total_heal: 3498,
+            champ_level: 18,
+            champion_id: 17,
+            role_bound_item: Some(1220),
+            position: Some("TOP"),
+            item_ids: [3115, 2420, 3087, 3006, 6653, 2510, 3364],
+        },
+        RealExpect {
+            // roleBoundItem=3006（狂战士胫甲，非分路任务道具）无法判定分路，
+            // 必须降级到 timeline 的 BOTTOM/CARRY 才能得到 BOTTOM。
+            name: "real/bottom-carry",
+            queue_id: 430,
+            win: false,
+            remake: false,
+            time: "2026-10-20 13:17",
+            duration: "41:28",
+            kda: "1.31",
+            cs: 239,
+            gold: 19369,
+            total_damage: 30158,
+            total_heal: 9401,
+            champ_level: 17,
+            champion_id: 18,
+            role_bound_item: Some(3006),
+            position: Some("BOTTOM"),
+            item_ids: [6676, 3026, 3031, 3072, 6675, 3035, 3363],
+        },
+        RealExpect {
+            // roleBoundItem=2055（控制守卫，非任务道具）；装备栏含 3871（辅助装）→ UTILITY
+            name: "real/bottom-support",
+            queue_id: 430,
+            win: true,
+            remake: false,
+            time: "2026-10-16 13:21",
+            duration: "27:49",
+            kda: "1.67",
+            cs: 47,
+            gold: 8150,
+            total_damage: 17563,
+            total_heal: 3599,
+            champ_level: 13,
+            champion_id: 63,
+            role_bound_item: Some(2055),
+            position: Some("UTILITY"),
+            item_ids: [3871, 3020, 2031, 2503, 6653, 0, 3364],
+        },
+        RealExpect {
+            // LCU lane=NONE / role=DUO，若只靠 role 兜底会被判成 BOTTOM。
+            // 实际上单（已由用户核对），roleBoundItem=1220（上路任务奖励）+ 传送技能才是对的，
+            // 说明分路任务装备的可靠性高于 LCU 的 timeline，当前优先级是正确的。
+            name: "real/none-duo",
+            queue_id: 430,
+            win: false,
+            remake: false,
+            time: "2026-10-19 13:39",
+            duration: "19:21",
+            kda: "2.00",
+            cs: 159,
+            gold: 7786,
+            total_damage: 16792,
+            total_heal: 1941,
+            champ_level: 14,
+            champion_id: 17,
+            role_bound_item: Some(1220),
+            position: Some("TOP"),
+            item_ids: [3006, 3087, 1026, 1056, 1043, 3108, 3364],
+        },
+        RealExpect {
+            name: "real/remake",
+            queue_id: 430,
+            win: true,
+            remake: true,
+            time: "2026-10-21 13:33",
+            duration: "01:13",
+            kda: "Perfect",
+            cs: 4,
+            gold: 596,
+            total_damage: 41,
+            total_heal: 0,
+            champ_level: 1,
+            champion_id: 63,
+            role_bound_item: Some(1201),
+            position: Some("MIDDLE"),
+            item_ids: [1056, 2003, 0, 0, 0, 0, 3340],
+        },
+        RealExpect {
+            // 队列 3100 不在 is_laned_mode 白名单内 → 一律不推分路（即使 roleBoundItem 为 0、
+            // timeline 给出 NONE/SUPPORT）。若要支持自定义对局分路，需先扩展该白名单。
+            name: "real/custom-3100",
+            queue_id: 3100,
+            win: false,
+            remake: false,
+            time: "2026-10-19 14:51",
+            duration: "08:07",
+            kda: "2.50",
+            cs: 24,
+            gold: 3304,
+            total_damage: 6821,
+            total_heal: 1541,
+            champ_level: 6,
+            champion_id: 805,
+            role_bound_item: Some(0),
+            position: None,
+            item_ids: [1001, 2031, 1052, 1056, 3057, 0, 3340],
+        },
+    ];
+
+    #[test]
+    fn real_fixtures_produce_expected_display() {
+        assert_eq!(REAL.len(), REAL_EXPECT.len(), "样本数与期望表不一致");
+
+        for (fx, exp) in REAL.iter().zip(REAL_EXPECT) {
+            assert_eq!(fx.name, exp.name, "样本与期望表顺序不一致");
+            let game = load_fixture(fx.raw);
+            let d = game.to_display(&GameDataAssets::default()).unwrap();
+
+            assert_eq!(d.queue_id, exp.queue_id, "{}: queueId", fx.name);
+            assert_eq!(d.win, exp.win, "{}: win", fx.name);
+            assert_eq!(d.remake, exp.remake, "{}: remake", fx.name);
+            assert_eq!(d.time, exp.time, "{}: time", fx.name);
+            assert_eq!(d.duration, exp.duration, "{}: duration", fx.name);
+            assert_eq!(d.kda, exp.kda, "{}: kda", fx.name);
+            assert_eq!(d.cs, exp.cs, "{}: cs", fx.name);
+            assert_eq!(d.gold, exp.gold, "{}: gold", fx.name);
+            assert_eq!(d.total_damage, exp.total_damage, "{}: 伤害", fx.name);
+            assert_eq!(d.total_heal, exp.total_heal, "{}: 治疗", fx.name);
+            assert_eq!(d.champ_level, exp.champ_level, "{}: 英雄等级", fx.name);
+            assert_eq!(d.champion_id, exp.champion_id, "{}: 英雄", fx.name);
+            assert_eq!(
+                d.role_bound_item, exp.role_bound_item,
+                "{}: roleBoundItem",
+                fx.name
+            );
+            assert_eq!(d.position.as_deref(), exp.position, "{}: 分路", fx.name);
+            assert_eq!(d.item_ids, exp.item_ids, "{}: 装备", fx.name);
+            // 资源表为空时图标字段必须为空而不是 panic
+            assert!(d.item_icon_urls.is_empty(), "{}: 图标", fx.name);
+        }
+    }
+
+    /// 真实载荷前向兼容：stats 有 118 个字段、game 层有 gameMode / gameModeMutators /
+    /// endOfGameResult / participantIdentities 等未建模字段，都必须被忽略而不是解析失败。
+    #[test]
+    fn real_fixtures_deserialize_and_ignore_unmodelled_fields() {
+        for fx in REAL {
+            let game = load_fixture(fx.raw);
+            assert_eq!(
+                game.participants.len(),
+                1,
+                "{}: current-summoner 的 matches 接口只返回本人",
+                fx.name
+            );
+            assert!(game.game_id > 0, "{}: gameId 应存在", fx.name);
+            assert!(game.to_display(&GameDataAssets::default()).is_some());
+        }
+    }
+
+    /// 目录级守卫：testdata/match 下新增任何样本都必须能被当前结构体反序列化。
+    /// 这是发现「真实载荷多出必填字段 / 改了类型」最直接的手段。
+    #[test]
+    fn all_fixtures_on_disk_deserialize() {
+        use std::path::Path;
+
+        fn collect(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    collect(&path, out);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("json")
+                    && path.file_name().and_then(|n| n.to_str()) != Some("manifest.json")
+                {
+                    out.push(path);
+                }
+            }
+        }
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/match");
+        let mut files = Vec::new();
+        collect(&root, &mut files);
+        assert!(!files.is_empty(), "testdata/match 下未找到任何 fixture");
+
+        for file in files {
+            let raw = std::fs::read_to_string(&file).expect("读取 fixture 失败");
+            let response: LcuMatchHistoryResponse = serde_json::from_str(&raw)
+                .unwrap_or_else(|e| panic!("{} 无法反序列化: {e}", file.display()));
+            assert!(
+                !response.games.games.is_empty(),
+                "{} 不含任何对局",
+                file.display()
+            );
+        }
+    }
 }

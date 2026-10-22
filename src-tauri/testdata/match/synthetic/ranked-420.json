@@ -1,0 +1,130 @@
+{
+  "games": {
+    "gameCount": 1,
+    "gameIndexBegin": 0,
+    "gameIndexEnd": 0,
+    "games": [
+      {
+        "gameId": 4839207510,
+        "gameCreation": 1705329000000,
+        "gameCreationDate": "2024-01-15T14:30:00.000Z",
+        "gameDuration": 1530,
+        "gameMode": "CLASSIC",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "14.1.486.7324",
+        "mapId": 11,
+        "queueId": 420,
+        "seasonId": 13,
+        "platformId": "HN1",
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "accountId": 2000000001,
+              "currentAccountId": 2000000001,
+              "currentPlatformId": "HN1",
+              "platformId": "HN1",
+              "puuid": "11111111-2222-3333-4444-555555555555",
+              "summonerId": 1234567890123,
+              "summonerName": "TestSummoner",
+              "matchHistoryUri": "/v1/stats/player_history/HN1/2000000001"
+            }
+          }
+        ],
+        "participants": [
+          {
+            "participantId": 1,
+            "teamId": 100,
+            "championId": 64,
+            "spell1Id": 4,
+            "spell2Id": 11,
+            "timeline": {
+              "participantId": 1,
+              "lane": "JUNGLE",
+              "role": "NONE",
+              "creepsPerMinDeltas": { "10-20": 5.4, "0-10": 4.8 },
+              "xpPerMinDeltas": { "10-20": 480.2, "0-10": 421.7 },
+              "goldPerMinDeltas": { "10-20": 512.3, "0-10": 388.9 },
+              "csDiffPerMinDeltas": { "10-20": 4.1, "0-10": 2.9 },
+              "xpDiffPerMinDeltas": { "10-20": 92.4, "0-10": 61.3 }
+            },
+            "stats": {
+              "participantId": 1,
+              "win": true,
+              "kills": 7,
+              "deaths": 3,
+              "assists": 9,
+              "champLevel": 16,
+              "item0": 6692,
+              "item1": 3006,
+              "item2": 6675,
+              "item3": 6676,
+              "item4": 1038,
+              "item5": 3364,
+              "item6": 3340,
+              "perk0": 8010,
+              "perk1": 9111,
+              "perk2": 9104,
+              "perk3": 8014,
+              "perk4": 8304,
+              "perk5": 5008,
+              "perkPrimaryStyle": 8000,
+              "perkSubStyle": 8300,
+              "totalMinionsKilled": 182,
+              "neutralMinionsKilled": 24,
+              "neutralMinionsKilledTeamJungle": 140,
+              "neutralMinionsKilledEnemyJungle": 22,
+              "goldEarned": 12850,
+              "goldSpent": 12100,
+              "totalDamageDealtToChampions": 24500,
+              "totalDamageTaken": 19800,
+              "totalHeal": 800,
+              "totalTimeCrowdControlDealt": 412,
+              "visionScore": 31,
+              "wardsPlaced": 12,
+              "wardsKilled": 5,
+              "doubleKills": 1,
+              "tripleKills": 0,
+              "quadraKills": 0,
+              "pentaKills": 0,
+              "firstBloodKill": true,
+              "firstTowerKill": false,
+              "gameEndedInEarlySurrender": false,
+              "gameEndedInSurrender": false,
+              "causedEarlySurrender": false,
+              "teamEarlySurrendered": false,
+              "longestTimeSpentLiving": 512,
+              "largestMultiKill": 2,
+              "killingSprees": 2,
+              "unrealKills": 0,
+              "roleBoundItem": 1204,
+              "playerAugment1": 0,
+              "playerAugment2": 0,
+              "playerAugment3": 0,
+              "playerAugment4": 0,
+              "playerAugment5": 0,
+              "augments": [],
+              "subteamPlacement": 0
+            }
+          }
+        ],
+        "teams": [
+          {
+            "teamId": 100,
+            "win": "Win",
+            "firstBlood": true,
+            "firstTower": false,
+            "firstInhibitor": true,
+            "firstBaron": false,
+            "firstDragon": true,
+            "towerKills": 7,
+            "inhibitorKills": 2,
+            "baronKills": 0,
+            "dragonKills": 3,
+            "bans": [{ "championId": 157, "pickTurn": 1 }]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "games": {
+    "gameCount": 1,
+    "gameIndexBegin": 0,
+    "gameIndexEnd": 0,
+    "games": [
+      {
+        "gameId": 4839207520,
+        "gameCreation": 1705329000000,
+        "gameCreationDate": "2024-01-15T14:30:00.000Z",
+        "gameDuration": 1088,
+        "gameMode": "ARAM",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "14.1.486.7324",
+        "mapId": 12,
+        "queueId": 450,
+        "seasonId": 13,
+        "platformId": "HN1",
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "accountId": 2000000002,
+              "currentAccountId": 2000000002,
+              "currentPlatformId": "HN1",
+              "platformId": "HN1",
+              "puuid": "66666666-7777-8888-9999-000000000000",
+              "summonerId": 1234567890124,
+              "summonerName": "AramPlayer",
+              "matchHistoryUri": "/v1/stats/player_history/HN1/2000000002"
+            }
+          }
+        ],
+        "participants": [
+          {
+            "participantId": 1,
+            "teamId": 100,
+            "championId": 432,
+            "spell1Id": 4,
+            "spell2Id": 12,
+            "timeline": {
+              "participantId": 1,
+              "lane": "NONE",
+              "role": "NONE"
+            },
+            "stats": {
+              "participantId": 1,
+              "win": false,
+              "kills": 12,
+              "deaths": 0,
+              "assists": 21,
+              "champLevel": 18,
+              "item0": 6653,
+              "item1": 3157,
+              "item2": 3020,
+              "item3": 4645,
+              "item4": 0,
+              "item5": 0,
+              "item6": 2052,
+              "perk0": 8128,
+              "perk1": 8139,
+              "perk2": 8138,
+              "perk3": 8106,
+              "perk4": 8226,
+              "perk5": 8210,
+              "perkPrimaryStyle": 8100,
+              "perkSubStyle": 8200,
+              "totalMinionsKilled": 63,
+              "neutralMinionsKilled": 0,
+              "goldEarned": 15230,
+              "goldSpent": 15230,
+              "totalDamageDealtToChampions": 41200,
+              "totalDamageTaken": 18700,
+              "totalHeal": 3200,
+              "visionScore": 0,
+              "doubleKills": 2,
+              "tripleKills": 1,
+              "quadraKills": 0,
+              "pentaKills": 0,
+              "gameEndedInEarlySurrender": false,
+              "gameEndedInSurrender": false,
+              "roleBoundItem": 0,
+              "playerAugment1": 7018,
+              "playerAugment2": 7027,
+              "playerAugment3": 7010,
+              "playerAugment4": 7022,
+              "playerAugment5": 0,
+              "augments": [7010, 0],
+              "subteamPlacement": 0
+            }
+          }
+        ],
+        "teams": [
+          {
+            "teamId": 100,
+            "win": "Fail",
+            "firstBlood": false,
+            "towerKills": 3,
+            "inhibitorKills": 1,
+            "baronKills": 0,
+            "dragonKills": 0,
+            "bans": []
+          }
+        ]
+      }
+    ]
+  }
+}

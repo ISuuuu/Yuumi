@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 2,
+  "description": "LCU 对局响应快照，供 parsers 层回归测试使用。结构与 /lol-match-history/v1/products/lol/{puuid}/matches 的完整外层响应一致（含应用未建模的字段），用于防止结构体过度收紧。",
+  "capturedAt": "2026-10-22T06:18:08.981Z",
+  "source": {
+    "endpoint": "/lol-match-history/v1/products/lol/current-summoner/matches?begIndex=0&endIndex=19",
+    "platformId": "HN1",
+    "redacted": true,
+    "note": "puuid / summonerId / summonerName 已脱敏为 <redacted>，解析层不消费这些字段。由 pnpm fixtures:capture 采集，原始抓包 21 局，按 lane/role 组合择优保留 8 局。"
+  },
+  "layout": {
+    "real/": "真实抓包，来自 pnpm fixtures:capture",
+    "synthetic/": "按 LCU schema 合成，仅覆盖真实抓包中缺失的场景（大乱斗 / 斗魂竞技场 / 排位 420 / 稀疏载荷）"
+  },
+  "real": [
+    {
+      "file": "real/top-solo.json",
+      "gameId": 11395344574,
+      "queueId": 430,
+      "win": true,
+      "laneRole": "TOP/SOLO",
+      "covers": "timeline 判定 TOP；roleBoundItem 1220（上路奖励）"
+    },
+    {
+      "file": "real/mid-solo.json",
+      "gameId": 11396194371,
+      "queueId": 430,
+      "win": true,
+      "laneRole": "MIDDLE/SOLO",
+      "covers": "timeline 判定 MIDDLE；roleBoundItem 1206（中路奖励）"
+    },
+    {
+      "file": "real/jungle-none.json",
+      "gameId": 11393506594,
+      "queueId": 430,
+      "win": true,
+      "laneRole": "JUNGLE/NONE",
+      "covers": "LCU 报 lane=JUNGLE，但 roleBoundItem=1220（上路任务奖励）+ 传送技能，正确判为 TOP"
+    },
+    {
+      "file": "real/bottom-carry.json",
+      "gameId": 11393285240,
+      "queueId": 430,
+      "win": false,
+      "laneRole": "BOTTOM/CARRY",
+      "covers": "roleBoundItem 为 3006（非分路任务道具）必须降级到 timeline 才得到 BOTTOM；负局"
+    },
+    {
+      "file": "real/bottom-support.json",
+      "gameId": 11381240745,
+      "queueId": 430,
+      "win": true,
+      "laneRole": "BOTTOM/SUPPORT",
+      "covers": "role=SUPPORT 优先于 lane=BOTTOM，判定 UTILITY；roleBoundItem 为 2055（非任务道具）"
+    },
+    {
+      "file": "real/none-duo.json",
+      "gameId": 11390715346,
+      "queueId": 430,
+      "win": false,
+      "laneRole": "NONE/DUO",
+      "covers": "LCU lane=NONE/role=DUO 若只靠 role 兜底会误判 BOTTOM；实际为上单（已核对），由 roleBoundItem=1220 + 传送技能正确纠正为 TOP"
+    },
+    {
+      "file": "real/remake.json",
+      "gameId": 11396042190,
+      "queueId": 430,
+      "win": true,
+      "laneRole": "NONE/SUPPORT",
+      "covers": "73 秒三分钟重开 gameEndedInEarlySurrender；零死亡 Perfect KDA；roleBoundItem 1201"
+    },
+    {
+      "file": "real/custom-3100.json",
+      "gameId": 11391093102,
+      "queueId": 3100,
+      "win": false,
+      "laneRole": "NONE/SUPPORT",
+      "covers": "自定义对局队列 3100：不在 is_laned_mode 白名单内，分路恒为 None；roleBoundItem 下发 0 而非省略字段"
+    }
+  ],
+  "synthetic": [
+    {
+      "file": "synthetic/aram-450.json",
+      "queueId": 450,
+      "covers": "娱乐模式无分路；augments 数组与 playerAugment1..5 合并去重"
+    },
+    {
+      "file": "synthetic/arena-1700.json",
+      "queueId": 1700,
+      "covers": "斗魂竞技场 subteamPlacement 名次"
+    },
+    {
+      "file": "synthetic/ranked-420.json",
+      "queueId": 420,
+      "covers": "排位单双排队列名与地图映射（真实抓包中无 420）"
+    },
+    {
+      "file": "synthetic/minimal-420.json",
+      "queueId": 420,
+      "covers": "稀疏载荷边界：仅结构体必填字段，其余降级为 0/None 且不 panic"
+    }
+  ],
+  "observedInRealPayload": [
+    "stats 共 118 个字段，本应用仅建模约 28 个，其余靠 serde 忽略——若改为 deny_unknown_fields 会立刻损坏",
+    "roleBoundItem 经常不是分路任务道具（实测出现 3006 狂战士胫甲、2055 控制守卫），只能作候选而非权威依据",
+    "【已核对】分路判定应以 roleBoundItem（分路任务装备）为准，其可靠性高于 LCU 的 timeline.lane/role。实测 21 局中 3 局 rbi=1220，其中 2 局的 timeline 分别给出 JUNGLE 与 NONE/DUO 两个错误值，均被该规则纠正为 TOP（用户已核对 none-duo 那局确为上单，配套召唤师技能为传送）。因此 to_display 中「roleBoundItem 优先于 timeline」的顺序是正确的，不要调整",
+    "队列 3100（自定义对局）不在 is_laned_mode 白名单内，即使 timeline 给出 NONE/SUPPORT 也不推分路，position 恒为 None",
+    "存在 playerAugment6，本应用仅建模 1..5，第 6 个海克斯会被丢弃（dedupe_augment_ids 本身也截断到 5 个）",
+    "stats 中不存在 augments 数组字段，海克斯只能来自 playerAugment1..6（synthetic/aram-450 覆盖了字段存在时的合并逻辑）",
+    "timeline.role 实测出现 CARRY / SOLO / SUPPORT / DUO / NONE 五种取值",
+    "/lol-match-history/v1/products/lol/current-summoner/matches 每个对局只返回本人的 participant，parsers 依赖 participants.first()"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "games": {
+    "games": [
+      {
+        "gameId": 4839207550,
+        "gameCreation": 1705329000000,
+        "gameDuration": 1200,
+        "queueId": 420,
+        "participants": [
+          {
+            "championId": 1,
+            "spell1Id": 4,
+            "spell2Id": 14,
+            "stats": {
+              "win": true,
+              "kills": 1,
+              "deaths": 2,
+              "assists": 3,
+              "champLevel": 11,
+              "item0": 0,
+              "item1": 0,
+              "item2": 0,
+              "item3": 0,
+              "item4": 0,
+              "item5": 0,
+              "item6": 0,
+              "perk0": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
