@@ -3,9 +3,11 @@ pub mod gameflow;
 pub mod lcu;
 pub mod parsers;
 pub mod runtime;
+pub mod storage;
 
 pub use agents::*;
 pub use gameflow::*;
 pub use lcu::*;
 pub use parsers::*;
 pub use runtime::*;
+pub use storage::*;

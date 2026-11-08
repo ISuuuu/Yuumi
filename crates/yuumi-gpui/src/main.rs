@@ -1,8 +1,8 @@
 use gpui::prelude::*;
 use gpui::{
-    div, px, App, Application, Bounds, Context, InteractiveElement, IntoElement, ParentElement,
-    Point, Render, Size, StatefulInteractiveElement, Styled, TitlebarOptions, Window, WindowBounds,
-    WindowHandle, WindowKind, WindowOptions,
+    div, px, App, Application, Bounds, Context, FontWeight, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, Point, Render, ScrollHandle, Size, StatefulInteractiveElement,
+    Styled, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
 };
 use std::sync::Arc;
 
@@ -44,10 +44,9 @@ use yuumi_core::parsers::game_info::LiveGameInfo;
 pub const MAIN_WINDOW_TITLE: &str = components::titlebar::APP_NAME;
 pub const BENCH_WINDOW_TITLE: &str = "Yuumi - 大乱斗板凳席悬浮窗";
 
-/// 预热图片资源：网络拉取与解码在 Tokio 运行时执行，完成后回到主线程重绘。
+/// 预热图片资源：在 Tokio 运行时高并发异步拉取并解码为 RenderImage，完成后回到主线程重绘。
 ///
-/// 不能改用 `cx.background_executor()`——该 executor 由 Windows 线程池驱动，
-/// 线程上没有 Tokio reactor 上下文，reqwest 请求会 panic（there is no reactor running）。
+/// 彻底禁止在 UI 主线程读磁盘和解码图片，所有 I/O 与图像算法全部在后台 Tokio 线程池完成。
 fn prewarm_assets(paths: Vec<String>, cx: &mut Context<MainWindow>) {
     if paths.is_empty() {
         return;
@@ -62,8 +61,15 @@ fn prewarm_assets(paths: Vec<String>, cx: &mut Context<MainWindow>) {
         let _ = handle
             .spawn(async move {
                 let loader = asset_loader::global_asset_loader();
+                let mut tasks = Vec::with_capacity(paths.len());
                 for path in paths {
-                    let _ = loader.load_render_image(&path).await;
+                    let l = loader.clone();
+                    tasks.push(tokio::spawn(async move {
+                        let _ = l.load_render_image(&path).await;
+                    }));
+                }
+                for t in tasks {
+                    let _ = t.await;
                 }
             })
             .await;
@@ -104,6 +110,8 @@ pub struct MainWindow {
     bench_session: Option<ChampSelectSession>,
     /// LCU 预加载的游戏资源字典（用于悬浮窗英雄名）
     game_assets: Option<Arc<GameDataAssets>>,
+    /// 主视口全局滚动跟踪句柄（用于监听滚动到底部与回到顶部）
+    main_scroll_handle: ScrollHandle,
 }
 
 impl MainWindow {
@@ -119,7 +127,7 @@ impl MainWindow {
         let tools_view = ToolsView::from_settings(&automation);
 
         let search_view = SearchView::new(cx).with_matches(matches.clone());
-        let saved_players_view = SavedPlayersView::new();
+        let saved_players_view = SavedPlayersView::new(cx);
         let settings_view = SettingsView::new();
         let tray = TrayManager::new().ok();
         let search_input = SearchInput::new("输入召唤师名 / 英雄过滤...");
@@ -174,6 +182,7 @@ impl MainWindow {
             automation,
             bench_session: None,
             game_assets: None,
+            main_scroll_handle: ScrollHandle::new(),
         }
     }
 
@@ -183,6 +192,7 @@ impl MainWindow {
                 if let ConnectionStatus::Connected { summoner, .. } = &status {
                     if let Some(s) = summoner.as_ref() {
                         self.career_view.summoner = Some(s.clone());
+                        self.saved_players_view.set_self_puuid(Some(s.puuid.clone()));
                     }
                 }
                 if matches!(status, ConnectionStatus::Disconnected) {
@@ -267,6 +277,60 @@ impl MainWindow {
                     // 选人结束（或进入其它阶段）即收起板凳席悬浮窗
                     self.bench_session = None;
                     self.close_bench_overlay(cx);
+                }
+
+                // 对局结束（结算阶段）：若存在 10 人快照，自动持久化记录同局相遇玩家
+                if matches!(
+                    phase,
+                    GamePhase::PreEndOfGame | GamePhase::EndOfGame | GamePhase::WaitingForStats
+                ) {
+                    if let Some(ref info) = self.game_info {
+                        if let Some(ref s) = self.saved_players_view.storage {
+                            let self_puuid = self
+                                .career_view
+                                .summoner
+                                .as_ref()
+                                .map(|sum| sum.puuid.as_str())
+                                .unwrap_or("");
+                            let game_id = info.game_id.unwrap_or(0);
+                            let queue_type = info.queue_id.to_string();
+                            let players_to_record: Vec<yuumi_core::storage::GamePlayerRecord> = info
+                                .players()
+                                .filter(|p| !p.is_local_player && !p.puuid.is_empty())
+                                .map(|p| yuumi_core::storage::GamePlayerRecord {
+                                    puuid: p.puuid.clone(),
+                                    summoner_name: p.summoner_name.clone(),
+                                    tag_line: if p.tag_line.is_empty() {
+                                        None
+                                    } else {
+                                        Some(p.tag_line.clone())
+                                    },
+                                    profile_icon_id: 0,
+                                    champion_id: p.champion_id,
+                                })
+                                .collect();
+
+                            if !players_to_record.is_empty() && !self_puuid.is_empty() && game_id > 0 {
+                                match s.record_encounters(
+                                    &players_to_record,
+                                    self_puuid,
+                                    game_id,
+                                    &queue_type,
+                                ) {
+                                    Ok(rec) => {
+                                        log::info!(
+                                            "[MainWindow] 对局结束自动记录相遇玩家: 共 {} 人",
+                                            rec
+                                        );
+                                        self.saved_players_view.reload(Some(self_puuid));
+                                    }
+                                    Err(e) => {
+                                        log::warn!("[MainWindow] 自动记录相遇玩家失败: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 cx.notify();
             }
@@ -459,8 +523,155 @@ impl MainWindow {
                 self.route_history.remove(0);
             }
             self.current_route = route;
+            self.main_scroll_handle.set_offset(Point::default());
+            if self.current_route == Route::SavedPlayers {
+                self.reload_saved_players(cx);
+            }
         }
         cx.notify();
+    }
+
+    /// 异步拉取路人集首屏（完全剥离到 Tokio 阻塞池，0 阻塞 UI 主线程）
+    pub fn reload_saved_players(&mut self, cx: &mut Context<Self>) {
+        let storage = self.saved_players_view.storage.clone();
+        let Some(storage) = storage else {
+            return;
+        };
+
+        let filter = if self.saved_players_view.active_tag_filter == "全部" {
+            None
+        } else {
+            Some(self.saved_players_view.active_tag_filter.clone())
+        };
+        let search = if self.saved_players_view.search_query.trim().is_empty() {
+            None
+        } else {
+            Some(self.saved_players_view.search_query.trim().to_string())
+        };
+        let self_p = self.saved_players_view.self_puuid.clone();
+
+        let handle = yuumi_core::runtime::tokio_handle();
+        cx.spawn(async move |entity, cx| {
+            let Some(handle) = handle else {
+                return;
+            };
+            let res = handle
+                .spawn(async move {
+                    tokio::task::spawn_blocking(move || {
+                        let total = storage
+                            .count_players(self_p.as_deref(), filter.as_deref(), search.as_deref())
+                            .unwrap_or(0);
+                        let list = storage
+                            .query_players(
+                                self_p.as_deref(),
+                                filter.as_deref(),
+                                search.as_deref(),
+                                views::saved_players::SAVED_PLAYERS_PAGE_SIZE,
+                                0,
+                            )
+                            .unwrap_or_default();
+                        (total, list)
+                    })
+                    .await
+                    .unwrap_or((0, Vec::new()))
+                })
+                .await;
+
+            if let Ok((total, list)) = res {
+                let _ = entity.update(cx, |this, cx| {
+                    let mut asset_paths = Vec::new();
+                    for p in &list {
+                        asset_paths.push(p.profile_icon_url());
+                        if let Some(champ) = p.champion_icon_url() {
+                            asset_paths.push(champ);
+                        }
+                    }
+                    prewarm_assets(asset_paths, cx);
+
+                    this.saved_players_view.current_page = 1;
+                    this.saved_players_view.total_count = total;
+                    this.saved_players_view.players = list;
+                    this.saved_players_view.is_loading_more = false;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// 异步拉取路人集下一页（完全剥离到 Tokio 阻塞池，0 阻塞 UI 主线程）
+    pub fn load_more_saved_players(&mut self, cx: &mut Context<Self>) {
+        if self.saved_players_view.is_loading_more
+            || self.saved_players_view.players.len() >= self.saved_players_view.total_count as usize
+        {
+            return;
+        }
+
+        self.saved_players_view.is_loading_more = true;
+        let storage = self.saved_players_view.storage.clone();
+        let Some(storage) = storage else {
+            self.saved_players_view.is_loading_more = false;
+            return;
+        };
+
+        let next_page = self.saved_players_view.current_page + 1;
+        let offset = (next_page - 1) * views::saved_players::SAVED_PLAYERS_PAGE_SIZE;
+        let filter = if self.saved_players_view.active_tag_filter == "全部" {
+            None
+        } else {
+            Some(self.saved_players_view.active_tag_filter.clone())
+        };
+        let search = if self.saved_players_view.search_query.trim().is_empty() {
+            None
+        } else {
+            Some(self.saved_players_view.search_query.trim().to_string())
+        };
+        let self_p = self.saved_players_view.self_puuid.clone();
+
+        let handle = yuumi_core::runtime::tokio_handle();
+        cx.spawn(async move |entity, cx| {
+            let Some(handle) = handle else {
+                return;
+            };
+            let res = handle
+                .spawn(async move {
+                    tokio::task::spawn_blocking(move || {
+                        storage.query_players(
+                            self_p.as_deref(),
+                            filter.as_deref(),
+                            search.as_deref(),
+                            views::saved_players::SAVED_PLAYERS_PAGE_SIZE,
+                            offset,
+                        )
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()))
+                })
+                .await;
+
+            if let Ok(Ok(more)) = res {
+                let _ = entity.update(cx, |this, cx| {
+                    let mut asset_paths = Vec::new();
+                    for p in &more {
+                        asset_paths.push(p.profile_icon_url());
+                        if let Some(champ) = p.champion_icon_url() {
+                            asset_paths.push(champ);
+                        }
+                    }
+                    prewarm_assets(asset_paths, cx);
+
+                    this.saved_players_view.players.extend(more);
+                    this.saved_players_view.current_page = next_page;
+                    this.saved_players_view.is_loading_more = false;
+                    cx.notify();
+                });
+            } else {
+                let _ = entity.update(cx, |this, _cx| {
+                    this.saved_players_view.is_loading_more = false;
+                });
+            }
+        })
+        .detach();
     }
 
     /// 返回上一路由（标题栏返回键）
@@ -731,6 +942,7 @@ impl Render for MainWindow {
             // 2. 主体区域：64/210 导航侧栏 + 主路由视口
             .child(
                 div()
+                    .relative()
                     .flex()
                     .flex_row()
                     .flex_1()
@@ -756,16 +968,19 @@ impl Render for MainWindow {
                             }
                         },
                     ))
-                    // 右侧主视口：首页自行撑满，其余路由沿用统一滚动
+                    // 右侧主视口：首页与路人集自行撑满（路人集采用吸顶Header+内部独立平滑滚动），其余路由沿用统一外层滚动
                     .child(
                         div()
                             .id("main-scroll-view")
                             .flex_1()
                             .h_full()
                             .min_w(px(0.0))
-                            .when(self.current_route != Route::Home, |el| {
-                                el.overflow_y_scroll()
-                            })
+                            .track_scroll(&self.main_scroll_handle)
+                            .when(
+                                self.current_route != Route::Home
+                                    && self.current_route != Route::SavedPlayers,
+                                |el| el.overflow_y_scroll(),
+                            )
                             .when(self.current_route == Route::Home, |el| {
                                 el.child(HomeView::render(&self.connection_status))
                             })
@@ -852,52 +1067,63 @@ impl Render for MainWindow {
                             })
                             .when(self.current_route == Route::SavedPlayers, |el| {
                                 let view = view_entity.clone();
-                                let on_filter_tag = {
-                                    let v = view.clone();
-                                    move |tag: &str, _win: &mut Window, app: &mut App| {
-                                        let tag_str = tag.to_string();
-                                        v.update(app, |this, cx| {
-                                            this.saved_players_view.set_filter(tag_str);
-                                            cx.notify();
-                                        });
-                                    }
-                                };
-                                let on_toggle_pin = {
-                                    let v = view.clone();
-                                    move |puuid: &str, _win: &mut Window, app: &mut App| {
-                                        let p = puuid.to_string();
-                                        v.update(app, |this, cx| {
-                                            this.saved_players_view.toggle_pin(&p);
-                                            cx.notify();
-                                        });
-                                    }
-                                };
-                                let on_toggle_expand = {
-                                    let v = view.clone();
-                                    move |puuid: &str, _win: &mut Window, app: &mut App| {
-                                        let p = puuid.to_string();
-                                        v.update(app, |this, cx| {
-                                            this.saved_players_view.toggle_expand(&p);
-                                            cx.notify();
-                                        });
-                                    }
-                                };
-                                let on_remove_player = {
-                                    let v = view.clone();
-                                    move |puuid: &str, _win: &mut Window, app: &mut App| {
-                                        let p = puuid.to_string();
-                                        v.update(app, |this, cx| {
-                                            this.saved_players_view.remove_player(&p);
-                                            cx.notify();
-                                        });
-                                    }
+                                let on_action = move |action: views::saved_players::SavedPlayersAction, _win: &mut Window, app: &mut App| {
+                                    view.update(app, |this, cx| {
+                                        use views::saved_players::SavedPlayersAction;
+                                        match action {
+                                            SavedPlayersAction::FilterTag(tag) => {
+                                                this.saved_players_view.active_tag_filter = tag;
+                                                this.reload_saved_players(cx);
+                                            }
+                                            SavedPlayersAction::TogglePin(puuid) => {
+                                                this.saved_players_view.toggle_pin(&puuid);
+                                            }
+                                            SavedPlayersAction::ToggleExpand(puuid) => {
+                                                this.saved_players_view.toggle_expand(&puuid);
+                                            }
+                                            SavedPlayersAction::RemovePlayer(puuid) => {
+                                                this.saved_players_view.remove_player(&puuid);
+                                            }
+                                            SavedPlayersAction::StartEdit(puuid) => {
+                                                this.saved_players_view.start_edit(&puuid);
+                                            }
+                                            SavedPlayersAction::SaveEdit(puuid) => {
+                                                this.saved_players_view.save_edit(&puuid);
+                                            }
+                                            SavedPlayersAction::CancelEdit => {
+                                                this.saved_players_view.cancel_edit();
+                                            }
+                                            SavedPlayersAction::SetEditTag(tag) => {
+                                                this.saved_players_view.set_editing_tag(&tag);
+                                            }
+                                            SavedPlayersAction::LoadMore => {
+                                                this.load_more_saved_players(cx);
+                                            }
+                                            SavedPlayersAction::SearchInput(q) => {
+                                                this.saved_players_view.search_query = q;
+                                                this.reload_saved_players(cx);
+                                            }
+                                            SavedPlayersAction::SearchSubmit => {
+                                                this.reload_saved_players(cx);
+                                            }
+                                            SavedPlayersAction::SearchClear => {
+                                                this.saved_players_view.search_query.clear();
+                                                this.reload_saved_players(cx);
+                                            }
+                                            SavedPlayersAction::EditTagInput(t) => {
+                                                this.saved_players_view.editing_tag_buffer = t;
+                                            }
+                                            SavedPlayersAction::EditNotesInput(n) => {
+                                                this.saved_players_view.editing_notes_buffer = n;
+                                            }
+                                        }
+                                        cx.notify();
+                                    });
                                 };
 
                                 el.child(self.saved_players_view.render_panel(
-                                    on_filter_tag,
-                                    on_toggle_pin,
-                                    on_toggle_expand,
-                                    on_remove_player,
+                                    window,
+                                    on_action,
                                 ))
                             })
                             .when(self.current_route == Route::Tools, |el| {
@@ -1132,7 +1358,59 @@ impl Render for MainWindow {
                                     p_settings_clear_cache,
                                 ))
                             }),
-                    ),
+                    )
+                    // 右下角回到顶部悬浮按钮
+                    .when(self.current_route != Route::Home, |this| {
+                        let v = view_entity.clone();
+                        let is_saved_page = self.current_route == Route::SavedPlayers;
+                        let scroll_y = if is_saved_page {
+                            -self.saved_players_view.scroll_handle.offset().y
+                        } else {
+                            -self.main_scroll_handle.offset().y
+                        };
+                        let show_btn = scroll_y > px(180.0);
+                        this.when(show_btn, |panel| {
+                            panel.child(
+                                div()
+                                    .absolute()
+                                    .bottom(px(32.0))
+                                    .right(px(32.0))
+                                    .size(px(40.0))
+                                    .rounded_full()
+                                    .bg(Theme::CARD_BG)
+                                    .border_1()
+                                    .border_color(Theme::AURORA_CYAN)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .cursor_pointer()
+                                    .hover(|s| {
+                                        s.bg(Theme::CARD_BG_HOVER)
+                                            .border_color(Theme::ACCENT_PRIMARY)
+                                    })
+                                    .on_mouse_down(MouseButton::Left, move |_ev, _win, app| {
+                                        v.update(app, |this, cx| {
+                                            if this.current_route == Route::SavedPlayers {
+                                                this.saved_players_view
+                                                    .scroll_handle
+                                                    .set_offset(Point::default());
+                                            } else {
+                                                this.main_scroll_handle
+                                                    .set_offset(Point::default());
+                                            }
+                                            cx.notify();
+                                        });
+                                    })
+                                    .child(
+                                        div()
+                                            .text_base()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::ACCENT_PRIMARY)
+                                            .child("↑"),
+                                    ),
+                            )
+                        })
+                    }),
             )
     }
 }

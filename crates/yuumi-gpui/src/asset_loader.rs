@@ -70,34 +70,24 @@ impl AssetLoader {
         Ok(Arc::new(render_img))
     }
 
-    /// 同步快速查询已解码缓存（若已解码命中则直接返回供渲染）
+    /// 同步纯内存快速查询已解码缓存（0 阻塞 UI 主线程，绝不在渲染主线程执行磁盘 I/O 或图像解码）
     pub fn get_cached_render_image(&self, path: &str) -> Option<Arc<RenderImage>> {
         let trimmed = path.trim();
         if trimmed.is_empty() {
             return None;
         }
 
-        // 1. 已解码缓存命中
+        // 纯内存已解码缓存命中，微秒级返回
         if let Ok(lock) = self.decoded_cache.read() {
             if let Some(img) = lock.get(trimmed) {
                 return Some(img.clone());
             }
         }
 
-        // 2. 磁盘或内存有原始字节，同步尝试快速解码
-        if let Some(raw_bytes) = self.core_cache.try_read_disk_cache(trimmed) {
-            if let Ok(render_img) = Self::decode_bytes_to_render_image(&raw_bytes) {
-                if let Ok(mut lock) = self.decoded_cache.write() {
-                    lock.insert(trimmed.to_string(), render_img.clone());
-                }
-                return Some(render_img);
-            }
-        }
-
         None
     }
 
-    /// 异步拉取并解码图片
+    /// 异步拉取并解码图片（在后台 Tokio 线程池执行磁盘/网络 I/O 与 CPU 图像解码）
     pub async fn load_render_image(&self, path: &str) -> Result<Arc<RenderImage>, String> {
         let trimmed = path.trim();
         if trimmed.is_empty() {
@@ -108,7 +98,12 @@ impl AssetLoader {
             return Ok(cached);
         }
 
-        let bytes = self.core_cache.fetch_asset_bytes(trimmed).await?;
+        let bytes = if let Some(raw) = self.core_cache.try_read_disk_cache(trimmed) {
+            raw
+        } else {
+            self.core_cache.fetch_asset_bytes(trimmed).await?
+        };
+
         let render_img = Self::decode_bytes_to_render_image(&bytes)?;
 
         if let Ok(mut lock) = self.decoded_cache.write() {

@@ -4,7 +4,8 @@ use crate::components::card::Card;
 use crate::theme::{self, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use yuumi_core::parsers::saved_player::{create_mock_saved_players, SavedPlayer, RECOMMENDED_TAGS};
+use yuumi_core::parsers::saved_player::{SavedPlayer, RECOMMENDED_TAGS};
+use yuumi_core::storage::SavedPlayersStorage;
 
 /// 标签颜色映射
 fn tag_badge_colors(tag: &str) -> (Hsla, Hsla, Hsla) {
@@ -40,10 +41,39 @@ fn queue_type_display_name(queue_type: &str) -> &'static str {
     }
 }
 
-/// 路人集主视图
+/// 路人集界面交互动作分发枚举
+#[derive(Debug, Clone)]
+pub enum SavedPlayersAction {
+    FilterTag(String),
+    TogglePin(String),
+    ToggleExpand(String),
+    RemovePlayer(String),
+    StartEdit(String),
+    SaveEdit(String),
+    CancelEdit,
+    SetEditTag(String),
+    LoadMore,
+    SearchInput(String),
+    SearchSubmit,
+    SearchClear,
+    EditTagInput(String),
+    EditNotesInput(String),
+}
+
+/// 每页展示路人数量（防止一次性渲染上千张卡片撑爆渲染管线）
+pub const SAVED_PLAYERS_PAGE_SIZE: usize = 30;
+
 pub struct SavedPlayersView {
-    /// 完整路人记录列表
+    /// 持久化数据库存储句柄
+    pub storage: Option<SavedPlayersStorage>,
+    /// 当前登录召唤师 PUUID
+    pub self_puuid: Option<String>,
+    /// 当前已加载展示的路人记录列表（按页累加）
     pub players: Vec<SavedPlayer>,
+    /// 匹配当前条件的总人数
+    pub total_count: u32,
+    /// 当前加载到的页码（基于 1）
+    pub current_page: usize,
     /// 当前选中的标签过滤，例如 "全部"、"置顶"、"大腿" 等
     pub active_tag_filter: String,
     /// 搜索过滤词（按召唤师名、标签、备注检索）
@@ -55,84 +85,145 @@ pub struct SavedPlayersView {
     /// 编辑输入临时缓冲
     pub editing_tag_buffer: String,
     pub editing_notes_buffer: String,
-}
-
-impl Default for SavedPlayersView {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// 正在拉取下一页标志位（防止快速滚动时重复并发加载）
+    pub is_loading_more: bool,
+    /// 独立列表滚动控制与位置跟踪句柄（固定顶部后由列表独占滚动）
+    pub scroll_handle: ScrollHandle,
+    /// 顶部搜索框焦点句柄
+    pub search_focus_handle: FocusHandle,
+    /// 内联编辑标签输入框焦点句柄
+    pub edit_tag_focus_handle: FocusHandle,
+    /// 内联编辑备注输入框焦点句柄
+    pub edit_notes_focus_handle: FocusHandle,
 }
 
 impl SavedPlayersView {
-    pub fn new() -> Self {
+    pub fn new(cx: &mut App) -> Self {
+        let storage = SavedPlayersStorage::open_default().ok();
+        let (total_count, players) = if let Some(ref s) = storage {
+            let total = s.count_players(None, None, None).unwrap_or(0);
+            let list = s
+                .query_players(None, None, None, SAVED_PLAYERS_PAGE_SIZE, 0)
+                .unwrap_or_default();
+            (total, list)
+        } else {
+            (0, Vec::new())
+        };
+
         Self {
-            players: create_mock_saved_players(),
+            storage,
+            self_puuid: None,
+            players,
+            total_count,
+            current_page: 1,
             active_tag_filter: "全部".to_string(),
             search_query: String::new(),
             expanded_puuid: None,
             editing_puuid: None,
             editing_tag_buffer: String::new(),
             editing_notes_buffer: String::new(),
+            is_loading_more: false,
+            scroll_handle: ScrollHandle::new(),
+            search_focus_handle: cx.focus_handle(),
+            edit_tag_focus_handle: cx.focus_handle(),
+            edit_notes_focus_handle: cx.focus_handle(),
         }
     }
 
     /// 使用自定义数据初始化
     pub fn with_players(mut self, players: Vec<SavedPlayer>) -> Self {
+        self.total_count = players.len() as u32;
         self.players = players;
         self
     }
 
-    /// 过滤后的路人记录列表
-    pub fn filtered_players(&self) -> Vec<&SavedPlayer> {
-        let q = self.search_query.trim().to_lowercase();
-        let mut list: Vec<&SavedPlayer> = self
-            .players
-            .iter()
-            .filter(|p| {
-                // 1. 标签过滤
-                let match_tag = match self.active_tag_filter.as_str() {
-                    "全部" => true,
-                    "置顶" => p.is_pinned,
-                    target => p.tag.as_deref() == Some(target),
-                };
+    /// 重新从本地数据库加载（重置到第一页，按过滤与搜索词精准查库）
+    pub fn reload(&mut self, self_puuid: Option<&str>) {
+        self.is_loading_more = false;
+        if let Some(ref s) = self.storage {
+            let filter = if self.active_tag_filter == "全部" {
+                None
+            } else {
+                Some(self.active_tag_filter.as_str())
+            };
+            let search = if self.search_query.trim().is_empty() {
+                None
+            } else {
+                Some(self.search_query.trim())
+            };
 
-                if !match_tag {
-                    return false;
-                }
-
-                // 2. 搜索词过滤
-                if q.is_empty() {
-                    return true;
-                }
-
-                p.summoner_name.to_lowercase().contains(&q)
-                    || p.tag_line.to_lowercase().contains(&q)
-                    || p.notes.to_lowercase().contains(&q)
-                    || p.tag
-                        .as_ref()
-                        .map(|t| t.to_lowercase().contains(&q))
-                        .unwrap_or(false)
-            })
-            .collect();
-
-        // 排序规则：置顶排前，同级按最近相遇时间倒序
-        list.sort_by(|a, b| {
-            b.is_pinned
-                .cmp(&a.is_pinned)
-                .then_with(|| b.last_met_timestamp.cmp(&a.last_met_timestamp))
-        });
-
-        list
+            self.current_page = 1;
+            self.total_count = s.count_players(self_puuid, filter, search).unwrap_or(0);
+            if let Ok(list) =
+                s.query_players(self_puuid, filter, search, SAVED_PLAYERS_PAGE_SIZE, 0)
+            {
+                self.players = list;
+            }
+        }
     }
 
-    /// 累计同局相遇总局数
-    pub fn total_encounter_count(&self) -> u32 {
-        self.players.iter().map(|p| p.encountered_count).sum()
+    /// 加载下一页数据并追加至当前列表（带防重入保护）
+    pub fn load_more(&mut self) {
+        if self.is_loading_more || self.players.len() >= self.total_count as usize {
+            return;
+        }
+        self.is_loading_more = true;
+
+        if let Some(ref s) = self.storage {
+            let next_page = self.current_page + 1;
+            let offset = (next_page - 1) * SAVED_PLAYERS_PAGE_SIZE;
+            let filter = if self.active_tag_filter == "全部" {
+                None
+            } else {
+                Some(self.active_tag_filter.as_str())
+            };
+            let search = if self.search_query.trim().is_empty() {
+                None
+            } else {
+                Some(self.search_query.trim())
+            };
+            let self_p = self.self_puuid.as_deref();
+
+            if let Ok(more) =
+                s.query_players(self_p, filter, search, SAVED_PLAYERS_PAGE_SIZE, offset)
+            {
+                self.players.extend(more);
+                self.current_page = next_page;
+            }
+        }
+
+        self.is_loading_more = false;
+    }
+
+    /// 设置当前召唤师 PUUID 并刷新
+    pub fn set_self_puuid(&mut self, puuid: Option<String>) {
+        let self_p = puuid.clone();
+        self.self_puuid = puuid;
+        self.reload(self_p.as_deref());
+    }
+
+    /// 当前展示的玩家列表引用（直接基于数据库已分页排序的结果）
+    pub fn displayed_players(&self) -> Vec<&SavedPlayer> {
+        self.players.iter().collect()
     }
 
     /// 切换标签过滤
     pub fn set_filter(&mut self, tag: impl Into<String>) {
         self.active_tag_filter = tag.into();
+        let self_p = self.self_puuid.clone();
+        self.reload(self_p.as_deref());
+    }
+
+    /// 设置搜索词并刷新
+    pub fn set_search(&mut self, query: impl Into<String>) {
+        self.search_query = query.into();
+        let self_p = self.self_puuid.clone();
+        self.reload(self_p.as_deref());
+    }
+
+    /// 累计同局相遇总局数
+    pub fn total_encounter_count(&self) -> u32 {
+        self.players.iter().map(|p| p.encountered_count).sum()
     }
 
     /// 切换展开某个玩家的历史
@@ -141,17 +232,34 @@ impl SavedPlayersView {
             self.expanded_puuid = None;
         } else {
             self.expanded_puuid = Some(puuid.to_string());
+            // 如果历史记录为空，从持久化层查询最近 20 场真实相遇对局
+            if let Some(player) = self.players.iter_mut().find(|p| p.puuid == puuid) {
+                if player.encounter_history.is_empty() {
+                    if let Some(ref s) = self.storage {
+                        let self_p = self.self_puuid.as_deref();
+                        if let Ok(history) = s.query_encountered_games(puuid, self_p, 20) {
+                            player.encounter_history = history;
+                        }
+                    }
+                }
+            }
         }
     }
 
-    /// 切换玩家置顶状态
+    /// 切换玩家置顶状态（写回数据库）
     pub fn toggle_pin(&mut self, puuid: &str) {
+        let mut new_pinned = false;
         if let Some(player) = self.players.iter_mut().find(|p| p.puuid == puuid) {
             player.is_pinned = !player.is_pinned;
+            new_pinned = player.is_pinned;
+        }
+        if let Some(ref s) = self.storage {
+            let self_p = self.self_puuid.as_deref().unwrap_or("");
+            let _ = s.update_pin(puuid, self_p, new_pinned);
         }
     }
 
-    /// 删除玩家记录
+    /// 删除玩家记录（同步从数据库移除）
     pub fn remove_player(&mut self, puuid: &str) {
         self.players.retain(|p| p.puuid != puuid);
         if self.expanded_puuid.as_deref() == Some(puuid) {
@@ -159,6 +267,10 @@ impl SavedPlayersView {
         }
         if self.editing_puuid.as_deref() == Some(puuid) {
             self.editing_puuid = None;
+        }
+        if let Some(ref s) = self.storage {
+            let self_p = self.self_puuid.as_deref().unwrap_or("");
+            let _ = s.delete_player(puuid, self_p);
         }
     }
 
@@ -171,16 +283,34 @@ impl SavedPlayersView {
         }
     }
 
-    /// 保存编辑内容
+    /// 快捷选择标签
+    pub fn set_editing_tag(&mut self, tag: &str) {
+        if tag == "清除标签" {
+            self.editing_tag_buffer.clear();
+        } else {
+            self.editing_tag_buffer = tag.to_string();
+        }
+    }
+
+    /// 保存编辑内容（写回数据库）
     pub fn save_edit(&mut self, puuid: &str) {
-        if let Some(player) = self.players.iter_mut().find(|p| p.puuid == puuid) {
+        let tag_opt = {
             let t = self.editing_tag_buffer.trim();
-            player.tag = if t.is_empty() {
+            if t.is_empty() {
                 None
             } else {
                 Some(t.to_string())
-            };
-            player.notes = self.editing_notes_buffer.trim().to_string();
+            }
+        };
+        let notes_str = self.editing_notes_buffer.trim().to_string();
+
+        if let Some(player) = self.players.iter_mut().find(|p| p.puuid == puuid) {
+            player.tag = tag_opt.clone();
+            player.notes = notes_str.clone();
+        }
+        if let Some(ref s) = self.storage {
+            let self_p = self.self_puuid.as_deref().unwrap_or("");
+            let _ = s.update_tag_and_notes(puuid, self_p, tag_opt.as_deref(), &notes_str);
         }
         self.editing_puuid = None;
     }
@@ -193,50 +323,50 @@ impl SavedPlayersView {
     // ── 渲染入口 ──
 
     /// 统一完整交互式面板渲染
-    pub fn render_panel<F1, F2, F3, F4>(
+    pub fn render_panel<F>(
         &self,
-        on_filter_tag: F1,
-        on_toggle_pin: F2,
-        on_toggle_expand: F3,
-        on_remove_player: F4,
+        window: &mut Window,
+        on_action: F,
     ) -> impl IntoElement
     where
-        F1: Fn(&str, &mut Window, &mut App) + 'static + Clone,
-        F2: Fn(&str, &mut Window, &mut App) + 'static + Clone,
-        F3: Fn(&str, &mut Window, &mut App) + 'static + Clone,
-        F4: Fn(&str, &mut Window, &mut App) + 'static + Clone,
+        F: Fn(SavedPlayersAction, &mut Window, &mut App) + 'static + Clone,
     {
-        let filtered = self.filtered_players();
-        let total_players = self.players.len();
-        let total_encounters = self.total_encounter_count();
+        let displayed = self.displayed_players();
+        let total_players = self.total_count as usize;
+        let total_encounters = self.players.iter().map(|p| p.encountered_count).sum();
 
         div()
             .flex()
             .flex_col()
             .size_full()
-            .bg(theme::BG_MAIN)
             .p_4()
-            .gap_4()
+            .gap_3()
             .overflow_hidden()
-            // 顶部操作栏与统计
-            .child(self.render_header_bar(total_players, total_encounters, on_filter_tag))
-            // 极光水晶玩家列表 (Grid/Cards)
-            .child(self.render_players_content(
-                filtered,
-                on_toggle_pin,
-                on_toggle_expand,
-                on_remove_player,
-            ))
+            // 顶部基本信息卡片（固定在上方，绝不随滚动滚走）
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .child(self.render_header_bar(total_players, total_encounters, window, on_action.clone())),
+            )
+            // 下方独立滚动的卡片列表（独占单层平滑滚动）
+            .child(
+                div()
+                    .flex_1()
+                    .w_full()
+                    .min_h(px(0.0))
+                    .overflow_hidden()
+                    .child(self.render_players_content(
+                        displayed,
+                        window,
+                        on_action,
+                    )),
+            )
     }
 
     /// 无外部回调的默认渲染
-    pub fn render(&self) -> impl IntoElement {
-        self.render_panel(
-            |_tag, _win, _app| {},
-            |_puuid, _win, _app| {},
-            |_puuid, _win, _app| {},
-            |_puuid, _win, _app| {},
-        )
+    pub fn render(&self, window: &mut Window) -> impl IntoElement {
+        self.render_panel(window, |_act, _win, _app| {})
     }
 
     /// 顶部搜索、标签胶囊与统计徽章
@@ -244,11 +374,18 @@ impl SavedPlayersView {
         &self,
         total_players: usize,
         total_encounters: u32,
-        on_filter_tag: F,
+        window: &mut Window,
+        on_action: F,
     ) -> impl IntoElement
     where
-        F: Fn(&str, &mut Window, &mut App) + 'static + Clone,
+        F: Fn(SavedPlayersAction, &mut Window, &mut App) + 'static + Clone,
     {
+        let is_search_focused = self.search_focus_handle.is_focused(window);
+        let current_search = self.search_query.clone();
+        let search_focus_handle = self.search_focus_handle.clone();
+        let on_action_search = on_action.clone();
+        let on_action_clear = on_action.clone();
+
         Card::new().p(px(14.0)).child(
             div()
                 .flex()
@@ -336,7 +473,7 @@ impl SavedPlayersView {
                                 ),
                         ),
                 )
-                // 第二行：搜索输入框 + 标签过滤胶囊组
+                // 第二行：支持真实键盘打字的搜索输入框 + 标签过滤胶囊组
                 .child(
                     div()
                         .flex()
@@ -345,36 +482,94 @@ impl SavedPlayersView {
                         .gap_4()
                         .child(
                             div()
+                                .id("saved-players-search-box")
+                                .track_focus(&search_focus_handle)
                                 .flex()
                                 .items_center()
+                                .justify_between()
                                 .bg(theme::BG_INPUT)
                                 .border_1()
-                                .border_color(theme::BORDER_SECONDARY)
+                                .border_color(if is_search_focused {
+                                    Theme::AURORA_CYAN
+                                } else {
+                                    theme::BORDER_SECONDARY
+                                })
                                 .rounded(px(6.0))
                                 .px_3()
                                 .py_1()
-                                .w(px(260.0))
-                                .gap_2()
-                                .child(div().text_xs().text_color(theme::TEXT_MUTED).child("🔍"))
+                                .w(px(280.0))
+                                .cursor_text()
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, _app| {
+                                    win.focus(&search_focus_handle);
+                                })
+                                .on_key_down(move |ev: &KeyDownEvent, win, app| {
+                                    let key_str = &ev.keystroke.key;
+                                    if key_str == "enter" {
+                                        on_action_search(SavedPlayersAction::SearchSubmit, win, app);
+                                    } else if key_str == "backspace" {
+                                        let mut s = current_search.clone();
+                                        s.pop();
+                                        on_action_search(SavedPlayersAction::SearchInput(s), win, app);
+                                    } else if let Some(ref c) = ev.keystroke.key_char {
+                                        let mut s = current_search.clone();
+                                        s.push_str(c);
+                                        on_action_search(SavedPlayersAction::SearchInput(s), win, app);
+                                    } else if key_str.chars().count() == 1
+                                        && !ev.keystroke.modifiers.control
+                                        && !ev.keystroke.modifiers.alt
+                                    {
+                                        let mut s = current_search.clone();
+                                        s.push_str(key_str);
+                                        on_action_search(SavedPlayersAction::SearchInput(s), win, app);
+                                    }
+                                })
                                 .child(
                                     div()
-                                        .text_xs()
-                                        .text_color(if self.search_query.is_empty() {
-                                            theme::TEXT_MUTED
-                                        } else {
-                                            theme::TEXT_PRIMARY
-                                        })
-                                        .child(if self.search_query.is_empty() {
-                                            "搜索召唤师名 / 标签 / 备注...".to_string()
-                                        } else {
-                                            self.search_query.clone()
-                                        }),
-                                ),
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(div().text_xs().text_color(theme::TEXT_MUTED).child("🔍"))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(if self.search_query.is_empty() {
+                                                    theme::TEXT_MUTED
+                                                } else {
+                                                    theme::TEXT_PRIMARY
+                                                })
+                                                .child(if self.search_query.is_empty() {
+                                                    if is_search_focused {
+                                                        "|".to_string()
+                                                    } else {
+                                                        "搜索召唤师名 / 标签 / 备注...".to_string()
+                                                    }
+                                                } else {
+                                                    if is_search_focused {
+                                                        format!("{}|", self.search_query)
+                                                    } else {
+                                                        self.search_query.clone()
+                                                    }
+                                                }),
+                                        ),
+                                )
+                                .when(!self.search_query.is_empty(), |this| {
+                                    this.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(Theme::TEXT_MUTED)
+                                            .cursor_pointer()
+                                            .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
+                                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                on_action_clear(SavedPlayersAction::SearchClear, win, app);
+                                            })
+                                            .child("✕"),
+                                    )
+                                }),
                         )
                         .child(div().flex().items_center().gap_2().children(
                             RECOMMENDED_TAGS.iter().map(|&tag_name| {
                                 let is_active = self.active_tag_filter == tag_name;
-                                let on_filter = on_filter_tag.clone();
+                                let on_action_tag = on_action.clone();
                                 div()
                                     .px_3()
                                     .py_1()
@@ -410,7 +605,7 @@ impl SavedPlayersView {
                                         })
                                     })
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        on_filter(tag_name, win, app);
+                                        on_action_tag(SavedPlayersAction::FilterTag(tag_name.to_string()), win, app);
                                     })
                                     .child(tag_name)
                             }),
@@ -420,19 +615,16 @@ impl SavedPlayersView {
     }
 
     /// 玩家列表容器
-    fn render_players_content<'a, F1, F2, F3>(
+    fn render_players_content<'a, F>(
         &'a self,
-        filtered: Vec<&'a SavedPlayer>,
-        on_toggle_pin: F1,
-        on_toggle_expand: F2,
-        on_remove_player: F3,
+        displayed: Vec<&'a SavedPlayer>,
+        window: &mut Window,
+        on_action: F,
     ) -> AnyElement
     where
-        F1: Fn(&str, &mut Window, &mut App) + 'static + Clone,
-        F2: Fn(&str, &mut Window, &mut App) + 'static + Clone,
-        F3: Fn(&str, &mut Window, &mut App) + 'static + Clone,
+        F: Fn(SavedPlayersAction, &mut Window, &mut App) + 'static + Clone,
     {
-        if filtered.is_empty() {
+        if displayed.is_empty() {
             return div()
                 .flex_1()
                 .flex()
@@ -455,48 +647,113 @@ impl SavedPlayersView {
                 )
                 .child(
                     div().text_xs().text_color(Theme::TEXT_MUTED).child(
-                        "对局结束后曾同局的玩家将自动收录在此，您也可以给他们添加高亮标签。",
+                        "对局结束后曾同局的玩家将自动收录在此，您也可以给他们添加高亮标签与备注。",
                     ),
                 )
                 .into_any_element();
         }
 
+        let has_more = self.players.len() < self.total_count as usize;
+        let loaded_count = self.players.len();
+        let total_count = self.total_count;
+        let is_loading = self.is_loading_more;
+        let on_more_click = on_action.clone();
+        let on_more_wheel = on_action.clone();
+        let scroll_handle = self.scroll_handle.clone();
+
         div()
             .id("saved-players-scroll")
             .flex()
             .flex_col()
-            .flex_1()
+            .size_full()
             .gap_3()
             .overflow_y_scroll()
-            .children(filtered.into_iter().map(|p| {
-                self.render_player_card(
-                    p,
-                    on_toggle_pin.clone(),
-                    on_toggle_expand.clone(),
-                    on_remove_player.clone(),
-                )
+            .track_scroll(&self.scroll_handle)
+            .on_scroll_wheel(move |ev, win, app| {
+                // 滚轮向下滚动且靠近底部时，直接自动异步加载下一批路人记录，无需任何鼠标移动
+                if has_more && ev.delta.pixel_delta(px(20.0)).y < px(0.0) {
+                    let offset_y = -scroll_handle.offset().y;
+                    let max_h = scroll_handle.max_offset().height;
+                    if offset_y + px(400.0) >= max_h {
+                        on_more_wheel(SavedPlayersAction::LoadMore, win, app);
+                    }
+                }
+            })
+            .children(displayed.into_iter().map(|p| {
+                self.render_player_card(p, window, on_action.clone())
             }))
+            .when(has_more, |this| {
+                let on_more = on_more_click.clone();
+                this.child(
+                    div()
+                        .id("saved-players-infinite-sentinel")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .py_3()
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                            on_more(SavedPlayersAction::LoadMore, win, app);
+                        })
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .px_4()
+                                .py_2()
+                                .rounded_lg()
+                                .bg(Theme::CARD_BG)
+                                .border_1()
+                                .border_color(Theme::AURORA_CYAN.opacity(0.35))
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(Theme::ACCENT_PRIMARY)
+                                .child(if is_loading {
+                                    "⏳ 正在自动载入更多记录..."
+                                } else {
+                                    "⬇ 向下滚动自动加载更多记录"
+                                })
+                                .child(format!(
+                                    "({} / {} 人)",
+                                    loaded_count, total_count
+                                )),
+                        ),
+                )
+            })
+            .when(!has_more && total_count > 0, |this| {
+                this.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .py_3()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(Theme::TEXT_MUTED)
+                                .child(format!("已载入全部 {} 位路人记录", total_count)),
+                        ),
+                )
+            })
             .into_any_element()
     }
 
     /// 单个极光水晶卡片渲染
-    fn render_player_card<F1, F2, F3>(
+    fn render_player_card<F>(
         &self,
         p: &SavedPlayer,
-        on_toggle_pin: F1,
-        on_toggle_expand: F2,
-        on_remove_player: F3,
+        window: &mut Window,
+        on_action: F,
     ) -> impl IntoElement
     where
-        F1: Fn(&str, &mut Window, &mut App) + 'static + Clone,
-        F2: Fn(&str, &mut Window, &mut App) + 'static + Clone,
-        F3: Fn(&str, &mut Window, &mut App) + 'static + Clone,
+        F: Fn(SavedPlayersAction, &mut Window, &mut App) + 'static + Clone,
     {
         let is_expanded = self.expanded_puuid.as_deref() == Some(&p.puuid);
         let is_editing = self.editing_puuid.as_deref() == Some(&p.puuid);
         let loader = global_asset_loader();
 
-        // 头像与英雄图标
+        // 头像与英雄图标（纯内存高速查询，微秒级）
         let avatar_url = p.profile_icon_url();
         let avatar_img = loader.get_cached_render_image(&avatar_url);
 
@@ -512,9 +769,21 @@ impl SavedPlayersView {
         let p_puuid_pin = p.puuid.clone();
         let p_puuid_expand = p.puuid.clone();
         let p_puuid_delete = p.puuid.clone();
+        let p_puuid_edit = p.puuid.clone();
+        let p_puuid_save = p.puuid.clone();
 
-        Card::new()
-            .p(px(14.0))
+        let on_action_pin = on_action.clone();
+        let on_action_expand = on_action.clone();
+        let on_action_delete = on_action.clone();
+        let on_action_edit = on_action.clone();
+        let on_action_save = on_action.clone();
+        let on_action_cancel = on_action.clone();
+
+        div()
+            .p(px(12.0))
+            .rounded_lg()
+            .bg(Theme::CARD_BG)
+            .border_1()
             .border_color(if p.is_pinned {
                 Theme::GOLD.opacity(0.6)
             } else {
@@ -725,7 +994,11 @@ impl SavedPlayersView {
                                                     .on_mouse_down(
                                                         MouseButton::Left,
                                                         move |_ev, win, app| {
-                                                            on_toggle_pin(&p_puuid_pin, win, app);
+                                                            on_action_pin(
+                                                                SavedPlayersAction::TogglePin(p_puuid_pin.clone()),
+                                                                win,
+                                                                app,
+                                                            );
                                                         },
                                                     )
                                                     .child(if p.is_pinned {
@@ -750,6 +1023,16 @@ impl SavedPlayersView {
                                                         s.bg(Theme::CARD_BG_HOVER)
                                                             .text_color(Theme::ACCENT_PRIMARY)
                                                     })
+                                                    .on_mouse_down(
+                                                        MouseButton::Left,
+                                                        move |_ev, win, app| {
+                                                            on_action_edit(
+                                                                SavedPlayersAction::StartEdit(p_puuid_edit.clone()),
+                                                                win,
+                                                                app,
+                                                            );
+                                                        },
+                                                    )
                                                     .child("编辑"),
                                             )
                                             // 查看相遇对局展开按钮
@@ -781,8 +1064,8 @@ impl SavedPlayersView {
                                                     .on_mouse_down(
                                                         MouseButton::Left,
                                                         move |_ev, win, app| {
-                                                            on_toggle_expand(
-                                                                &p_puuid_expand,
+                                                            on_action_expand(
+                                                                SavedPlayersAction::ToggleExpand(p_puuid_expand.clone()),
                                                                 win,
                                                                 app,
                                                             );
@@ -813,8 +1096,8 @@ impl SavedPlayersView {
                                                     .on_mouse_down(
                                                         MouseButton::Left,
                                                         move |_ev, win, app| {
-                                                            on_remove_player(
-                                                                &p_puuid_delete,
+                                                            on_action_delete(
+                                                                SavedPlayersAction::RemovePlayer(p_puuid_delete.clone()),
                                                                 win,
                                                                 app,
                                                             );
@@ -827,11 +1110,25 @@ impl SavedPlayersView {
                     )
                     // 编辑浮层 / 内联表单
                     .when(is_editing, |this| {
+                        let p_puuid_save_clone = p_puuid_save.clone();
+                        let on_save_clone = on_action_save.clone();
+                        let on_cancel_clone = on_action_cancel.clone();
+                        let on_action_tag_btn = on_action.clone();
+
+                        let is_tag_focused = self.edit_tag_focus_handle.is_focused(window);
+                        let is_notes_focused = self.edit_notes_focus_handle.is_focused(window);
+                        let edit_tag_h = self.edit_tag_focus_handle.clone();
+                        let edit_notes_h = self.edit_notes_focus_handle.clone();
+                        let current_tag = self.editing_tag_buffer.clone();
+                        let current_notes = self.editing_notes_buffer.clone();
+                        let on_action_tag_key = on_action.clone();
+                        let on_action_notes_key = on_action.clone();
+
                         this.child(
                             div()
                                 .flex()
-                                .items_center()
-                                .gap_3()
+                                .flex_col()
+                                .gap_2()
                                 .p_2p5()
                                 .rounded_lg()
                                 .bg(Theme::CARD_BG_HOVER)
@@ -839,74 +1136,215 @@ impl SavedPlayersView {
                                 .border_color(Theme::AURORA_CYAN.opacity(0.4))
                                 .child(
                                     div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(Theme::TEXT_PRIMARY)
-                                        .child("标签:"),
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .child("快速标签:"),
+                                        )
+                                        .child(
+                                            div().flex().items_center().gap_1p5().children(
+                                                ["大腿", "避坑", "绝活", "演员/挂机", "清除标签"].iter().map(|&t| {
+                                                    let on_tag_click = on_action_tag_btn.clone();
+                                                    let is_selected = self.editing_tag_buffer == t || (t == "清除标签" && self.editing_tag_buffer.is_empty());
+                                                    div()
+                                                        .px_2()
+                                                        .py_0p5()
+                                                        .rounded(px(4.0))
+                                                        .bg(if is_selected { Theme::AURORA_CYAN.opacity(0.2) } else { Theme::CARD_BG })
+                                                        .border_1()
+                                                        .border_color(if is_selected { Theme::AURORA_CYAN } else { Theme::CARD_BORDER })
+                                                        .text_xs()
+                                                        .text_color(if is_selected { Theme::ACCENT_PRIMARY } else { Theme::TEXT_SECONDARY })
+                                                        .cursor_pointer()
+                                                        .hover(|s| s.bg(Theme::CARD_BG_HOVER))
+                                                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                            on_tag_click(SavedPlayersAction::SetEditTag(t.to_string()), win, app);
+                                                        })
+                                                        .child(t)
+                                                }),
+                                            ),
+                                        ),
                                 )
                                 .child(
                                     div()
-                                        .px_2()
-                                        .py_1()
-                                        .rounded(px(4.0))
-                                        .bg(theme::BG_INPUT)
-                                        .border_1()
-                                        .border_color(Theme::CARD_BORDER)
-                                        .text_xs()
-                                        .text_color(Theme::TEXT_PRIMARY)
-                                        .child(if self.editing_tag_buffer.is_empty() {
-                                            "输入标签 (如: 大腿/避坑)".to_string()
-                                        } else {
-                                            self.editing_tag_buffer.clone()
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(Theme::TEXT_PRIMARY)
-                                        .child("备注:"),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .px_2()
-                                        .py_1()
-                                        .rounded(px(4.0))
-                                        .bg(theme::BG_INPUT)
-                                        .border_1()
-                                        .border_color(Theme::CARD_BORDER)
-                                        .text_xs()
-                                        .text_color(Theme::TEXT_PRIMARY)
-                                        .child(if self.editing_notes_buffer.is_empty() {
-                                            "输入玩家特征、常用英雄或打法风格...".to_string()
-                                        } else {
-                                            self.editing_notes_buffer.clone()
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .px_3()
-                                        .py_1()
-                                        .rounded(px(4.0))
-                                        .bg(Theme::ACCENT_PRIMARY)
-                                        .text_color(hsla(0.0, 0.0, 1.0, 1.0))
-                                        .text_xs()
-                                        .cursor_pointer()
-                                        .child("保存"),
-                                )
-                                .child(
-                                    div()
-                                        .px_3()
-                                        .py_1()
-                                        .rounded(px(4.0))
-                                        .bg(Theme::CARD_BG)
-                                        .border_1()
-                                        .border_color(Theme::CARD_BORDER)
-                                        .text_xs()
-                                        .text_color(Theme::TEXT_SECONDARY)
-                                        .cursor_pointer()
-                                        .child("取消"),
+                                        .flex()
+                                        .items_center()
+                                        .gap_3()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .child("标签输入:"),
+                                        )
+                                        .child({
+                                            let h = edit_tag_h.clone();
+                                            div()
+                                                .id("edit-tag-input-box")
+                                                .track_focus(&h)
+                                                .px_2()
+                                                .py_1()
+                                                .w(px(140.0))
+                                                .rounded(px(4.0))
+                                                .bg(theme::BG_INPUT)
+                                                .border_1()
+                                                .border_color(if is_tag_focused {
+                                                    Theme::AURORA_CYAN
+                                                } else {
+                                                    Theme::CARD_BORDER
+                                                })
+                                                .cursor_text()
+                                                .on_mouse_down(MouseButton::Left, move |_ev, win, _app| {
+                                                    win.focus(&h);
+                                                })
+                                                .on_key_down(move |ev: &KeyDownEvent, win, app| {
+                                                    let key_str = &ev.keystroke.key;
+                                                    if key_str == "backspace" {
+                                                        let mut s = current_tag.clone();
+                                                        s.pop();
+                                                        on_action_tag_key(SavedPlayersAction::EditTagInput(s), win, app);
+                                                    } else if let Some(ref c) = ev.keystroke.key_char {
+                                                        let mut s = current_tag.clone();
+                                                        s.push_str(c);
+                                                        on_action_tag_key(SavedPlayersAction::EditTagInput(s), win, app);
+                                                    } else if key_str.chars().count() == 1
+                                                        && !ev.keystroke.modifiers.control
+                                                        && !ev.keystroke.modifiers.alt
+                                                    {
+                                                        let mut s = current_tag.clone();
+                                                        s.push_str(key_str);
+                                                        on_action_tag_key(SavedPlayersAction::EditTagInput(s), win, app);
+                                                    }
+                                                })
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(if self.editing_tag_buffer.is_empty() {
+                                                            Theme::TEXT_MUTED
+                                                        } else {
+                                                            Theme::TEXT_PRIMARY
+                                                        })
+                                                        .child(if self.editing_tag_buffer.is_empty() {
+                                                            if is_tag_focused {
+                                                                "|".to_string()
+                                                            } else {
+                                                                "自定义标签...".to_string()
+                                                            }
+                                                        } else {
+                                                            if is_tag_focused {
+                                                                format!("{}|", self.editing_tag_buffer)
+                                                            } else {
+                                                                self.editing_tag_buffer.clone()
+                                                            }
+                                                        }),
+                                                )
+                                        })
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .child("备注:"),
+                                        )
+                                        .child({
+                                            let h = edit_notes_h.clone();
+                                            div()
+                                                .id("edit-notes-input-box")
+                                                .track_focus(&h)
+                                                .flex_1()
+                                                .px_2()
+                                                .py_1()
+                                                .rounded(px(4.0))
+                                                .bg(theme::BG_INPUT)
+                                                .border_1()
+                                                .border_color(if is_notes_focused {
+                                                    Theme::AURORA_CYAN
+                                                } else {
+                                                    Theme::CARD_BORDER
+                                                })
+                                                .cursor_text()
+                                                .on_mouse_down(MouseButton::Left, move |_ev, win, _app| {
+                                                    win.focus(&h);
+                                                })
+                                                .on_key_down(move |ev: &KeyDownEvent, win, app| {
+                                                    let key_str = &ev.keystroke.key;
+                                                    if key_str == "backspace" {
+                                                        let mut s = current_notes.clone();
+                                                        s.pop();
+                                                        on_action_notes_key(SavedPlayersAction::EditNotesInput(s), win, app);
+                                                    } else if let Some(ref c) = ev.keystroke.key_char {
+                                                        let mut s = current_notes.clone();
+                                                        s.push_str(c);
+                                                        on_action_notes_key(SavedPlayersAction::EditNotesInput(s), win, app);
+                                                    } else if key_str.chars().count() == 1
+                                                        && !ev.keystroke.modifiers.control
+                                                        && !ev.keystroke.modifiers.alt
+                                                    {
+                                                        let mut s = current_notes.clone();
+                                                        s.push_str(key_str);
+                                                        on_action_notes_key(SavedPlayersAction::EditNotesInput(s), win, app);
+                                                    }
+                                                })
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(if self.editing_notes_buffer.is_empty() {
+                                                            Theme::TEXT_MUTED
+                                                        } else {
+                                                            Theme::TEXT_PRIMARY
+                                                        })
+                                                        .child(if self.editing_notes_buffer.is_empty() {
+                                                            if is_notes_focused {
+                                                                "|".to_string()
+                                                            } else {
+                                                                "输入玩家特征、常用英雄打法或避坑原因...".to_string()
+                                                            }
+                                                        } else {
+                                                            if is_notes_focused {
+                                                                format!("{}|", self.editing_notes_buffer)
+                                                            } else {
+                                                                self.editing_notes_buffer.clone()
+                                                            }
+                                                        }),
+                                                )
+                                        })
+                                        .child(
+                                            div()
+                                                .px_3()
+                                                .py_1()
+                                                .rounded(px(4.0))
+                                                .bg(Theme::ACCENT_PRIMARY)
+                                                .text_color(hsla(0.0, 0.0, 1.0, 1.0))
+                                                .text_xs()
+                                                .cursor_pointer()
+                                                .hover(|s| s.bg(Theme::ACCENT_PRIMARY.opacity(0.85)))
+                                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                    on_save_clone(SavedPlayersAction::SaveEdit(p_puuid_save_clone.clone()), win, app);
+                                                })
+                                                .child("保存"),
+                                        )
+                                        .child(
+                                            div()
+                                                .px_3()
+                                                .py_1()
+                                                .rounded(px(4.0))
+                                                .bg(Theme::CARD_BG)
+                                                .border_1()
+                                                .border_color(Theme::CARD_BORDER)
+                                                .text_xs()
+                                                .text_color(Theme::TEXT_SECONDARY)
+                                                .cursor_pointer()
+                                                .hover(|s| s.bg(Theme::CARD_BG_HOVER))
+                                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                    on_cancel_clone(SavedPlayersAction::CancelEdit, win, app);
+                                                })
+                                                .child("取消"),
+                                        ),
                                 ),
                         )
                     })

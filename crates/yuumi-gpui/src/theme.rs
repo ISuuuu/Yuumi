@@ -109,7 +109,7 @@ impl Theme {
 
     // ── 字体族设定 ──
     pub fn font_family() -> SharedString {
-        "Microsoft YaHei UI, Segoe UI, PingFang SC, sans-serif".into()
+        "Microsoft YaHei UI".into()
     }
 }
 

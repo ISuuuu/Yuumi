@@ -157,7 +157,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
                     game_id: 70002,
                     queue_type: "420".to_string(),
                     champion_id: 103, // 阿狸
-                    timestamp: now - (1 * day),
+                    timestamp: now - day,
                     result: Some("Win".to_string()),
                 },
                 EncounteredGameRecord {
@@ -205,7 +205,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
             champion_id: 23, // 蛮王 Tryndamere
             profile_icon_id: 742,
             encountered_count: 4,
-            last_met_timestamp: now - (1 * day),
+            last_met_timestamp: now - day,
             is_pinned: false,
             notes: "劣势易红温点投降，拒绝配合团战打龙，建议静音避让。".to_string(),
             encounter_history: vec![
@@ -213,7 +213,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
                     game_id: 70020,
                     queue_type: "420".to_string(),
                     champion_id: 23,
-                    timestamp: now - (1 * day),
+                    timestamp: now - day,
                     result: Some("Loss".to_string()),
                 },
                 EncounteredGameRecord {

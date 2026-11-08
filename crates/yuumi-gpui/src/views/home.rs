@@ -183,7 +183,7 @@ impl HomeView {
     }
 }
 
-/// 详情卡使用等宽字体，与旧版 `ui-monospace / Consolas` 回退链一致
+/// 详情卡使用等宽字体
 fn mono_font_family() -> SharedString {
-    "Consolas, Cascadia Mono, Courier New, monospace".into()
+    "Consolas".into()
 }
