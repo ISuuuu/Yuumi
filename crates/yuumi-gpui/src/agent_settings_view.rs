@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! 自动化 Agent 功能配置看板（纯白水晶极光风格）
 
 use gpui::{

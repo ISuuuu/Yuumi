@@ -1,11 +1,15 @@
 //! 对接 yuumi-core 核心对局数据模型的视图适配层
 
+use std::collections::HashMap;
 use std::path::Path;
 
 pub use yuumi_core::gameflow::match_stats::{
     compute_match_stats, MatchLike,
 };
 pub use yuumi_core::lcu::game_data::GameDataAssets;
+pub use yuumi_core::parsers::match_detail::{
+    GameDetail, GameDetailTeam, RawGameDetail,
+};
 pub use yuumi_core::parsers::match_parser::{
     LcuMatchGame, LcuMatchHistoryResponse, MatchDisplay,
 };
@@ -156,6 +160,38 @@ pub fn load_mock_matches() -> Vec<MatchItem> {
     }
 
     matches
+}
+
+/// 从 fixtures 加载真实或保底对局详情映射 (game_id -> GameDetail)
+pub fn load_fixture_game_details() -> HashMap<u64, GameDetail> {
+    let raw_fixtures = [
+        include_str!("../../../src-tauri/testdata/match/real/top-solo.json"),
+        include_str!("../../../src-tauri/testdata/match/real/mid-solo.json"),
+        include_str!("../../../src-tauri/testdata/match/real/jungle-none.json"),
+        include_str!("../../../src-tauri/testdata/match/real/bottom-carry.json"),
+        include_str!("../../../src-tauri/testdata/match/real/bottom-support.json"),
+        include_str!("../../../src-tauri/testdata/match/real/none-duo.json"),
+        include_str!("../../../src-tauri/testdata/match/real/remake.json"),
+        include_str!("../../../src-tauri/testdata/match/real/custom-3100.json"),
+    ];
+
+    let mut map = HashMap::new();
+    let assets = GameDataAssets::default();
+
+    for raw in raw_fixtures {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(raw) {
+            if let Some(games) = val["games"]["games"].as_array() {
+                for g in games {
+                    if let Ok(raw_detail) = serde_json::from_value::<RawGameDetail>(g.clone()) {
+                        let detail = raw_detail.to_game_detail(&assets);
+                        map.insert(detail.game_id, detail);
+                    }
+                }
+            }
+        }
+    }
+
+    map
 }
 
 #[cfg(test)]

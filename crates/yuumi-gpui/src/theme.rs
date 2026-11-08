@@ -10,7 +10,11 @@ pub struct Theme;
 #[allow(dead_code)]
 impl Theme {
     // ── 基础背景与面板 ──
+    pub const SIDEBAR_WIDTH: Pixels = px(48.0);
     pub const BG_APP: Hsla = const_hsla(210.0 / 360.0, 0.20, 0.98, 1.0); // 冷白底色 #f8fafc
+    pub const SIDEBAR_BG: Hsla = const_hsla(210.0 / 360.0, 0.25, 0.96, 0.92); // 侧边栏微透底色
+    pub const SIDEBAR_HOVER: Hsla = const_hsla(168.0 / 360.0, 0.60, 0.92, 0.80); // 侧边栏悬停微光
+    pub const SIDEBAR_ACTIVE: Hsla = const_hsla(174.0 / 360.0, 0.85, 0.92, 0.95); // 侧边栏激活底色
     pub const CARD_BG: Hsla = const_hsla(0.0, 0.0, 1.0, 0.78); // 半透明纯白卡片
     pub const CARD_BG_HOVER: Hsla = const_hsla(0.0, 0.0, 1.0, 0.92);
     pub const CARD_BORDER: Hsla = const_hsla(214.0 / 360.0, 0.32, 0.91, 0.85); // 柔和冷灰边框 #e2e8f0
@@ -66,6 +70,8 @@ impl Theme {
     pub const PREMADE_COLOR_2: Hsla = const_hsla(38.0 / 360.0, 0.95, 0.45, 1.0);  // 琥珀金
     pub const PREMADE_COLOR_3: Hsla = const_hsla(270.0 / 360.0, 0.80, 0.55, 1.0); // 罗兰紫
     pub const PREMADE_COLOR_4: Hsla = const_hsla(15.0 / 360.0, 0.95, 0.52, 1.0);  // 珊瑚橙
+    pub const GOLD: Hsla = const_hsla(38.0 / 360.0, 0.95, 0.45, 1.0);
+    pub const HOVER_BG: Hsla = const_hsla(210.0 / 360.0, 0.20, 0.95, 0.6);
 
     pub fn premade_color(idx: usize) -> Hsla {
         match idx % 4 {
@@ -81,3 +87,27 @@ impl Theme {
         "Microsoft YaHei UI, Segoe UI, PingFang SC, sans-serif".into()
     }
 }
+
+// 兼容别名与全局快捷常量
+pub const SIDEBAR_WIDTH: Pixels = Theme::SIDEBAR_WIDTH;
+pub const BG_MAIN: Hsla = Theme::BG_APP;
+pub const BG_CARD: Hsla = Theme::CARD_BG;
+pub const BG_CARD_HOVER: Hsla = Theme::CARD_BG_HOVER;
+pub const BG_ELEVATED: Hsla = Theme::CARD_BG_HOVER;
+pub const BG_INPUT: Hsla = const_hsla(0.0, 0.0, 1.0, 0.95);
+pub const SIDEBAR_BG: Hsla = Theme::SIDEBAR_BG;
+pub const SIDEBAR_HOVER: Hsla = Theme::SIDEBAR_HOVER;
+pub const SIDEBAR_ACTIVE: Hsla = Theme::SIDEBAR_ACTIVE;
+pub const PRIMARY: Hsla = Theme::ACCENT_PRIMARY;
+pub const TEXT_PRIMARY: Hsla = Theme::TEXT_PRIMARY;
+pub const TEXT_SECONDARY: Hsla = Theme::TEXT_SECONDARY;
+pub const TEXT_MUTED: Hsla = Theme::TEXT_MUTED;
+pub const TEXT_ON_PRIMARY: Hsla = const_hsla(0.0, 0.0, 1.0, 1.0);
+pub const BORDER_SECONDARY: Hsla = Theme::CARD_BORDER;
+pub const WIN_PRIMARY: Hsla = Theme::WIN_BAR;
+pub const WIN_MUTED: Hsla = Theme::WIN_BG;
+pub const WIN_BORDER: Hsla = Theme::WIN_BORDER;
+pub const LOSS_PRIMARY: Hsla = Theme::LOSS_BAR;
+pub const LOSS_MUTED: Hsla = Theme::LOSS_BG;
+pub const PRIMARY_MUTED: Hsla = Theme::ACCENT_LIGHT;
+pub const GOLD: Hsla = Theme::PREMADE_COLOR_2;

@@ -143,6 +143,36 @@ pub fn set_window_clickthrough(hwnd: HWND, enable: bool) {
     }
 }
 
+/// 在 Windows 11 上启用 Mica 亚克力材质极光半透明
+pub fn apply_mica_or_acrylic(hwnd: HWND) {
+    unsafe {
+        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE};
+        // DWMSBT_ACRYLIC = 3, DWMSBT_MAINWINDOW = 2 (Mica)
+        let backdrop_type: u32 = 2; // Mica
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_SYSTEMBACKDROP_TYPE,
+            &backdrop_type as *const _ as *const _,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
+
+/// 在 Windows 11 上启用原生圆角
+pub fn set_window_rounded_corners(hwnd: HWND) {
+    unsafe {
+        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE};
+        // DWMWCP_ROUND = 2
+        let preference: u32 = 2;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &preference as *const _ as *const _,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

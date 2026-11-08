@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
-    div, hsla, px, Bounds, Context, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Point, Render, Size, StatefulInteractiveElement, Styled, Window, WindowBounds,
+    div, px, App, Bounds, Context, InteractiveElement, IntoElement,
+    ParentElement, Point, Render, Size, StatefulInteractiveElement, Styled, Window, WindowBounds,
     WindowHandle, WindowOptions, Application,
 };
 use std::path::Path;
@@ -17,36 +17,40 @@ pub mod platform;
 pub mod services;
 mod theme;
 mod tray;
+pub mod views;
 
-use agent_settings_view::AgentSettingsView;
 use bench_overlay::BenchOverlayView;
-use career_view::{CareerHeaderStats, CareerView};
 use components::input::SearchInput;
+use components::sidebar::Sidebar;
 use components::titlebar::TitleBar;
 use game_info_view::{load_mock_game_info, GameInfoData, GameInfoView};
-use match_model::{load_real_fixtures, MatchItem};
+use match_model::{load_fixture_game_details, load_real_fixtures, MatchItem};
 use services::{ConnectionStatus, LiveLcuEvent, LiveLcuService};
 use theme::Theme;
 use tray::TrayManager;
+use views::career::{CareerHeaderStats, CareerView};
+use views::home::HomeView;
+use views::saved_players::SavedPlayersView;
+use views::search::SearchView;
+use views::settings::SettingsView;
+use views::tools::ToolsView;
+use views::Route;
 
 pub const MAIN_WINDOW_TITLE: &str = "Yuumi · 英雄联盟对局助手 (GPUI 高性能原生内核)";
 pub const BENCH_WINDOW_TITLE: &str = "Yuumi - 大乱斗板凳席悬浮窗";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TabPage {
-    GameInfo,
-    Career,
-    Settings,
-}
 
 pub struct MainWindow {
     titlebar: TitleBar,
     search_input: SearchInput,
     matches: Vec<MatchItem>,
     stats: CareerHeaderStats,
+    career_view: CareerView,
     game_info: GameInfoData,
-    settings_view: AgentSettingsView,
-    current_tab: TabPage,
+    tools_view: ToolsView,
+    search_view: SearchView,
+    saved_players_view: SavedPlayersView,
+    settings_view: SettingsView,
+    current_route: Route,
     _tray: Option<TrayManager>,
     overlay_window: Option<WindowHandle<BenchOverlayView>>,
     live_service: LiveLcuService,
@@ -67,8 +71,13 @@ impl MainWindow {
         };
 
         let stats = CareerHeaderStats::compute(&matches);
+        let career_view = CareerView::new();
         let game_info = load_mock_game_info();
-        let settings_view = AgentSettingsView::new();
+        let tools_view = ToolsView::new();
+        let mut search_view = SearchView::new().with_matches(matches.clone());
+        search_view.details_cache = load_fixture_game_details();
+        let saved_players_view = SavedPlayersView::new();
+        let settings_view = SettingsView::new();
         let tray = TrayManager::new().ok();
         let search_input = SearchInput::new("输入召唤师名 / 英雄过滤...");
 
@@ -110,9 +119,13 @@ impl MainWindow {
             search_input,
             matches,
             stats,
+            career_view,
             game_info,
+            tools_view,
+            search_view,
+            saved_players_view,
             settings_view,
-            current_tab: TabPage::GameInfo,
+            current_route: Route::Home,
             _tray: tray,
             overlay_window: None,
             live_service,
@@ -123,12 +136,18 @@ impl MainWindow {
     pub fn handle_live_event(&mut self, event: LiveLcuEvent, cx: &mut Context<Self>) {
         match event {
             LiveLcuEvent::ConnectionChanged(status) => {
+                if let ConnectionStatus::Connected { summoner, .. } = &status {
+                    if let Some(s) = summoner.as_ref() {
+                        self.career_view.summoner = Some(s.clone());
+                    }
+                }
                 self.connection_status = status;
                 cx.notify();
             }
             LiveLcuEvent::MatchHistoryLoaded(matches) => {
                 let items: Vec<MatchItem> = matches.into_iter().map(MatchItem::new).collect();
                 self.stats = CareerHeaderStats::compute(&items);
+                self.search_view.matches = items.clone();
                 self.matches = items;
                 cx.notify();
             }
@@ -152,44 +171,96 @@ impl MainWindow {
         cx.notify();
     }
 
-    pub fn switch_tab(&mut self, tab: TabPage, cx: &mut Context<Self>) {
-        self.current_tab = tab;
+    pub fn switch_route(&mut self, route: Route, cx: &mut Context<Self>) {
+        self.current_route = route;
         cx.notify();
     }
 
     pub fn toggle_auto_accept(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.match_config.auto_accept = !self.settings_view.match_config.auto_accept;
-        let _ = self.live_service.auto_match_cfg.send(self.settings_view.match_config.clone());
+        self.tools_view.match_config.auto_accept = !self.tools_view.match_config.auto_accept;
+        let _ = self.live_service.auto_match_cfg.send(self.tools_view.match_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_reconnect(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.match_config.auto_reconnect = !self.settings_view.match_config.auto_reconnect;
-        let _ = self.live_service.auto_match_cfg.send(self.settings_view.match_config.clone());
+        self.tools_view.match_config.auto_reconnect = !self.tools_view.match_config.auto_reconnect;
+        let _ = self.live_service.auto_match_cfg.send(self.tools_view.match_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_play_again(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.match_config.auto_play_again = !self.settings_view.match_config.auto_play_again;
-        let _ = self.live_service.auto_match_cfg.send(self.settings_view.match_config.clone());
+        self.tools_view.match_config.auto_play_again = !self.tools_view.match_config.auto_play_again;
+        let _ = self.live_service.auto_match_cfg.send(self.tools_view.match_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_pick(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.bp_config.auto_pick = !self.settings_view.bp_config.auto_pick;
-        let _ = self.live_service.auto_bp_cfg.send(self.settings_view.bp_config.clone());
+        self.tools_view.bp_config.auto_pick = !self.tools_view.bp_config.auto_pick;
+        let _ = self.live_service.auto_bp_cfg.send(self.tools_view.bp_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_ban(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.bp_config.auto_ban = !self.settings_view.bp_config.auto_ban;
-        let _ = self.live_service.auto_bp_cfg.send(self.settings_view.bp_config.clone());
+        self.tools_view.bp_config.auto_ban = !self.tools_view.bp_config.auto_ban;
+        let _ = self.live_service.auto_bp_cfg.send(self.tools_view.bp_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_spell(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.bp_config.auto_spell = !self.settings_view.bp_config.auto_spell;
-        let _ = self.live_service.auto_bp_cfg.send(self.settings_view.bp_config.clone());
+        self.tools_view.bp_config.auto_spell = !self.tools_view.bp_config.auto_spell;
+        let _ = self.live_service.auto_bp_cfg.send(self.tools_view.bp_config.clone());
+        cx.notify();
+    }
+
+    pub fn toggle_bench_overlay_setting(&mut self, cx: &mut Context<Self>) {
+        self.tools_view.bench_overlay = !self.tools_view.bench_overlay;
+        cx.notify();
+    }
+
+    pub fn toggle_auto_trade(&mut self, cx: &mut Context<Self>) {
+        self.tools_view.auto_trade = !self.tools_view.auto_trade;
+        cx.notify();
+    }
+
+    pub fn toggle_auto_honor(&mut self, cx: &mut Context<Self>) {
+        self.tools_view.auto_honor = !self.tools_view.auto_honor;
+        self.tools_view.match_config.auto_honor = self.tools_view.auto_honor;
+        let _ = self.live_service.auto_match_cfg.send(self.tools_view.match_config.clone());
+        cx.notify();
+    }
+
+    pub fn toggle_close_to_tray(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.close_to_tray = !self.settings_view.close_to_tray;
+        cx.notify();
+    }
+
+    pub fn toggle_start_with_windows(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.start_with_windows = !self.settings_view.start_with_windows;
+        cx.notify();
+    }
+
+    pub fn toggle_minimize_on_game(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.minimize_on_game_start = !self.settings_view.minimize_on_game_start;
+        cx.notify();
+    }
+
+    pub fn toggle_mica(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.mica_enabled = !self.settings_view.mica_enabled;
+        cx.notify();
+    }
+
+    pub fn toggle_hide_tft(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.hide_tft = !self.settings_view.hide_tft;
+        cx.notify();
+    }
+
+    pub fn toggle_hide_saved_players(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.hide_saved_players = !self.settings_view.hide_saved_players;
+        cx.notify();
+    }
+
+    pub fn select_theme_index(&mut self, idx: usize, cx: &mut Context<Self>) {
+        self.settings_view.selected_theme_index = idx;
         cx.notify();
     }
 
@@ -224,15 +295,13 @@ impl MainWindow {
             if let Ok(h) = new_handle {
                 self.overlay_window = Some(h);
                 // 异步将板凳席小窗设置为 Windows 原生置顶与工具窗口（隐藏任务栏图标）
-                cx.background_executor()
-                    .spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        if let Some(hwnd) = platform::find_window_by_title(BENCH_WINDOW_TITLE) {
-                            platform::set_window_topmost(hwnd, true);
-                            platform::set_window_toolwindow(hwnd);
-                        }
-                    })
-                    .detach();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    if let Some(hwnd) = platform::find_window_by_title(BENCH_WINDOW_TITLE) {
+                        platform::set_window_topmost(hwnd, true);
+                        platform::set_window_toolwindow(hwnd);
+                    }
+                });
             }
             cx.notify();
         }
@@ -241,11 +310,9 @@ impl MainWindow {
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let matches_count = self.matches.len();
         let stats = &self.stats;
-        let is_overlay_open = self.overlay_window.is_some();
+        let _is_overlay_open = self.overlay_window.is_some();
         let view_entity = cx.entity().clone();
-        let search_view = cx.entity().clone();
 
         div()
             .size_full()
@@ -265,284 +332,206 @@ impl Render for MainWindow {
                     app.quit();
                 },
             ))
-            // 2. 顶部快捷操作栏（搜索框、选项卡切换、悬浮窗开关、状态指标）
+            // 2. 主体区域：48px 极光侧边栏 + 主路由视口
             .child(
                 div()
-                    .w_full()
-                    .px_4()
-                    .py_2()
-                    .bg(Theme::CARD_BG)
-                    .border_b_1()
-                    .border_color(Theme::CARD_BORDER)
                     .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .size_2()
-                                            .rounded_full()
-                                            .bg(match &self.connection_status {
-                                                ConnectionStatus::Connected { .. } => hsla(160.0 / 360.0, 0.85, 0.45, 1.0),
-                                                ConnectionStatus::Connecting => hsla(45.0 / 360.0, 0.90, 0.50, 1.0),
-                                                ConnectionStatus::Disconnected => hsla(0.0, 0.75, 0.55, 1.0),
-                                            }),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
-                                            .child(match &self.connection_status {
-                                                ConnectionStatus::Connected { summoner, .. } => {
-                                                    if let Some(s) = summoner.as_ref() {
-                                                        format!("LCU 已连接: {}", s.full_name())
-                                                    } else {
-                                                        "LCU 已连接".to_string()
-                                                    }
-                                                }
-                                                ConnectionStatus::Connecting => "LCU 连接中...".to_string(),
-                                                ConnectionStatus::Disconnected => "LCU 未启动 (离线)".to_string(),
-                                            }),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .px_2()
-                                    .py(px(2.0))
-                                    .rounded_md()
-                                    .bg(Theme::BADGE_BG)
-                                    .text_xs()
-                                    .text_color(Theme::TEXT_SECONDARY)
-                                    .child(format!("{} 场对局记录", matches_count)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            // 选项卡切换：对局信息 (GameInfo) / 个人生涯 (Career) / 自动化设置 (Settings)
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .p(px(2.0))
-                                    .rounded_lg()
-                                    .bg(Theme::BADGE_BG)
-                                    .child(
-                                        div()
-                                            .id("tab-game-info")
-                                            .px_3()
-                                            .py(px(3.0))
-                                            .rounded_md()
-                                            .bg(if self.current_tab == TabPage::GameInfo {
-                                                Theme::CARD_BG_HOVER
-                                            } else {
-                                                hsla(0.0, 0.0, 0.0, 0.0)
-                                            })
-                                            .border_1()
-                                            .border_color(if self.current_tab == TabPage::GameInfo {
-                                                Theme::CARD_BORDER
-                                            } else {
-                                                hsla(0.0, 0.0, 0.0, 0.0)
-                                            })
-                                            .text_xs()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(if self.current_tab == TabPage::GameInfo {
-                                                Theme::ACCENT_PRIMARY
-                                            } else {
-                                                Theme::TEXT_SECONDARY
-                                            })
-                                            .cursor_pointer()
-                                            .on_mouse_down(MouseButton::Left, cx.listener(
-                                                |this, _ev, _window, cx| {
-                                                    this.switch_tab(TabPage::GameInfo, cx);
-                                                },
-                                            ))
-                                            .child("⚔️ 10人对局看板"),
-                                    )
-                                    .child(
-                                        div()
-                                            .id("tab-career")
-                                            .px_3()
-                                            .py(px(3.0))
-                                            .rounded_md()
-                                            .bg(if self.current_tab == TabPage::Career {
-                                                Theme::CARD_BG_HOVER
-                                            } else {
-                                                hsla(0.0, 0.0, 0.0, 0.0)
-                                            })
-                                            .border_1()
-                                            .border_color(if self.current_tab == TabPage::Career {
-                                                Theme::CARD_BORDER
-                                            } else {
-                                                hsla(0.0, 0.0, 0.0, 0.0)
-                                            })
-                                            .text_xs()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(if self.current_tab == TabPage::Career {
-                                                Theme::ACCENT_PRIMARY
-                                            } else {
-                                                Theme::TEXT_SECONDARY
-                                            })
-                                            .cursor_pointer()
-                                            .on_mouse_down(MouseButton::Left, cx.listener(
-                                                |this, _ev, _window, cx| {
-                                                    this.switch_tab(TabPage::Career, cx);
-                                                },
-                                            ))
-                                            .child("📊 生涯历史"),
-                                    )
-                                    .child(
-                                        div()
-                                            .id("tab-settings")
-                                            .px_3()
-                                            .py(px(3.0))
-                                            .rounded_md()
-                                            .bg(if self.current_tab == TabPage::Settings {
-                                                Theme::CARD_BG_HOVER
-                                            } else {
-                                                hsla(0.0, 0.0, 0.0, 0.0)
-                                            })
-                                            .border_1()
-                                            .border_color(if self.current_tab == TabPage::Settings {
-                                                Theme::CARD_BORDER
-                                            } else {
-                                                hsla(0.0, 0.0, 0.0, 0.0)
-                                            })
-                                            .text_xs()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(if self.current_tab == TabPage::Settings {
-                                                Theme::ACCENT_PRIMARY
-                                            } else {
-                                                Theme::TEXT_SECONDARY
-                                            })
-                                            .cursor_pointer()
-                                            .on_mouse_down(MouseButton::Left, cx.listener(
-                                                |this, _ev, _window, cx| {
-                                                    this.switch_tab(TabPage::Settings, cx);
-                                                },
-                                            ))
-                                            .child("⚙️ 自动流程"),
-                                    ),
-                            )
-                            // 搜索输入组件
-                            .child(self.search_input.render(move |_w, app| {
-                                search_view.update(app, |this, cx| {
-                                    this.clear_search(cx);
-                                });
-                            }))
-                            // 悬浮窗开关
-                            .child(
-                                div()
-                                    .id("btn-toggle-overlay")
-                                    .px_3()
-                                    .py(px(4.0))
-                                    .rounded_md()
-                                    .bg(if is_overlay_open {
-                                        Theme::ACCENT_LIGHT
-                                    } else {
-                                        Theme::BADGE_BG
-                                    })
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(if is_overlay_open {
-                                        Theme::ACCENT_PRIMARY
-                                    } else {
-                                        Theme::TEXT_PRIMARY
-                                    })
-                                    .cursor_pointer()
-                                    .hover(|s| s.bg(Theme::ACCENT_LIGHT))
-                                    .on_mouse_down(MouseButton::Left, cx.listener(
-                                        |this, _ev, window, cx| {
-                                            this.toggle_bench_overlay(window, cx);
-                                        },
-                                    ))
-                                    .child(if is_overlay_open {
-                                        "关闭板凳席悬浮窗"
-                                    } else {
-                                        "🪟 打开大乱斗板凳席小窗"
-                                    }),
-                            ),
-                    ),
-            )
-            // 3. 主内容区域：垂直滚动容器
-            .child(
-                div()
-                    .id("main-scroll-view")
+                    .flex_row()
                     .flex_1()
-                    .overflow_y_scroll()
-                    .p_4()
-                    .when(self.current_tab == TabPage::GameInfo, |el| {
-                        el.child(GameInfoView::render(&self.game_info))
-                    })
-                    .when(self.current_tab == TabPage::Career, |el| {
-                        el.child(CareerView::render_header(stats))
-                            .children(self.matches.iter().enumerate().map(|(idx, m)| {
+                    .overflow_hidden()
+                    // 左侧 48px 导航侧边栏
+                    .child(Sidebar::render(self.current_route, {
+                        let entity = view_entity.clone();
+                        move |route, _window, app| {
+                            entity.update(app, |this, cx| {
+                                this.switch_route(route, cx);
+                            });
+                        }
+                    }))
+                    // 右侧主视口
+                    .child(
+                        div()
+                            .id("main-scroll-view")
+                            .flex_1()
+                            .h_full()
+                            .overflow_y_scroll()
+                            .when(self.current_route == Route::Home, |el| {
+                                let entity = view_entity.clone();
+                                el.p_4().child(HomeView::render(
+                                    &self.connection_status,
+                                    move |target_route, _window, app| {
+                                        entity.update(app, |this, cx| {
+                                            this.switch_route(target_route, cx);
+                                        });
+                                    },
+                                ))
+                            })
+                            .when(self.current_route == Route::Career, |el| {
                                 let view = view_entity.clone();
-                                CareerView::render_match_card(
-                                    m,
-                                    idx,
-                                    move |clicked_idx, _window, app| {
+                                let view_matches = view_entity.clone();
+                                el.child(self.career_view.render(
+                                    &self.matches,
+                                    stats,
+                                    move |target_tab, _window, app| {
                                         view.update(app, |this, cx| {
+                                            this.career_view.active_tab = target_tab;
+                                            cx.notify();
+                                        });
+                                    },
+                                    move |clicked_idx, _window, app| {
+                                        view_matches.update(app, |this, cx| {
                                             this.toggle_card_expanded(clicked_idx, cx);
                                         });
                                     },
-                                )
-                            }))
-                    })
-                    .when(self.current_tab == TabPage::Settings, |el| {
-                        let view = view_entity.clone();
-                        let p_accept = {
-                            let v = view.clone();
-                            move |_ev: &_, _win: &mut _, app: &mut _| {
-                                v.update(app, |this, cx| this.toggle_auto_accept(cx));
-                            }
-                        };
-                        let p_reconn = {
-                            let v = view.clone();
-                            move |_ev: &_, _win: &mut _, app: &mut _| {
-                                v.update(app, |this, cx| this.toggle_auto_reconnect(cx));
-                            }
-                        };
-                        let p_again = {
-                            let v = view.clone();
-                            move |_ev: &_, _win: &mut _, app: &mut _| {
-                                v.update(app, |this, cx| this.toggle_auto_play_again(cx));
-                            }
-                        };
-                        let p_pick = {
-                            let v = view.clone();
-                            move |_ev: &_, _win: &mut _, app: &mut _| {
-                                v.update(app, |this, cx| this.toggle_auto_pick(cx));
-                            }
-                        };
-                        let p_ban = {
-                            let v = view.clone();
-                            move |_ev: &_, _win: &mut _, app: &mut _| {
-                                v.update(app, |this, cx| this.toggle_auto_ban(cx));
-                            }
-                        };
-                        let p_spell = {
-                            let v = view.clone();
-                            move |_ev: &_, _win: &mut _, app: &mut _| {
-                                v.update(app, |this, cx| this.toggle_auto_spell(cx));
-                            }
-                        };
-                        el.child(self.settings_view.render_panel(
-                            p_accept, p_reconn, p_again, p_pick, p_ban, p_spell,
-                        ))
-                    }),
+                                ))
+                            })
+                            .when(self.current_route == Route::GameInfo, |el| {
+                                el.p_4().child(GameInfoView::render(&self.game_info))
+                            })
+                            .when(self.current_route == Route::Search, |el| {
+                                let view = view_entity.clone();
+                                let on_select_match = {
+                                    let v = view.clone();
+                                    move |game_id: u64, _win: &mut Window, app: &mut App| {
+                                        v.update(app, |this, cx| {
+                                            this.search_view.selected_game_id = Some(game_id);
+                                            if !this.search_view.details_cache.contains_key(&game_id) {
+                                                if let Some(first_detail) = this.search_view.details_cache.values().next().cloned() {
+                                                    let mut fallback = first_detail;
+                                                    fallback.game_id = game_id;
+                                                    this.search_view.details_cache.insert(game_id, fallback);
+                                                }
+                                            }
+                                            cx.notify();
+                                        });
+                                    }
+                                };
+                                let on_filter_queue = {
+                                    let v = view.clone();
+                                    move |qid: Option<i32>, _win: &mut Window, app: &mut App| {
+                                        v.update(app, |this, cx| {
+                                            this.search_view.active_queue_filter = qid;
+                                            cx.notify();
+                                        });
+                                    }
+                                };
+                                el.child(self.search_view.render(on_select_match, on_filter_queue))
+                            })
+                            .when(self.current_route == Route::SavedPlayers, |el| {
+                                el.child(self.saved_players_view.render())
+                            })
+                            .when(self.current_route == Route::Tools, |el| {
+                                let view = view_entity.clone();
+                                let p_accept = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_auto_accept(cx));
+                                    }
+                                };
+                                let p_reconn = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_auto_reconnect(cx));
+                                    }
+                                };
+                                let p_again = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_auto_play_again(cx));
+                                    }
+                                };
+                                let p_pick = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_auto_pick(cx));
+                                    }
+                                };
+                                let p_ban = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_auto_ban(cx));
+                                    }
+                                };
+                                let p_spell = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_auto_spell(cx));
+                                    }
+                                };
+                                let p_bench = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_bench_overlay_setting(cx));
+                                    }
+                                };
+                                let p_trade = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_auto_trade(cx));
+                                    }
+                                };
+                                let p_honor = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_auto_honor(cx));
+                                    }
+                                };
+
+                                el.child(self.tools_view.render_panel(
+                                    p_accept, p_reconn, p_again, p_pick, p_ban, p_spell,
+                                    p_bench, p_trade, p_honor,
+                                ))
+                            })
+                            .when(self.current_route == Route::Settings, |el| {
+                                let view = view_entity.clone();
+                                let p_close_tray = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_close_to_tray(cx));
+                                    }
+                                };
+                                let p_start_win = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_start_with_windows(cx));
+                                    }
+                                };
+                                let p_min_game = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_minimize_on_game(cx));
+                                    }
+                                };
+                                let p_mica = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_mica(cx));
+                                    }
+                                };
+                                let p_hide_tft = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_hide_tft(cx));
+                                    }
+                                };
+                                let p_hide_saved = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.toggle_hide_saved_players(cx));
+                                    }
+                                };
+                                let p_theme = {
+                                    let v = view.clone();
+                                    move |idx: usize, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| this.select_theme_index(idx, cx));
+                                    }
+                                };
+
+                                el.child(self.settings_view.render_panel(
+                                    p_close_tray, p_start_win, p_min_game, p_mica, p_hide_tft, p_hide_saved, p_theme
+                                ))
+                            }),
+                    ),
             )
     }
 }
@@ -558,7 +547,7 @@ fn main() {
     // 1. Windows 单实例互斥量检测（Named Mutex）
     let mutex_name = "Global\\Yuumi_GPUI_SingleInstance_Mutex";
     let _instance_guard = match platform::acquire_single_instance(mutex_name) {
-        Ok(guard) => guard,
+        Ok(guard) => Some(guard),
         Err(platform::SingleInstanceError::AlreadyRunning) => {
             eprintln!("检测到 Yuumi 已在运行中，激活现有窗口...");
             if let Some(hwnd) = platform::find_window_by_title(MAIN_WINDOW_TITLE) {
@@ -567,37 +556,50 @@ fn main() {
             return;
         }
         Err(e) => {
-            eprintln!("互斥量检测失败: {}", e);
-            return;
+            eprintln!("创建单实例互斥量警告: {:?}", e);
+            None
         }
     };
 
+    // 2. 初始化平台日志系统（输出到标准错误与调试输出）
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    log::info!("Yuumi GPUI 原生 Direct3D 11/DirectWrite 渲染宿主正在启动...");
+
+    // 3. 创建 GPUI 原生应用程序宿主
     let app = Application::new();
 
     app.run(move |cx| {
+        // 创建主应用窗口（无边框，极光现代无缝阴影，居中显示）
         let window_options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: Point {
-                    x: px(150.0),
+                    x: px(160.0),
                     y: px(80.0),
                 },
                 size: Size {
-                    width: px(1120.0),
-                    height: px(780.0),
+                    width: px(1080.0),
+                    height: px(720.0),
                 },
             })),
-            titlebar: None,
+            titlebar: None, // 彻底禁用操作系统传统标题栏，启用我们纯手工打磨的极光水晶透明标题栏
             focus: true,
             is_movable: true,
             ..Default::default()
         };
 
-        let window_res = cx.open_window(window_options, |_window, cx| {
-            cx.new(MainWindow::new)
+        let window_handle = cx
+            .open_window(window_options, |_window, cx| cx.new(MainWindow::new))
+            .expect("创建 Yuumi GPUI 主窗口失败");
+
+        // 异步应用 Windows 11 Mica / DwmExtendFrameIntoClientArea 亚克力极光特效与圆角
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            if let Some(hwnd) = platform::find_window_by_title(MAIN_WINDOW_TITLE) {
+                platform::apply_mica_or_acrylic(hwnd);
+                platform::set_window_rounded_corners(hwnd);
+            }
         });
 
-        if let Err(e) = window_res {
-            eprintln!("打开 GPUI 窗口失败: {:?}", e);
-        }
+        let _ = window_handle;
     });
 }
