@@ -515,6 +515,7 @@ impl CareerView {
                 disenchant_value: 0,
                 tile_path: None,
                 is_openable: true,
+                ..Default::default()
             },
             LootInventoryItem {
                 loot_id: "CHEST_masterwork".to_string(),
@@ -526,6 +527,7 @@ impl CareerView {
                 disenchant_value: 0,
                 tile_path: None,
                 is_openable: true,
+                ..Default::default()
             },
             LootInventoryItem {
                 loot_id: "CHAMPION_RENTAL_350".to_string(),
@@ -537,6 +539,7 @@ impl CareerView {
                 disenchant_value: 1260,
                 tile_path: None,
                 is_openable: false,
+                ..Default::default()
             },
             LootInventoryItem {
                 loot_id: "SKIN_RENTAL_157001".to_string(),
@@ -548,6 +551,7 @@ impl CareerView {
                 disenchant_value: 1050,
                 tile_path: None,
                 is_openable: false,
+                ..Default::default()
             },
         ]
     }
