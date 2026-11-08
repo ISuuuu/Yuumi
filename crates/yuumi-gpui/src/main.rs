@@ -85,10 +85,11 @@ impl MainWindow {
         let asset_cache = std::sync::Arc::new(yuumi_core::lcu::asset_cache::AssetCache::default());
         asset_loader::init_global_asset_loader(asset_cache.clone());
         let live_service = LiveLcuService::new(asset_cache);
+
+        // 优先订阅 LCU 领域事件与连接状态，避免漏掉启动瞬间的广播消息
+        let mut event_rx = live_service.subscribe_events();
         live_service.start();
 
-        // 订阅 LCU 领域事件与连接状态并在 GPUI 主调度器中消费
-        let mut event_rx = live_service.subscribe_events();
         cx.spawn(async move |entity, cx| {
             while let Ok(event) = event_rx.recv().await {
                 let event_clone = event.clone();
@@ -146,10 +147,69 @@ impl MainWindow {
                 cx.notify();
             }
             LiveLcuEvent::MatchHistoryLoaded(matches) => {
+                log::info!("[MainWindow] 接收到真实战绩数据: count={}", matches.len());
                 let items: Vec<MatchItem> = matches.into_iter().map(MatchItem::new).collect();
                 self.stats = CareerHeaderStats::compute(&items);
                 self.search_view.matches = items.clone();
+
+                // 异步预热战绩中的新资源（英雄头像、技能、装备）
+                let mut asset_paths = Vec::new();
+                for m in &items {
+                    if !m.display.champion_icon_url.is_empty() {
+                        asset_paths.push(m.display.champion_icon_url.clone());
+                    }
+                    if !m.display.spell1_icon_url.is_empty() {
+                        asset_paths.push(m.display.spell1_icon_url.clone());
+                    }
+                    if !m.display.spell2_icon_url.is_empty() {
+                        asset_paths.push(m.display.spell2_icon_url.clone());
+                    }
+                    for item_id in &m.display.item_ids {
+                        if *item_id > 0 {
+                            asset_paths.push(format!("/lol-game-data/assets/v1/items/{}.png", item_id));
+                        }
+                    }
+                }
+                cx.background_executor()
+                    .spawn(async move {
+                        let loader = asset_loader::global_asset_loader();
+                        for path in asset_paths {
+                            let _ = loader.load_render_image(&path).await;
+                        }
+                    })
+                    .detach();
+
                 self.matches = items;
+                cx.notify();
+            }
+            LiveLcuEvent::ChampionMasteryLoaded(masteries) => {
+                log::info!("[MainWindow] 接收到真实熟练度数据: count={}", masteries.len());
+                let asset_paths: Vec<String> = masteries
+                    .iter()
+                    .map(|m| m.champion_icon_url.clone())
+                    .filter(|u| !u.is_empty())
+                    .collect();
+                cx.background_executor()
+                    .spawn(async move {
+                        let loader = asset_loader::global_asset_loader();
+                        for path in asset_paths {
+                            let _ = loader.load_render_image(&path).await;
+                        }
+                    })
+                    .detach();
+
+                self.career_view.mastery_list = masteries;
+                cx.notify();
+            }
+            LiveLcuEvent::LootSummaryLoaded(balances, items) => {
+                log::info!(
+                    "[MainWindow] 接收到真实战利品数据: 蓝精粹={}, 橙精粹={}, 物品数={}",
+                    balances.blue_essence,
+                    balances.orange_essence,
+                    items.len()
+                );
+                self.career_view.essences = balances;
+                self.career_view.loot_items = items;
                 cx.notify();
             }
             LiveLcuEvent::GamePhaseChanged(phase) => {
@@ -165,6 +225,13 @@ impl MainWindow {
             m.expanded = !m.expanded;
             cx.notify();
         }
+    }
+
+    pub fn refresh_career(&mut self, _cx: &mut Context<Self>) {
+        let live = self.live_service.clone();
+        tokio::spawn(async move {
+            live.refresh_career_data().await;
+        });
     }
 
     pub fn clear_search(&mut self, cx: &mut Context<Self>) {
@@ -527,6 +594,7 @@ impl Render for MainWindow {
                             .when(self.current_route == Route::Career, |el| {
                                 let view = view_entity.clone();
                                 let view_matches = view_entity.clone();
+                                let view_refresh = view_entity.clone();
                                 el.child(self.career_view.render(
                                     &self.matches,
                                     stats,
@@ -539,6 +607,11 @@ impl Render for MainWindow {
                                     move |clicked_idx, _window, app| {
                                         view_matches.update(app, |this, cx| {
                                             this.toggle_card_expanded(clicked_idx, cx);
+                                        });
+                                    },
+                                    move |_window, app| {
+                                        view_refresh.update(app, |this, cx| {
+                                            this.refresh_career(cx);
                                         });
                                     },
                                 ))

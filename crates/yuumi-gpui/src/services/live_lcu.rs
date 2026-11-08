@@ -16,6 +16,8 @@ use yuumi_core::lcu::{
     monitor::{detect_lcu, LcuConnectionInfo},
     ws::{start_ws, LcuWsEvent, LcuWsHandle},
 };
+use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
+use yuumi_core::parsers::mastery::ChampionMasteryItem;
 use yuumi_core::parsers::match_parser::{fetch_match_history, MatchDisplay};
 use yuumi_core::parsers::summoner::{fetch_current_summoner, SummonerInfo};
 
@@ -37,6 +39,8 @@ pub enum LiveLcuEvent {
     GamePhaseChanged(GamePhase),
     ChampSelectUpdated(ChampSelectSession),
     MatchHistoryLoaded(Vec<MatchDisplay>),
+    ChampionMasteryLoaded(Vec<ChampionMasteryItem>),
+    LootSummaryLoaded(EssenceBalances, Vec<LootInventoryItem>),
     GameDataReady(Arc<GameDataAssets>),
 }
 
@@ -174,17 +178,11 @@ impl LiveLcuService {
                             },
                         ));
 
-                        // 若已获取召唤师，拉取最近战绩
-                        if let (Some(s), Some(assets)) = (&summoner, &game_data_assets) {
-                            if let Ok(matches) =
-                                fetch_match_history(&client, &s.puuid, Some(0), Some(19), assets)
-                                    .await
-                            {
-                                let _ = self
-                                    .event_tx
-                                    .send(LiveLcuEvent::MatchHistoryLoaded(matches));
-                            }
-                        }
+                        // 异步并发拉取召唤师战绩、英雄熟练度与战利品
+                        let this_career = self.clone();
+                        tokio::spawn(async move {
+                            this_career.refresh_career_data().await;
+                        });
 
                         // 建立 WebSocket 连接
                         let ws_handle = start_ws(info.port, info.token.clone());
@@ -264,5 +262,91 @@ impl LiveLcuService {
             }
             _ => {}
         }
+    }
+
+    /// 刷新当前登录召唤师的生涯数据（最近 20 场战绩、英雄熟练度、战利品与精粹）
+    pub async fn refresh_career_data(&self) {
+        let client_opt = self.client.read().await.clone();
+        let Some(client) = client_opt else {
+            log::warn!("[LiveLcu] 无法刷新生涯数据: LCU client 未连接");
+            return;
+        };
+
+        // 1. 获取当前召唤师
+        let summoner = match fetch_current_summoner(&client).await {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("[LiveLcu] 刷新生涯数据失败，无法获取召唤师: {}", e);
+                return;
+            }
+        };
+
+        // 2. 获取 GameDataAssets
+        let assets_opt = self.game_data_assets.read().await.clone();
+        let Some(assets) = assets_opt else {
+            log::warn!("[LiveLcu] 无法刷新战绩: GameDataAssets 尚未就绪");
+            return;
+        };
+
+        log::info!(
+            "[LiveLcu] 开始并发拉取召唤师 [{}] 的生涯对局历史、熟练度与战利品...",
+            summoner.full_name()
+        );
+
+        // 并发拉取战绩 (近 20 场)
+        let c_matches = client.clone();
+        let puuid_clone = summoner.puuid.clone();
+        let assets_clone = assets.clone();
+        let event_tx_matches = self.event_tx.clone();
+        let matches_task = tokio::spawn(async move {
+            match fetch_match_history(&c_matches, &puuid_clone, Some(0), Some(20), &assets_clone).await {
+                Ok(matches) => {
+                    log::info!("[LiveLcu] 成功拉取当前召唤师战绩: count={}", matches.len());
+                    let _ = event_tx_matches.send(LiveLcuEvent::MatchHistoryLoaded(matches));
+                }
+                Err(e) => {
+                    log::error!("[LiveLcu] 拉取当前召唤师战绩失败: {}", e);
+                }
+            }
+        });
+
+        // 并发拉取英雄熟练度
+        let c_mastery = client.clone();
+        let event_tx_mastery = self.event_tx.clone();
+        let mastery_task = tokio::spawn(async move {
+            match yuumi_core::parsers::mastery::fetch_champion_mastery_list(&c_mastery).await {
+                Ok(masteries) => {
+                    log::info!("[LiveLcu] 成功拉取英雄熟练度: count={}", masteries.len());
+                    let _ = event_tx_mastery.send(LiveLcuEvent::ChampionMasteryLoaded(masteries));
+                }
+                Err(e) => {
+                    log::warn!("[LiveLcu] 拉取英雄熟练度失败: {}", e);
+                }
+            }
+        });
+
+        // 并发拉取战利品与精粹
+        let c_loot = client.clone();
+        let event_tx_loot = self.event_tx.clone();
+        let loot_task = tokio::spawn(async move {
+            match yuumi_core::parsers::loot::fetch_loot_summary(&c_loot).await {
+                Ok((balances, items)) => {
+                    log::info!(
+                        "[LiveLcu] 成功拉取战利品: 蓝精粹={}, 橙精粹={}, 神话精粹={}, 物品数={}",
+                        balances.blue_essence,
+                        balances.orange_essence,
+                        balances.mythic_essence,
+                        items.len()
+                    );
+                    let _ = event_tx_loot.send(LiveLcuEvent::LootSummaryLoaded(balances, items));
+                }
+                Err(e) => {
+                    log::warn!("[LiveLcu] 拉取战利品库存失败: {}", e);
+                }
+            }
+        });
+
+        let _ = tokio::join!(matches_task, mastery_task, loot_task);
+        log::info!("[LiveLcu] 召唤师生涯数据全部拉取完毕并派发完成");
     }
 }

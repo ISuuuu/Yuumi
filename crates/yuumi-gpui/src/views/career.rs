@@ -248,6 +248,7 @@ impl CareerView {
         stats: &CareerHeaderStats,
         on_tab_change: impl Fn(CareerTab, &mut Window, &mut App) + 'static + Clone,
         on_toggle_match: impl Fn(usize, &mut Window, &mut App) + 'static + Clone,
+        on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let active_tab = self.active_tab;
 
@@ -259,7 +260,7 @@ impl CareerView {
             .flex_col()
             .gap_4()
             // 顶部召唤师身份与 Tab 胶囊导航栏
-            .child(self.render_summoner_header(stats, on_tab_change))
+            .child(self.render_summoner_header(stats, on_tab_change, on_refresh))
             // 主体内容区域（根据当前 Sub-Tab 切换）
             .child(
                 div()
@@ -284,6 +285,7 @@ impl CareerView {
         &self,
         stats: &CareerHeaderStats,
         on_tab_change: impl Fn(CareerTab, &mut Window, &mut App) + 'static + Clone,
+        on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let name_str = self
             .summoner
@@ -435,6 +437,24 @@ impl CareerView {
                                     })
                                     .child(tab.label())
                             }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .rounded_lg()
+                            .cursor_pointer()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .bg(Theme::CARD_BG)
+                            .border_1()
+                            .border_color(Theme::CARD_BORDER)
+                            .text_color(Theme::AURORA_BLUE)
+                            .hover(|s| s.bg(rgba(0xffffff88)).border_color(Theme::AURORA_CYAN))
+                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                on_refresh(win, app);
+                            })
+                            .child("🔄 刷新"),
                     ),
             )
     }
@@ -445,6 +465,8 @@ impl CareerView {
         stats: &CareerHeaderStats,
         on_toggle_match: impl Fn(usize, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
+        let is_empty = matches.is_empty();
+
         div()
             .w_full()
             .flex()
@@ -452,15 +474,41 @@ impl CareerView {
             .gap_4()
             // 战绩指标统计卡片
             .child(Self::render_header(stats))
-            // 紧凑战绩列表
-            .child(
+            // 紧凑战绩列表或空态引导
+            .child(if is_empty {
+                div()
+                    .w_full()
+                    .bg(Theme::CARD_BG)
+                    .border_1()
+                    .border_color(Theme::CARD_BORDER)
+                    .rounded_xl()
+                    .p_8()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_base()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(Theme::TEXT_PRIMARY)
+                            .child("暂无近期的对局历史记录"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("请在英雄联盟客户端完成对局，或点击右上角「🔄 刷新」拉取最新战绩"),
+                    )
+            } else {
                 div().w_full().flex().flex_col().children(
                     matches
                         .iter()
                         .enumerate()
                         .map(|(idx, m)| Self::render_match_card(m, idx, on_toggle_match.clone())),
-                ),
-            )
+                )
+            })
     }
 
     /// Tab 2: 英雄熟练度与里程碑网格
