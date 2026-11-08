@@ -4,8 +4,8 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
 use tokio::time::{sleep, Duration};
 use yuumi_core::agents::{
-    auto_bp::{handle_champ_select_session, ChampSelectSession},
-    auto_match::{handle_phase_change, handle_ready_check, ReadyCheckData},
+    auto_bp::{request_bench_swap, request_reroll, ChampSelectSession},
+    auto_match::ReadyCheckData,
     config::{AutoBpConfig, AutoMatchConfig},
     lifecycle::{GamePhase, LifecycleManager},
     supervisor::AgentSupervisor,
@@ -18,6 +18,8 @@ use yuumi_core::lcu::{
 };
 use yuumi_core::parsers::match_parser::{fetch_match_history, MatchDisplay};
 use yuumi_core::parsers::summoner::{fetch_current_summoner, SummonerInfo};
+
+use crate::services::agent_runtime::{AgentRuntime, BpAgentEvent, MatchAgentEvent};
 
 /// 全局连接状态
 #[derive(Debug, Clone, PartialEq)]
@@ -52,6 +54,8 @@ pub struct LiveLcuService {
     pub auto_bp_cfg: Arc<watch::Sender<AutoBpConfig>>,
     pub client: Arc<tokio::sync::RwLock<Option<yuumi_core::lcu::client::LcuClient>>>,
     pub game_data_assets: Arc<tokio::sync::RwLock<Option<Arc<GameDataAssets>>>>,
+    /// 当前连接生命周期内的 Agent 后台运行时（未连接时为 None）
+    agent_runtime: Arc<tokio::sync::RwLock<Option<AgentRuntime>>>,
 }
 
 impl LiveLcuService {
@@ -71,6 +75,7 @@ impl LiveLcuService {
             auto_bp_cfg: Arc::new(bp_tx),
             client: Arc::new(tokio::sync::RwLock::new(None)),
             game_data_assets: Arc::new(tokio::sync::RwLock::new(None)),
+            agent_runtime: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -186,16 +191,26 @@ impl LiveLcuService {
                             }
                         }
 
+                        // 启动 Agent 后台 Worker（与本次连接同生命周期）
+                        let runtime = AgentRuntime::start(
+                            client.clone(),
+                            self.supervisor.clone(),
+                            self.lifecycle.clone(),
+                            self.auto_match_cfg.clone(),
+                            self.auto_bp_cfg.clone(),
+                        );
+                        *self.agent_runtime.write().await = Some(runtime);
+
                         // 建立 WebSocket 连接
                         let ws_handle = start_ws(info.port, info.token.clone());
                         let mut ws_rx = ws_handle.subscribe_events();
                         let this_clone = self.clone();
-                        let client_clone = client.clone();
 
                         tokio::spawn(async move {
                             while let Ok(event) = ws_rx.recv().await {
-                                this_clone.handle_ws_event(&client_clone, event).await;
+                                this_clone.handle_ws_event(event).await;
                             }
+                            log::info!("[LiveLcu] WS 事件读取任务已结束");
                         });
 
                         active_ws = Some(ws_handle);
@@ -211,6 +226,13 @@ impl LiveLcuService {
                     self.asset_cache.set_lcu_client(None);
                     *self.client.write().await = None;
                     self.supervisor.cancel_all().await;
+
+                    // 关闭 Agent Worker：先取出（释放锁）再带超时等待，避免跨 await 持锁
+                    let runtime = { self.agent_runtime.write().await.take() };
+                    if let Some(runtime) = runtime {
+                        runtime.shutdown().await;
+                    }
+
                     let _ = self.lifecycle.on_phase_changed("None").await;
                     let _ = self.status.send(ConnectionStatus::Disconnected);
                     let _ = self.event_tx.send(LiveLcuEvent::ConnectionChanged(
@@ -224,39 +246,35 @@ impl LiveLcuService {
         }
     }
 
-    async fn handle_ws_event(
-        &self,
-        client: &yuumi_core::lcu::client::LcuClient,
-        event: LcuWsEvent,
-    ) {
+    /// 将 WS 事件分发给后台 Agent Worker，并向 UI 广播领域事件
+    async fn handle_ws_event(&self, event: LcuWsEvent) {
+        let dispatcher = {
+            let guard = self.agent_runtime.read().await;
+            guard.as_ref().map(|runtime| runtime.dispatcher())
+        };
+
         match event.uri.as_str() {
             "/lol-gameflow/v1/gameflow-phase" => {
                 if let Some(phase_str) = event.data.as_str() {
+                    if let Some(d) = &dispatcher {
+                        d.dispatch_match(MatchAgentEvent::PhaseChanged(phase_str.to_string()));
+                    }
                     let phase = GamePhase::from(phase_str);
-                    let cfg = self.auto_match_cfg.borrow().clone();
-                    handle_phase_change(client, phase_str, &cfg, &self.supervisor, &self.lifecycle)
-                        .await;
                     let _ = self.event_tx.send(LiveLcuEvent::GamePhaseChanged(phase));
                 }
             }
             "/lol-matchmaking/v1/ready-check" => {
                 if let Ok(ready) = serde_json::from_value::<ReadyCheckData>(event.data) {
-                    let cfg = self.auto_match_cfg.borrow().clone();
-                    handle_ready_check(client, &ready, &cfg, &self.supervisor, &self.lifecycle)
-                        .await;
+                    if let Some(d) = &dispatcher {
+                        d.dispatch_match(MatchAgentEvent::ReadyCheck(ready));
+                    }
                 }
             }
             "/lol-champ-select/v1/session" => {
                 if let Ok(session) = serde_json::from_value::<ChampSelectSession>(event.data) {
-                    let cfg = self.auto_bp_cfg.borrow().clone();
-                    handle_champ_select_session(
-                        client,
-                        &session,
-                        &cfg,
-                        &self.supervisor,
-                        &self.lifecycle,
-                    )
-                    .await;
+                    if let Some(d) = &dispatcher {
+                        d.dispatch_bp(BpAgentEvent::ChampSelect(Box::new(session.clone())));
+                    }
                     let _ = self
                         .event_tx
                         .send(LiveLcuEvent::ChampSelectUpdated(session));
@@ -264,5 +282,23 @@ impl LiveLcuService {
             }
             _ => {}
         }
+    }
+
+    /// 一键换取大乱斗板凳席英雄
+    pub async fn swap_bench_champion(&self, champion_id: i32) -> Result<(), String> {
+        let client = self
+            .get_client()
+            .await
+            .ok_or_else(|| "英雄联盟客户端未连接".to_string())?;
+        request_bench_swap(&client, champion_id).await
+    }
+
+    /// 摇号（重随）当前英雄
+    pub async fn reroll_aram_champion(&self) -> Result<(), String> {
+        let client = self
+            .get_client()
+            .await
+            .ok_or_else(|| "英雄联盟客户端未连接".to_string())?;
+        request_reroll(&client).await
     }
 }

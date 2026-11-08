@@ -1,8 +1,15 @@
-//! 自动化功能配置模型
+//! 自动化功能配置模型与持久化
 
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 极地大乱斗队列 ID
+pub const ARAM_QUEUE_ID: i32 = 450;
+
+/// 拥有共享板凳席的大乱斗家族队列（极地大乱斗 / 海克斯大乱斗 / 经典海斗）
+pub const ARAM_BENCH_QUEUE_IDS: &[i32] = &[450, 2400, 2450];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AutoMatchConfig {
     /// 自动接受匹配
@@ -32,7 +39,7 @@ impl Default for AutoMatchConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AutoBpConfig {
     /// 自动选英雄开关
@@ -65,5 +72,170 @@ impl Default for AutoBpConfig {
             spell1_id: 4,  // 闪现
             spell2_id: 14, // 点燃
         }
+    }
+}
+
+/// 工具箱全部自动化开关的持久化载体。
+///
+/// 视图层（`ToolsView`）只做展示，开关状态的权威来源是这份结构体：
+/// 启动时从磁盘反序列化，任一开关变更后立即回写，并同步进 `LiveLcuService` 的 watch 通道。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutomationSettings {
+    /// 对局流程自动化（自动接受 / 重连 / 再来一局 / 点赞）
+    pub auto_match: AutoMatchConfig,
+    /// 选人阶段自动化（秒选 / 秒禁 / 召唤师技能）
+    pub auto_bp: AutoBpConfig,
+    /// 大乱斗板凳席悬浮窗
+    pub aram_bench_overlay: bool,
+    /// 自动同意队友换人 / 换楼
+    pub auto_trade: bool,
+}
+
+impl Default for AutomationSettings {
+    fn default() -> Self {
+        Self {
+            auto_match: AutoMatchConfig::default(),
+            auto_bp: AutoBpConfig::default(),
+            aram_bench_overlay: true,
+            auto_trade: true,
+        }
+    }
+}
+
+impl AutomationSettings {
+    /// 默认配置文件路径：`<配置目录>/Yuumi/automation.json`
+    pub fn default_path() -> Option<PathBuf> {
+        dirs::config_dir().map(|dir| dir.join("Yuumi").join("automation.json"))
+    }
+
+    /// 从指定路径读取；文件缺失或内容损坏时退回默认配置，不向上抛错。
+    pub fn load_from_path(path: &Path) -> Self {
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            log::info!("[Config] 未找到自动化配置 {}，使用默认值", path.display());
+            return Self::default();
+        };
+        match serde_json::from_str::<Self>(&raw) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                log::warn!(
+                    "[Config] 自动化配置解析失败({})，已回退默认值: {}",
+                    path.display(),
+                    e
+                );
+                Self::default()
+            }
+        }
+    }
+
+    /// 从默认路径读取
+    pub fn load() -> Self {
+        match Self::default_path() {
+            Some(path) => Self::load_from_path(&path),
+            None => Self::default(),
+        }
+    }
+
+    /// 写入指定路径（自动创建父目录）
+    pub fn save_to_path(&self, path: &Path) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建配置目录失败 {}: {}", parent.display(), e))?;
+        }
+        let raw = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("序列化自动化配置失败: {}", e))?;
+        std::fs::write(path, raw)
+            .map_err(|e| format!("写入自动化配置失败 {}: {}", path.display(), e))
+    }
+
+    /// 写入默认路径
+    pub fn save(&self) -> Result<(), String> {
+        match Self::default_path() {
+            Some(path) => self.save_to_path(&path),
+            None => Err("当前系统无可用配置目录".to_string()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "yuumi-automation-{}-{}.json",
+            name,
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn settings_roundtrip_through_disk() {
+        let path = temp_path("roundtrip");
+        let _ = std::fs::remove_file(&path);
+
+        let mut settings = AutomationSettings::default();
+        settings.auto_match.auto_accept = false;
+        settings.auto_match.auto_accept_delay = 7;
+        settings.auto_bp.auto_pick = true;
+        settings.auto_bp.pick_champion_ids = vec![157, 238];
+        settings.auto_bp.spell2_id = 12;
+        settings.aram_bench_overlay = false;
+        settings.auto_trade = false;
+
+        settings.save_to_path(&path).expect("配置写入应当成功");
+        let loaded = AutomationSettings::load_from_path(&path);
+        assert_eq!(loaded, settings);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn missing_file_falls_back_to_default() {
+        let path = temp_path("missing");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            AutomationSettings::load_from_path(&path),
+            AutomationSettings::default()
+        );
+    }
+
+    #[test]
+    fn corrupted_file_falls_back_to_default() {
+        let path = temp_path("corrupted");
+        std::fs::write(&path, "{ this is not json").expect("写入脏数据");
+        assert_eq!(
+            AutomationSettings::load_from_path(&path),
+            AutomationSettings::default()
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn partial_file_keeps_defaults_for_missing_fields() {
+        let path = temp_path("partial");
+        std::fs::write(
+            &path,
+            r#"{"aram_bench_overlay": false, "auto_bp": {"auto_pick": true}}"#,
+        )
+        .expect("写入部分配置");
+        let loaded = AutomationSettings::load_from_path(&path);
+        assert!(!loaded.aram_bench_overlay);
+        assert!(loaded.auto_bp.auto_pick);
+        // 未出现的字段保留默认值
+        assert!(loaded.auto_bp.auto_pick_intent);
+        assert_eq!(loaded.auto_bp.spell1_id, 4);
+        assert!(loaded.auto_match.auto_accept);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn unknown_fields_are_ignored() {
+        let path = temp_path("unknown");
+        std::fs::write(&path, r#"{"future_field": 1, "auto_trade": false}"#).expect("写入未知字段");
+        let loaded = AutomationSettings::load_from_path(&path);
+        assert!(!loaded.auto_trade);
+        let _ = std::fs::remove_file(&path);
     }
 }

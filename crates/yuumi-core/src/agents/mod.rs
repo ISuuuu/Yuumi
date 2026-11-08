@@ -6,9 +6,14 @@ pub mod config;
 pub mod lifecycle;
 pub mod supervisor;
 
-pub use auto_bp::{handle_champ_select_session, ChampSelectSession};
+pub use auto_bp::{
+    handle_champ_select_session, request_bench_swap, request_reroll, BenchChampion,
+    ChampSelectSession,
+};
 pub use auto_match::{handle_phase_change, handle_ready_check, ReadyCheckData};
-pub use config::{AutoBpConfig, AutoMatchConfig};
+pub use config::{
+    AutoBpConfig, AutoMatchConfig, AutomationSettings, ARAM_BENCH_QUEUE_IDS, ARAM_QUEUE_ID,
+};
 pub use lifecycle::{
     GamePhase, GenerationGuard, LifecycleManager, LifecycleState, PhaseTransition,
 };

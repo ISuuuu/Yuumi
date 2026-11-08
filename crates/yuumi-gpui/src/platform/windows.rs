@@ -1,14 +1,14 @@
 //! Windows 平台级深度接入（Win32 API、命名互斥量单实例、透明置顶与无边框控制）
 
 use crate::MAIN_WINDOW_TITLE;
-use windows::core::HSTRING;
+use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, HWND};
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, GetWindowLongW, SetForegroundWindow, SetWindowLongW, SetWindowPos, ShowWindow,
-    GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_SHOWWINDOW, SW_MINIMIZE, SW_RESTORE, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
-    WS_EX_TRANSPARENT,
+    FindWindowExW, FindWindowW, GetWindowLongW, SetForegroundWindow, SetWindowLongW, SetWindowPos,
+    ShowWindow, GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_MINIMIZE, SW_RESTORE, WS_EX_LAYERED,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
 /// 命名互斥量守卫，负责释放句柄
@@ -62,16 +62,34 @@ pub fn acquire_single_instance(name: &str) -> Result<SingleInstanceGuard, Single
     }
 }
 
-/// 根据窗口类名或标题查找主窗口 HWND
+/// 判断窗口是否为工具窗口（悬浮小窗会带 WS_EX_TOOLWINDOW，主窗口不会）
+fn is_tool_window(hwnd: HWND) -> bool {
+    unsafe {
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        ex_style & (WS_EX_TOOLWINDOW.0 as i32) != 0
+    }
+}
+
+/// 根据窗口类名或标题查找主窗口 HWND。
+///
+/// 会跳过带 WS_EX_TOOLWINDOW 的窗口（大乱斗板凳席悬浮窗等），避免与其混淆。
 pub fn find_main_window_hwnd() -> Option<HWND> {
     unsafe {
-        // 优先通过 GPUI 窗口类名查找
+        // 优先通过 GPUI 窗口类名逐个枚举，取第一个非工具窗口
         let class_name = HSTRING::from("Zed::Window");
-        if let Ok(hwnd) = FindWindowW(&class_name, None) {
-            if !hwnd.0.is_null() {
-                return Some(hwnd);
+        let null_hwnd = HWND(std::ptr::null_mut());
+        let mut previous = null_hwnd;
+        loop {
+            let found = match FindWindowExW(null_hwnd, previous, &class_name, PCWSTR::null()) {
+                Ok(hwnd) if !hwnd.0.is_null() => hwnd,
+                _ => break,
+            };
+            if !is_tool_window(found) {
+                return Some(found);
             }
+            previous = found;
         }
+
         // 兜底通过窗口标题查找
         let wide_title = HSTRING::from(MAIN_WINDOW_TITLE);
         if let Ok(hwnd) = FindWindowW(None, &wide_title) {

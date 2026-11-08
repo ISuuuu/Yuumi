@@ -1,168 +1,426 @@
-//! 大乱斗板凳席置顶透明悬浮小窗（DirectComposition / Win32 原生置顶与透明穿透）
+//! 大乱斗板凳席置顶透明悬浮小窗
+//!
+//! 数据源：`LiveLcuService` 广播的 `ChampSelectSession`（由主窗口转发）。
+//! 交互：点击板凳席英雄图标 → 调用 LCU `bench/swap` 一键换人；「摇号」→ 重随当前英雄。
+//! 生命周期：仅在极地大乱斗（及同族板凳席队列）选人期间由主窗口显示，选人结束自动隐藏。
 
+use crate::asset_loader::global_asset_loader;
+use crate::components::lcu_image::LcuImage;
+use crate::services::LiveLcuService;
 use crate::theme::Theme;
+use gpui::prelude::FluentBuilder;
 use gpui::*;
+use yuumi_core::agents::ChampSelectSession;
+use yuumi_core::lcu::game_data::GameDataAssets;
 
-pub struct BenchOverlayView {
-    pub bench_champions: Vec<(&'static str, &'static str)>,
-    pub selected_idx: Option<usize>,
-    pub click_through: bool,
+/// 英雄图标资源路径
+fn champion_icon_path(champion_id: i32) -> String {
+    format!(
+        "/lol-game-data/assets/v1/champion-icons/{}.png",
+        champion_id
+    )
 }
 
-impl Default for BenchOverlayView {
-    fn default() -> Self {
-        Self::new()
-    }
+/// 小窗内单个英雄槽位
+#[derive(Debug, Clone, PartialEq)]
+pub struct BenchSlot {
+    pub champion_id: i32,
+    pub name: SharedString,
+    pub is_mine: bool,
+}
+
+pub struct BenchOverlayView {
+    live_service: LiveLcuService,
+    /// 板凳席剩余英雄
+    bench: Vec<BenchSlot>,
+    /// 本方已拥有的英雄（含自己 + 队友）
+    team: Vec<BenchSlot>,
+    /// 当前登录玩家已选英雄
+    my_champion_id: i32,
+    queue_id: i32,
+    /// 正在提交换人请求的英雄 ID（用于禁用重复点击）
+    pending_champion: Option<i32>,
+    /// 最近一次操作反馈
+    status: Option<SharedString>,
 }
 
 impl BenchOverlayView {
-    pub fn new() -> Self {
+    pub fn new(live_service: LiveLcuService) -> Self {
         Self {
-            bench_champions: vec![
-                ("悠米", "Yuumi"),
-                ("金克丝", "Jinx"),
-                ("亚索", "Yasuo"),
-                ("阿狸", "Ahri"),
-                ("李青", "LeeSin"),
-            ],
-            selected_idx: None,
-            click_through: false,
+            live_service,
+            bench: Vec::new(),
+            team: Vec::new(),
+            my_champion_id: 0,
+            queue_id: 0,
+            pending_champion: None,
+            status: None,
         }
     }
 
-    pub fn toggle_click_through(&mut self, cx: &mut Context<Self>) {
-        self.click_through = !self.click_through;
+    /// 用最新选人会话刷新小窗数据
+    pub fn apply_session(
+        &mut self,
+        session: &ChampSelectSession,
+        assets: Option<&GameDataAssets>,
+        cx: &mut Context<Self>,
+    ) {
+        let name_of = |id: i32| -> SharedString {
+            assets
+                .and_then(|a| a.champions.get(&id).cloned())
+                .unwrap_or_else(|| format!("英雄 {}", id))
+                .into()
+        };
+
+        self.queue_id = session.queue_id;
+        self.my_champion_id = session.local_champion_id();
+        self.bench = session
+            .bench_champions
+            .iter()
+            .filter(|c| c.champion_id > 0)
+            .map(|c| BenchSlot {
+                champion_id: c.champion_id,
+                name: name_of(c.champion_id),
+                is_mine: c.is_mine,
+            })
+            .collect();
+        self.team = session
+            .my_team
+            .iter()
+            .filter(|p| p.champion_id > 0)
+            .map(|p| BenchSlot {
+                champion_id: p.champion_id,
+                name: name_of(p.champion_id),
+                is_mine: p.cell_id == session.local_player_cell_id,
+            })
+            .collect();
+
+        // 换人请求已落地（板凳席不再包含该英雄）则清除 pending 状态
+        if let Some(pending) = self.pending_champion {
+            if !self.bench.iter().any(|slot| slot.champion_id == pending) {
+                self.pending_champion = None;
+            }
+        }
+
+        self.preload_icons(cx);
         cx.notify();
     }
-}
 
-impl Render for BenchOverlayView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let champs = self.bench_champions.clone();
-        let selected = self.selected_idx;
-        let is_ct = self.click_through;
+    /// 选人结束 / 非大乱斗队列时清空展示
+    pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.bench.clear();
+        self.team.clear();
+        self.my_champion_id = 0;
+        self.queue_id = 0;
+        self.pending_champion = None;
+        self.status = None;
+        cx.notify();
+    }
+
+    /// 异步预热当前展示英雄的图标，解码完成后重绘
+    fn preload_icons(&self, cx: &mut Context<Self>) {
+        let mut paths: Vec<String> = self
+            .bench
+            .iter()
+            .chain(self.team.iter())
+            .map(|slot| champion_icon_path(slot.champion_id))
+            .collect();
+        paths.sort();
+        paths.dedup();
+        if paths.is_empty() {
+            return;
+        }
+
+        cx.spawn(async move |this, cx| {
+            let loader = global_asset_loader();
+            let mut loaded_any = false;
+            for path in paths {
+                if loader.get_cached_render_image(&path).is_some() {
+                    continue;
+                }
+                if loader.load_render_image(&path).await.is_ok() {
+                    loaded_any = true;
+                }
+            }
+            if loaded_any {
+                let _ = this.update(cx, |_view, cx| cx.notify());
+            }
+        })
+        .detach();
+    }
+
+    /// 一键换取板凳席英雄
+    fn swap_to(&mut self, champion_id: i32, cx: &mut Context<Self>) {
+        if self.pending_champion.is_some() || champion_id <= 0 {
+            return;
+        }
+        if champion_id == self.my_champion_id {
+            self.status = Some("已是当前英雄".into());
+            cx.notify();
+            return;
+        }
+
+        self.pending_champion = Some(champion_id);
+        self.status = Some("换人中…".into());
+        cx.notify();
+
+        let service = self.live_service.clone();
+        cx.spawn(async move |this, cx| {
+            let result = service.swap_bench_champion(champion_id).await;
+            let message: SharedString = match &result {
+                Ok(()) => "已提交换人".into(),
+                Err(e) => format!("换人失败: {}", e).into(),
+            };
+            if let Err(e) = &result {
+                log::warn!("[BenchOverlay] {}", e);
+            }
+            let _ = this.update(cx, |view, cx| {
+                view.pending_champion = None;
+                view.status = Some(message);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// 摇号（重随）当前英雄
+    fn reroll(&mut self, cx: &mut Context<Self>) {
+        if self.pending_champion.is_some() {
+            return;
+        }
+        self.status = Some("摇号中…".into());
+        cx.notify();
+
+        let service = self.live_service.clone();
+        cx.spawn(async move |this, cx| {
+            let result = service.reroll_aram_champion().await;
+            let message: SharedString = match &result {
+                Ok(()) => "已提交摇号".into(),
+                Err(e) => format!("摇号失败: {}", e).into(),
+            };
+            if let Err(e) = &result {
+                log::warn!("[BenchOverlay] {}", e);
+            }
+            let _ = this.update(cx, |view, cx| {
+                view.status = Some(message);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let queue_label: SharedString = match self.queue_id {
+            450 => "极地大乱斗".into(),
+            2400 => "海克斯大乱斗".into(),
+            2450 => "经典海斗".into(),
+            other if other > 0 => format!("队列 {}", other).into(),
+            _ => "等待选人数据".into(),
+        };
 
         div()
-            .size_full()
+            .w_full()
             .flex()
-            .flex_col()
-            .bg(rgba(0x0f172acc)) // 游戏内深色半透底色
-            .border_1()
-            .border_color(Theme::AURORA_CYAN)
-            .rounded_xl()
-            .p_3()
-            .shadow_lg()
-            // 顶部小标题栏
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .mb_2()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_CYAN))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0xffffff))
-                                    .child("大乱斗板凳席 (置顶半透明)"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .cursor_pointer()
-                                    .px_2()
-                                    .py(px(1.0))
-                                    .rounded_sm()
-                                    .bg(if is_ct {
-                                        rgba(0x00f5d440)
-                                    } else {
-                                        rgba(0xffffff20)
-                                    })
-                                    .text_size(px(10.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(if is_ct {
-                                        Theme::AURORA_CYAN
-                                    } else {
-                                        hsla(0.0, 0.0, 1.0, 1.0)
-                                    })
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _ev, _window, cx| {
-                                            this.toggle_click_through(cx);
-                                        }),
-                                    )
-                                    .child(if is_ct { "穿透: 开" } else { "穿透: 关" }),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(Theme::AURORA_CYAN)
-                                    .child("点击一键交换"),
-                            ),
-                    ),
-            )
-            // 板凳英雄 5 槽位横向排开
+            .items_center()
+            .justify_between()
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_2()
-                    .children(champs.iter().enumerate().map(|(idx, (name, en_name))| {
-                        let is_active = selected == Some(idx);
+                    .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_CYAN))
+                    .child(
                         div()
-                            .id(ElementId::NamedInteger("bench-slot".into(), idx as u64))
-                            .size(px(54.0))
-                            .rounded_lg()
-                            .bg(if is_active {
-                                rgba(0x00f5d440)
-                            } else {
-                                rgba(0x2d3748aa)
-                            })
-                            .border_2()
-                            .border_color(if is_active {
-                                Theme::AURORA_CYAN
-                            } else {
-                                Theme::CARD_BORDER
-                            })
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .justify_center()
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(0xffffff))
+                            .child("大乱斗板凳席"),
+                    )
+                    .child(
+                        div()
+                            .px(px(4.0))
+                            .rounded(px(3.0))
+                            .bg(rgba(0x00f5d430))
+                            .text_size(px(9.0))
+                            .text_color(Theme::AURORA_CYAN)
+                            .child(queue_label),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_size(px(9.0))
+                            .text_color(Theme::TEXT_MUTED)
+                            .child(format!(
+                                "板凳 {} · 本方 {}",
+                                self.bench.len(),
+                                self.team.len()
+                            )),
+                    )
+                    .child(
+                        div()
+                            .id("bench-reroll")
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgba(0x00f5d425)).border_color(Theme::AURORA_CYAN))
+                            .px_2()
+                            .rounded_sm()
+                            .bg(rgba(0xffffff20))
+                            .hover(|s| s.bg(rgba(0x00f5d440)))
+                            .text_size(px(10.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(0xffffff))
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(move |this, _ev, _window, cx| {
-                                    this.selected_idx = Some(idx);
-                                    cx.notify();
+                                cx.listener(|this, _ev, _window, cx| {
+                                    this.reroll(cx);
                                 }),
                             )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0xffffff))
-                                    .child(*name),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(9.0))
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .child(*en_name),
-                            )
+                            .child("摇号"),
+                    ),
+            )
+    }
+
+    fn render_section_label(text: &'static str) -> impl IntoElement {
+        div()
+            .text_size(px(9.0))
+            .text_color(Theme::TEXT_MUTED)
+            .child(text)
+    }
+
+    fn render_slot(&self, slot: &BenchSlot, cx: &mut Context<Self>) -> impl IntoElement {
+        let champion_id = slot.champion_id;
+        let is_pending = self.pending_champion == Some(champion_id);
+        let highlight = is_pending || champion_id == self.my_champion_id || slot.is_mine;
+        let border_color = if highlight {
+            Theme::AURORA_CYAN
+        } else {
+            Theme::CARD_BORDER
+        };
+
+        div()
+            .id(ElementId::NamedInteger(
+                if slot.is_mine {
+                    "bench-slot-mine"
+                } else {
+                    "bench-slot"
+                }
+                .into(),
+                champion_id as u64,
+            ))
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(1.0))
+            .opacity(if is_pending { 0.55 } else { 1.0 })
+            .when(!is_pending, |this| {
+                this.cursor_pointer().hover(|s| s.opacity(0.85))
+            })
+            .child(
+                LcuImage::new(champion_icon_path(champion_id))
+                    .size(px(38.0))
+                    .border_color(border_color)
+                    .placeholder(slot.name.clone()),
+            )
+            .child(
+                div()
+                    .max_w(px(46.0))
+                    .overflow_hidden()
+                    .text_size(px(8.0))
+                    .text_color(if highlight {
+                        Theme::AURORA_CYAN
+                    } else {
+                        Theme::TEXT_SECONDARY
+                    })
+                    .child(slot.name.clone()),
+            )
+            .when(!is_pending, |this| {
+                this.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |view, _ev, _window, cx| {
+                        view.swap_to(champion_id, cx);
+                    }),
+                )
+            })
+    }
+}
+
+impl Render for BenchOverlayView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let bench = self.bench.clone();
+        let team = self.team.clone();
+        let status = self.status.clone();
+        let header = self.render_header(cx);
+        let bench_slots: Vec<_> = bench
+            .iter()
+            .map(|slot| self.render_slot(slot, cx))
+            .collect();
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .bg(rgba(0x0f172af2)) // 游戏内深色半透底色
+            .border_1()
+            .border_color(Theme::AURORA_CYAN.opacity(0.55))
+            .rounded_xl()
+            .p_3()
+            .shadow_lg()
+            .child(header)
+            .child(Self::render_section_label("板凳席（点击换取）"))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .min_h(px(56.0))
+                    .when(bench.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(Theme::TEXT_MUTED)
+                                .child("暂无板凳席英雄"),
+                        )
+                    })
+                    .children(bench_slots),
+            )
+            .child(Self::render_section_label("本方已拥有"))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .when(team.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(Theme::TEXT_MUTED)
+                                .child("暂无已选英雄"),
+                        )
+                    })
+                    .children(team.iter().map(|slot| {
+                        div().flex().flex_col().items_center().gap(px(1.0)).child(
+                            LcuImage::new(champion_icon_path(slot.champion_id))
+                                .size(px(26.0))
+                                .border_color(if slot.is_mine {
+                                    Theme::AURORA_CYAN
+                                } else {
+                                    Theme::CARD_BORDER
+                                })
+                                .placeholder(slot.name.clone()),
+                        )
                     })),
             )
+            .when_some(status, |this, text| {
+                this.child(
+                    div()
+                        .text_size(px(9.0))
+                        .text_color(Theme::AURORA_CYAN)
+                        .child(text),
+                )
+            })
     }
 }
