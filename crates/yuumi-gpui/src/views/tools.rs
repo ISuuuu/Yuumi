@@ -7,7 +7,7 @@ use crate::components::switch::Switch;
 use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-pub use yuumi_core::agents::{AutoBpConfig, AutoMatchConfig};
+pub use yuumi_core::agents::{AutoBpConfig, AutoMatchConfig, AutomationSettings};
 
 #[derive(Clone)]
 pub struct ToolsView {
@@ -15,7 +15,6 @@ pub struct ToolsView {
     pub bp_config: AutoBpConfig,
     pub bench_overlay: bool,
     pub auto_trade: bool,
-    pub auto_honor: bool,
     pub lock_settings: bool,
 }
 
@@ -27,29 +26,53 @@ impl Default for ToolsView {
 
 impl ToolsView {
     pub fn new() -> Self {
+        Self::from_settings(&AutomationSettings::default())
+    }
+
+    /// 由持久化的全局配置构造视图状态（启动时调用）
+    pub fn from_settings(settings: &AutomationSettings) -> Self {
         Self {
-            match_config: AutoMatchConfig {
-                auto_accept: true,
-                auto_accept_delay: 2,
-                auto_reconnect: true,
-                auto_play_again: false,
-                auto_play_again_delay: 5,
-                auto_honor: true,
-            },
-            bp_config: AutoBpConfig {
-                auto_pick: true,
-                auto_pick_intent: true,
-                pick_champion_ids: vec![157, 238, 84], // 亚索, 劫, 阿卡丽
-                auto_ban: true,
-                ban_champion_ids: vec![11, 24], // 易大师, 贾克斯
-                auto_spell: true,
-                spell1_id: 4,  // 闪现
-                spell2_id: 14, // 点燃
-            },
-            bench_overlay: true,
-            auto_trade: true,
-            auto_honor: true,
+            match_config: settings.auto_match.clone(),
+            bp_config: settings.auto_bp.clone(),
+            bench_overlay: settings.aram_bench_overlay,
+            auto_trade: settings.auto_trade,
             lock_settings: false,
+        }
+    }
+
+    /// 导出当前开关状态为全局配置结构体（任一开关变更后调用）
+    pub fn to_settings(&self) -> AutomationSettings {
+        AutomationSettings {
+            auto_match: self.match_config.clone(),
+            auto_bp: self.bp_config.clone(),
+            aram_bench_overlay: self.bench_overlay,
+            auto_trade: self.auto_trade,
+        }
+    }
+
+    /// 首选英雄配置摘要（随配置动态变化，不再硬编码英雄名）
+    fn pick_summary(&self) -> String {
+        if self.bp_config.pick_champion_ids.is_empty() {
+            "未配置首选英雄".to_string()
+        } else {
+            format!(
+                "首选 {} 位 · 意向优先: {}",
+                self.bp_config.pick_champion_ids.len(),
+                if self.bp_config.auto_pick_intent {
+                    "开"
+                } else {
+                    "关"
+                }
+            )
+        }
+    }
+
+    /// 禁用英雄配置摘要
+    fn ban_summary(&self) -> String {
+        if self.bp_config.ban_champion_ids.is_empty() {
+            "未配置禁用英雄".to_string()
+        } else {
+            format!("禁用 {} 位", self.bp_config.ban_champion_ids.len())
         }
     }
 
@@ -80,6 +103,13 @@ impl ToolsView {
         F10: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
         F11: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
     {
+        let pick_summary = self.pick_summary();
+        let ban_summary = self.ban_summary();
+        let spell_summary = format!(
+            "技能 1: {} · 技能 2: {}",
+            self.bp_config.spell1_id, self.bp_config.spell2_id
+        );
+
         div()
             .id("tools-scroll-view")
             .size_full()
@@ -142,7 +172,7 @@ impl ToolsView {
                                 "🎯 自动秒选/锁定英雄",
                                 "选人阶段优先亮起意向英雄并按首选列表自动锁定",
                                 self.bp_config.auto_pick,
-                                Some("首选: 亚索 · 劫 · 阿卡丽".to_string()),
+                                Some(pick_summary),
                                 on_toggle_pick,
                             ))
                             // 卡片 3: 自动禁用英雄
@@ -150,15 +180,15 @@ impl ToolsView {
                                 "🚫 自动禁用英雄",
                                 "禁用阶段自动锁定首选 ban 位，防止忘记禁英雄",
                                 self.bp_config.auto_ban,
-                                Some("首禁: 易大师 · 贾克斯".to_string()),
+                                Some(ban_summary),
                                 on_toggle_ban,
                             ))
                             // 卡片 4: 自动配置召唤师技能
                             .child(render_interactive_card(
                                 "✨ 自动配置召唤师技能",
-                                "进入选人房间时自动校验并配置 D 闪 / F 点燃",
+                                "进入选人房间时自动校验并配置召唤师技能",
                                 self.bp_config.auto_spell,
-                                Some("D: 闪现 (4) · F: 点燃 (14)".to_string()),
+                                Some(spell_summary),
                                 on_toggle_spell,
                             ))
                             // 卡片 5: 自动同意换英雄/换楼层
@@ -197,7 +227,7 @@ impl ToolsView {
                             .child(render_interactive_card(
                                 "👍 结算自动点赞队友",
                                 "游戏结束后自动为表现最佳或随机队友点赞，获取荣誉点数",
-                                self.auto_honor,
+                                self.match_config.auto_honor,
                                 None,
                                 on_toggle_honor,
                             ))

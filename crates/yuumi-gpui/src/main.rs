@@ -1,10 +1,11 @@
 use gpui::prelude::*;
 use gpui::{
     div, px, App, Application, Bounds, Context, InteractiveElement, IntoElement, ParentElement,
-    Point, Render, Size, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowHandle,
-    WindowOptions,
+    Point, Render, Size, StatefulInteractiveElement, Styled, TitlebarOptions, Window, WindowBounds,
+    WindowHandle, WindowKind, WindowOptions,
 };
 use std::path::Path;
+use std::sync::Arc;
 
 mod agent_settings_view;
 mod asset_loader;
@@ -35,6 +36,8 @@ use views::search::SearchView;
 use views::settings::SettingsView;
 use views::tools::ToolsView;
 use views::Route;
+use yuumi_core::agents::{AutomationSettings, ChampSelectSession, GamePhase};
+use yuumi_core::lcu::game_data::GameDataAssets;
 
 pub const MAIN_WINDOW_TITLE: &str = "Yuumi · 英雄联盟对局助手 (GPUI 高性能原生内核)";
 pub const BENCH_WINDOW_TITLE: &str = "Yuumi - 大乱斗板凳席悬浮窗";
@@ -55,6 +58,12 @@ pub struct MainWindow {
     overlay_window: Option<WindowHandle<BenchOverlayView>>,
     live_service: LiveLcuService,
     connection_status: ConnectionStatus,
+    /// 工具箱自动化开关的权威配置（启动时从磁盘加载，变更即回写）
+    automation: AutomationSettings,
+    /// 当前选人会话快照（大乱斗悬浮窗的数据来源）
+    bench_session: Option<ChampSelectSession>,
+    /// LCU 预加载的游戏资源字典（用于悬浮窗英雄名）
+    game_assets: Option<Arc<GameDataAssets>>,
 }
 
 impl MainWindow {
@@ -73,7 +82,11 @@ impl MainWindow {
         let stats = CareerHeaderStats::compute(&matches);
         let career_view = CareerView::new();
         let game_info = load_mock_game_info();
-        let tools_view = ToolsView::new();
+
+        // 加载持久化的自动化开关，并用它初始化工具箱视图
+        let automation = AutomationSettings::load();
+        let tools_view = ToolsView::from_settings(&automation);
+
         let mut search_view = SearchView::new(cx).with_matches(matches.clone());
         search_view.details_cache = load_fixture_game_details();
         let saved_players_view = SavedPlayersView::new();
@@ -86,10 +99,17 @@ impl MainWindow {
         asset_loader::init_global_asset_loader(asset_cache.clone());
         let live_service = LiveLcuService::new(asset_cache);
 
+        // 启动即把持久化配置灌入 Agent 运行时，避免默认值覆盖用户选择
+        let _ = live_service
+            .auto_match_cfg
+            .send(automation.auto_match.clone());
+        let _ = live_service.auto_bp_cfg.send(automation.auto_bp.clone());
+
         // 优先订阅 LCU 领域事件与连接状态，避免漏掉启动瞬间的广播消息
         let mut event_rx = live_service.subscribe_events();
         live_service.start();
 
+        // 订阅 LCU 领域事件与连接状态并在 GPUI 主调度器中消费
         cx.spawn(async move |entity, cx| {
             while let Ok(event) = event_rx.recv().await {
                 let event_clone = event.clone();
@@ -132,6 +152,9 @@ impl MainWindow {
             overlay_window: None,
             live_service,
             connection_status: ConnectionStatus::Disconnected,
+            automation,
+            bench_session: None,
+            game_assets: None,
         }
     }
 
@@ -142,6 +165,11 @@ impl MainWindow {
                     if let Some(s) = summoner.as_ref() {
                         self.career_view.summoner = Some(s.clone());
                     }
+                }
+                if matches!(status, ConnectionStatus::Disconnected) {
+                    // 客户端断开：立即收起悬浮窗，避免残留空窗
+                    self.bench_session = None;
+                    self.close_bench_overlay(cx);
                 }
                 self.connection_status = status;
                 cx.notify();
@@ -212,12 +240,151 @@ impl MainWindow {
                 self.career_view.loot_items = items;
                 cx.notify();
             }
-            LiveLcuEvent::GamePhaseChanged(phase) => {
-                log::info!("[MainWindow] 接收到游戏阶段更新: {:?}", phase);
+            LiveLcuEvent::GameDataReady(assets) => {
+                self.game_assets = Some(assets);
                 cx.notify();
             }
-            _ => {}
+            LiveLcuEvent::GamePhaseChanged(phase) => {
+                log::info!("[MainWindow] 接收到游戏阶段更新: {:?}", phase);
+                if phase != GamePhase::ChampSelect {
+                    // 选人结束（或进入其它阶段）即收起板凳席悬浮窗
+                    self.bench_session = None;
+                    self.close_bench_overlay(cx);
+                }
+                cx.notify();
+            }
+            LiveLcuEvent::ChampSelectUpdated(session) => {
+                if session.is_aram() {
+                    self.bench_session = Some(session);
+                } else {
+                    self.bench_session = None;
+                }
+                self.sync_bench_overlay(cx);
+                cx.notify();
+            }
         }
+    }
+
+    /// 依据开关状态与当前选人会话同步大乱斗板凳席悬浮窗
+    pub fn sync_bench_overlay(&mut self, cx: &mut Context<Self>) {
+        let should_show = self.automation.aram_bench_overlay
+            && self
+                .bench_session
+                .as_ref()
+                .map(|session| session.is_aram())
+                .unwrap_or(false);
+
+        if !should_show {
+            self.close_bench_overlay(cx);
+            return;
+        }
+
+        let Some(session) = self.bench_session.clone() else {
+            return;
+        };
+
+        // 已开窗：仅推送最新数据
+        if let Some(handle) = &self.overlay_window {
+            let assets = self.game_assets.clone();
+            let result = handle.update(cx, |view, _window, cx| {
+                view.apply_session(&session, assets.as_deref(), cx);
+            });
+            if result.is_err() {
+                log::warn!("[BenchOverlay] 悬浮窗已失效，重新创建");
+                self.overlay_window = None;
+            } else {
+                return;
+            }
+        }
+
+        self.open_bench_overlay(cx);
+    }
+
+    /// 创建置顶工具窗口并灌入当前板凳席数据
+    fn open_bench_overlay(&mut self, cx: &mut Context<Self>) {
+        let service = self.live_service.clone();
+        let session = self.bench_session.clone();
+        let assets = self.game_assets.clone();
+
+        let window_options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: Point {
+                    x: px(420.0),
+                    y: px(140.0),
+                },
+                size: Size {
+                    width: px(452.0),
+                    height: px(268.0),
+                },
+            })),
+            // 无系统装饰，仅保留标题供 Win32 定位到 HWND（置顶 / 工具窗样式）
+            titlebar: Some(TitlebarOptions {
+                title: Some(BENCH_WINDOW_TITLE.into()),
+                appears_transparent: true,
+                traffic_light_position: None,
+            }),
+            kind: WindowKind::Normal,
+            focus: false,
+            is_movable: true,
+            is_resizable: false,
+            ..Default::default()
+        };
+
+        let new_handle = cx.open_window(window_options, move |_window, cx| {
+            cx.new(move |cx| {
+                let mut view = BenchOverlayView::new(service);
+                if let Some(session) = &session {
+                    view.apply_session(session, assets.as_deref(), cx);
+                }
+                view
+            })
+        });
+
+        if let Ok(handle) = new_handle {
+            self.overlay_window = Some(handle);
+            // 异步将板凳席小窗设置为 Windows 原生置顶与工具窗口（隐藏任务栏图标）
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if let Some(hwnd) = platform::find_window_by_title(BENCH_WINDOW_TITLE) {
+                    platform::set_window_topmost(hwnd, true);
+                    platform::set_window_toolwindow(hwnd);
+                } else {
+                    log::warn!("[BenchOverlay] 未找到悬浮窗 HWND，置顶样式未应用");
+                }
+            });
+        }
+    }
+
+    /// 关闭并销毁悬浮窗
+    pub fn close_bench_overlay(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.overlay_window.take() {
+            let _ = handle.update(cx, |view, window, cx| {
+                view.clear(cx);
+                window.remove_window();
+            });
+        }
+    }
+
+    /// 将工具箱开关状态同步进全局配置、Agent 运行时与磁盘
+    fn persist_automation(&mut self, cx: &mut Context<Self>) {
+        self.automation = self.tools_view.to_settings();
+
+        let _ = self
+            .live_service
+            .auto_match_cfg
+            .send(self.automation.auto_match.clone());
+        let _ = self
+            .live_service
+            .auto_bp_cfg
+            .send(self.automation.auto_bp.clone());
+
+        if let Err(e) = self.automation.save() {
+            log::warn!("[Tools] 自动化配置持久化失败: {}", e);
+        }
+
+        // 悬浮窗开关变更需立即生效
+        self.sync_bench_overlay(cx);
+        cx.notify();
     }
 
     pub fn toggle_card_expanded(&mut self, idx: usize, cx: &mut Context<Self>) {
@@ -246,77 +413,48 @@ impl MainWindow {
 
     pub fn toggle_auto_accept(&mut self, cx: &mut Context<Self>) {
         self.tools_view.match_config.auto_accept = !self.tools_view.match_config.auto_accept;
-        let _ = self
-            .live_service
-            .auto_match_cfg
-            .send(self.tools_view.match_config.clone());
-        cx.notify();
+        self.persist_automation(cx);
     }
 
     pub fn toggle_auto_reconnect(&mut self, cx: &mut Context<Self>) {
         self.tools_view.match_config.auto_reconnect = !self.tools_view.match_config.auto_reconnect;
-        let _ = self
-            .live_service
-            .auto_match_cfg
-            .send(self.tools_view.match_config.clone());
-        cx.notify();
+        self.persist_automation(cx);
     }
 
     pub fn toggle_auto_play_again(&mut self, cx: &mut Context<Self>) {
         self.tools_view.match_config.auto_play_again =
             !self.tools_view.match_config.auto_play_again;
-        let _ = self
-            .live_service
-            .auto_match_cfg
-            .send(self.tools_view.match_config.clone());
-        cx.notify();
+        self.persist_automation(cx);
     }
 
     pub fn toggle_auto_pick(&mut self, cx: &mut Context<Self>) {
         self.tools_view.bp_config.auto_pick = !self.tools_view.bp_config.auto_pick;
-        let _ = self
-            .live_service
-            .auto_bp_cfg
-            .send(self.tools_view.bp_config.clone());
-        cx.notify();
+        self.persist_automation(cx);
     }
 
     pub fn toggle_auto_ban(&mut self, cx: &mut Context<Self>) {
         self.tools_view.bp_config.auto_ban = !self.tools_view.bp_config.auto_ban;
-        let _ = self
-            .live_service
-            .auto_bp_cfg
-            .send(self.tools_view.bp_config.clone());
-        cx.notify();
+        self.persist_automation(cx);
     }
 
     pub fn toggle_auto_spell(&mut self, cx: &mut Context<Self>) {
         self.tools_view.bp_config.auto_spell = !self.tools_view.bp_config.auto_spell;
-        let _ = self
-            .live_service
-            .auto_bp_cfg
-            .send(self.tools_view.bp_config.clone());
-        cx.notify();
+        self.persist_automation(cx);
     }
 
     pub fn toggle_bench_overlay_setting(&mut self, cx: &mut Context<Self>) {
         self.tools_view.bench_overlay = !self.tools_view.bench_overlay;
-        cx.notify();
+        self.persist_automation(cx);
     }
 
     pub fn toggle_auto_trade(&mut self, cx: &mut Context<Self>) {
         self.tools_view.auto_trade = !self.tools_view.auto_trade;
-        cx.notify();
+        self.persist_automation(cx);
     }
 
     pub fn toggle_auto_honor(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.auto_honor = !self.tools_view.auto_honor;
-        self.tools_view.match_config.auto_honor = self.tools_view.auto_honor;
-        let _ = self
-            .live_service
-            .auto_match_cfg
-            .send(self.tools_view.match_config.clone());
-        cx.notify();
+        self.tools_view.match_config.auto_honor = !self.tools_view.match_config.auto_honor;
+        self.persist_automation(cx);
     }
 
     pub fn toggle_close_to_tray(&mut self, cx: &mut Context<Self>) {
@@ -352,49 +490,6 @@ impl MainWindow {
     pub fn select_theme_index(&mut self, idx: usize, cx: &mut Context<Self>) {
         self.settings_view.selected_theme_index = idx;
         cx.notify();
-    }
-
-    pub fn toggle_bench_overlay(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(handle) = self.overlay_window.take() {
-            let _ = handle.update(cx, |_view, _window, _cx| {
-                // 关闭悬浮窗
-            });
-            cx.notify();
-        } else {
-            // 打开置顶半透明大乱斗悬浮窗
-            let new_handle = cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(Bounds {
-                        origin: Point {
-                            x: px(400.0),
-                            y: px(120.0),
-                        },
-                        size: Size {
-                            width: px(380.0),
-                            height: px(180.0),
-                        },
-                    })),
-                    titlebar: None,
-                    focus: true,
-                    is_movable: true,
-                    ..Default::default()
-                },
-                |_window, cx| cx.new(|_cx| BenchOverlayView::new()),
-            );
-
-            if let Ok(h) = new_handle {
-                self.overlay_window = Some(h);
-                // 异步将板凳席小窗设置为 Windows 原生置顶与工具窗口（隐藏任务栏图标）
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    if let Some(hwnd) = platform::find_window_by_title(BENCH_WINDOW_TITLE) {
-                        platform::set_window_topmost(hwnd, true);
-                        platform::set_window_toolwindow(hwnd);
-                    }
-                });
-            }
-            cx.notify();
-        }
     }
 
     pub fn perform_search(&mut self, query: &str, cx: &mut Context<Self>) {

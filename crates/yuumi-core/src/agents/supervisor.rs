@@ -76,7 +76,6 @@ impl std::fmt::Display for SpawnError {
 impl std::error::Error for SpawnError {}
 
 struct RunningTaskInfo {
-    #[allow(dead_code)]
     id: TaskId,
     cancel_token: CancellationToken,
     done_rx: Option<oneshot::Receiver<()>>,
@@ -166,29 +165,21 @@ impl AgentSupervisor {
                 Ok(id)
             }
             DuplicateStrategy::RejectNew => {
-                let mut map = self.running.lock().await;
-                if map.contains_key(&kind) {
-                    return Err(SpawnError::DuplicateRejected(kind));
+                {
+                    let mut map = self.running.lock().await;
+                    if map.contains_key(&kind) {
+                        return Err(SpawnError::DuplicateRejected(kind));
+                    }
+                    map.insert(
+                        kind.clone(),
+                        RunningTaskInfo {
+                            id,
+                            cancel_token: cancel_token.clone(),
+                            done_rx: Some(done_rx),
+                        },
+                    );
                 }
-                map.insert(
-                    kind.clone(),
-                    RunningTaskInfo {
-                        id,
-                        cancel_token: cancel_token.clone(),
-                        done_rx: Some(done_rx),
-                    },
-                );
-                drop(map);
-
-                let ctx = TaskContext {
-                    id,
-                    kind: kind.clone(),
-                    cancel_token,
-                };
-                tokio::spawn(async move {
-                    task_fn(ctx).await;
-                    let _ = done_tx.send(());
-                });
+                self.spawn_tracked(id, kind, cancel_token, task_fn, done_tx);
                 Ok(id)
             }
             DuplicateStrategy::ReplaceOld => {
@@ -206,29 +197,60 @@ impl AgentSupervisor {
                     let _ = tokio::time::timeout(REPLACE_GRACE_TIMEOUT, rx).await;
                 }
 
-                let mut map = self.running.lock().await;
-                map.insert(
-                    kind.clone(),
-                    RunningTaskInfo {
-                        id,
-                        cancel_token: cancel_token.clone(),
-                        done_rx: Some(done_rx),
-                    },
-                );
-                drop(map);
-
-                let ctx = TaskContext {
-                    id,
-                    kind,
-                    cancel_token,
-                };
-                tokio::spawn(async move {
-                    task_fn(ctx).await;
-                    let _ = done_tx.send(());
-                });
+                {
+                    let mut map = self.running.lock().await;
+                    map.insert(
+                        kind.clone(),
+                        RunningTaskInfo {
+                            id,
+                            cancel_token: cancel_token.clone(),
+                            done_rx: Some(done_rx),
+                        },
+                    );
+                }
+                self.spawn_tracked(id, kind, cancel_token, task_fn, done_tx);
                 Ok(id)
             }
         }
+    }
+
+    /// 启动已被登记的异步任务，并在其结束后回收登记表条目。
+    ///
+    /// 回收是幂等性的关键：若条目永久滞留，后续同类 `RejectNew` 任务会被永久拒绝，
+    /// 也会让 `running` 表随时间无限增长（通道与状态泄漏）。
+    fn spawn_tracked<F, Fut>(
+        &self,
+        id: TaskId,
+        kind: TaskKind,
+        cancel_token: CancellationToken,
+        task_fn: F,
+        done_tx: oneshot::Sender<()>,
+    ) where
+        F: FnOnce(TaskContext) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let running = self.running.clone();
+        let ctx = TaskContext {
+            id,
+            kind: kind.clone(),
+            cancel_token,
+        };
+        tokio::spawn(async move {
+            task_fn(ctx).await;
+            {
+                let mut map = running.lock().await;
+                // 仅当登记条目仍是本任务时才回收，避免误删「替换后」的新任务
+                if map.get(&kind).map(|info| info.id) == Some(id) {
+                    map.remove(&kind);
+                }
+            }
+            let _ = done_tx.send(());
+        });
+    }
+
+    /// 当前登记在案的任务数量（用于泄漏自检与测试断言）
+    pub async fn running_task_count(&self) -> usize {
+        self.running.lock().await.len()
     }
 
     /// 取消指定类型的任务
@@ -286,5 +308,77 @@ mod tests {
             )
             .await;
         assert!(matches!(r2, Err(SpawnError::DuplicateRejected(_))));
+    }
+
+    #[tokio::test]
+    async fn test_reject_new_entry_reclaimed_after_completion() {
+        let supervisor = AgentSupervisor::new();
+        supervisor
+            .spawn(
+                TaskKind::AutoAccept,
+                DuplicateStrategy::RejectNew,
+                |_| async {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                },
+            )
+            .await
+            .expect("首次触发应当成功");
+        assert_eq!(supervisor.running_task_count().await, 1);
+
+        // 轮询等待任务结束并完成登记回收，避免依赖固定 sleep 时长
+        let mut reclaimed = false;
+        for _ in 0..100 {
+            if supervisor.running_task_count().await == 0 {
+                reclaimed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            reclaimed,
+            "任务结束后登记条目必须被回收，否则后续同类任务会被永久拒绝"
+        );
+
+        // 回收后允许再次触发同类任务（幂等重试）
+        assert!(supervisor
+            .spawn(
+                TaskKind::AutoAccept,
+                DuplicateStrategy::RejectNew,
+                |_| async {}
+            )
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_replace_old_does_not_drop_new_entry() {
+        let supervisor = AgentSupervisor::new();
+        supervisor
+            .spawn(
+                TaskKind::AutoPickLock,
+                DuplicateStrategy::ReplaceOld,
+                |_| async {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                },
+            )
+            .await
+            .expect("首个任务应当成功");
+
+        // 替换为长任务，旧任务被取消后会尝试回收，但不得误删新任务的登记
+        supervisor
+            .spawn(
+                TaskKind::AutoPickLock,
+                DuplicateStrategy::ReplaceOld,
+                |_| async {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                },
+            )
+            .await
+            .expect("替换应当成功");
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(supervisor.running_task_count().await, 1);
+
+        supervisor.cancel_all().await;
     }
 }
