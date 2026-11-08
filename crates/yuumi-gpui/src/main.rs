@@ -14,6 +14,7 @@ mod components;
 mod game_info_view;
 mod match_model;
 pub mod platform;
+pub mod services;
 mod theme;
 mod tray;
 
@@ -24,6 +25,7 @@ use components::input::SearchInput;
 use components::titlebar::TitleBar;
 use game_info_view::{load_mock_game_info, GameInfoData, GameInfoView};
 use match_model::{load_real_fixtures, MatchItem};
+use services::{ConnectionStatus, LiveLcuEvent, LiveLcuService};
 use theme::Theme;
 use tray::TrayManager;
 
@@ -47,6 +49,8 @@ pub struct MainWindow {
     current_tab: TabPage,
     _tray: Option<TrayManager>,
     overlay_window: Option<WindowHandle<BenchOverlayView>>,
+    live_service: LiveLcuService,
+    connection_status: ConnectionStatus,
 }
 
 impl MainWindow {
@@ -67,6 +71,23 @@ impl MainWindow {
         let settings_view = AgentSettingsView::new();
         let tray = TrayManager::new().ok();
         let search_input = SearchInput::new("输入召唤师名 / 英雄过滤...");
+
+        // 初始化真实 LCU 实时监控与调度服务
+        let asset_cache = std::sync::Arc::new(yuumi_core::lcu::asset_cache::AssetCache::default());
+        let live_service = LiveLcuService::new(asset_cache);
+        live_service.start();
+
+        // 订阅 LCU 领域事件与连接状态并在 GPUI 主调度器中消费
+        let mut event_rx = live_service.subscribe_events();
+        cx.spawn(async move |entity, cx| {
+            while let Ok(event) = event_rx.recv().await {
+                let event_clone = event.clone();
+                let _ = entity.update(cx, |view, cx| {
+                    view.handle_live_event(event_clone, cx);
+                });
+            }
+        })
+        .detach();
 
         // 异步预热战绩卡片中的核心资源（英雄头像等），拉取后触发视图重绘
         let asset_paths: Vec<String> = matches
@@ -94,6 +115,28 @@ impl MainWindow {
             current_tab: TabPage::GameInfo,
             _tray: tray,
             overlay_window: None,
+            live_service,
+            connection_status: ConnectionStatus::Disconnected,
+        }
+    }
+
+    pub fn handle_live_event(&mut self, event: LiveLcuEvent, cx: &mut Context<Self>) {
+        match event {
+            LiveLcuEvent::ConnectionChanged(status) => {
+                self.connection_status = status;
+                cx.notify();
+            }
+            LiveLcuEvent::MatchHistoryLoaded(matches) => {
+                let items: Vec<MatchItem> = matches.into_iter().map(MatchItem::new).collect();
+                self.stats = CareerHeaderStats::compute(&items);
+                self.matches = items;
+                cx.notify();
+            }
+            LiveLcuEvent::GamePhaseChanged(phase) => {
+                log::info!("[MainWindow] 接收到游戏阶段更新: {:?}", phase);
+                cx.notify();
+            }
+            _ => {}
         }
     }
 
@@ -116,31 +159,37 @@ impl MainWindow {
 
     pub fn toggle_auto_accept(&mut self, cx: &mut Context<Self>) {
         self.settings_view.match_config.auto_accept = !self.settings_view.match_config.auto_accept;
+        let _ = self.live_service.auto_match_cfg.send(self.settings_view.match_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_reconnect(&mut self, cx: &mut Context<Self>) {
         self.settings_view.match_config.auto_reconnect = !self.settings_view.match_config.auto_reconnect;
+        let _ = self.live_service.auto_match_cfg.send(self.settings_view.match_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_play_again(&mut self, cx: &mut Context<Self>) {
         self.settings_view.match_config.auto_play_again = !self.settings_view.match_config.auto_play_again;
+        let _ = self.live_service.auto_match_cfg.send(self.settings_view.match_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_pick(&mut self, cx: &mut Context<Self>) {
         self.settings_view.bp_config.auto_pick = !self.settings_view.bp_config.auto_pick;
+        let _ = self.live_service.auto_bp_cfg.send(self.settings_view.bp_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_ban(&mut self, cx: &mut Context<Self>) {
         self.settings_view.bp_config.auto_ban = !self.settings_view.bp_config.auto_ban;
+        let _ = self.live_service.auto_bp_cfg.send(self.settings_view.bp_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_spell(&mut self, cx: &mut Context<Self>) {
         self.settings_view.bp_config.auto_spell = !self.settings_view.bp_config.auto_spell;
+        let _ = self.live_service.auto_bp_cfg.send(self.settings_view.bp_config.clone());
         cx.notify();
     }
 
@@ -235,10 +284,36 @@ impl Render for MainWindow {
                             .gap_3()
                             .child(
                                 div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child("GPUI Direct3D 11 硬件加速渲染"),
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .size_2()
+                                            .rounded_full()
+                                            .bg(match &self.connection_status {
+                                                ConnectionStatus::Connected { .. } => hsla(160.0 / 360.0, 0.85, 0.45, 1.0),
+                                                ConnectionStatus::Connecting => hsla(45.0 / 360.0, 0.90, 0.50, 1.0),
+                                                ConnectionStatus::Disconnected => hsla(0.0, 0.75, 0.55, 1.0),
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .child(match &self.connection_status {
+                                                ConnectionStatus::Connected { summoner, .. } => {
+                                                    if let Some(s) = summoner.as_ref() {
+                                                        format!("LCU 已连接: {}", s.full_name())
+                                                    } else {
+                                                        "LCU 已连接".to_string()
+                                                    }
+                                                }
+                                                ConnectionStatus::Connecting => "LCU 连接中...".to_string(),
+                                                ConnectionStatus::Disconnected => "LCU 未启动 (离线)".to_string(),
+                                            }),
+                                    ),
                             )
                             .child(
                                 div()
@@ -248,7 +323,7 @@ impl Render for MainWindow {
                                     .bg(Theme::BADGE_BG)
                                     .text_xs()
                                     .text_color(Theme::TEXT_SECONDARY)
-                                    .child(format!("已装载 {} 场真实对局样本", matches_count)),
+                                    .child(format!("{} 场对局记录", matches_count)),
                             ),
                     )
                     .child(
@@ -473,6 +548,13 @@ impl Render for MainWindow {
 }
 
 fn main() {
+    // 0. 初始化全局 Tokio 异步运行时，供后台网络 I/O、WebSocket 与 LCU 轮询使用
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("初始化 Tokio 运行时失败");
+    let _runtime_guard = runtime.enter();
+
     // 1. Windows 单实例互斥量检测（Named Mutex）
     let mutex_name = "Global\\Yuumi_GPUI_SingleInstance_Mutex";
     let _instance_guard = match platform::acquire_single_instance(mutex_name) {
