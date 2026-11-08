@@ -11,7 +11,7 @@ pub struct EssenceBalances {
     pub mythic_essence: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LootInventoryItem {
     pub loot_id: String,
@@ -23,6 +23,17 @@ pub struct LootInventoryItem {
     pub disenchant_value: i32,
     pub tile_path: Option<String>,
     pub is_openable: bool,
+    /// 展示分类（CHAMPION / SKIN / EMOTE / MATERIAL ...），筛选与卡片精粹色依赖它
+    pub display_categories: String,
+    /// 拥有状态（OWNED / NOT_OWNED ...），拥有筛选与升级前置校验依赖它
+    pub item_status: String,
+    /// 皮肤对应英雄的拥有状态
+    pub parent_item_status: String,
+    /// 升级配方名（动作链路待接，先保留字段）
+    pub upgrade_recipe_name: Option<String>,
+    /// 升级所需精粹
+    pub upgrade_essence_cost: i32,
+    pub rarity: String,
 }
 
 /// 获取战利品库存与精粹资产
@@ -101,6 +112,33 @@ pub async fn fetch_loot_summary(
                 .map(|s| s.to_string());
         }
 
+        let str_field = |key: &str| {
+            item.get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        let display_categories = {
+            let raw = str_field("displayCategories");
+            if raw.is_empty() {
+                loot_type.clone()
+            } else {
+                raw
+            }
+        };
+        let item_status = str_field("itemStatus");
+        let parent_item_status = str_field("parentItemStatus");
+        let upgrade_recipe_name = item
+            .get("upgradeRecipeName")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let upgrade_essence_cost = item
+            .get("upgradeEssenceCost")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let rarity = str_field("rarity");
+
         let is_openable = loot_type.contains("CHEST")
             || loot_type.contains("ORB")
             || loot_type.contains("CAPSULE")
@@ -117,6 +155,12 @@ pub async fn fetch_loot_summary(
             disenchant_value,
             tile_path,
             is_openable,
+            display_categories,
+            item_status,
+            parent_item_status,
+            upgrade_recipe_name,
+            upgrade_essence_cost,
+            rarity,
         });
     }
 
