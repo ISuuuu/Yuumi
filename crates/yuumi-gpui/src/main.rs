@@ -129,7 +129,13 @@ impl MainWindow {
         let search_view = SearchView::new(cx).with_matches(matches.clone());
         let saved_players_view = SavedPlayersView::new(cx);
         let settings_view = SettingsView::new();
-        let tray = TrayManager::new().ok();
+        let tray = match TrayManager::new() {
+            Ok(tray) => Some(tray),
+            Err(e) => {
+                log::warn!("[Tray] 托盘创建失败: {}，托盘功能不可用", e);
+                None
+            }
+        };
         let search_input = SearchInput::new("输入召唤师名 / 英雄过滤...");
 
         // 初始化真实 LCU 实时监控与调度服务
