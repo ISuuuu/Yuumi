@@ -20,7 +20,7 @@ mod theme;
 mod tray;
 pub mod views;
 
-use bench_overlay::BenchOverlayView;
+use bench_overlay::{load_saved_origin, BenchOverlayView};
 use components::input::SearchInput;
 use components::sidebar::Sidebar;
 use components::titlebar::TitleBar;
@@ -41,6 +41,35 @@ use yuumi_core::lcu::game_data::GameDataAssets;
 
 pub const MAIN_WINDOW_TITLE: &str = "Yuumi · 英雄联盟对局助手 (GPUI 高性能原生内核)";
 pub const BENCH_WINDOW_TITLE: &str = "Yuumi - 大乱斗板凳席悬浮窗";
+
+/// 预热图片资源：网络拉取与解码在 Tokio 运行时执行，完成后回到主线程重绘。
+///
+/// 不能改用 `cx.background_executor()`——该 executor 由 Windows 线程池驱动，
+/// 线程上没有 Tokio reactor 上下文，reqwest 请求会 panic（there is no reactor running）。
+fn prewarm_assets(paths: Vec<String>, cx: &mut Context<MainWindow>) {
+    if paths.is_empty() {
+        return;
+    }
+
+    let handle = yuumi_core::runtime::tokio_handle();
+    cx.spawn(async move |this, cx| {
+        let Some(handle) = handle else {
+            log::error!("[MainWindow] Tokio 运行时未注册，跳过资源预热");
+            return;
+        };
+        let _ = handle
+            .spawn(async move {
+                let loader = asset_loader::global_asset_loader();
+                for path in paths {
+                    let _ = loader.load_render_image(&path).await;
+                }
+            })
+            .await;
+        // 解码落地后重绘，避免图片资源加载完成却不刷新
+        let _ = this.update(cx, |_this, cx| cx.notify());
+    })
+    .detach();
+}
 
 pub struct MainWindow {
     titlebar: TitleBar,
@@ -127,14 +156,7 @@ impl MainWindow {
             .filter(|u| !u.is_empty())
             .collect();
 
-        cx.background_executor()
-            .spawn(async move {
-                let loader = asset_loader::global_asset_loader();
-                for path in asset_paths {
-                    let _ = loader.load_render_image(&path).await;
-                }
-            })
-            .detach();
+        prewarm_assets(asset_paths, cx);
 
         Self {
             titlebar: TitleBar::new(MAIN_WINDOW_TITLE),
@@ -198,14 +220,7 @@ impl MainWindow {
                         }
                     }
                 }
-                cx.background_executor()
-                    .spawn(async move {
-                        let loader = asset_loader::global_asset_loader();
-                        for path in asset_paths {
-                            let _ = loader.load_render_image(&path).await;
-                        }
-                    })
-                    .detach();
+                prewarm_assets(asset_paths, cx);
 
                 self.matches = items;
                 cx.notify();
@@ -217,14 +232,7 @@ impl MainWindow {
                     .map(|m| m.champion_icon_url.clone())
                     .filter(|u| !u.is_empty())
                     .collect();
-                cx.background_executor()
-                    .spawn(async move {
-                        let loader = asset_loader::global_asset_loader();
-                        for path in asset_paths {
-                            let _ = loader.load_render_image(&path).await;
-                        }
-                    })
-                    .detach();
+                prewarm_assets(asset_paths, cx);
 
                 self.career_view.mastery_list = masteries;
                 cx.notify();
@@ -308,10 +316,11 @@ impl MainWindow {
 
         let window_options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
-                origin: Point {
+                // 恢复上次拖拽后的位置，首次运行落在默认坐标
+                origin: load_saved_origin().unwrap_or(Point {
                     x: px(420.0),
                     y: px(140.0),
-                },
+                }),
                 size: Size {
                     width: px(452.0),
                     height: px(268.0),
@@ -396,7 +405,7 @@ impl MainWindow {
 
     pub fn refresh_career(&mut self, _cx: &mut Context<Self>) {
         let live = self.live_service.clone();
-        tokio::spawn(async move {
+        yuumi_core::runtime::spawn_background(async move {
             live.refresh_career_data().await;
         });
     }
@@ -1054,6 +1063,9 @@ fn main() {
         .enable_all()
         .build()
         .expect("初始化 Tokio 运行时失败");
+    // 注册全局句柄：GPUI 的 background_executor 运行在 Windows 线程池上，
+    // 线程池任务需要靠该句柄把网络 I/O 投递回运行时，否则会 panic（no reactor running）
+    yuumi_core::runtime::set_tokio_handle(runtime.handle().clone());
     let _runtime_guard = runtime.enter();
 
     // 1. Windows 单实例互斥量检测（Named Mutex）
@@ -1062,7 +1074,7 @@ fn main() {
         Ok(guard) => Some(guard),
         Err(platform::SingleInstanceError::AlreadyRunning) => {
             eprintln!("检测到 Yuumi 已在运行中，激活现有窗口...");
-            if let Some(hwnd) = platform::find_window_by_title(MAIN_WINDOW_TITLE) {
+            if let Some(hwnd) = platform::find_main_window_hwnd() {
                 platform::restore_and_foreground(hwnd);
             }
             return;
@@ -1093,7 +1105,13 @@ fn main() {
                     height: px(720.0),
                 },
             })),
-            titlebar: None, // 彻底禁用操作系统传统标题栏，启用我们纯手工打磨的极光水晶透明标题栏
+            // 彻底禁用操作系统传统标题栏（appears_transparent=true 仍隐藏系统标题栏）；
+            // title 用于 Win32 侧精确定位主窗口：单实例二次启动时激活已有窗口依赖它
+            titlebar: Some(TitlebarOptions {
+                title: Some(MAIN_WINDOW_TITLE.into()),
+                appears_transparent: true,
+                traffic_light_position: None,
+            }),
             focus: true,
             is_movable: true,
             ..Default::default()

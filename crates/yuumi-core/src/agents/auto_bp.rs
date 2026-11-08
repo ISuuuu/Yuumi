@@ -26,6 +26,12 @@ pub struct ChampSelectSession {
     /// 当前选人会话所属队列 ID
     #[serde(default)]
     pub queue_id: i32,
+    /// 是否为自定义房间（自定义大乱斗的队列 ID 为 0，需借助此标记判定）
+    #[serde(default)]
+    pub is_custom_game: bool,
+    /// 剩余摇号（reroll）次数
+    #[serde(default)]
+    pub rerolls_remaining: i32,
     pub timer: Option<ChampSelectTimer>,
 }
 
@@ -76,8 +82,14 @@ pub struct ChampSelectTimer {
 
 impl ChampSelectSession {
     /// 是否是拥有共享板凳席的大乱斗家族队列（主判定为极地大乱斗 450）
+    ///
+    /// 自定义房间的队列 ID 为 0，无法用队列号判定，改用 `benchEnabled`：
+    /// 共享板凳席只存在于大乱斗家族地图，经典图自定义局该标记恒为 false。
     pub fn is_aram(&self) -> bool {
-        ARAM_BENCH_QUEUE_IDS.contains(&self.queue_id)
+        if ARAM_BENCH_QUEUE_IDS.contains(&self.queue_id) {
+            return true;
+        }
+        self.is_custom_game && self.bench_enabled
     }
 
     /// 当前登录玩家已选定的英雄 ID（未选择为 0）
@@ -146,6 +158,46 @@ pub async fn request_reroll(client: &LcuClient) -> Result<(), String> {
         .await
         .map(|_| ())
         .map_err(|e| format!("摇号失败: {}", e))
+}
+
+/// 拉取当前选人会话（无活跃会话时 LCU 返回 404）
+pub async fn fetch_champ_select_session(client: &LcuClient) -> Result<ChampSelectSession, String> {
+    let value = client
+        .get("/lol-champ-select/v1/session")
+        .await
+        .map_err(|e| format!("获取选人会话失败: {}", e))?;
+    serde_json::from_value(value).map_err(|e| format!("选人会话解析失败: {}", e))
+}
+
+/// 摇号并瞬时换回原英雄
+///
+/// reroll 后原英雄会进入板凳席，需要等待服务端状态落地再从板凳席换回；
+/// 轮询间隔 150ms × 12 次，覆盖实测的 reroll 生效延迟。
+pub async fn request_reroll_and_restore(client: &LcuClient) -> Result<i32, String> {
+    const RETRIES: usize = 12;
+    const INTERVAL: Duration = Duration::from_millis(150);
+
+    let original = fetch_champ_select_session(client)
+        .await?
+        .local_champion_id();
+    if original <= 0 {
+        return Err("尚未选择英雄，无法摇号换回".to_string());
+    }
+
+    request_reroll(client).await?;
+
+    for _ in 0..RETRIES {
+        sleep(INTERVAL).await;
+        let Ok(session) = fetch_champ_select_session(client).await else {
+            continue;
+        };
+        if session.bench_champion_ids().contains(&original) {
+            request_bench_swap(client, original).await?;
+            return Ok(original);
+        }
+    }
+
+    Err("摇号后原英雄未进入板凳席，换回失败".to_string())
 }
 
 /// 处理选人会话更新事件
@@ -458,5 +510,50 @@ mod tests {
         let client = LcuClient::new(1234, 2999, "mock".to_string(), None).unwrap();
         assert!(request_bench_swap(&client, 0).await.is_err());
         assert!(request_bench_swap(&client, -3).await.is_err());
+    }
+
+    #[test]
+    fn test_custom_aram_session_detected_by_bench_enabled() {
+        let custom = ChampSelectSession {
+            actions: Vec::new(),
+            local_player_cell_id: 0,
+            my_team: Vec::new(),
+            bench_enabled: true,
+            bench_champions: vec![BenchChampion {
+                champion_id: 22,
+                is_mine: false,
+            }],
+            queue_id: 0,
+            is_custom_game: true,
+            rerolls_remaining: 2,
+            timer: None,
+        };
+        // 自定义大乱斗：队列 ID 为 0，靠 isCustomGame + benchEnabled 识别
+        assert!(custom.is_aram());
+
+        // 经典图自定义局：板凳席未启用，不应误判为大乱斗
+        let classic = ChampSelectSession {
+            bench_enabled: false,
+            ..custom
+        };
+        assert!(!classic.is_aram());
+    }
+
+    #[test]
+    fn test_aram_queue_and_rerolls_remaining_payload() {
+        let json = r#"{
+            "localPlayerCellId": 0,
+            "actions": [],
+            "myTeam": [],
+            "benchEnabled": true,
+            "queueId": 450,
+            "rerollsRemaining": 2,
+            "benchChampions": [{"championId": 22, "isMine": false}]
+        }"#;
+
+        let session: ChampSelectSession = serde_json::from_str(json).unwrap();
+        assert!(session.is_aram());
+        assert_eq!(session.rerolls_remaining, 2);
+        assert_eq!(session.bench_champion_ids(), vec![22]);
     }
 }

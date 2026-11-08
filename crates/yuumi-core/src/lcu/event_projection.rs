@@ -145,6 +145,7 @@ fn project_champ_select_session(data: &Value) -> Value {
         "benchEnabled",
         "queueId",
         "isCustomGame",
+        "rerollsRemaining",
     ] {
         if let Some(value) = obj.get(key) {
             out.insert(key.to_string(), value.clone());
@@ -261,6 +262,7 @@ mod tests {
             },
             "queueId": 2400,
             "isCustomGame": false,
+            "rerollsRemaining": 2,
             "chatDetails": { "mucJwtDto": { "token": "secret" } }
         });
 
@@ -288,6 +290,7 @@ mod tests {
         assert_eq!(obj["benchEnabled"], json!(true));
         assert_eq!(obj["queueId"], json!(2400));
         assert_eq!(obj["isCustomGame"], json!(false));
+        assert_eq!(obj["rerollsRemaining"], json!(2));
     }
 
     #[test]

@@ -2,13 +2,16 @@
 
 use crate::MAIN_WINDOW_TITLE;
 use windows::core::{HSTRING, PCWSTR};
-use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, HWND};
+use windows::Win32::Foundation::{
+    CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM, WPARAM,
+};
 use windows::Win32::System::Threading::CreateMutexW;
+use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowExW, FindWindowW, GetWindowLongW, SetForegroundWindow, SetWindowLongW, SetWindowPos,
-    ShowWindow, GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_MINIMIZE, SW_RESTORE, WS_EX_LAYERED,
-    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    FindWindowExW, FindWindowW, GetWindowLongW, SendMessageW, SetForegroundWindow, SetWindowLongW,
+    SetWindowPos, ShowWindow, GWL_EXSTYLE, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_MINIMIZE,
+    SW_RESTORE, WM_NCLBUTTONDOWN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
 /// 命名互斥量守卫，负责释放句柄
@@ -124,6 +127,22 @@ pub fn restore_and_foreground(hwnd: HWND) {
 pub fn minimize_window(hwnd: HWND) {
     unsafe {
         let _ = ShowWindow(hwnd, SW_MINIMIZE);
+    }
+}
+
+/// 以 Win32 原生方式启动窗口拖拽（等价于按住系统标题栏拖动）
+///
+/// `SendMessageW(WM_NCLBUTTONDOWN)` 内部进入系统模态拖拽循环，鼠标释放后才返回，
+/// 调用方可在返回后读取窗口的新坐标并持久化。
+pub fn begin_window_drag(hwnd: HWND) {
+    unsafe {
+        let _ = ReleaseCapture();
+        SendMessageW(
+            hwnd,
+            WM_NCLBUTTONDOWN,
+            WPARAM(HTCAPTION as usize),
+            LPARAM(0),
+        );
     }
 }
 

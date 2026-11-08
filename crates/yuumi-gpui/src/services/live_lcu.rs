@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
 use tokio::time::{sleep, Duration};
 use yuumi_core::agents::{
-    auto_bp::{request_bench_swap, request_reroll, ChampSelectSession},
+    auto_bp::{request_bench_swap, request_reroll, request_reroll_and_restore, ChampSelectSession},
     auto_match::ReadyCheckData,
     config::{AutoBpConfig, AutoMatchConfig},
     lifecycle::{GamePhase, LifecycleManager},
@@ -384,5 +384,14 @@ impl LiveLcuService {
             .await
             .ok_or_else(|| "英雄联盟客户端未连接".to_string())?;
         request_reroll(&client).await
+    }
+
+    /// 摇号并瞬时换回原英雄（返回被换回的原英雄 ID）
+    pub async fn reroll_and_restore_aram_champion(&self) -> Result<i32, String> {
+        let client = self
+            .get_client()
+            .await
+            .ok_or_else(|| "英雄联盟客户端未连接".to_string())?;
+        request_reroll_and_restore(&client).await
     }
 }

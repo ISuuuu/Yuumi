@@ -1,17 +1,68 @@
 //! 大乱斗板凳席置顶透明悬浮小窗
 //!
 //! 数据源：`LiveLcuService` 广播的 `ChampSelectSession`（由主窗口转发）。
-//! 交互：点击板凳席英雄图标 → 调用 LCU `bench/swap` 一键换人；「摇号」→ 重随当前英雄。
+//! 交互：点击板凳席英雄图标 → 调用 LCU `bench/swap` 一键换人；「摇号」→ 重随当前英雄；
+//!       「摇号换回」→ reroll 后瞬时从板凳席换回原英雄；空白区域按下可拖拽移动并记忆坐标。
 //! 生命周期：仅在极地大乱斗（及同族板凳席队列）选人期间由主窗口显示，选人结束自动隐藏。
 
 use crate::asset_loader::global_asset_loader;
 use crate::components::lcu_image::LcuImage;
+use crate::platform;
 use crate::services::LiveLcuService;
 use crate::theme::Theme;
+use crate::BENCH_WINDOW_TITLE;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use yuumi_core::agents::ChampSelectSession;
 use yuumi_core::lcu::game_data::GameDataAssets;
+
+/// 悬浮窗坐标持久化文件名（位于应用数据目录）
+const OVERLAY_LAYOUT_FILE: &str = "bench-overlay.json";
+
+/// 悬浮窗左上角坐标
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct OverlayLayout {
+    x: f32,
+    y: f32,
+}
+
+fn layout_path() -> PathBuf {
+    yuumi_core::runtime::app_data_dir().join(OVERLAY_LAYOUT_FILE)
+}
+
+/// 读取上次保存的小窗坐标（首次运行或读失败时返回 None）
+pub fn load_saved_origin() -> Option<Point<Pixels>> {
+    let raw = std::fs::read_to_string(layout_path()).ok()?;
+    let layout: OverlayLayout = serde_json::from_str(&raw).ok()?;
+    Some(Point {
+        x: px(layout.x),
+        y: px(layout.y),
+    })
+}
+
+fn save_origin(origin: Point<Pixels>) {
+    let path = layout_path();
+    if let Some(parent) = path.parent() {
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            log::warn!("[BenchOverlay] 创建配置目录失败: {}", err);
+            return;
+        }
+    }
+    let layout = OverlayLayout {
+        x: origin.x.into(),
+        y: origin.y.into(),
+    };
+    match serde_json::to_string(&layout) {
+        Ok(json) => {
+            if let Err(err) = std::fs::write(&path, json) {
+                log::warn!("[BenchOverlay] 保存小窗坐标失败: {}", err);
+            }
+        }
+        Err(err) => log::warn!("[BenchOverlay] 序列化小窗坐标失败: {}", err),
+    }
+}
 
 /// 英雄图标资源路径
 fn champion_icon_path(champion_id: i32) -> String {
@@ -38,6 +89,8 @@ pub struct BenchOverlayView {
     /// 当前登录玩家已选英雄
     my_champion_id: i32,
     queue_id: i32,
+    /// 剩余摇号次数
+    rerolls_remaining: i32,
     /// 正在提交换人请求的英雄 ID（用于禁用重复点击）
     pending_champion: Option<i32>,
     /// 最近一次操作反馈
@@ -52,6 +105,7 @@ impl BenchOverlayView {
             team: Vec::new(),
             my_champion_id: 0,
             queue_id: 0,
+            rerolls_remaining: 0,
             pending_champion: None,
             status: None,
         }
@@ -73,6 +127,7 @@ impl BenchOverlayView {
 
         self.queue_id = session.queue_id;
         self.my_champion_id = session.local_champion_id();
+        self.rerolls_remaining = session.rerolls_remaining;
         self.bench = session
             .bench_champions
             .iter()
@@ -111,6 +166,7 @@ impl BenchOverlayView {
         self.team.clear();
         self.my_champion_id = 0;
         self.queue_id = 0;
+        self.rerolls_remaining = 0;
         self.pending_champion = None;
         self.status = None;
         cx.notify();
@@ -208,6 +264,47 @@ impl BenchOverlayView {
         .detach();
     }
 
+    /// 摇号并瞬时换回原英雄
+    fn reroll_and_restore(&mut self, cx: &mut Context<Self>) {
+        if self.pending_champion.is_some() {
+            return;
+        }
+        self.status = Some("摇号换回中…".into());
+        cx.notify();
+
+        let service = self.live_service.clone();
+        cx.spawn(async move |this, cx| {
+            let result = service.reroll_and_restore_aram_champion().await;
+            let message: SharedString = match &result {
+                Ok(champion_id) => format!("已摇号并换回英雄 {}", champion_id).into(),
+                Err(e) => format!("摇号换回失败: {}", e).into(),
+            };
+            if let Err(e) = &result {
+                log::warn!("[BenchOverlay] {}", e);
+            }
+            let _ = this.update(cx, |view, cx| {
+                view.status = Some(message);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// 空白区域按下：交给 Win32 原生拖拽，松手后持久化最终坐标
+    fn begin_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(hwnd) = platform::find_window_by_title(BENCH_WINDOW_TITLE) else {
+            log::warn!("[BenchOverlay] 未找到小窗 HWND，跳过拖拽");
+            return;
+        };
+
+        platform::begin_window_drag(hwnd);
+
+        if let WindowBounds::Windowed(bounds) = window.window_bounds() {
+            save_origin(bounds.origin);
+        }
+        cx.notify();
+    }
+
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let queue_label: SharedString = match self.queue_id {
             450 => "极地大乱斗".into(),
@@ -255,9 +352,10 @@ impl BenchOverlayView {
                             .text_size(px(9.0))
                             .text_color(Theme::TEXT_MUTED)
                             .child(format!(
-                                "板凳 {} · 本方 {}",
+                                "板凳 {} · 本方 {} · 剩余摇号 {}",
                                 self.bench.len(),
-                                self.team.len()
+                                self.team.len(),
+                                self.rerolls_remaining
                             )),
                     )
                     .child(
@@ -274,10 +372,31 @@ impl BenchOverlayView {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _ev, _window, cx| {
+                                    cx.stop_propagation();
                                     this.reroll(cx);
                                 }),
                             )
                             .child("摇号"),
+                    )
+                    .child(
+                        div()
+                            .id("bench-reroll-restore")
+                            .cursor_pointer()
+                            .px_2()
+                            .rounded_sm()
+                            .bg(rgba(0x00f5d433))
+                            .hover(|s| s.bg(rgba(0x00f5d466)))
+                            .text_size(px(10.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(Theme::AURORA_CYAN)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _ev, _window, cx| {
+                                    cx.stop_propagation();
+                                    this.reroll_and_restore(cx);
+                                }),
+                            )
+                            .child("摇号换回"),
                     ),
             )
     }
@@ -339,6 +458,7 @@ impl BenchOverlayView {
                 this.on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |view, _ev, _window, cx| {
+                        cx.stop_propagation();
                         view.swap_to(champion_id, cx);
                     }),
                 )
@@ -358,6 +478,7 @@ impl Render for BenchOverlayView {
             .collect();
 
         div()
+            .id("bench-overlay-root")
             .size_full()
             .flex()
             .flex_col()
@@ -368,6 +489,13 @@ impl Render for BenchOverlayView {
             .rounded_xl()
             .p_3()
             .shadow_lg()
+            // 空白区域按下可拖拽移动（英雄槽位与按钮内部阻止冒泡）
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _ev, window, cx| {
+                    this.begin_drag(window, cx);
+                }),
+            )
             .child(header)
             .child(Self::render_section_label("板凳席（点击换取）"))
             .child(
