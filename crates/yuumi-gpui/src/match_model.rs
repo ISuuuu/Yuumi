@@ -3,16 +3,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-pub use yuumi_core::gameflow::match_stats::{
-    compute_match_stats, MatchLike,
-};
+pub use yuumi_core::gameflow::match_stats::{compute_match_stats, MatchLike};
 pub use yuumi_core::lcu::game_data::GameDataAssets;
-pub use yuumi_core::parsers::match_detail::{
-    GameDetail, GameDetailTeam, RawGameDetail,
-};
-pub use yuumi_core::parsers::match_parser::{
-    LcuMatchGame, LcuMatchHistoryResponse, MatchDisplay,
-};
+pub use yuumi_core::parsers::match_detail::{GameDetail, GameDetailTeam, RawGameDetail};
+pub use yuumi_core::parsers::match_parser::{LcuMatchGame, LcuMatchHistoryResponse, MatchDisplay};
 
 /// 界面展示使用的战绩卡片数据（包裹 MatchDisplay 并增加 UI 交互状态）
 #[derive(Debug, Clone)]
@@ -220,7 +214,10 @@ mod tests {
         let info = crate::game_info_view::load_mock_game_info();
         assert_eq!(info.blue_team.len(), 5);
         assert_eq!(info.red_team.len(), 5);
-        assert_eq!(info.user_side, Some(yuumi_core::gameflow::team_builder::MapSide::Blue));
+        assert_eq!(
+            info.user_side,
+            Some(yuumi_core::gameflow::team_builder::MapSide::Blue)
+        );
         assert!(info.side_matched);
 
         let local_player = info

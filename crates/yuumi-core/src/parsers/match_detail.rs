@@ -4,9 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lcu::client::{build_auth_header, LcuClient};
 use crate::lcu::game_data::GameDataAssets;
-use crate::parsers::match_parser::{
-    dedupe_augment_ids, LcuMatchStats, LcuParticipantTimeline,
-};
+use crate::parsers::match_parser::{dedupe_augment_ids, LcuMatchStats, LcuParticipantTimeline};
 
 // ─── LCU 原始响应结构 ───
 
@@ -234,8 +232,8 @@ impl RawGameDetail {
                 .unwrap_or_else(|| (format!("玩家{}", p.participant_id), String::new(), 0));
 
             let stats = &p.stats;
-            let cs = stats.total_minions_killed.unwrap_or(0)
-                + stats.neutral_minions_killed.unwrap_or(0);
+            let cs =
+                stats.total_minions_killed.unwrap_or(0) + stats.neutral_minions_killed.unwrap_or(0);
             let gold = stats.gold_earned.unwrap_or(0);
             let damage = stats.total_damage_dealt_to_champions.unwrap_or(0);
 
@@ -256,49 +254,32 @@ impl RawGameDetail {
             let mut item_icon_urls = Vec::new();
             for &id in &item_ids {
                 if id > 0 {
-                    let path = assets
-                        .items
-                        .get(&id)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            format!("/lol-game-data/assets/v1/item-icons/{}.png", id)
-                        });
+                    let path = assets.items.get(&id).cloned().unwrap_or_else(|| {
+                        format!("/lol-game-data/assets/v1/item-icons/{}.png", id)
+                    });
                     item_icon_urls.push(path);
                 } else {
                     item_icon_urls.push(String::new());
                 }
             }
 
-            let ward_icon_url = if let Some(wid) = ward_item_id {
-                assets
-                    .items
-                    .get(&wid)
-                    .cloned()
-                    .unwrap_or_else(|| format!("/lol-game-data/assets/v1/item-icons/{}.png", wid))
-            } else {
-                String::new()
-            };
+            let ward_icon_url =
+                if let Some(wid) = ward_item_id {
+                    assets.items.get(&wid).cloned().unwrap_or_else(|| {
+                        format!("/lol-game-data/assets/v1/item-icons/{}.png", wid)
+                    })
+                } else {
+                    String::new()
+                };
 
             let champion_icon_url = format!(
                 "/lol-game-data/assets/v1/champion-icons/{}.png",
                 p.champion_id
             );
 
-            let spell1_icon_url = assets
-                .spells
-                .get(&p.spell1_id)
-                .cloned()
-                .unwrap_or_default();
-            let spell2_icon_url = assets
-                .spells
-                .get(&p.spell2_id)
-                .cloned()
-                .unwrap_or_default();
-            let rune_icon_url = assets
-                .runes
-                .get(&stats.perk0)
-                .cloned()
-                .unwrap_or_default();
+            let spell1_icon_url = assets.spells.get(&p.spell1_id).cloned().unwrap_or_default();
+            let spell2_icon_url = assets.spells.get(&p.spell2_id).cloned().unwrap_or_default();
+            let rune_icon_url = assets.runes.get(&stats.perk0).cloned().unwrap_or_default();
 
             let aug_ids = dedupe_augment_ids(stats.augments.iter().copied().chain([
                 stats.player_augment1,
@@ -478,4 +459,3 @@ mod tests {
         }
     }
 }
-

@@ -299,47 +299,227 @@ pub fn load_mock_game_info() -> GameInfoData {
 
     let blue_team = vec![
         make_mock_player(
-            "puuid-blue-top", 10001, 0, "寒霜之刃", "CN1", 84, "阿卡丽", "离群之刺",
-            "宗师", "I", 485, "上单", None, None, 14, 6, 7, 3, 5, false,
+            "puuid-blue-top",
+            10001,
+            0,
+            "寒霜之刃",
+            "CN1",
+            84,
+            "阿卡丽",
+            "离群之刺",
+            "宗师",
+            "I",
+            485,
+            "上单",
+            None,
+            None,
+            14,
+            6,
+            7,
+            3,
+            5,
+            false,
         ),
         make_mock_player(
-            "puuid-blue-jug", 10002, 1, "暗影猎犬", "001", 121, "卡兹克", "虚空掠夺者",
-            "大师", "I", 120, "打野", None, None, 12, 8, 5, 4, 8, false,
+            "puuid-blue-jug",
+            10002,
+            1,
+            "暗影猎犬",
+            "001",
+            121,
+            "卡兹克",
+            "虚空掠夺者",
+            "大师",
+            "I",
+            120,
+            "打野",
+            None,
+            None,
+            12,
+            8,
+            5,
+            4,
+            8,
+            false,
         ),
         make_mock_player(
-            "puuid-local-mid", 10003, 2, "悠米本米", "GPUI", 350, "悠米", "魔法猫咪",
-            "王者", "I", 890, "中单", None, None, 16, 4, 9, 2, 7, true,
+            "puuid-local-mid",
+            10003,
+            2,
+            "悠米本米",
+            "GPUI",
+            350,
+            "悠米",
+            "魔法猫咪",
+            "王者",
+            "I",
+            890,
+            "中单",
+            None,
+            None,
+            16,
+            4,
+            9,
+            2,
+            7,
+            true,
         ),
         make_mock_player(
-            "puuid-blue-adc", 10004, 3, "金克丝超闪", "ADC", 222, "金克丝", "暴走萝莉",
-            "大师", "I", 230, "下路", Some(0), tpid_blue_duo.clone(), 15, 5, 11, 4, 6, false,
+            "puuid-blue-adc",
+            10004,
+            3,
+            "金克丝超闪",
+            "ADC",
+            222,
+            "金克丝",
+            "暴走萝莉",
+            "大师",
+            "I",
+            230,
+            "下路",
+            Some(0),
+            tpid_blue_duo.clone(),
+            15,
+            5,
+            11,
+            4,
+            6,
+            false,
         ),
         make_mock_player(
-            "puuid-blue-sup", 10005, 4, "时光守护者", "SUP", 26, "基兰", "时光守护者",
-            "大师", "I", 180, "辅助", Some(0), tpid_blue_duo, 13, 7, 2, 3, 16, false,
+            "puuid-blue-sup",
+            10005,
+            4,
+            "时光守护者",
+            "SUP",
+            26,
+            "基兰",
+            "时光守护者",
+            "大师",
+            "I",
+            180,
+            "辅助",
+            Some(0),
+            tpid_blue_duo,
+            13,
+            7,
+            2,
+            3,
+            16,
+            false,
         ),
     ];
 
     let red_team = vec![
         make_mock_player(
-            "puuid-red-top", 20001, 5, "诺克萨斯之手", "KR1", 122, "德莱厄斯", "诺克萨斯之手",
-            "宗师", "I", 512, "上单", Some(1), tpid_red_trio.clone(), 11, 9, 8, 5, 4, false,
+            "puuid-red-top",
+            20001,
+            5,
+            "诺克萨斯之手",
+            "KR1",
+            122,
+            "德莱厄斯",
+            "诺克萨斯之手",
+            "宗师",
+            "I",
+            512,
+            "上单",
+            Some(1),
+            tpid_red_trio.clone(),
+            11,
+            9,
+            8,
+            5,
+            4,
+            false,
         ),
         make_mock_player(
-            "puuid-red-jug", 20002, 6, "盲僧小王", "JUG", 64, "李青", "盲僧",
-            "宗师", "I", 620, "打野", Some(1), tpid_red_trio.clone(), 13, 7, 7, 4, 9, false,
+            "puuid-red-jug",
+            20002,
+            6,
+            "盲僧小王",
+            "JUG",
+            64,
+            "李青",
+            "盲僧",
+            "宗师",
+            "I",
+            620,
+            "打野",
+            Some(1),
+            tpid_red_trio.clone(),
+            13,
+            7,
+            7,
+            4,
+            9,
+            false,
         ),
         make_mock_player(
-            "puuid-red-mid", 20003, 7, "九尾妖狐", "MID", 103, "阿狸", "九尾妖狐",
-            "王者", "I", 780, "中单", Some(1), tpid_red_trio, 14, 6, 8, 3, 8, false,
+            "puuid-red-mid",
+            20003,
+            7,
+            "九尾妖狐",
+            "MID",
+            103,
+            "阿狸",
+            "九尾妖狐",
+            "王者",
+            "I",
+            780,
+            "中单",
+            Some(1),
+            tpid_red_trio,
+            14,
+            6,
+            8,
+            3,
+            8,
+            false,
         ),
         make_mock_player(
-            "puuid-red-adc", 20004, 8, "狂暴圣枪", "BOT", 236, "卢锡安", "圣枪游侠",
-            "大师", "I", 340, "下路", None, None, 10, 10, 9, 6, 5, false,
+            "puuid-red-adc",
+            20004,
+            8,
+            "狂暴圣枪",
+            "BOT",
+            236,
+            "卢锡安",
+            "圣枪游侠",
+            "大师",
+            "I",
+            340,
+            "下路",
+            None,
+            None,
+            10,
+            10,
+            9,
+            6,
+            5,
+            false,
         ),
         make_mock_player(
-            "puuid-red-sup", 20005, 9, "幻翎洛洛", "RAK", 497, "洛", "幻翎",
-            "大师", "I", 210, "辅助", None, None, 9, 11, 1, 5, 14, false,
+            "puuid-red-sup",
+            20005,
+            9,
+            "幻翎洛洛",
+            "RAK",
+            497,
+            "洛",
+            "幻翎",
+            "大师",
+            "I",
+            210,
+            "辅助",
+            None,
+            None,
+            9,
+            11,
+            1,
+            5,
+            14,
+            false,
         ),
     ];
 
@@ -383,12 +563,7 @@ impl GameInfoView {
                             .flex()
                             .items_center()
                             .gap_3()
-                            .child(
-                                div()
-                                    .size(px(10.0))
-                                    .rounded_full()
-                                    .bg(Theme::AURORA_CYAN),
-                            )
+                            .child(div().size(px(10.0)).rounded_full().bg(Theme::AURORA_CYAN))
                             .child(
                                 div()
                                     .text_sm()
@@ -438,13 +613,8 @@ impl GameInfoView {
                                                 "蓝方队伍"
                                             }),
                                     ),
-                                    )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .child("VS"),
                             )
+                            .child(div().text_xs().text_color(Theme::TEXT_MUTED).child("VS"))
                             .child(
                                 div()
                                     .flex()
@@ -661,7 +831,14 @@ impl GameInfoView {
                                     .text_sm()
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(Theme::TEXT_PRIMARY)
-                                    .child(player.champion_name.chars().next().unwrap_or('?').to_string()),
+                                    .child(
+                                        player
+                                            .champion_name
+                                            .chars()
+                                            .next()
+                                            .unwrap_or('?')
+                                            .to_string(),
+                                    ),
                             )
                             .child(
                                 div()
@@ -672,79 +849,60 @@ impl GameInfoView {
                     )
                     // 玩家文本信息
                     .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(left_meta)
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(Theme::TEXT_SECONDARY)
-                                            .child(format!(
-                                                "{} · {}",
-                                                player.champion_name, player.champion_title
-                                            )),
-                                    )
-                                    .child(
-                                        div()
-                                            .px_2()
-                                            .py(px(1.0))
-                                            .rounded_md()
-                                            .bg(Theme::BADGE_BG)
-                                            .text_xs()
-                                            .text_color(Theme::TEXT_MUTED)
-                                            .child(format!(
-                                                "{} {} ({} LP)",
-                                                player.rank_tier,
-                                                player.rank_division,
-                                                player.rank_lp
-                                            )),
-                                    ),
-                            ),
+                        div().flex().flex_col().gap_1().child(left_meta).child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(Theme::TEXT_SECONDARY)
+                                        .child(format!(
+                                            "{} · {}",
+                                            player.champion_name, player.champion_title
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .px_2()
+                                        .py(px(1.0))
+                                        .rounded_md()
+                                        .bg(Theme::BADGE_BG)
+                                        .text_xs()
+                                        .text_color(Theme::TEXT_MUTED)
+                                        .child(format!(
+                                            "{} {} ({} LP)",
+                                            player.rank_tier, player.rank_division, player.rank_lp
+                                        )),
+                                ),
+                        ),
                     ),
             );
 
-        let mut right_pane = div()
-            .flex()
-            .items_center()
-            .gap_4()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_end()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(if player.win_rate >= 50 {
-                                Theme::WIN_TEXT
-                            } else {
-                                Theme::LOSS_TEXT
-                            })
-                            .child(format!("胜率 {}%", player.win_rate)),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(Theme::TEXT_MUTED)
-                            .child(format!(
-                                "{:.2} KDA ({}/{}/{})",
-                                player.avg_kda,
-                                player.kills,
-                                player.deaths,
-                                player.assists
-                            )),
-                    ),
-            );
+        let mut right_pane = div().flex().items_center().gap_4().child(
+            div()
+                .flex()
+                .flex_col()
+                .items_end()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(if player.win_rate >= 50 {
+                            Theme::WIN_TEXT
+                        } else {
+                            Theme::LOSS_TEXT
+                        })
+                        .child(format!("胜率 {}%", player.win_rate)),
+                )
+                .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(format!(
+                    "{:.2} KDA ({}/{}/{})",
+                    player.avg_kda, player.kills, player.deaths, player.assists
+                ))),
+        );
 
         if let Some(streak) = player.streak_text.clone() {
             right_pane = right_pane.child(

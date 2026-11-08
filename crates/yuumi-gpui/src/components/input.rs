@@ -1,6 +1,6 @@
+use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use crate::theme::Theme;
 
 #[derive(Clone, Debug)]
 pub struct SearchInput {
@@ -59,12 +59,7 @@ impl SearchInput {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(Theme::TEXT_MUTED)
-                            .child("🔍"),
-                    )
+                    .child(div().text_xs().text_color(Theme::TEXT_MUTED).child("🔍"))
                     .child(
                         div()
                             .text_xs()

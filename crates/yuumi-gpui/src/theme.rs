@@ -67,9 +67,9 @@ impl Theme {
 
     // ── 组队主题强调色（高辨识度色板） ──
     pub const PREMADE_COLOR_1: Hsla = const_hsla(160.0 / 360.0, 0.90, 0.38, 1.0); // 翡翠青
-    pub const PREMADE_COLOR_2: Hsla = const_hsla(38.0 / 360.0, 0.95, 0.45, 1.0);  // 琥珀金
+    pub const PREMADE_COLOR_2: Hsla = const_hsla(38.0 / 360.0, 0.95, 0.45, 1.0); // 琥珀金
     pub const PREMADE_COLOR_3: Hsla = const_hsla(270.0 / 360.0, 0.80, 0.55, 1.0); // 罗兰紫
-    pub const PREMADE_COLOR_4: Hsla = const_hsla(15.0 / 360.0, 0.95, 0.52, 1.0);  // 珊瑚橙
+    pub const PREMADE_COLOR_4: Hsla = const_hsla(15.0 / 360.0, 0.95, 0.52, 1.0); // 珊瑚橙
     pub const GOLD: Hsla = const_hsla(38.0 / 360.0, 0.95, 0.45, 1.0);
     pub const HOVER_BG: Hsla = const_hsla(210.0 / 360.0, 0.20, 0.95, 0.6);
 

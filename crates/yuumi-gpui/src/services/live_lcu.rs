@@ -50,6 +50,8 @@ pub struct LiveLcuService {
     pub asset_cache: Arc<AssetCache>,
     pub auto_match_cfg: Arc<watch::Sender<AutoMatchConfig>>,
     pub auto_bp_cfg: Arc<watch::Sender<AutoBpConfig>>,
+    pub client: Arc<tokio::sync::RwLock<Option<yuumi_core::lcu::client::LcuClient>>>,
+    pub game_data_assets: Arc<tokio::sync::RwLock<Option<Arc<GameDataAssets>>>>,
 }
 
 impl LiveLcuService {
@@ -67,6 +69,8 @@ impl LiveLcuService {
             asset_cache,
             auto_match_cfg: Arc::new(match_tx),
             auto_bp_cfg: Arc::new(bp_tx),
+            client: Arc::new(tokio::sync::RwLock::new(None)),
+            game_data_assets: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -76,6 +80,16 @@ impl LiveLcuService {
 
     pub fn subscribe_status(&self) -> watch::Receiver<ConnectionStatus> {
         self.status.subscribe()
+    }
+
+    /// 获取当前的 LcuClient（若已连接）
+    pub async fn get_client(&self) -> Option<yuumi_core::lcu::client::LcuClient> {
+        self.client.read().await.clone()
+    }
+
+    /// 获取当前预加载的 GameDataAssets
+    pub async fn get_game_data_assets(&self) -> Option<Arc<GameDataAssets>> {
+        self.game_data_assets.read().await.clone()
     }
 
     /// 启动后台常驻监控与 WebSocket 分发循环
@@ -97,7 +111,11 @@ impl LiveLcuService {
 
             match (detected, &active_info) {
                 (Some(info), None) => {
-                    log::info!("[LiveLcu] 检测到本地 LCU 进程: pid={}, port={}", info.pid, info.port);
+                    log::info!(
+                        "[LiveLcu] 检测到本地 LCU 进程: pid={}, port={}",
+                        info.pid,
+                        info.port
+                    );
                     let _ = self.status.send(ConnectionStatus::Connecting);
 
                     // 实例化 LcuClient
@@ -112,8 +130,11 @@ impl LiveLcuService {
                             let assets = fetch_game_data_assets(&client).await;
                             let arc_assets = Arc::new(assets);
                             game_data_assets = Some(arc_assets.clone());
+                            *self.game_data_assets.write().await = Some(arc_assets.clone());
                             let _ = self.event_tx.send(LiveLcuEvent::GameDataReady(arc_assets));
                         }
+
+                        *self.client.write().await = Some(client.clone());
 
                         // 获取当前召唤师
                         let summoner = fetch_current_summoner(&client).await.ok();
@@ -121,15 +142,22 @@ impl LiveLcuService {
                             info: info.clone(),
                             summoner: Box::new(summoner.clone()),
                         });
-                        let _ = self.event_tx.send(LiveLcuEvent::ConnectionChanged(ConnectionStatus::Connected {
-                            info: info.clone(),
-                            summoner: Box::new(summoner.clone()),
-                        }));
+                        let _ = self.event_tx.send(LiveLcuEvent::ConnectionChanged(
+                            ConnectionStatus::Connected {
+                                info: info.clone(),
+                                summoner: Box::new(summoner.clone()),
+                            },
+                        ));
 
                         // 若已获取召唤师，拉取最近战绩
                         if let (Some(s), Some(assets)) = (&summoner, &game_data_assets) {
-                            if let Ok(matches) = fetch_match_history(&client, &s.puuid, Some(0), Some(19), assets).await {
-                                let _ = self.event_tx.send(LiveLcuEvent::MatchHistoryLoaded(matches));
+                            if let Ok(matches) =
+                                fetch_match_history(&client, &s.puuid, Some(0), Some(19), assets)
+                                    .await
+                            {
+                                let _ = self
+                                    .event_tx
+                                    .send(LiveLcuEvent::MatchHistoryLoaded(matches));
                             }
                         }
 
@@ -155,10 +183,13 @@ impl LiveLcuService {
                         ws.cancel();
                     }
                     active_info = None;
+                    *self.client.write().await = None;
                     self.supervisor.cancel_all().await;
                     let _ = self.lifecycle.on_phase_changed("None").await;
                     let _ = self.status.send(ConnectionStatus::Disconnected);
-                    let _ = self.event_tx.send(LiveLcuEvent::ConnectionChanged(ConnectionStatus::Disconnected));
+                    let _ = self.event_tx.send(LiveLcuEvent::ConnectionChanged(
+                        ConnectionStatus::Disconnected,
+                    ));
                 }
                 _ => {}
             }
@@ -167,27 +198,42 @@ impl LiveLcuService {
         }
     }
 
-    async fn handle_ws_event(&self, client: &yuumi_core::lcu::client::LcuClient, event: LcuWsEvent) {
+    async fn handle_ws_event(
+        &self,
+        client: &yuumi_core::lcu::client::LcuClient,
+        event: LcuWsEvent,
+    ) {
         match event.uri.as_str() {
             "/lol-gameflow/v1/gameflow-phase" => {
                 if let Some(phase_str) = event.data.as_str() {
                     let phase = GamePhase::from(phase_str);
                     let cfg = self.auto_match_cfg.borrow().clone();
-                    handle_phase_change(client, phase_str, &cfg, &self.supervisor, &self.lifecycle).await;
+                    handle_phase_change(client, phase_str, &cfg, &self.supervisor, &self.lifecycle)
+                        .await;
                     let _ = self.event_tx.send(LiveLcuEvent::GamePhaseChanged(phase));
                 }
             }
             "/lol-matchmaking/v1/ready-check" => {
                 if let Ok(ready) = serde_json::from_value::<ReadyCheckData>(event.data) {
                     let cfg = self.auto_match_cfg.borrow().clone();
-                    handle_ready_check(client, &ready, &cfg, &self.supervisor, &self.lifecycle).await;
+                    handle_ready_check(client, &ready, &cfg, &self.supervisor, &self.lifecycle)
+                        .await;
                 }
             }
             "/lol-champ-select/v1/session" => {
                 if let Ok(session) = serde_json::from_value::<ChampSelectSession>(event.data) {
                     let cfg = self.auto_bp_cfg.borrow().clone();
-                    handle_champ_select_session(client, &session, &cfg, &self.supervisor, &self.lifecycle).await;
-                    let _ = self.event_tx.send(LiveLcuEvent::ChampSelectUpdated(session));
+                    handle_champ_select_session(
+                        client,
+                        &session,
+                        &cfg,
+                        &self.supervisor,
+                        &self.lifecycle,
+                    )
+                    .await;
+                    let _ = self
+                        .event_tx
+                        .send(LiveLcuEvent::ChampSelectUpdated(session));
                 }
             }
             _ => {}

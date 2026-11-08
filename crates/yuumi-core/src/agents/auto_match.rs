@@ -40,7 +40,11 @@ pub async fn handle_phase_change(
     lifecycle: &LifecycleManager,
 ) {
     let transition = lifecycle.on_phase_changed(phase).await;
-    log::info!("[Agent] 游戏流转阶段推进: phase={}, transition={:?}", phase, transition);
+    log::info!(
+        "[Agent] 游戏流转阶段推进: phase={}, transition={:?}",
+        phase,
+        transition
+    );
 
     match GamePhase::from(phase) {
         GamePhase::Reconnect => {
@@ -50,16 +54,24 @@ pub async fn handle_phase_change(
                 let supervisor_clone = supervisor.clone();
 
                 let _ = supervisor
-                    .spawn(TaskKind::AutoReconnect, DuplicateStrategy::RejectNew, move |ctx| async move {
-                        sleep(Duration::from_millis(1500)).await;
-                        if ctx.is_cancelled() {
-                            return;
-                        }
-                        let _permit = supervisor_clone.acquire_exclusive_permit().await;
-                        if client.post("/lol-gameflow/v1/reconnect", Some(serde_json::json!({}))).await.is_ok() {
-                            log::info!("[Agent] 自动重连已请求成功 (guard={:?})", guard);
-                        }
-                    })
+                    .spawn(
+                        TaskKind::AutoReconnect,
+                        DuplicateStrategy::RejectNew,
+                        move |ctx| async move {
+                            sleep(Duration::from_millis(1500)).await;
+                            if ctx.is_cancelled() {
+                                return;
+                            }
+                            let _permit = supervisor_clone.acquire_exclusive_permit().await;
+                            if client
+                                .post("/lol-gameflow/v1/reconnect", Some(serde_json::json!({})))
+                                .await
+                                .is_ok()
+                            {
+                                log::info!("[Agent] 自动重连已请求成功 (guard={:?})", guard);
+                            }
+                        },
+                    )
                     .await;
             }
         }
@@ -71,16 +83,24 @@ pub async fn handle_phase_change(
                 let supervisor_clone = supervisor.clone();
 
                 let _ = supervisor
-                    .spawn(TaskKind::AutoPlayAgain, DuplicateStrategy::RejectNew, move |ctx| async move {
-                        sleep(Duration::from_secs(delay)).await;
-                        if ctx.is_cancelled() {
-                            return;
-                        }
-                        let _permit = supervisor_clone.acquire_exclusive_permit().await;
-                        if client.post("/lol-lobby/v2/play-again", Some(serde_json::json!({}))).await.is_ok() {
-                            log::info!("[Agent] 延时再来一局已触发 (guard={:?})", guard);
-                        }
-                    })
+                    .spawn(
+                        TaskKind::AutoPlayAgain,
+                        DuplicateStrategy::RejectNew,
+                        move |ctx| async move {
+                            sleep(Duration::from_secs(delay)).await;
+                            if ctx.is_cancelled() {
+                                return;
+                            }
+                            let _permit = supervisor_clone.acquire_exclusive_permit().await;
+                            if client
+                                .post("/lol-lobby/v2/play-again", Some(serde_json::json!({})))
+                                .await
+                                .is_ok()
+                            {
+                                log::info!("[Agent] 延时再来一局已触发 (guard={:?})", guard);
+                            }
+                        },
+                    )
                     .await;
             }
         }
@@ -115,23 +135,33 @@ pub async fn handle_ready_check(
         let supervisor_clone = supervisor.clone();
 
         let _ = supervisor
-            .spawn(TaskKind::AutoAccept, DuplicateStrategy::RejectNew, move |ctx| async move {
-                if delay > 0 {
-                    sleep(Duration::from_secs(delay)).await;
-                }
-                if ctx.is_cancelled() {
-                    return;
-                }
-                let _permit = supervisor_clone.acquire_exclusive_permit().await;
-                match client.post("/lol-matchmaking/v1/ready-check/accept", Some(serde_json::json!({}))).await {
-                    Ok(_) => {
-                        log::info!("[Agent] 自动接受匹配成功 (guard={:?})", guard);
+            .spawn(
+                TaskKind::AutoAccept,
+                DuplicateStrategy::RejectNew,
+                move |ctx| async move {
+                    if delay > 0 {
+                        sleep(Duration::from_secs(delay)).await;
                     }
-                    Err(e) => {
-                        log::warn!("[Agent] 自动接受匹配失败: {}", e);
+                    if ctx.is_cancelled() {
+                        return;
                     }
-                }
-            })
+                    let _permit = supervisor_clone.acquire_exclusive_permit().await;
+                    match client
+                        .post(
+                            "/lol-matchmaking/v1/ready-check/accept",
+                            Some(serde_json::json!({})),
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            log::info!("[Agent] 自动接受匹配成功 (guard={:?})", guard);
+                        }
+                        Err(e) => {
+                            log::warn!("[Agent] 自动接受匹配失败: {}", e);
+                        }
+                    }
+                },
+            )
             .await;
     }
 }

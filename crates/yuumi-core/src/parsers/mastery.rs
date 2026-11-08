@@ -22,7 +22,9 @@ pub struct ChampionMasteryItem {
 }
 
 /// 解析熟练度与里程碑数据
-pub async fn fetch_champion_mastery_list(client: &LcuClient) -> Result<Vec<ChampionMasteryItem>, String> {
+pub async fn fetch_champion_mastery_list(
+    client: &LcuClient,
+) -> Result<Vec<ChampionMasteryItem>, String> {
     let mastery_val = client
         .get("/lol-champion-mastery/v1/local-player/champion-mastery")
         .await?;
@@ -37,7 +39,10 @@ pub async fn fetch_champion_mastery_list(client: &LcuClient) -> Result<Vec<Champ
         if let Some(arr) = val.as_array() {
             for item in arr {
                 if let Some(cid) = item.get("championId").and_then(|v| v.as_i64()) {
-                    let eligible = item.get("eligibleForChest").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let eligible = item
+                        .get("eligibleForChest")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     let grades = item
                         .get("milestoneGrades")
                         .and_then(|v| v.as_array())
@@ -104,7 +109,10 @@ pub async fn fetch_champion_mastery_list(client: &LcuClient) -> Result<Vec<Champ
             champion_id,
             champion_name: format!("英雄 {}", champion_id),
             champion_title: String::new(),
-            champion_icon_url: format!("/lol-game-data/assets/v1/champion-icons/{}.png", champion_id),
+            champion_icon_url: format!(
+                "/lol-game-data/assets/v1/champion-icons/{}.png",
+                champion_id
+            ),
             champion_level,
             champion_points,
             champion_points_since_last_level,

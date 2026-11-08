@@ -247,10 +247,8 @@ pub async fn try_connect(
 }
 
 /// 处理 WebSocket 连接读写
-async fn handle_messages<S>(
-    mut ws_stream: S,
-    event_tx: &broadcast::Sender<LcuWsEvent>,
-) where
+async fn handle_messages<S>(mut ws_stream: S, event_tx: &broadcast::Sender<LcuWsEvent>)
+where
     S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
         + SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error>
         + Unpin,
@@ -303,7 +301,9 @@ pub fn parse_and_project_event(text: &str, dedup: &mut EventDedup) -> Option<Lcu
     }
 
     // 寻找匹配的 URI 前缀
-    let matched_prefix = WATCHED_URIS.iter().find(|prefix| uri.starts_with(**prefix))?;
+    let matched_prefix = WATCHED_URIS
+        .iter()
+        .find(|prefix| uri.starts_with(**prefix))?;
 
     let raw_data = event_data.get("data").unwrap_or(&Value::Null);
     let projected = event_projection::project(matched_prefix, raw_data);
@@ -334,7 +334,7 @@ mod tests {
     fn test_parse_and_project_event_gameflow_phase() {
         let mut dedup = EventDedup::default();
         let payload = r#"[8, "OnJsonApiEvent_lol_gameflow", {"uri": "/lol-gameflow/v1/gameflow-phase", "eventType": "Update", "data": "ChampSelect"}]"#;
-        
+
         let event = parse_and_project_event(payload, &mut dedup);
         assert!(event.is_some());
         let ev = event.unwrap();

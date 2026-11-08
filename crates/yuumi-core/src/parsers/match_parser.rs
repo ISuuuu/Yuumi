@@ -261,10 +261,7 @@ fn extract_augment_ids(stats: &LcuMatchStats) -> Vec<i32> {
     ]))
 }
 
-fn resolve_augment_details(
-    ids: &[i32],
-    assets: &GameDataAssets,
-) -> (Vec<String>, Vec<String>) {
+fn resolve_augment_details(ids: &[i32], assets: &GameDataAssets) -> (Vec<String>, Vec<String>) {
     let mut icon_urls = Vec::new();
     let mut names = Vec::new();
     for &id in ids {
@@ -487,24 +484,78 @@ pub struct QueueInfo {
 
 pub fn get_queue_info(queue_id: i32) -> QueueInfo {
     match queue_id {
-        400 => QueueInfo { name: "征召模式", map: "召唤师峡谷" },
-        420 => QueueInfo { name: "排位单双排", map: "召唤师峡谷" },
-        430 => QueueInfo { name: "匹配模式", map: "召唤师峡谷" },
-        440 => QueueInfo { name: "排位灵活组排", map: "召唤师峡谷" },
-        480 | 490 => QueueInfo { name: "快速模式", map: "召唤师峡谷" },
-        450 => QueueInfo { name: "极地大乱斗", map: "嚎哭深渊" },
-        2400 => QueueInfo { name: "海克斯大乱斗", map: "嚎哭深渊" },
-        2450 => QueueInfo { name: "经典海斗", map: "嚎哭深渊" },
-        800..=850 => QueueInfo { name: "人机对战", map: "召唤师峡谷" },
-        900 => QueueInfo { name: "无限火力", map: "召唤师峡谷" },
-        1010 => QueueInfo { name: "随机无限火力", map: "嚎哭深渊" },
-        1020 => QueueInfo { name: "克隆模式", map: "召唤师峡谷" },
-        1300 => QueueInfo { name: "极限闪击", map: "极限闪击" },
-        1700 | 1710 => QueueInfo { name: "斗魂竞技场", map: "斗魂竞技场" },
-        1810..=1840 => QueueInfo { name: "捉鬼模式", map: "捉鬼模式" },
-        4300 | 4310 => QueueInfo { name: "经典模式", map: "召唤师峡谷" },
-        0 => QueueInfo { name: "自定义模式", map: "自定义" },
-        _ => QueueInfo { name: "自定义模式", map: "自定义" },
+        400 => QueueInfo {
+            name: "征召模式",
+            map: "召唤师峡谷",
+        },
+        420 => QueueInfo {
+            name: "排位单双排",
+            map: "召唤师峡谷",
+        },
+        430 => QueueInfo {
+            name: "匹配模式",
+            map: "召唤师峡谷",
+        },
+        440 => QueueInfo {
+            name: "排位灵活组排",
+            map: "召唤师峡谷",
+        },
+        480 | 490 => QueueInfo {
+            name: "快速模式",
+            map: "召唤师峡谷",
+        },
+        450 => QueueInfo {
+            name: "极地大乱斗",
+            map: "嚎哭深渊",
+        },
+        2400 => QueueInfo {
+            name: "海克斯大乱斗",
+            map: "嚎哭深渊",
+        },
+        2450 => QueueInfo {
+            name: "经典海斗",
+            map: "嚎哭深渊",
+        },
+        800..=850 => QueueInfo {
+            name: "人机对战",
+            map: "召唤师峡谷",
+        },
+        900 => QueueInfo {
+            name: "无限火力",
+            map: "召唤师峡谷",
+        },
+        1010 => QueueInfo {
+            name: "随机无限火力",
+            map: "嚎哭深渊",
+        },
+        1020 => QueueInfo {
+            name: "克隆模式",
+            map: "召唤师峡谷",
+        },
+        1300 => QueueInfo {
+            name: "极限闪击",
+            map: "极限闪击",
+        },
+        1700 | 1710 => QueueInfo {
+            name: "斗魂竞技场",
+            map: "斗魂竞技场",
+        },
+        1810..=1840 => QueueInfo {
+            name: "捉鬼模式",
+            map: "捉鬼模式",
+        },
+        4300 | 4310 => QueueInfo {
+            name: "经典模式",
+            map: "召唤师峡谷",
+        },
+        0 => QueueInfo {
+            name: "自定义模式",
+            map: "自定义",
+        },
+        _ => QueueInfo {
+            name: "自定义模式",
+            map: "自定义",
+        },
     }
 }
 
@@ -559,7 +610,6 @@ impl crate::gameflow::match_stats::MatchLike for MatchDisplay {
         self.champion_id as i64
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -931,10 +981,14 @@ mod tests {
         },
     ];
 
-    const SYNTHETIC_ARAM: &str = include_str!("../../../../src-tauri/testdata/match/synthetic/aram-450.json");
-    const SYNTHETIC_ARENA: &str = include_str!("../../../../src-tauri/testdata/match/synthetic/arena-1700.json");
-    const SYNTHETIC_RANKED: &str = include_str!("../../../../src-tauri/testdata/match/synthetic/ranked-420.json");
-    const SYNTHETIC_MINIMAL: &str = include_str!("../../../../src-tauri/testdata/match/synthetic/minimal-420.json");
+    const SYNTHETIC_ARAM: &str =
+        include_str!("../../../../src-tauri/testdata/match/synthetic/aram-450.json");
+    const SYNTHETIC_ARENA: &str =
+        include_str!("../../../../src-tauri/testdata/match/synthetic/arena-1700.json");
+    const SYNTHETIC_RANKED: &str =
+        include_str!("../../../../src-tauri/testdata/match/synthetic/ranked-420.json");
+    const SYNTHETIC_MINIMAL: &str =
+        include_str!("../../../../src-tauri/testdata/match/synthetic/minimal-420.json");
 
     fn load_fixture(raw: &str) -> LcuMatchGame {
         let response: LcuMatchHistoryResponse =
@@ -1221,7 +1275,9 @@ mod tests {
     #[test]
     fn match_display_implements_match_like_and_computes_stats() {
         use crate::gameflow::match_stats::compute_match_stats;
-        let mut display = sample_game(420).to_display(&GameDataAssets::default()).unwrap();
+        let mut display = sample_game(420)
+            .to_display(&GameDataAssets::default())
+            .unwrap();
         display.win = true;
         display.kills = 10;
         display.deaths = 2;

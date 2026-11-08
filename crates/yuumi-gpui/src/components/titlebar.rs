@@ -1,5 +1,5 @@
-use gpui::*;
 use crate::theme::Theme;
+use gpui::*;
 
 pub struct TitleBar {
     pub title: SharedString,

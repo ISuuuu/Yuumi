@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
 
 use super::client::{build_auth_header, LcuClient};

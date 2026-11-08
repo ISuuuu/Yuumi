@@ -90,7 +90,11 @@ pub fn minimize_window(hwnd: HWND) {
 /// 设置窗口置顶 (HWND_TOPMOST)
 pub fn set_window_topmost(hwnd: HWND, topmost: bool) {
     unsafe {
-        let insert_after = if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST };
+        let insert_after = if topmost {
+            HWND_TOPMOST
+        } else {
+            HWND_NOTOPMOST
+        };
         let _ = SetWindowPos(
             hwnd,
             insert_after,
@@ -161,7 +165,9 @@ pub fn apply_mica_or_acrylic(hwnd: HWND) {
 /// 在 Windows 11 上启用原生圆角
 pub fn set_window_rounded_corners(hwnd: HWND) {
     unsafe {
-        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE};
+        use windows::Win32::Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE,
+        };
         // DWMWCP_ROUND = 2
         let preference: u32 = 2;
         let _ = DwmSetWindowAttribute(
@@ -172,6 +178,12 @@ pub fn set_window_rounded_corners(hwnd: HWND) {
         );
     }
 }
+
+// 重新导出系统工具服务中的常用方法以方便平台级访问
+pub use crate::services::system_tools::{
+    clear_game_cache, detect_lol_path, fix_client_window, open_folder, open_log_folder,
+    select_folder,
+};
 
 #[cfg(test)]
 mod tests {

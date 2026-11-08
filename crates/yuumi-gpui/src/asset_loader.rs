@@ -48,8 +48,8 @@ impl AssetLoader {
 
     /// 将图片原始字节（PNG / WebP / JPEG 等）解码并转换成 GPUI 原生所需的 BGRA `RenderImage`
     pub fn decode_bytes_to_render_image(bytes: &[u8]) -> Result<Arc<RenderImage>, String> {
-        let raw_format = image::guess_format(bytes)
-            .map_err(|e| format!("无法识别图片格式: {}", e))?;
+        let raw_format =
+            image::guess_format(bytes).map_err(|e| format!("无法识别图片格式: {}", e))?;
 
         let dyn_img = image::load_from_memory_with_format(bytes, raw_format)
             .map_err(|e| format!("图片解码失败: {}", e))?;

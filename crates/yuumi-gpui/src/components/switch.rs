@@ -1,8 +1,8 @@
 //! 原生极光风格滑动开关组件 (Switch)
 //! 遵循纯白水晶极光设计语言，支持 checked 状态动画与点击事件响应
 
-use gpui::*;
 use crate::theme::Theme;
+use gpui::*;
 
 pub struct Switch {
     checked: bool,
@@ -59,11 +59,7 @@ impl IntoElement for Switch {
             track = track.justify_start();
         }
 
-        let knob = div()
-            .size(px(14.0))
-            .rounded_full()
-            .bg(knob_bg)
-            .shadow_sm();
+        let knob = div().size(px(14.0)).rounded_full().bg(knob_bg).shadow_sm();
 
         track.child(knob)
     }

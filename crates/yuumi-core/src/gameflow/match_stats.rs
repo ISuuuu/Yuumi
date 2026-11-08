@@ -157,7 +157,11 @@ pub fn compute_match_stats<M: MatchLike>(matches: &[M]) -> ComputedMatchStats {
         0
     };
 
-    let deaths_for_calc = if total_deaths == 0 { 1.0 } else { total_deaths as f64 };
+    let deaths_for_calc = if total_deaths == 0 {
+        1.0
+    } else {
+        total_deaths as f64
+    };
     let avg_kda = (total_kills + total_assists) as f64 / deaths_for_calc;
 
     // 连胜/连败计算（排除重开）
@@ -175,7 +179,11 @@ pub fn compute_match_stats<M: MatchLike>(matches: &[M]) -> ComputedMatchStats {
         }
         if count >= 2 {
             streak = Some(StreakInfo {
-                streak_type: if first_win { StreakType::Win } else { StreakType::Loss },
+                streak_type: if first_win {
+                    StreakType::Win
+                } else {
+                    StreakType::Loss
+                },
                 count,
             });
         }
@@ -206,13 +214,33 @@ pub fn compute_match_stats<M: MatchLike>(matches: &[M]) -> ComputedMatchStats {
         }
     }
 
-    let (primary_position, primary_percentage) = sorted_positions.first()
-        .map(|(pos, count)| (*pos, if total_valid_positions > 0 { ((*count as f64 / total_valid_positions as f64) * 100.0).round() as u32 } else { 0 }))
+    let (primary_position, primary_percentage) = sorted_positions
+        .first()
+        .map(|(pos, count)| {
+            (
+                *pos,
+                if total_valid_positions > 0 {
+                    ((*count as f64 / total_valid_positions as f64) * 100.0).round() as u32
+                } else {
+                    0
+                },
+            )
+        })
         .map(|(p, pct)| (Some(p), pct))
         .unwrap_or((None, 0));
 
-    let (secondary_position, secondary_percentage) = sorted_positions.get(1)
-        .map(|(pos, count)| (*pos, if total_valid_positions > 0 { ((*count as f64 / total_valid_positions as f64) * 100.0).round() as u32 } else { 0 }))
+    let (secondary_position, secondary_percentage) = sorted_positions
+        .get(1)
+        .map(|(pos, count)| {
+            (
+                *pos,
+                if total_valid_positions > 0 {
+                    ((*count as f64 / total_valid_positions as f64) * 100.0).round() as u32
+                } else {
+                    0
+                },
+            )
+        })
         .map(|(p, pct)| (Some(p), pct))
         .unwrap_or((None, 0));
 
@@ -237,7 +265,9 @@ pub fn compute_match_stats<M: MatchLike>(matches: &[M]) -> ComputedMatchStats {
         if cid <= 0 {
             continue;
         }
-        let entry = champ_map.entry(cid).or_insert((0, 0, 0, 0, 0, HashMap::new()));
+        let entry = champ_map
+            .entry(cid)
+            .or_insert((0, 0, 0, 0, 0, HashMap::new()));
         entry.0 += 1; // games
         if m.is_win() {
             entry.1 += 1; // wins
@@ -246,7 +276,11 @@ pub fn compute_match_stats<M: MatchLike>(matches: &[M]) -> ComputedMatchStats {
         }
         entry.3 += m.kills();
         entry.4 += m.deaths();
-        entry.5.entry(normalize_position(m.position()).unwrap_or(PositionKey::Middle)).and_modify(|c| *c += 1).or_insert(1);
+        entry
+            .5
+            .entry(normalize_position(m.position()).unwrap_or(PositionKey::Middle))
+            .and_modify(|c| *c += 1)
+            .or_insert(1);
     }
 
     let mut champ_aggregations: Vec<ChampionAggregation> = champ_map
@@ -278,7 +312,11 @@ pub fn compute_match_stats<M: MatchLike>(matches: &[M]) -> ComputedMatchStats {
         })
         .collect();
 
-    champ_aggregations.sort_by(|a, b| b.games.cmp(&a.games).then_with(|| b.win_rate.cmp(&a.win_rate)));
+    champ_aggregations.sort_by(|a, b| {
+        b.games
+            .cmp(&a.games)
+            .then_with(|| b.win_rate.cmp(&a.win_rate))
+    });
     champ_aggregations.truncate(5);
 
     ComputedMatchStats {
@@ -310,22 +348,68 @@ mod tests {
     }
 
     impl MatchLike for SimpleMatch {
-        fn is_remake(&self) -> bool { self.remake }
-        fn is_win(&self) -> bool { self.win }
-        fn kills(&self) -> u32 { self.k }
-        fn deaths(&self) -> u32 { self.d }
-        fn assists(&self) -> u32 { self.a }
-        fn position(&self) -> Option<&str> { self.pos }
-        fn champion_id(&self) -> i64 { self.cid }
+        fn is_remake(&self) -> bool {
+            self.remake
+        }
+        fn is_win(&self) -> bool {
+            self.win
+        }
+        fn kills(&self) -> u32 {
+            self.k
+        }
+        fn deaths(&self) -> u32 {
+            self.d
+        }
+        fn assists(&self) -> u32 {
+            self.a
+        }
+        fn position(&self) -> Option<&str> {
+            self.pos
+        }
+        fn champion_id(&self) -> i64 {
+            self.cid
+        }
     }
 
     #[test]
     fn test_compute_match_stats_basic() {
         let matches = vec![
-            SimpleMatch { remake: false, win: true, k: 10, d: 2, a: 5, pos: Some("MID"), cid: 103 },
-            SimpleMatch { remake: false, win: true, k: 5, d: 1, a: 8, pos: Some("MIDDLE"), cid: 103 },
-            SimpleMatch { remake: false, win: false, k: 2, d: 5, a: 3, pos: Some("TOP"), cid: 266 },
-            SimpleMatch { remake: true, win: false, k: 0, d: 0, a: 0, pos: None, cid: 103 },
+            SimpleMatch {
+                remake: false,
+                win: true,
+                k: 10,
+                d: 2,
+                a: 5,
+                pos: Some("MID"),
+                cid: 103,
+            },
+            SimpleMatch {
+                remake: false,
+                win: true,
+                k: 5,
+                d: 1,
+                a: 8,
+                pos: Some("MIDDLE"),
+                cid: 103,
+            },
+            SimpleMatch {
+                remake: false,
+                win: false,
+                k: 2,
+                d: 5,
+                a: 3,
+                pos: Some("TOP"),
+                cid: 266,
+            },
+            SimpleMatch {
+                remake: true,
+                win: false,
+                k: 0,
+                d: 0,
+                a: 0,
+                pos: None,
+                cid: 103,
+            },
         ];
 
         let stats = compute_match_stats(&matches);

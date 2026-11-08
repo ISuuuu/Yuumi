@@ -1,7 +1,7 @@
 //! 大乱斗板凳席置顶透明悬浮小窗（DirectComposition / Win32 原生置顶与透明穿透）
 
-use gpui::*;
 use crate::theme::Theme;
+use gpui::*;
 
 pub struct BenchOverlayView {
     pub bench_champions: Vec<(&'static str, &'static str)>,
@@ -65,12 +65,7 @@ impl Render for BenchOverlayView {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(
-                                div()
-                                    .size(px(8.0))
-                                    .rounded_full()
-                                    .bg(Theme::AURORA_CYAN),
-                            )
+                            .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_CYAN))
                             .child(
                                 div()
                                     .text_xs()
@@ -90,13 +85,24 @@ impl Render for BenchOverlayView {
                                     .px_2()
                                     .py(px(1.0))
                                     .rounded_sm()
-                                    .bg(if is_ct { rgba(0x00f5d440) } else { rgba(0xffffff20) })
+                                    .bg(if is_ct {
+                                        rgba(0x00f5d440)
+                                    } else {
+                                        rgba(0xffffff20)
+                                    })
                                     .text_size(px(10.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(if is_ct { Theme::AURORA_CYAN } else { hsla(0.0, 0.0, 1.0, 1.0) })
-                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _ev, _window, cx| {
-                                        this.toggle_click_through(cx);
-                                    }))
+                                    .text_color(if is_ct {
+                                        Theme::AURORA_CYAN
+                                    } else {
+                                        hsla(0.0, 0.0, 1.0, 1.0)
+                                    })
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _ev, _window, cx| {
+                                            this.toggle_click_through(cx);
+                                        }),
+                                    )
                                     .child(if is_ct { "穿透: 开" } else { "穿透: 关" }),
                             )
                             .child(
@@ -136,10 +142,13 @@ impl Render for BenchOverlayView {
                             .justify_center()
                             .cursor_pointer()
                             .hover(|s| s.bg(rgba(0x00f5d425)).border_color(Theme::AURORA_CYAN))
-                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _ev, _window, cx| {
-                                this.selected_idx = Some(idx);
-                                cx.notify();
-                            }))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _ev, _window, cx| {
+                                    this.selected_idx = Some(idx);
+                                    cx.notify();
+                                }),
+                            )
                             .child(
                                 div()
                                     .text_xs()

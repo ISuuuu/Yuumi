@@ -83,9 +83,18 @@ impl GamePhase {
 /// 生命周期代际失效错误
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StaleGenerationError {
-    EpochMismatch { expected: u64, actual: u64 },
-    RevisionMismatch { expected: u64, actual: u64 },
-    SessionMismatch { expected: String, actual: Option<String> },
+    EpochMismatch {
+        expected: u64,
+        actual: u64,
+    },
+    RevisionMismatch {
+        expected: u64,
+        actual: u64,
+    },
+    SessionMismatch {
+        expected: String,
+        actual: Option<String>,
+    },
     SessionMissing,
 }
 
@@ -93,13 +102,25 @@ impl std::fmt::Display for StaleGenerationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StaleGenerationError::EpochMismatch { expected, actual } => {
-                write!(f, "对局代际不匹配: 期望 epoch={}, 实际={}", expected, actual)
+                write!(
+                    f,
+                    "对局代际不匹配: 期望 epoch={}, 实际={}",
+                    expected, actual
+                )
             }
             StaleGenerationError::RevisionMismatch { expected, actual } => {
-                write!(f, "阶段版本不匹配: 期望 revision={}, 实际={}", expected, actual)
+                write!(
+                    f,
+                    "阶段版本不匹配: 期望 revision={}, 实际={}",
+                    expected, actual
+                )
             }
             StaleGenerationError::SessionMismatch { expected, actual } => {
-                write!(f, "选人会话不匹配: 期望 session={}, 实际={:?}", expected, actual)
+                write!(
+                    f,
+                    "选人会话不匹配: 期望 session={}, 实际={:?}",
+                    expected, actual
+                )
             }
             StaleGenerationError::SessionMissing => {
                 write!(f, "当前没有活跃的选人会话")
@@ -305,7 +326,11 @@ mod tests {
         // Lobby -> ReadyCheck (对局开启)
         let t1 = lm.on_phase_changed("ReadyCheck").await;
         match t1 {
-            PhaseTransition::NewMatchStarted { match_epoch, phase_revision, .. } => {
+            PhaseTransition::NewMatchStarted {
+                match_epoch,
+                phase_revision,
+                ..
+            } => {
                 assert_eq!(match_epoch, 2);
                 assert_eq!(phase_revision, 1);
             }
@@ -315,7 +340,11 @@ mod tests {
         // ReadyCheck -> ChampSelect (同一对局内部变迁)
         let t2 = lm.on_phase_changed("ChampSelect").await;
         match t2 {
-            PhaseTransition::PhaseChanged { match_epoch, phase_revision, .. } => {
+            PhaseTransition::PhaseChanged {
+                match_epoch,
+                phase_revision,
+                ..
+            } => {
                 assert_eq!(match_epoch, 2);
                 assert_eq!(phase_revision, 2);
             }

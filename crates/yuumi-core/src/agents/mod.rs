@@ -9,5 +9,7 @@ pub mod supervisor;
 pub use auto_bp::{handle_champ_select_session, ChampSelectSession};
 pub use auto_match::{handle_phase_change, handle_ready_check, ReadyCheckData};
 pub use config::{AutoBpConfig, AutoMatchConfig};
-pub use lifecycle::{GamePhase, GenerationGuard, LifecycleManager, LifecycleState, PhaseTransition};
+pub use lifecycle::{
+    GamePhase, GenerationGuard, LifecycleManager, LifecycleState, PhaseTransition,
+};
 pub use supervisor::{AgentSupervisor, DuplicateStrategy, SpawnError, TaskId, TaskKind};

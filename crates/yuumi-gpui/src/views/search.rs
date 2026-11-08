@@ -1,9 +1,10 @@
-use std::collections::HashMap;
-use gpui::*;
 use crate::components::badge::{Badge, BadgeVariant};
 use crate::components::card::Card;
 use crate::match_model::{GameDetail, GameDetailTeam, MatchItem};
 use crate::theme;
+use gpui::prelude::FluentBuilder;
+use gpui::*;
+use std::collections::HashMap;
 
 /// 战绩查询主视图
 pub struct SearchView {
@@ -19,10 +20,18 @@ pub struct SearchView {
     pub details_cache: HashMap<u64, GameDetail>,
     /// 详情加载状态
     pub is_loading_detail: bool,
+    /// 是否正在进行网络搜索召唤师/战绩
+    pub is_searching: bool,
+    /// 搜索失败或空态错误提示
+    pub search_error: Option<String>,
+    /// 当前查询到的召唤师显示名
+    pub current_summoner_name: Option<String>,
+    /// 键盘焦点句柄
+    pub focus_handle: FocusHandle,
 }
 
 impl SearchView {
-    pub fn new() -> Self {
+    pub fn new(cx: &mut App) -> Self {
         Self {
             search_query: String::new(),
             active_queue_filter: None,
@@ -30,6 +39,10 @@ impl SearchView {
             selected_game_id: None,
             details_cache: HashMap::new(),
             is_loading_detail: false,
+            is_searching: false,
+            search_error: None,
+            current_summoner_name: None,
+            focus_handle: cx.focus_handle(),
         }
     }
 
@@ -39,6 +52,43 @@ impl SearchView {
         }
         self.matches = matches;
         self
+    }
+
+    /// 设置搜索查询文本
+    pub fn set_search_query(&mut self, query: impl Into<String>) {
+        self.search_query = query.into();
+    }
+
+    /// 设置搜索状态
+    pub fn set_searching(&mut self, is_searching: bool) {
+        self.is_searching = is_searching;
+        if is_searching {
+            self.search_error = None;
+        }
+    }
+
+    /// 设置搜索失败提示
+    pub fn set_search_error(&mut self, err: impl Into<String>) {
+        self.search_error = Some(err.into());
+        self.is_searching = false;
+    }
+
+    /// 填充搜索结果（召唤师信息及对局列表）
+    pub fn set_search_results(&mut self, summoner_name: String, matches: Vec<MatchItem>) {
+        self.current_summoner_name = Some(summoner_name);
+        self.is_searching = false;
+        self.search_error = None;
+        if let Some(first) = matches.first() {
+            self.selected_game_id = Some(first.display.game_id);
+        } else {
+            self.selected_game_id = None;
+        }
+        self.matches = matches;
+    }
+
+    /// 添加单局详情缓存
+    pub fn insert_game_detail(&mut self, game_id: u64, detail: GameDetail) {
+        self.details_cache.insert(game_id, detail);
     }
 
     /// 过滤后的战绩列表
@@ -57,6 +107,8 @@ impl SearchView {
         &self,
         on_select_match: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
         on_filter_queue: impl Fn(Option<i32>, &mut Window, &mut App) + 'static + Clone,
+        on_search: impl Fn(&str, &mut Window, &mut App) + 'static + Clone,
+        on_input_change: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let filtered = self.filtered_matches();
         let selected_game_id = self
@@ -74,7 +126,7 @@ impl SearchView {
             .gap_3()
             .overflow_hidden()
             // 顶部搜索与模式筛选卡片
-            .child(self.render_header_card(on_filter_queue))
+            .child(self.render_header_card(on_filter_queue, on_search, on_input_change))
             // 下方主内容：左侧列表 + 右侧对抗详情
             .child(
                 div()
@@ -93,139 +145,228 @@ impl SearchView {
     fn render_header_card(
         &self,
         on_filter_queue: impl Fn(Option<i32>, &mut Window, &mut App) + 'static + Clone,
+        on_search: impl Fn(&str, &mut Window, &mut App) + 'static + Clone,
+        on_input_change: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
-        Card::new()
-            .p(px(12.0))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(theme::TEXT_PRIMARY)
-                                    .child("召唤师查询"),
-                            )
-                            // 搜索输入胶囊
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .bg(theme::BG_INPUT)
-                                    .border_1()
-                                    .border_color(theme::BORDER_SECONDARY)
-                                    .rounded(px(6.0))
-                                    .px_3()
-                                    .py_1()
-                                    .w(px(280.0))
-                                    .child(
+        let query_text = self.search_query.clone();
+        let is_searching = self.is_searching;
+
+        Card::new().p(px(12.0)).child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(theme::TEXT_PRIMARY)
+                                .child("召唤师查询"),
+                        )
+                        // 搜索输入胶囊
+                        .child({
+                            let q_for_key = query_text.clone();
+                            let on_search_key = on_search.clone();
+                            let on_input_key = on_input_change.clone();
+                            let focus_handle = self.focus_handle.clone();
+                            div()
+                                .id("search-query-input")
+                                .track_focus(&focus_handle)
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .bg(theme::BG_INPUT)
+                                .border_1()
+                                .border_color(if is_searching {
+                                    theme::PRIMARY
+                                } else {
+                                    theme::BORDER_SECONDARY
+                                })
+                                .rounded(px(6.0))
+                                .px_3()
+                                .py_1()
+                                .w(px(280.0))
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, _app| {
+                                    win.focus(&focus_handle);
+                                })
+                                .on_key_down(move |ev: &KeyDownEvent, win, app| {
+                                    if is_searching {
+                                        return;
+                                    }
+                                    let key_str = &ev.keystroke.key;
+                                    if key_str == "enter" {
+                                        on_search_key(&q_for_key, win, app);
+                                    } else if key_str == "backspace" {
+                                        let mut s = q_for_key.clone();
+                                        s.pop();
+                                        on_input_key(s, win, app);
+                                    } else if let Some(ref c) = ev.keystroke.key_char {
+                                        let mut s = q_for_key.clone();
+                                        s.push_str(c);
+                                        on_input_key(s, win, app);
+                                    }
+                                })
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(theme::TEXT_MUTED)
+                                                .child("🔍"),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(if self.search_query.is_empty() {
+                                                    theme::TEXT_MUTED
+                                                } else {
+                                                    theme::TEXT_PRIMARY
+                                                })
+                                                .child(if self.search_query.is_empty() {
+                                                    "输入召唤师名称#标签 (按回车或点击查询)"
+                                                        .to_string()
+                                                } else {
+                                                    self.search_query.clone()
+                                                }),
+                                        ),
+                                )
+                                .when(is_searching, |el| {
+                                    el.child(div().text_xs().text_color(theme::PRIMARY).child("⏳"))
+                                })
+                        })
+                        // 查询高亮按钮
+                        .child({
+                            let q = query_text.clone();
+                            let cb = on_search.clone();
+                            div()
+                                .id("btn-search-trigger")
+                                .flex()
+                                .items_center()
+                                .gap_1p5()
+                                .px_3()
+                                .py_1()
+                                .bg(if is_searching {
+                                    theme::PRIMARY_MUTED
+                                } else {
+                                    theme::PRIMARY
+                                })
+                                .text_color(theme::TEXT_ON_PRIMARY)
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .rounded(px(6.0))
+                                .cursor_pointer()
+                                .hover(|s| s.opacity(0.85))
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    if !is_searching {
+                                        cb(&q, win, app);
+                                    }
+                                })
+                                .child(if is_searching {
+                                    "查询中..."
+                                } else {
+                                    "查询"
+                                })
+                        })
+                        // 提示信息（例如当前玩家名或错误）
+                        .when(
+                            self.current_summoner_name.is_some() || self.search_error.is_some(),
+                            |el| {
+                                if let Some(err) = &self.search_error {
+                                    el.child(
                                         div()
                                             .text_xs()
-                                            .text_color(if self.search_query.is_empty() {
-                                                theme::TEXT_MUTED
-                                            } else {
-                                                theme::TEXT_PRIMARY
-                                            })
-                                            .child(if self.search_query.is_empty() {
-                                                "输入召唤师名称#标签 (如: 玩家#CN1)".to_string()
-                                            } else {
-                                                self.search_query.clone()
-                                            }),
-                                    ),
-                            )
-                            // 查询高亮按钮
-                            .child(
-                                div()
-                                    .px_3()
-                                    .py_1()
-                                    .bg(theme::PRIMARY)
-                                    .text_color(theme::TEXT_ON_PRIMARY)
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .rounded(px(6.0))
-                                    .cursor_pointer()
-                                    .child("查询"),
-                            ),
-                    )
-                    // 快捷队列过滤胶囊标签组
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child({
-                                let cb = on_filter_queue.clone();
-                                div()
-                                    .cursor_pointer()
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        cb(None, win, app);
-                                    })
-                                    .child(
-                                        Badge::new("全部模式")
-                                            .variant(if self.active_queue_filter.is_none() {
-                                                BadgeVariant::Primary
-                                            } else {
-                                                BadgeVariant::Ghost
-                                            }),
+                                            .text_color(theme::LOSS_PRIMARY)
+                                            .child(err.clone()),
                                     )
-                            })
-                            .child({
-                                let cb = on_filter_queue.clone();
-                                div()
-                                    .cursor_pointer()
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        cb(Some(420), win, app);
-                                    })
-                                    .child(
-                                        Badge::new("单双排位")
-                                            .variant(if self.active_queue_filter == Some(420) {
-                                                BadgeVariant::Primary
-                                            } else {
-                                                BadgeVariant::Ghost
-                                            }),
+                                } else if let Some(name) = &self.current_summoner_name {
+                                    el.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(theme::TEXT_MUTED)
+                                            .child(format!("当前: {}", name)),
                                     )
-                            })
-                            .child({
-                                let cb = on_filter_queue.clone();
-                                div()
-                                    .cursor_pointer()
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        cb(Some(450), win, app);
-                                    })
-                                    .child(
-                                        Badge::new("极地大乱斗")
-                                            .variant(if self.active_queue_filter == Some(450) {
-                                                BadgeVariant::Primary
-                                            } else {
-                                                BadgeVariant::Ghost
-                                            }),
-                                    )
-                            })
-                            .child({
-                                let cb = on_filter_queue.clone();
-                                div()
-                                    .cursor_pointer()
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        cb(Some(440), win, app);
-                                    })
-                                    .child(
-                                        Badge::new("灵活组排")
-                                            .variant(if self.active_queue_filter == Some(440) {
-                                                BadgeVariant::Primary
-                                            } else {
-                                                BadgeVariant::Ghost
-                                            }),
-                                    )
-                            }),
-                    ),
-            )
+                                } else {
+                                    el
+                                }
+                            },
+                        ),
+                )
+                // 快捷队列过滤胶囊标签组
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child({
+                            let cb = on_filter_queue.clone();
+                            div()
+                                .cursor_pointer()
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    cb(None, win, app);
+                                })
+                                .child(Badge::new("全部模式").variant(
+                                    if self.active_queue_filter.is_none() {
+                                        BadgeVariant::Primary
+                                    } else {
+                                        BadgeVariant::Ghost
+                                    },
+                                ))
+                        })
+                        .child({
+                            let cb = on_filter_queue.clone();
+                            div()
+                                .cursor_pointer()
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    cb(Some(420), win, app);
+                                })
+                                .child(Badge::new("单双排位").variant(
+                                    if self.active_queue_filter == Some(420) {
+                                        BadgeVariant::Primary
+                                    } else {
+                                        BadgeVariant::Ghost
+                                    },
+                                ))
+                        })
+                        .child({
+                            let cb = on_filter_queue.clone();
+                            div()
+                                .cursor_pointer()
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    cb(Some(450), win, app);
+                                })
+                                .child(Badge::new("极地大乱斗").variant(
+                                    if self.active_queue_filter == Some(450) {
+                                        BadgeVariant::Primary
+                                    } else {
+                                        BadgeVariant::Ghost
+                                    },
+                                ))
+                        })
+                        .child({
+                            let cb = on_filter_queue.clone();
+                            div()
+                                .cursor_pointer()
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    cb(Some(440), win, app);
+                                })
+                                .child(Badge::new("灵活组排").variant(
+                                    if self.active_queue_filter == Some(440) {
+                                        BadgeVariant::Primary
+                                    } else {
+                                        BadgeVariant::Ghost
+                                    },
+                                ))
+                        }),
+                ),
+        )
     }
 
     /// 左侧战绩列表 (320px)
@@ -235,6 +376,71 @@ impl SearchView {
         selected_game_id: Option<u64>,
         on_select_match: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
+        if self.is_searching {
+            return div()
+                .id("search-matches-scroll")
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .w(px(320.0))
+                .p_4()
+                .gap_2()
+                .bg(theme::BG_CARD)
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(theme::BORDER_SECONDARY)
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::PRIMARY)
+                        .child("⏳ 正在查询战绩历史..."),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme::TEXT_MUTED)
+                        .child("正在通过 LCU 拉取召唤师档案与近期对局"),
+                )
+                .into_any_element();
+        }
+
+        if filtered.is_empty() {
+            return div()
+                .id("search-matches-scroll")
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .w(px(320.0))
+                .p_4()
+                .gap_2()
+                .bg(theme::BG_CARD)
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(theme::BORDER_SECONDARY)
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::TEXT_PRIMARY)
+                        .child(if self.search_error.is_some() {
+                            "未找到召唤师或离线中"
+                        } else {
+                            "暂无战绩记录"
+                        }),
+                )
+                .child(div().text_xs().text_color(theme::TEXT_MUTED).child(
+                    if let Some(err) = &self.search_error {
+                        err.clone()
+                    } else {
+                        "请检查客户端是否开启或输入正确的召唤师名".to_string()
+                    },
+                ))
+                .into_any_element();
+        }
+
         div()
             .id("search-matches-scroll")
             .flex()
@@ -329,7 +535,10 @@ impl SearchView {
                                             .text_xs()
                                             .font_weight(FontWeight::SEMIBOLD)
                                             .text_color(theme::TEXT_PRIMARY)
-                                            .child(format!("英雄 ID: {}", item.display.champion_id)),
+                                            .child(format!(
+                                                "英雄 ID: {}",
+                                                item.display.champion_id
+                                            )),
                                     )
                                     .child(
                                         div()
@@ -345,7 +554,9 @@ impl SearchView {
                                     .text_color(theme::TEXT_PRIMARY)
                                     .child(format!(
                                         "{}/{}/{}",
-                                        item.display.kills, item.display.deaths, item.display.assists
+                                        item.display.kills,
+                                        item.display.deaths,
+                                        item.display.assists
                                     )),
                             ),
                     )
@@ -356,10 +567,14 @@ impl SearchView {
                             .justify_between()
                             .text_xs()
                             .text_color(theme::TEXT_MUTED)
-                            .child(format!("补刀: {} ({}金币)", item.display.cs, item.display.gold))
+                            .child(format!(
+                                "补刀: {} ({}金币)",
+                                item.display.cs, item.display.gold
+                            ))
                             .child(item.display.short_time.clone()),
                     )
             }))
+            .into_any_element()
     }
 
     /// 右侧对抗详情面板
@@ -399,20 +614,26 @@ impl SearchView {
                             .text_base()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::TEXT_PRIMARY)
-                            .child(if self.is_loading_detail {
+                            .child(if self.is_searching {
+                                "正在查询召唤师与对局数据...".to_string()
+                            } else if self.is_loading_detail {
                                 "正在拉取对局 10 人详细对抗数据...".to_string()
                             } else if let Some(gid) = selected_game_id {
                                 format!("已选择对局 ID: {}，等待加载详情", gid)
+                            } else if self.search_error.is_some() {
+                                "无对局对抗数据".to_string()
                             } else {
                                 "请在左侧选择一场对局以查看 10 人详细对抗".to_string()
                             }),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme::TEXT_MUTED)
-                            .child("支持查看红蓝双方完整 5v5 KDA、推塔/大龙等团队目标、出装及对英雄伤害"),
-                    )
+                    .child(div().text_xs().text_color(theme::TEXT_MUTED).child(
+                        if let Some(err) = &self.search_error {
+                            err.clone()
+                        } else {
+                            "支持查看红蓝双方完整 5v5 KDA、推塔/大龙等团队目标、出装及对英雄伤害"
+                                .to_string()
+                        },
+                    ))
                     .into_any_element(),
             })
     }
@@ -538,16 +759,19 @@ impl SearchView {
                                     } else {
                                         theme::TEXT_PRIMARY
                                     })
-                                    .child(if is_blue { "蓝方队伍" } else { "红方队伍" }),
-                            )
-                            .child(
-                                Badge::new(if team.win { "胜方" } else { "败方" })
-                                    .variant(if team.win {
-                                        BadgeVariant::Win
+                                    .child(if is_blue {
+                                        "蓝方队伍"
                                     } else {
-                                        BadgeVariant::Loss
+                                        "红方队伍"
                                     }),
-                            ),
+                            )
+                            .child(Badge::new(if team.win { "胜方" } else { "败方" }).variant(
+                                if team.win {
+                                    BadgeVariant::Win
+                                } else {
+                                    BadgeVariant::Loss
+                                },
+                            )),
                     )
                     // 团队目标（推塔、水晶、大龙、巨龙）
                     .child(
@@ -570,7 +794,8 @@ impl SearchView {
                     .flex()
                     .flex_col()
                     .children(team.players.iter().map(|p| {
-                        let damage_pct = ((p.damage as f32 / max_damage as f32) * 100.0).clamp(0.0, 100.0);
+                        let damage_pct =
+                            ((p.damage as f32 / max_damage as f32) * 100.0).clamp(0.0, 100.0);
 
                         div()
                             .flex()
@@ -676,18 +901,21 @@ impl SearchView {
                                             .text_xs()
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(theme::TEXT_PRIMARY)
-                                            .child(format!("{}/{}/{}", p.kills, p.deaths, p.assists)),
+                                            .child(format!(
+                                                "{}/{}/{}",
+                                                p.kills, p.deaths, p.assists
+                                            )),
                                     )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(theme::TEXT_MUTED)
-                                            .child(if p.deaths == 0 {
-                                                "完美".to_string()
-                                            } else {
-                                                format!("{:.1} KDA", (p.kills + p.assists) as f32 / p.deaths as f32)
-                                            }),
-                                    ),
+                                    .child(div().text_xs().text_color(theme::TEXT_MUTED).child(
+                                        if p.deaths == 0 {
+                                            "完美".to_string()
+                                        } else {
+                                            format!(
+                                                "{:.1} KDA",
+                                                (p.kills + p.assists) as f32 / p.deaths as f32
+                                            )
+                                        },
+                                    )),
                             )
                             // 补刀与金币
                             .child(

@@ -103,8 +103,8 @@ pub async fn run_monitor_loop(tx: tokio::sync::mpsc::Sender<MonitorEvent>) {
             if consecutive_misses.is_multiple_of(MISS_THRESHOLD) {
                 log::debug!("连续 {} 次未找到 LCU，执行全量进程刷新", consecutive_misses);
                 sys = System::new_all();
-                lcu_raw = find_via_lockfile(&sys, &mut cached_exe_dir)
-                    .or_else(|| find_via_cmdline(&sys));
+                lcu_raw =
+                    find_via_lockfile(&sys, &mut cached_exe_dir).or_else(|| find_via_cmdline(&sys));
                 if lcu_raw.is_some() {
                     consecutive_misses = 0;
                 }
@@ -143,7 +143,9 @@ pub async fn run_monitor_loop(tx: tokio::sync::mpsc::Sender<MonitorEvent>) {
 
                     tokio::spawn(async move {
                         let _guard = ReconnectGuard(reconnect_in_flight);
-                        if let Err(msg) = probe_lcu_readiness(target_info.port, &target_info.token).await {
+                        if let Err(msg) =
+                            probe_lcu_readiness(target_info.port, &target_info.token).await
+                        {
                             log::warn!("LCU 就绪探测失败，跳过本轮: {}", msg);
                         } else {
                             log::info!("LCU HTTP 服务器已就绪: port={}", target_info.port);
@@ -557,7 +559,10 @@ mod tests {
     fn test_parse_cmdline_args() {
         let cmd = r#""C:\Riot Games\League of Legends\LeagueClientUx.exe" "--app-port=54321" "--remoting-auth-token=secret123" "--rso_platform_id=HN1""#;
         let res = parse_cmdline_args(cmd);
-        assert_eq!(res, Some((54321, "secret123".to_string(), Some("HN1".to_string()))));
+        assert_eq!(
+            res,
+            Some((54321, "secret123".to_string(), Some("HN1".to_string())))
+        );
 
         let cmd2 = r#"--app-port=12345 --remoting-auth-token=abcd"#;
         let res2 = parse_cmdline_args(cmd2);

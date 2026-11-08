@@ -119,26 +119,30 @@ async fn schedule_pick(
     let supervisor_clone = supervisor.clone();
 
     let _ = supervisor
-        .spawn(TaskKind::AutoPickLock, DuplicateStrategy::ReplaceOld, move |ctx| async move {
-            // 选人缓冲 500ms
-            sleep(Duration::from_millis(500)).await;
-            if ctx.is_cancelled() {
-                return;
-            }
+        .spawn(
+            TaskKind::AutoPickLock,
+            DuplicateStrategy::ReplaceOld,
+            move |ctx| async move {
+                // 选人缓冲 500ms
+                sleep(Duration::from_millis(500)).await;
+                if ctx.is_cancelled() {
+                    return;
+                }
 
-            let _permit = supervisor_clone.acquire_exclusive_permit().await;
-            let url = format!("/lol-champ-select/v1/session/actions/{}", action_id);
-            let payload = serde_json::json!({
-                "championId": pick_champ,
-                "completed": true
-            });
+                let _permit = supervisor_clone.acquire_exclusive_permit().await;
+                let url = format!("/lol-champ-select/v1/session/actions/{}", action_id);
+                let payload = serde_json::json!({
+                    "championId": pick_champ,
+                    "completed": true
+                });
 
-            if let Err(e) = client.patch(&url, Some(payload)).await {
-                log::warn!("[Agent] 自动选人锁定失败 (champ={}): {}", pick_champ, e);
-            } else {
-                log::info!("[Agent] 自动选人锁定成功 (champ={})", pick_champ);
-            }
-        })
+                if let Err(e) = client.patch(&url, Some(payload)).await {
+                    log::warn!("[Agent] 自动选人锁定失败 (champ={}): {}", pick_champ, e);
+                } else {
+                    log::info!("[Agent] 自动选人锁定成功 (champ={})", pick_champ);
+                }
+            },
+        )
         .await;
 }
 
@@ -158,33 +162,33 @@ async fn schedule_ban(
     let supervisor_clone = supervisor.clone();
 
     let _ = supervisor
-        .spawn(TaskKind::AutoBanLock, DuplicateStrategy::RejectNew, move |ctx| async move {
-            sleep(Duration::from_millis(800)).await;
-            if ctx.is_cancelled() {
-                return;
-            }
+        .spawn(
+            TaskKind::AutoBanLock,
+            DuplicateStrategy::RejectNew,
+            move |ctx| async move {
+                sleep(Duration::from_millis(800)).await;
+                if ctx.is_cancelled() {
+                    return;
+                }
 
-            let _permit = supervisor_clone.acquire_exclusive_permit().await;
-            let url = format!("/lol-champ-select/v1/session/actions/{}", action_id);
-            let payload = serde_json::json!({
-                "championId": ban_champ,
-                "completed": true
-            });
+                let _permit = supervisor_clone.acquire_exclusive_permit().await;
+                let url = format!("/lol-champ-select/v1/session/actions/{}", action_id);
+                let payload = serde_json::json!({
+                    "championId": ban_champ,
+                    "completed": true
+                });
 
-            if let Err(e) = client.patch(&url, Some(payload)).await {
-                log::warn!("[Agent] 自动禁人锁定失败 (champ={}): {}", ban_champ, e);
-            } else {
-                log::info!("[Agent] 自动禁人锁定成功 (champ={})", ban_champ);
-            }
-        })
+                if let Err(e) = client.patch(&url, Some(payload)).await {
+                    log::warn!("[Agent] 自动禁人锁定失败 (champ={}): {}", ban_champ, e);
+                } else {
+                    log::info!("[Agent] 自动禁人锁定成功 (champ={})", ban_champ);
+                }
+            },
+        )
         .await;
 }
 
-async fn schedule_spell(
-    client: &LcuClient,
-    config: &AutoBpConfig,
-    supervisor: &AgentSupervisor,
-) {
+async fn schedule_spell(client: &LcuClient, config: &AutoBpConfig, supervisor: &AgentSupervisor) {
     if config.spell1_id <= 0 || config.spell2_id <= 0 {
         return;
     }
@@ -195,24 +199,31 @@ async fn schedule_spell(
     let s2 = config.spell2_id;
 
     let _ = supervisor
-        .spawn(TaskKind::AutoSpell, DuplicateStrategy::ReplaceOld, move |ctx| async move {
-            sleep(Duration::from_millis(200)).await;
-            if ctx.is_cancelled() {
-                return;
-            }
+        .spawn(
+            TaskKind::AutoSpell,
+            DuplicateStrategy::ReplaceOld,
+            move |ctx| async move {
+                sleep(Duration::from_millis(200)).await;
+                if ctx.is_cancelled() {
+                    return;
+                }
 
-            let _permit = supervisor_clone.acquire_exclusive_permit().await;
-            let payload = serde_json::json!({
-                "spell1Id": s1,
-                "spell2Id": s2,
-            });
+                let _permit = supervisor_clone.acquire_exclusive_permit().await;
+                let payload = serde_json::json!({
+                    "spell1Id": s1,
+                    "spell2Id": s2,
+                });
 
-            if let Err(e) = client.patch("/lol-champ-select/v1/session/my-selection", Some(payload)).await {
-                log::warn!("[Agent] 自动设置召唤师技能失败: {}", e);
-            } else {
-                log::info!("[Agent] 自动配置召唤师技能成功: s1={}, s2={}", s1, s2);
-            }
-        })
+                if let Err(e) = client
+                    .patch("/lol-champ-select/v1/session/my-selection", Some(payload))
+                    .await
+                {
+                    log::warn!("[Agent] 自动设置召唤师技能失败: {}", e);
+                } else {
+                    log::info!("[Agent] 自动配置召唤师技能成功: s1={}, s2={}", s1, s2);
+                }
+            },
+        )
         .await;
 }
 

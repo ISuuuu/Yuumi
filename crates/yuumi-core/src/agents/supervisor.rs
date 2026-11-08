@@ -131,11 +131,19 @@ impl AgentSupervisor {
 
     /// 尝试以非阻塞方式获取 Agent 独占执行许可
     pub fn try_acquire_exclusive_permit(&self) -> Option<OwnedSemaphorePermit> {
-        self.agent_exclusive_semaphore.clone().try_acquire_owned().ok()
+        self.agent_exclusive_semaphore
+            .clone()
+            .try_acquire_owned()
+            .ok()
     }
 
     /// 调度执行异步任务
-    pub async fn spawn<F, Fut>(&self, kind: TaskKind, strategy: DuplicateStrategy, task_fn: F) -> Result<TaskId, SpawnError>
+    pub async fn spawn<F, Fut>(
+        &self,
+        kind: TaskKind,
+        strategy: DuplicateStrategy,
+        task_fn: F,
+    ) -> Result<TaskId, SpawnError>
     where
         F: FnOnce(TaskContext) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
@@ -260,14 +268,22 @@ mod tests {
     async fn test_supervisor_reject_duplicate() {
         let supervisor = AgentSupervisor::new();
         let r1 = supervisor
-            .spawn(TaskKind::AutoAccept, DuplicateStrategy::RejectNew, |_| async {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            })
+            .spawn(
+                TaskKind::AutoAccept,
+                DuplicateStrategy::RejectNew,
+                |_| async {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                },
+            )
             .await;
         assert!(r1.is_ok());
 
         let r2 = supervisor
-            .spawn(TaskKind::AutoAccept, DuplicateStrategy::RejectNew, |_| async {})
+            .spawn(
+                TaskKind::AutoAccept,
+                DuplicateStrategy::RejectNew,
+                |_| async {},
+            )
             .await;
         assert!(matches!(r2, Err(SpawnError::DuplicateRejected(_))));
     }

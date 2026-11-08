@@ -1,8 +1,8 @@
 use gpui::prelude::*;
 use gpui::{
-    div, px, App, Bounds, Context, InteractiveElement, IntoElement,
-    ParentElement, Point, Render, Size, StatefulInteractiveElement, Styled, Window, WindowBounds,
-    WindowHandle, WindowOptions, Application,
+    div, px, App, Application, Bounds, Context, InteractiveElement, IntoElement, ParentElement,
+    Point, Render, Size, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowHandle,
+    WindowOptions,
 };
 use std::path::Path;
 
@@ -74,7 +74,7 @@ impl MainWindow {
         let career_view = CareerView::new();
         let game_info = load_mock_game_info();
         let tools_view = ToolsView::new();
-        let mut search_view = SearchView::new().with_matches(matches.clone());
+        let mut search_view = SearchView::new(cx).with_matches(matches.clone());
         search_view.details_cache = load_fixture_game_details();
         let saved_players_view = SavedPlayersView::new();
         let settings_view = SettingsView::new();
@@ -178,37 +178,56 @@ impl MainWindow {
 
     pub fn toggle_auto_accept(&mut self, cx: &mut Context<Self>) {
         self.tools_view.match_config.auto_accept = !self.tools_view.match_config.auto_accept;
-        let _ = self.live_service.auto_match_cfg.send(self.tools_view.match_config.clone());
+        let _ = self
+            .live_service
+            .auto_match_cfg
+            .send(self.tools_view.match_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_reconnect(&mut self, cx: &mut Context<Self>) {
         self.tools_view.match_config.auto_reconnect = !self.tools_view.match_config.auto_reconnect;
-        let _ = self.live_service.auto_match_cfg.send(self.tools_view.match_config.clone());
+        let _ = self
+            .live_service
+            .auto_match_cfg
+            .send(self.tools_view.match_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_play_again(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.match_config.auto_play_again = !self.tools_view.match_config.auto_play_again;
-        let _ = self.live_service.auto_match_cfg.send(self.tools_view.match_config.clone());
+        self.tools_view.match_config.auto_play_again =
+            !self.tools_view.match_config.auto_play_again;
+        let _ = self
+            .live_service
+            .auto_match_cfg
+            .send(self.tools_view.match_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_pick(&mut self, cx: &mut Context<Self>) {
         self.tools_view.bp_config.auto_pick = !self.tools_view.bp_config.auto_pick;
-        let _ = self.live_service.auto_bp_cfg.send(self.tools_view.bp_config.clone());
+        let _ = self
+            .live_service
+            .auto_bp_cfg
+            .send(self.tools_view.bp_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_ban(&mut self, cx: &mut Context<Self>) {
         self.tools_view.bp_config.auto_ban = !self.tools_view.bp_config.auto_ban;
-        let _ = self.live_service.auto_bp_cfg.send(self.tools_view.bp_config.clone());
+        let _ = self
+            .live_service
+            .auto_bp_cfg
+            .send(self.tools_view.bp_config.clone());
         cx.notify();
     }
 
     pub fn toggle_auto_spell(&mut self, cx: &mut Context<Self>) {
         self.tools_view.bp_config.auto_spell = !self.tools_view.bp_config.auto_spell;
-        let _ = self.live_service.auto_bp_cfg.send(self.tools_view.bp_config.clone());
+        let _ = self
+            .live_service
+            .auto_bp_cfg
+            .send(self.tools_view.bp_config.clone());
         cx.notify();
     }
 
@@ -225,7 +244,10 @@ impl MainWindow {
     pub fn toggle_auto_honor(&mut self, cx: &mut Context<Self>) {
         self.tools_view.auto_honor = !self.tools_view.auto_honor;
         self.tools_view.match_config.auto_honor = self.tools_view.auto_honor;
-        let _ = self.live_service.auto_match_cfg.send(self.tools_view.match_config.clone());
+        let _ = self
+            .live_service
+            .auto_match_cfg
+            .send(self.tools_view.match_config.clone());
         cx.notify();
     }
 
@@ -305,6 +327,141 @@ impl MainWindow {
             }
             cx.notify();
         }
+    }
+
+    pub fn perform_search(&mut self, query: &str, cx: &mut Context<Self>) {
+        let trimmed = query.trim().to_string();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        self.search_view.set_search_query(&trimmed);
+        self.search_view.set_searching(true);
+        cx.notify();
+
+        let live_service = self.live_service.clone();
+        let query_name = trimmed.clone();
+
+        cx.spawn(async move |entity, cx| {
+            let client_opt = live_service.get_client().await;
+            let assets_opt = live_service.get_game_data_assets().await;
+
+            let (client, assets) = match (client_opt, assets_opt) {
+                (Some(c), Some(a)) => (c, a),
+                _ => {
+                    let _ = entity.update(cx, |this, cx| {
+                        this.search_view
+                            .set_search_error("客户端未连接或离线中，请先启动英雄联盟");
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+
+            // 1. 查询召唤师信息
+            match yuumi_core::parsers::summoner::fetch_summoner_by_name(&client, &query_name).await
+            {
+                Ok(summoner) => {
+                    let full_name = summoner.full_name();
+                    // 2. 查询近期战绩 (0..20)
+                    match yuumi_core::parsers::match_parser::fetch_match_history(
+                        &client,
+                        &summoner.puuid,
+                        Some(0),
+                        Some(19),
+                        &assets,
+                    )
+                    .await
+                    {
+                        Ok(matches) => {
+                            let items: Vec<MatchItem> =
+                                matches.into_iter().map(MatchItem::new).collect();
+                            let first_game_id = items.first().map(|m| m.display.game_id);
+
+                            let _ = entity.update(cx, |this, cx| {
+                                this.search_view.set_search_results(full_name, items);
+                                cx.notify();
+                            });
+
+                            // 3. 异步拉取首场详情填入 details_cache
+                            if let Some(gid) = first_game_id {
+                                if let Ok(detail) =
+                                    yuumi_core::parsers::match_detail::fetch_game_detail(
+                                        &client, gid, &assets,
+                                    )
+                                    .await
+                                {
+                                    let _ = entity.update(cx, |this, cx| {
+                                        this.search_view.insert_game_detail(gid, detail);
+                                        cx.notify();
+                                    });
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = entity.update(cx, |this, cx| {
+                                this.search_view
+                                    .set_search_error(format!("获取战绩失败: {}", e));
+                                cx.notify();
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = entity.update(cx, |this, cx| {
+                        this.search_view
+                            .set_search_error(format!("未找到召唤师: {}", e));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub fn load_match_detail(&mut self, game_id: u64, cx: &mut Context<Self>) {
+        if self.search_view.details_cache.contains_key(&game_id) {
+            self.search_view.selected_game_id = Some(game_id);
+            cx.notify();
+            return;
+        }
+
+        self.search_view.selected_game_id = Some(game_id);
+        self.search_view.is_loading_detail = true;
+        cx.notify();
+
+        let live_service = self.live_service.clone();
+        cx.spawn(async move |entity, cx| {
+            let client_opt = live_service.get_client().await;
+            let assets_opt = live_service.get_game_data_assets().await;
+
+            if let (Some(client), Some(assets)) = (client_opt, assets_opt) {
+                if let Ok(detail) =
+                    yuumi_core::parsers::match_detail::fetch_game_detail(&client, game_id, &assets)
+                        .await
+                {
+                    let _ = entity.update(cx, |this, cx| {
+                        this.search_view.insert_game_detail(game_id, detail);
+                        this.search_view.is_loading_detail = false;
+                        cx.notify();
+                    });
+                    return;
+                }
+            }
+
+            let _ = entity.update(cx, |this, cx| {
+                // 如果没有网络或真实拉取失败，尝试使用现有的 mock 详情作为保底
+                if let Some(first_detail) = this.search_view.details_cache.values().next().cloned()
+                {
+                    let mut fallback = first_detail;
+                    fallback.game_id = game_id;
+                    this.search_view.insert_game_detail(game_id, fallback);
+                }
+                this.search_view.is_loading_detail = false;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }
 
@@ -394,15 +551,7 @@ impl Render for MainWindow {
                                     let v = view.clone();
                                     move |game_id: u64, _win: &mut Window, app: &mut App| {
                                         v.update(app, |this, cx| {
-                                            this.search_view.selected_game_id = Some(game_id);
-                                            if !this.search_view.details_cache.contains_key(&game_id) {
-                                                if let Some(first_detail) = this.search_view.details_cache.values().next().cloned() {
-                                                    let mut fallback = first_detail;
-                                                    fallback.game_id = game_id;
-                                                    this.search_view.details_cache.insert(game_id, fallback);
-                                                }
-                                            }
-                                            cx.notify();
+                                            this.load_match_detail(game_id, cx);
                                         });
                                     }
                                 };
@@ -415,10 +564,80 @@ impl Render for MainWindow {
                                         });
                                     }
                                 };
-                                el.child(self.search_view.render(on_select_match, on_filter_queue))
+                                let on_search = {
+                                    let v = view.clone();
+                                    move |query: &str, _win: &mut Window, app: &mut App| {
+                                        let q = query.to_string();
+                                        v.update(app, |this, cx| {
+                                            this.perform_search(&q, cx);
+                                        });
+                                    }
+                                };
+                                let on_input_change = {
+                                    let v = view.clone();
+                                    move |new_text: String, _win: &mut Window, app: &mut App| {
+                                        v.update(app, |this, cx| {
+                                            this.search_view.set_search_query(new_text);
+                                            cx.notify();
+                                        });
+                                    }
+                                };
+                                el.child(self.search_view.render(
+                                    on_select_match,
+                                    on_filter_queue,
+                                    on_search,
+                                    on_input_change,
+                                ))
                             })
                             .when(self.current_route == Route::SavedPlayers, |el| {
-                                el.child(self.saved_players_view.render())
+                                let view = view_entity.clone();
+                                let on_filter_tag = {
+                                    let v = view.clone();
+                                    move |tag: &str, _win: &mut Window, app: &mut App| {
+                                        let tag_str = tag.to_string();
+                                        v.update(app, |this, cx| {
+                                            this.saved_players_view.set_filter(tag_str);
+                                            cx.notify();
+                                        });
+                                    }
+                                };
+                                let on_toggle_pin = {
+                                    let v = view.clone();
+                                    move |puuid: &str, _win: &mut Window, app: &mut App| {
+                                        let p = puuid.to_string();
+                                        v.update(app, |this, cx| {
+                                            this.saved_players_view.toggle_pin(&p);
+                                            cx.notify();
+                                        });
+                                    }
+                                };
+                                let on_toggle_expand = {
+                                    let v = view.clone();
+                                    move |puuid: &str, _win: &mut Window, app: &mut App| {
+                                        let p = puuid.to_string();
+                                        v.update(app, |this, cx| {
+                                            this.saved_players_view.toggle_expand(&p);
+                                            cx.notify();
+                                        });
+                                    }
+                                };
+                                let on_remove_player = {
+                                    let v = view.clone();
+                                    move |puuid: &str, _win: &mut Window, app: &mut App| {
+                                        let p = puuid.to_string();
+                                        v.update(app, |this, cx| {
+                                            this.saved_players_view.remove_player(&p);
+                                            cx.notify();
+                                        });
+                                    }
+                                };
+
+                                el.child(self.saved_players_view.render_panel(
+                                    on_filter_tag,
+                                    on_toggle_pin,
+                                    on_toggle_expand,
+                                    on_remove_player,
+                                ))
                             })
                             .when(self.current_route == Route::Tools, |el| {
                                 let view = view_entity.clone();
@@ -461,7 +680,9 @@ impl Render for MainWindow {
                                 let p_bench = {
                                     let v = view.clone();
                                     move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_bench_overlay_setting(cx));
+                                        v.update(app, |this, cx| {
+                                            this.toggle_bench_overlay_setting(cx)
+                                        });
                                     }
                                 };
                                 let p_trade = {
@@ -477,9 +698,48 @@ impl Render for MainWindow {
                                     }
                                 };
 
+                                let p_fix_win = {
+                                    let _v = view.clone();
+                                    move |_ev: &_, _win: &mut _, _app: &mut _| {
+                                        std::thread::spawn(|| {
+                                            match services::fix_client_window() {
+                                                Ok(msg) => log::info!("[Tools] {}", msg),
+                                                Err(e) => log::warn!("[Tools] 修复窗口失败: {}", e),
+                                            }
+                                        });
+                                    }
+                                };
+                                let p_clear_cache = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, _cx| {
+                                            let client_path =
+                                                this.settings_view.client_path.clone();
+                                            std::thread::spawn(move || {
+                                                match services::clear_game_cache(Some(&client_path))
+                                                {
+                                                    Ok(msg) => log::info!("[Tools] {}", msg),
+                                                    Err(e) => {
+                                                        log::warn!("[Tools] 清理缓存失败: {}", e)
+                                                    }
+                                                }
+                                            });
+                                        });
+                                    }
+                                };
+
                                 el.child(self.tools_view.render_panel(
-                                    p_accept, p_reconn, p_again, p_pick, p_ban, p_spell,
-                                    p_bench, p_trade, p_honor,
+                                    p_accept,
+                                    p_reconn,
+                                    p_again,
+                                    p_pick,
+                                    p_ban,
+                                    p_spell,
+                                    p_bench,
+                                    p_trade,
+                                    p_honor,
+                                    p_fix_win,
+                                    p_clear_cache,
                                 ))
                             })
                             .when(self.current_route == Route::Settings, |el| {
@@ -493,7 +753,9 @@ impl Render for MainWindow {
                                 let p_start_win = {
                                     let v = view.clone();
                                     move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_start_with_windows(cx));
+                                        v.update(app, |this, cx| {
+                                            this.toggle_start_with_windows(cx)
+                                        });
                                     }
                                 };
                                 let p_min_game = {
@@ -517,7 +779,9 @@ impl Render for MainWindow {
                                 let p_hide_saved = {
                                     let v = view.clone();
                                     move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_hide_saved_players(cx));
+                                        v.update(app, |this, cx| {
+                                            this.toggle_hide_saved_players(cx)
+                                        });
                                     }
                                 };
                                 let p_theme = {
@@ -526,9 +790,85 @@ impl Render for MainWindow {
                                         v.update(app, |this, cx| this.select_theme_index(idx, cx));
                                     }
                                 };
+                                let p_detect_path = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| {
+                                            if let Some(path) = services::detect_lol_path() {
+                                                log::info!(
+                                                    "[Settings] 检测到 LOL 客户端路径: {}",
+                                                    path
+                                                );
+                                                this.settings_view.client_path = path;
+                                                cx.notify();
+                                            } else {
+                                                log::warn!(
+                                                    "[Settings] 未能自动检测到 LOL 客户端路径"
+                                                );
+                                            }
+                                        });
+                                    }
+                                };
+                                let p_select_folder = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, cx| {
+                                            if let Some(path) = services::select_folder() {
+                                                log::info!(
+                                                    "[Settings] 手动选择 LOL 客户端路径: {}",
+                                                    path
+                                                );
+                                                this.settings_view.client_path = path;
+                                                cx.notify();
+                                            }
+                                        });
+                                    }
+                                };
+                                let p_open_log = {
+                                    let _v = view.clone();
+                                    move |_ev: &_, _win: &mut _, _app: &mut _| {
+                                        std::thread::spawn(|| match services::open_log_folder() {
+                                            Ok(path) => log::info!(
+                                                "[Settings] 已打开日志目录: {}",
+                                                path.display()
+                                            ),
+                                            Err(e) => {
+                                                log::warn!("[Settings] 打开日志目录失败: {}", e)
+                                            }
+                                        });
+                                    }
+                                };
+                                let p_settings_clear_cache = {
+                                    let v = view.clone();
+                                    move |_ev: &_, _win: &mut _, app: &mut _| {
+                                        v.update(app, |this, _cx| {
+                                            let client_path =
+                                                this.settings_view.client_path.clone();
+                                            std::thread::spawn(move || {
+                                                match services::clear_game_cache(Some(&client_path))
+                                                {
+                                                    Ok(msg) => log::info!("[Settings] {}", msg),
+                                                    Err(e) => {
+                                                        log::warn!("[Settings] 清理缓存失败: {}", e)
+                                                    }
+                                                }
+                                            });
+                                        });
+                                    }
+                                };
 
                                 el.child(self.settings_view.render_panel(
-                                    p_close_tray, p_start_win, p_min_game, p_mica, p_hide_tft, p_hide_saved, p_theme
+                                    p_close_tray,
+                                    p_start_win,
+                                    p_min_game,
+                                    p_mica,
+                                    p_hide_tft,
+                                    p_hide_saved,
+                                    p_theme,
+                                    p_detect_path,
+                                    p_select_folder,
+                                    p_open_log,
+                                    p_settings_clear_cache,
                                 ))
                             }),
                     ),

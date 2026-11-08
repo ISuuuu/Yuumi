@@ -1,11 +1,11 @@
 //! 全局设置视图 (SettingsView)
 //! 遵循纯白水晶极光设计语言，包含客户端路径、启动设置、个性化外观、自动化偏好、日志维护与关于面板
 
-use gpui::*;
 use crate::components::badge::Badge;
 use crate::components::card::Card;
 use crate::components::switch::Switch;
 use crate::theme::Theme;
+use gpui::*;
 
 #[derive(Clone)]
 pub struct SettingsView {
@@ -49,7 +49,7 @@ impl SettingsView {
         }
     }
 
-    pub fn render_panel<F1, F2, F3, F4, F5, F6, F7>(
+    pub fn render_panel<F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11>(
         &self,
         on_toggle_close_to_tray: F1,
         on_toggle_start_with_windows: F2,
@@ -58,6 +58,10 @@ impl SettingsView {
         on_toggle_hide_tft: F5,
         on_toggle_hide_saved: F6,
         on_select_theme: F7,
+        on_detect_lol_path: F8,
+        on_select_folder: F9,
+        on_open_log_folder: F10,
+        on_clear_cache: F11,
     ) -> impl IntoElement
     where
         F1: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
@@ -67,6 +71,10 @@ impl SettingsView {
         F5: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
         F6: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
         F7: Fn(usize, &mut gpui::Window, &mut gpui::App) + 'static,
+        F8: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+        F9: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+        F10: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+        F11: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
     {
         let on_theme = std::rc::Rc::new(on_select_theme);
         let t0 = on_theme.clone();
@@ -158,8 +166,8 @@ impl SettingsView {
                                                     .flex()
                                                     .items_center()
                                                     .gap_2()
-                                                    .child(render_action_btn("自动检测"))
-                                                    .child(render_action_btn("浏览文件夹")),
+                                                    .child(render_action_btn("自动检测", on_detect_lol_path))
+                                                    .child(render_action_btn("浏览文件夹", on_select_folder)),
                                             ),
                                     )
                                     .child(render_divider())
@@ -405,8 +413,8 @@ impl SettingsView {
                                                     .flex()
                                                     .items_center()
                                                     .gap_2()
-                                                    .child(render_action_btn("打开日志文件夹"))
-                                                    .child(render_action_btn("清空静态资源缓存")),
+                                                    .child(render_action_btn("打开日志文件夹", on_open_log_folder))
+                                                    .child(render_action_btn("清空静态资源缓存", on_clear_cache)),
                                             ),
                                     )
                                     .child(render_divider())
@@ -454,12 +462,7 @@ fn render_section_header(title: &'static str, dot_color: Hsla) -> impl IntoEleme
         .flex()
         .items_center()
         .gap_2()
-        .child(
-            div()
-                .size(px(8.0))
-                .rounded_full()
-                .bg(dot_color),
-        )
+        .child(div().size(px(8.0)).rounded_full().bg(dot_color))
         .child(
             div()
                 .text_sm()
@@ -506,12 +509,7 @@ where
                         .text_color(Theme::TEXT_PRIMARY)
                         .child(title),
                 )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(Theme::TEXT_MUTED)
-                        .child(desc),
-                ),
+                .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(desc)),
         )
         .child(
             div()
@@ -521,7 +519,10 @@ where
         )
 }
 
-fn render_action_btn(text: &'static str) -> impl IntoElement {
+fn render_action_btn<F>(text: &'static str, on_click: F) -> impl IntoElement
+where
+    F: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+{
     div()
         .px_3()
         .py_1()
@@ -529,8 +530,12 @@ fn render_action_btn(text: &'static str) -> impl IntoElement {
         .bg(Theme::BADGE_BG)
         .border_1()
         .border_color(Theme::CARD_BORDER)
-        .hover(|this| this.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY.opacity(0.4)))
+        .hover(|this| {
+            this.bg(Theme::HOVER_BG)
+                .border_color(Theme::ACCENT_PRIMARY.opacity(0.4))
+        })
         .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, on_click)
         .text_xs()
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(Theme::TEXT_PRIMARY)
@@ -551,7 +556,11 @@ where
         .rounded_full()
         .bg(color)
         .border_2()
-        .border_color(if is_selected { Theme::TEXT_PRIMARY } else { gpui::transparent_black() })
+        .border_color(if is_selected {
+            Theme::TEXT_PRIMARY
+        } else {
+            gpui::transparent_black()
+        })
         .cursor_pointer()
         .on_mouse_down(MouseButton::Left, on_click)
 }

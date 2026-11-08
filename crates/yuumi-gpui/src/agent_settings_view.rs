@@ -1,11 +1,10 @@
 #![allow(dead_code)]
 //! 自动化 Agent 功能配置看板（纯白水晶极光风格）
 
-use gpui::{
-    div, hsla, px, FontWeight, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Styled,
-};
 use crate::theme::Theme;
+use gpui::{
+    div, hsla, px, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement, Styled,
+};
 use yuumi_core::agents::{AutoBpConfig, AutoMatchConfig};
 
 #[derive(Clone)]
@@ -29,10 +28,10 @@ impl AgentSettingsView {
                 auto_pick_intent: true,
                 pick_champion_ids: vec![157, 238, 84], // 亚索, 劫, 阿卡丽
                 auto_ban: true,
-                ban_champion_ids: vec![11, 24],        // 易大师, 贾克斯
+                ban_champion_ids: vec![11, 24], // 易大师, 贾克斯
                 auto_spell: true,
-                spell1_id: 4,                          // 闪现
-                spell2_id: 14,                         // 点燃
+                spell1_id: 4,  // 闪现
+                spell2_id: 14, // 点燃
             },
         }
     }
@@ -83,12 +82,7 @@ impl AgentSettingsView {
                             .items_center()
                             .gap_2()
                             .mb_3()
-                            .child(
-                                div()
-                                    .size(px(8.0))
-                                    .rounded_full()
-                                    .bg(Theme::AURORA_CYAN),
-                            )
+                            .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_CYAN))
                             .child(
                                 div()
                                     .text_sm()
@@ -141,12 +135,7 @@ impl AgentSettingsView {
                             .items_center()
                             .gap_2()
                             .mb_3()
-                            .child(
-                                div()
-                                    .size(px(8.0))
-                                    .rounded_full()
-                                    .bg(Theme::AURORA_BLUE),
-                            )
+                            .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_BLUE))
                             .child(
                                 div()
                                     .text_sm()

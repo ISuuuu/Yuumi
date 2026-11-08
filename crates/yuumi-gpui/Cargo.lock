@@ -8215,6 +8215,7 @@ name = "yuumi-gpui"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dirs 6.0.0",
  "env_logger",
  "gpui",
  "image",
@@ -8223,6 +8224,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+ "sysinfo 0.33.1",
  "tokio",
  "tray-icon",
  "windows 0.58.0",

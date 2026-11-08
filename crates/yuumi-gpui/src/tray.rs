@@ -1,5 +1,5 @@
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem, MenuId},
+    menu::{Menu, MenuEvent, MenuId, MenuItem},
     Icon, TrayIcon, TrayIconBuilder, TrayIconEvent,
 };
 

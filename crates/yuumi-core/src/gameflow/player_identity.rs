@@ -155,8 +155,14 @@ mod tests {
 
     #[test]
     fn test_valid_tpid() {
-        assert_eq!(get_valid_tpid(Some("0"), Some("123")), Some("123".to_string()));
-        assert_eq!(get_valid_tpid(Some("party-1"), Some("123")), Some("party-1".to_string()));
+        assert_eq!(
+            get_valid_tpid(Some("0"), Some("123")),
+            Some("123".to_string())
+        );
+        assert_eq!(
+            get_valid_tpid(Some("party-1"), Some("123")),
+            Some("party-1".to_string())
+        );
         assert_eq!(get_valid_tpid(Some("0"), Some("0")), None);
         assert_eq!(get_valid_tpid(None, None), None);
     }

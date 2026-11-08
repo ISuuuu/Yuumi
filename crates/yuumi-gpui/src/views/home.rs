@@ -1,8 +1,8 @@
-use gpui::prelude::*;
-use gpui::*;
 use crate::services::ConnectionStatus;
 use crate::theme::Theme;
 use crate::views::Route;
+use gpui::prelude::*;
+use gpui::*;
 
 pub struct HomeView;
 

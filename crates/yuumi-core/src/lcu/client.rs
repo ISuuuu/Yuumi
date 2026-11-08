@@ -179,7 +179,8 @@ impl LcuClient {
                             && (path.contains("pickable-champion-ids")
                                 || path.contains("/lol-champ-select/v1/session")
                                 || path.contains("/lol-summoner/v2/summoners/puuid/")))
-                            || (status.as_u16() == 403 && path.contains("/lol-gameflow/v1/reconnect"));
+                            || (status.as_u16() == 403
+                                && path.contains("/lol-gameflow/v1/reconnect"));
                         if expected_unavailable {
                             log::debug!(
                                 "LCU API 常规未激活/未找到提示: {} {}, 状态码: {}, 响应: {}",

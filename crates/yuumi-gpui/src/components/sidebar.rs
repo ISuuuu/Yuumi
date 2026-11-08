@@ -1,7 +1,7 @@
-use gpui::prelude::FluentBuilder;
-use gpui::*;
 use crate::theme;
 use crate::views::Route;
+use gpui::prelude::FluentBuilder;
+use gpui::*;
 
 /// 48px 极光水晶风格左侧导航栏
 pub struct Sidebar;
@@ -67,11 +67,11 @@ impl Sidebar {
                     })),
             )
             // 底部设置
-            .child(
-                div()
-                    .w_full()
-                    .child(Self::render_item(Route::Settings, current_route == Route::Settings, on_select)),
-            )
+            .child(div().w_full().child(Self::render_item(
+                Route::Settings,
+                current_route == Route::Settings,
+                on_select,
+            )))
     }
 
     fn render_item(
@@ -92,12 +92,8 @@ impl Sidebar {
             .h(px(46.0))
             .relative()
             .cursor_pointer()
-            .when(is_active, |this| {
-                this.bg(theme::SIDEBAR_ACTIVE)
-            })
-            .hover(|this| {
-                this.bg(theme::SIDEBAR_HOVER)
-            })
+            .when(is_active, |this| this.bg(theme::SIDEBAR_ACTIVE))
+            .hover(|this| this.bg(theme::SIDEBAR_HOVER))
             // 左侧选中极光强调线
             .when(is_active, |this| {
                 this.child(

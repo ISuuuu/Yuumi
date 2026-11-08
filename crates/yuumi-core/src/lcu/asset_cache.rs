@@ -189,7 +189,8 @@ mod tests {
 
     #[test]
     fn test_asset_cache_disk_write_and_read() {
-        let temp_dir = std::env::temp_dir().join(format!("yuumi_asset_test_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("yuumi_asset_test_{}", std::process::id()));
         let cache = AssetCache::with_cache_dir(None, temp_dir.clone());
 
         let test_path = "/lol-game-data/assets/v1/champion-icons/1.png";
