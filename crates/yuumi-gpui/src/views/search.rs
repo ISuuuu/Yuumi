@@ -1,5 +1,6 @@
 use crate::components::badge::{Badge, BadgeVariant};
 use crate::components::card::Card;
+use crate::components::lcu_image::LcuImage;
 use crate::match_model::{GameDetail, GameDetailTeam, MatchItem};
 use crate::theme;
 use gpui::prelude::FluentBuilder;
@@ -531,6 +532,12 @@ impl SearchView {
                                     .items_center()
                                     .gap_2()
                                     .child(
+                                        LcuImage::new(item.display.champion_icon_url.clone())
+                                            .size(px(28.0))
+                                            .shape(crate::components::lcu_image::LcuImageShape::Rounded)
+                                            .placeholder(format!("{}", item.display.champion_id)),
+                                    )
+                                    .child(
                                         div()
                                             .text_xs()
                                             .font_weight(FontWeight::SEMIBOLD)
@@ -814,19 +821,11 @@ impl SearchView {
                                     .gap_2p5()
                                     .w(px(180.0))
                                     .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
+                                        LcuImage::new(p.champion_icon_url.clone())
                                             .size(px(32.0))
-                                            .rounded_full()
-                                            .bg(theme::BG_INPUT)
-                                            .border_1()
+                                            .circle()
                                             .border_color(theme::BORDER_SECONDARY)
-                                            .text_xs()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(theme::TEXT_PRIMARY)
-                                            .child(format!("{}", p.champion_id)),
+                                            .placeholder(format!("{}", p.champion_id)),
                                     )
                                     .child(
                                         div()
@@ -856,37 +855,30 @@ impl SearchView {
                                     .items_center()
                                     .gap_1()
                                     .w(px(160.0))
-                                    .children(p.item_ids.iter().map(|&item_id| {
-                                        div()
-                                            .size(px(20.0))
-                                            .rounded(px(3.0))
-                                            .bg(theme::BG_INPUT)
-                                            .border_1()
-                                            .border_color(theme::BORDER_SECONDARY)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .text_xs()
-                                            .text_color(theme::TEXT_MUTED)
-                                            .child(if item_id > 0 {
-                                                format!("{}", item_id % 100)
-                                            } else {
-                                                "".to_string()
-                                            })
-                                    }))
+                                    .children(p.item_ids.iter().enumerate().map(
+                                        |(idx, &item_id)| {
+                                            let item_url = p
+                                                .item_icon_urls
+                                                .get(idx)
+                                                .cloned()
+                                                .unwrap_or_default();
+                                            LcuImage::new(item_url)
+                                                .size(px(20.0))
+                                                .item_slot()
+                                                .border_color(theme::BORDER_SECONDARY)
+                                                .placeholder(if item_id > 0 {
+                                                    format!("{}", item_id % 100)
+                                                } else {
+                                                    "".to_string()
+                                                })
+                                        },
+                                    ))
                                     .child(
-                                        div()
+                                        LcuImage::new(p.ward_icon_url.clone())
                                             .size(px(20.0))
-                                            .rounded_full()
-                                            .bg(theme::BG_ELEVATED)
-                                            .border_1()
+                                            .circle()
                                             .border_color(theme::BORDER_SECONDARY)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .text_xs()
-                                            .text_color(theme::TEXT_MUTED)
-                                            .child("眼"),
+                                            .placeholder("眼"),
                                     ),
                             )
                             // KDA

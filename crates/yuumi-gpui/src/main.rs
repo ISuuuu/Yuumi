@@ -83,6 +83,7 @@ impl MainWindow {
 
         // 初始化真实 LCU 实时监控与调度服务
         let asset_cache = std::sync::Arc::new(yuumi_core::lcu::asset_cache::AssetCache::default());
+        asset_loader::init_global_asset_loader(asset_cache.clone());
         let live_service = LiveLcuService::new(asset_cache);
         live_service.start();
 
@@ -481,7 +482,7 @@ impl Render for MainWindow {
             .child(self.titlebar.render(
                 window,
                 |_w, _app| {
-                    if let Some(hwnd) = platform::find_window_by_title(MAIN_WINDOW_TITLE) {
+                    if let Some(hwnd) = platform::find_main_window_hwnd() {
                         platform::minimize_window(hwnd);
                     }
                 },
@@ -877,6 +878,9 @@ impl Render for MainWindow {
 }
 
 fn main() {
+    // 显式安装全局默认 CryptoProvider，防止 rustls 0.23+ 多 provider 特性冲突
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // 0. 初始化全局 Tokio 异步运行时，供后台网络 I/O、WebSocket 与 LCU 轮询使用
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -934,9 +938,11 @@ fn main() {
         // 异步应用 Windows 11 Mica / DwmExtendFrameIntoClientArea 亚克力极光特效与圆角
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(60));
-            if let Some(hwnd) = platform::find_window_by_title(MAIN_WINDOW_TITLE) {
+            if let Some(hwnd) = platform::find_main_window_hwnd() {
                 platform::apply_mica_or_acrylic(hwnd);
                 platform::set_window_rounded_corners(hwnd);
+            } else {
+                log::warn!("[Platform] 未找到主窗口 HWND，跳过 Mica/圆角设置");
             }
         });
 

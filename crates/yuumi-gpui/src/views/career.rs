@@ -1,4 +1,4 @@
-use crate::asset_loader::global_asset_loader;
+use crate::components::lcu_image::LcuImage;
 use crate::match_model::{compute_match_stats, position_to_zh, MatchItem};
 use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
@@ -297,13 +297,11 @@ impl CareerView {
             .map(|l| format!("Lv. {}", l))
             .unwrap_or_else(|| "Lv. 428".to_string());
 
-        let loader = global_asset_loader();
         let icon_path = self
             .summoner
             .as_ref()
             .map(|s| s.icon_path())
             .unwrap_or_else(|| "/lol-game-data/assets/v1/profile-icons/29.jpg".to_string());
-        let avatar_img = loader.get_cached_render_image(&icon_path);
 
         div()
             .w_full()
@@ -328,25 +326,15 @@ impl CareerView {
                             .relative()
                             .size(px(58.0))
                             .rounded_xl()
-                            .bg(Theme::ACCENT_LIGHT)
                             .border_2()
                             .border_color(Theme::AURORA_CYAN)
                             .overflow_hidden()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .when_some(avatar_img.clone(), |this, img_ref| {
-                                this.child(img(img_ref).size_full().object_fit(ObjectFit::Cover))
-                            })
-                            .when(avatar_img.is_none(), |this| {
-                                this.child(
-                                    div()
-                                        .text_xl()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::ACCENT_PRIMARY)
-                                        .child("悠"),
-                                )
-                            })
+                            .child(
+                                LcuImage::new(icon_path)
+                                    .size(px(58.0))
+                                    .shape(crate::components::lcu_image::LcuImageShape::Rounded)
+                                    .placeholder("悠"),
+                            )
                             .child(
                                 div()
                                     .absolute()
@@ -569,9 +557,6 @@ impl CareerView {
             // 英雄熟练度卡片网格（4 列）
             .child(div().w_full().grid().grid_cols(4).gap_3().children(
                 self.mastery_list.iter().map(|m| {
-                    let loader = global_asset_loader();
-                    let champ_img = loader.get_cached_render_image(&m.champion_icon_url);
-
                     div()
                         .p_3()
                         .rounded_xl()
@@ -592,29 +577,15 @@ impl CareerView {
                                         .relative()
                                         .size(px(44.0))
                                         .rounded_lg()
-                                        .bg(Theme::BADGE_BG)
                                         .border_1()
                                         .border_color(Theme::CARD_BORDER)
                                         .overflow_hidden()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .when_some(champ_img.clone(), |this, img_ref| {
-                                            this.child(
-                                                img(img_ref)
-                                                    .size_full()
-                                                    .object_fit(ObjectFit::Cover),
-                                            )
-                                        })
-                                        .when(champ_img.is_none(), |this| {
-                                            this.child(
-                                                div()
-                                                    .text_sm()
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::TEXT_PRIMARY)
-                                                    .child(format!("{}", m.champion_id)),
-                                            )
-                                        })
+                                        .child(
+                                            LcuImage::new(m.champion_icon_url.clone())
+                                                .size(px(44.0))
+                                                .shape(crate::components::lcu_image::LcuImageShape::Rounded)
+                                                .placeholder(format!("{}", m.champion_id)),
+                                        )
                                         .child(
                                             div()
                                                 .absolute()
@@ -1129,11 +1100,6 @@ impl CareerView {
         let assists = m.display.assists;
         let game_id = m.display.game_id;
 
-        let loader = global_asset_loader();
-        let champ_img = loader.get_cached_render_image(&champion_icon_url);
-        let spell1_img = loader.get_cached_render_image(&spell1_icon_url);
-        let spell2_img = loader.get_cached_render_image(&spell2_icon_url);
-
         div()
             .w_full()
             .mb_2()
@@ -1175,34 +1141,14 @@ impl CareerView {
                                             .relative()
                                             .size(px(52.0))
                                             .rounded_lg()
-                                            .bg(Theme::CARD_BG)
                                             .border_1()
                                             .border_color(border_color)
                                             .overflow_hidden()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .when_some(champ_img, |this, render_image| {
-                                                this.child(
-                                                    img(render_image)
-                                                        .size_full()
-                                                        .object_fit(ObjectFit::Cover),
-                                                )
-                                            })
-                                            .when(
-                                                champion_icon_url.is_empty()
-                                                    || loader
-                                                        .get_cached_render_image(&champion_icon_url)
-                                                        .is_none(),
-                                                |this| {
-                                                    this.child(
-                                                        div()
-                                                            .text_sm()
-                                                            .font_weight(FontWeight::BOLD)
-                                                            .text_color(Theme::TEXT_PRIMARY)
-                                                            .child(champion_name),
-                                                    )
-                                                },
+                                            .child(
+                                                LcuImage::new(champion_icon_url)
+                                                    .size(px(52.0))
+                                                    .shape(crate::components::lcu_image::LcuImageShape::Rounded)
+                                                    .placeholder(champion_name),
                                             )
                                             .child(
                                                 div()
@@ -1223,74 +1169,16 @@ impl CareerView {
                                             .flex_col()
                                             .gap(px(2.0))
                                             .child(
-                                                div()
+                                                LcuImage::new(spell1_icon_url)
                                                     .size(px(22.0))
-                                                    .rounded_md()
-                                                    .bg(Theme::BADGE_BG)
-                                                    .border_1()
-                                                    .border_color(Theme::CARD_BORDER)
-                                                    .overflow_hidden()
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .when_some(spell1_img, |this, render_image| {
-                                                        this.child(
-                                                            img(render_image)
-                                                                .size_full()
-                                                                .object_fit(ObjectFit::Cover),
-                                                        )
-                                                    })
-                                                    .when(
-                                                        spell1_icon_url.is_empty()
-                                                            || loader
-                                                                .get_cached_render_image(
-                                                                    &spell1_icon_url,
-                                                                )
-                                                                .is_none(),
-                                                        |this| {
-                                                            this.child(
-                                                                div()
-                                                                    .text_xs()
-                                                                    .text_color(Theme::TEXT_MUTED)
-                                                                    .child("D"),
-                                                            )
-                                                        },
-                                                    ),
+                                                    .shape(crate::components::lcu_image::LcuImageShape::Rounded)
+                                                    .placeholder("D"),
                                             )
                                             .child(
-                                                div()
+                                                LcuImage::new(spell2_icon_url)
                                                     .size(px(22.0))
-                                                    .rounded_md()
-                                                    .bg(Theme::BADGE_BG)
-                                                    .border_1()
-                                                    .border_color(Theme::CARD_BORDER)
-                                                    .overflow_hidden()
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .when_some(spell2_img, |this, render_image| {
-                                                        this.child(
-                                                            img(render_image)
-                                                                .size_full()
-                                                                .object_fit(ObjectFit::Cover),
-                                                        )
-                                                    })
-                                                    .when(
-                                                        spell2_icon_url.is_empty()
-                                                            || loader
-                                                                .get_cached_render_image(
-                                                                    &spell2_icon_url,
-                                                                )
-                                                                .is_none(),
-                                                        |this| {
-                                                            this.child(
-                                                                div()
-                                                                    .text_xs()
-                                                                    .text_color(Theme::TEXT_MUTED)
-                                                                    .child("F"),
-                                                            )
-                                                        },
-                                                    ),
+                                                    .shape(crate::components::lcu_image::LcuImageShape::Rounded)
+                                                    .placeholder("F"),
                                             ),
                                     ),
                             ),
@@ -1390,42 +1278,20 @@ impl CareerView {
                         items.iter().enumerate().map(|(slot_idx, &item_id)| {
                             let is_trinket = slot_idx == 6;
                             let is_empty = item_id == 0;
-                            let item_url = item_urls.get(slot_idx).cloned();
-                            let item_img = item_url
-                                .as_deref()
-                                .and_then(|u| loader.get_cached_render_image(u));
+                            let item_url = item_urls.get(slot_idx).cloned().unwrap_or_default();
 
-                            div()
+                            LcuImage::new(item_url)
                                 .size(px(26.0))
-                                .rounded_md()
-                                .bg(if is_empty {
-                                    Theme::ITEM_SLOT_BG
-                                } else {
-                                    Theme::CARD_BG
-                                })
-                                .border_1()
+                                .item_slot()
                                 .border_color(if is_trinket {
                                     Theme::AURORA_CYAN
                                 } else {
                                     Theme::ITEM_SLOT_BORDER
                                 })
-                                .overflow_hidden()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_xs()
-                                .text_color(Theme::TEXT_MUTED)
-                                .when_some(item_img.clone(), |this, render_image| {
-                                    this.child(
-                                        img(render_image).size_full().object_fit(ObjectFit::Cover),
-                                    )
-                                })
-                                .when(item_img.is_none(), |this| {
-                                    this.child(if is_empty {
-                                        "".to_string()
-                                    } else {
-                                        format!("{}", item_id % 100)
-                                    })
+                                .placeholder(if is_empty {
+                                    "".to_string()
+                                } else {
+                                    format!("{}", item_id % 100)
                                 })
                         }),
                     ))

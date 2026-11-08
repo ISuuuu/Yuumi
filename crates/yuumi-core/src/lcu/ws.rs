@@ -219,11 +219,16 @@ pub async fn try_connect(
     static TLS_CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
     let tls_config = TLS_CONFIG
         .get_or_init(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
             Arc::new(
-                ClientConfig::builder()
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(NoVerifier))
-                    .with_no_client_auth(),
+                ClientConfig::builder_with_provider(Arc::new(
+                    rustls::crypto::ring::default_provider(),
+                ))
+                .with_safe_default_protocol_versions()
+                .expect("初始化安全协议版本失败")
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(NoVerifier))
+                .with_no_client_auth(),
             )
         })
         .clone();

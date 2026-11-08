@@ -14,8 +14,8 @@ const DEFAULT_MEMORY_CACHE_CAPACITY: usize = 256;
 
 #[derive(Clone)]
 pub struct AssetCache {
-    /// 可选的活跃 LCU 客户端引用
-    lcu_client: Option<LcuClient>,
+    /// 可选的活跃 LCU 客户端引用 (Arc<RwLock<Option<LcuClient>>>)
+    lcu_client: Arc<RwLock<Option<LcuClient>>>,
     /// 自定义磁盘缓存根目录（若未指定则使用系统默认 data/cache/assets）
     custom_cache_dir: Option<PathBuf>,
     /// 内存缓存：asset path -> raw bytes
@@ -42,11 +42,18 @@ impl AssetCache {
             .unwrap_or_else(|_| reqwest::Client::new());
 
         Self {
-            lcu_client,
+            lcu_client: Arc::new(RwLock::new(lcu_client)),
             custom_cache_dir: None,
             memory_cache: Arc::new(RwLock::new(HashMap::new())),
             memory_capacity: DEFAULT_MEMORY_CACHE_CAPACITY,
             http_client,
+        }
+    }
+
+    /// 动态设置或更新活跃 LCU 客户端
+    pub fn set_lcu_client(&self, lcu_client: Option<LcuClient>) {
+        if let Ok(mut lock) = self.lcu_client.write() {
+            *lock = lcu_client;
         }
     }
 
@@ -138,7 +145,8 @@ impl AssetCache {
         }
 
         // 3. 尝试从活动 LCU 客户端拉取
-        if let Some(lcu) = &self.lcu_client {
+        let maybe_lcu = self.lcu_client.read().ok().and_then(|lock| lock.clone());
+        if let Some(lcu) = maybe_lcu {
             if trimmed.starts_with('/') {
                 if let Ok(bytes) = lcu.get_bytes(trimmed).await {
                     let _ = self.write_disk_cache(trimmed, &bytes);

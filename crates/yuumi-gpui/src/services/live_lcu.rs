@@ -127,17 +127,42 @@ impl LiveLcuService {
                     ) {
                         // 预加载 GameData 字典
                         if game_data_assets.is_none() {
+                            log::info!("[LiveLcu] 正在从 LCU 预加载 GameData 资源字典...");
                             let assets = fetch_game_data_assets(&client).await;
+                            log::info!(
+                                "[LiveLcu] GameData 字典加载完毕: items={}, spells={}, runes={}, champions={}, augments={}",
+                                assets.items.len(),
+                                assets.spells.len(),
+                                assets.runes.len(),
+                                assets.champions.len(),
+                                assets.augments.len(),
+                            );
                             let arc_assets = Arc::new(assets);
                             game_data_assets = Some(arc_assets.clone());
                             *self.game_data_assets.write().await = Some(arc_assets.clone());
                             let _ = self.event_tx.send(LiveLcuEvent::GameDataReady(arc_assets));
                         }
 
+                        // 同步活跃 LCU 客户端至 AssetCache，以便图片优先通过活跃客户端拉取
+                        self.asset_cache.set_lcu_client(Some(client.clone()));
                         *self.client.write().await = Some(client.clone());
 
                         // 获取当前召唤师
-                        let summoner = fetch_current_summoner(&client).await.ok();
+                        log::info!("[LiveLcu] 正在获取当前登录召唤师信息...");
+                        let summoner = match fetch_current_summoner(&client).await {
+                            Ok(s) => {
+                                log::info!(
+                                    "[LiveLcu] 成功获取召唤师: {} (puuid: {})",
+                                    s.full_name(),
+                                    s.puuid
+                                );
+                                Some(s)
+                            }
+                            Err(e) => {
+                                log::warn!("[LiveLcu] 获取当前召唤师失败: {}", e);
+                                None
+                            }
+                        };
                         let _ = self.status.send(ConnectionStatus::Connected {
                             info: info.clone(),
                             summoner: Box::new(summoner.clone()),
@@ -183,6 +208,7 @@ impl LiveLcuService {
                         ws.cancel();
                     }
                     active_info = None;
+                    self.asset_cache.set_lcu_client(None);
                     *self.client.write().await = None;
                     self.supervisor.cancel_all().await;
                     let _ = self.lifecycle.on_phase_changed("None").await;

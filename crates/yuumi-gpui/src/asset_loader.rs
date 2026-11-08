@@ -19,20 +19,25 @@ pub fn global_asset_loader() -> &'static AssetLoader {
     ASSET_LOADER.get_or_init(AssetLoader::default)
 }
 
+/// 用自定义 core cache 初始化全局资源加载引擎（必须在首次访问前调用，如已初始化则安全忽略）
+pub fn init_global_asset_loader(core_cache: Arc<AssetCache>) {
+    let _ = ASSET_LOADER.set(AssetLoader::new(core_cache));
+}
+
 #[derive(Clone)]
 pub struct AssetLoader {
-    core_cache: AssetCache,
+    core_cache: Arc<AssetCache>,
     decoded_cache: Arc<RwLock<HashMap<String, Arc<RenderImage>>>>,
 }
 
 impl Default for AssetLoader {
     fn default() -> Self {
-        Self::new(AssetCache::default())
+        Self::new(Arc::new(AssetCache::default()))
     }
 }
 
 impl AssetLoader {
-    pub fn new(core_cache: AssetCache) -> Self {
+    pub fn new(core_cache: Arc<AssetCache>) -> Self {
         Self {
             core_cache,
             decoded_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -42,7 +47,7 @@ impl AssetLoader {
     /// 使用指定本地磁盘目录构造（便于隔离与测试）
     #[allow(dead_code)]
     pub fn with_cache_dir(cache_dir: PathBuf) -> Self {
-        let core = AssetCache::with_cache_dir(None, cache_dir);
+        let core = Arc::new(AssetCache::with_cache_dir(None, cache_dir));
         Self::new(core)
     }
 
@@ -115,8 +120,23 @@ impl AssetLoader {
 
     /// 获取底层 core 缓存引用
     #[allow(dead_code)]
-    pub fn core_cache(&self) -> &AssetCache {
+    pub fn core_cache(&self) -> &Arc<AssetCache> {
         &self.core_cache
+    }
+
+    /// 获取特定资源路径对应的本地磁盘缓存文件路径（如存在）
+    #[allow(dead_code)]
+    pub fn get_disk_cache_file_path(&self, path: &str) -> Option<PathBuf> {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let file_path = self.core_cache.cache_file_path(trimmed);
+        if file_path.exists() {
+            Some(file_path)
+        } else {
+            None
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 //! Windows 平台级深度接入（Win32 API、命名互斥量单实例、透明置顶与无边框控制）
 
+use crate::MAIN_WINDOW_TITLE;
 use windows::core::HSTRING;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, HWND};
 use windows::Win32::System::Threading::CreateMutexW;
@@ -58,6 +59,27 @@ pub fn acquire_single_instance(name: &str) -> Result<SingleInstanceGuard, Single
         }
 
         Ok(SingleInstanceGuard { handle })
+    }
+}
+
+/// 根据窗口类名或标题查找主窗口 HWND
+pub fn find_main_window_hwnd() -> Option<HWND> {
+    unsafe {
+        // 优先通过 GPUI 窗口类名查找
+        let class_name = HSTRING::from("Zed::Window");
+        if let Ok(hwnd) = FindWindowW(&class_name, None) {
+            if !hwnd.0.is_null() {
+                return Some(hwnd);
+            }
+        }
+        // 兜底通过窗口标题查找
+        let wide_title = HSTRING::from(MAIN_WINDOW_TITLE);
+        if let Ok(hwnd) = FindWindowW(None, &wide_title) {
+            if !hwnd.0.is_null() {
+                return Some(hwnd);
+            }
+        }
+        None
     }
 }
 
@@ -153,12 +175,13 @@ pub fn apply_mica_or_acrylic(hwnd: HWND) {
         use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE};
         // DWMSBT_ACRYLIC = 3, DWMSBT_MAINWINDOW = 2 (Mica)
         let backdrop_type: u32 = 2; // Mica
-        let _ = DwmSetWindowAttribute(
+        let res = DwmSetWindowAttribute(
             hwnd,
             DWMWA_SYSTEMBACKDROP_TYPE,
             &backdrop_type as *const _ as *const _,
             std::mem::size_of::<u32>() as u32,
         );
+        log::info!("[Platform] DwmSetWindowAttribute Mica 返回: {:?}", res);
     }
 }
 
@@ -170,11 +193,15 @@ pub fn set_window_rounded_corners(hwnd: HWND) {
         };
         // DWMWCP_ROUND = 2
         let preference: u32 = 2;
-        let _ = DwmSetWindowAttribute(
+        let res = DwmSetWindowAttribute(
             hwnd,
             DWMWA_WINDOW_CORNER_PREFERENCE,
             &preference as *const _ as *const _,
             std::mem::size_of::<u32>() as u32,
+        );
+        log::info!(
+            "[Platform] DwmSetWindowAttribute RoundedCorners 返回: {:?}",
+            res
         );
     }
 }

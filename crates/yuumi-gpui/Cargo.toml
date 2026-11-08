@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 yuumi-core = { path = "../yuumi-core" }
 gpui = "0.2.2"
+rustls = { version = "0.23", features = ["ring"] }
 log = { version = "0.4", features = ["std"] }
 env_logger = "0.11"
 tokio = { version = "1", features = ["full"] }

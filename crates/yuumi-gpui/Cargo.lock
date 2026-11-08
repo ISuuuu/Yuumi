@@ -8221,6 +8221,7 @@ dependencies = [
  "image",
  "log",
  "rfd",
+ "rustls",
  "serde",
  "serde_json",
  "smallvec",

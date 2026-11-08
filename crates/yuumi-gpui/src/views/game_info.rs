@@ -2,6 +2,7 @@
 //! 纯白水晶极光风格，支持左/上蓝方与右/下红方 10 人看板
 //! 深度复用 yuumi-core 的阵营推断、身份门禁与战绩统计算法
 
+use crate::components::lcu_image::LcuImage;
 use crate::theme::Theme;
 use gpui::*;
 use yuumi_core::gameflow::match_stats::{compute_match_stats, MatchLike};
@@ -812,9 +813,9 @@ impl GameInfoView {
                     // 英雄头像 / 占位
                     .child(
                         div()
+                            .relative()
                             .size(px(46.0))
                             .rounded_lg()
-                            .bg(Theme::BADGE_BG)
                             .border_2()
                             .border_color(if is_local {
                                 side_accent
@@ -822,28 +823,34 @@ impl GameInfoView {
                                 Theme::CARD_BORDER
                             })
                             .overflow_hidden()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .justify_center()
                             .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child(
-                                        player
-                                            .champion_name
-                                            .chars()
-                                            .next()
-                                            .unwrap_or('?')
-                                            .to_string(),
-                                    ),
+                                LcuImage::new(format!(
+                                    "/lol-game-data/assets/v1/champion-icons/{}.png",
+                                    player.champion_id
+                                ))
+                                .size(px(46.0))
+                                .shape(crate::components::lcu_image::LcuImageShape::Rounded)
+                                .placeholder(
+                                    player
+                                        .champion_name
+                                        .chars()
+                                        .next()
+                                        .unwrap_or('?')
+                                        .to_string(),
+                                ),
                             )
                             .child(
                                 div()
+                                    .absolute()
+                                    .bottom_0()
+                                    .left_0()
+                                    .right_0()
+                                    .bg(rgba(0x000000aa))
+                                    .py(px(1.0))
+                                    .flex()
+                                    .justify_center()
                                     .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(rgb(0xffffff))
                                     .child(player.role),
                             ),
                     )
