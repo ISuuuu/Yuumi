@@ -2,19 +2,22 @@ use gpui::prelude::*;
 use gpui::{
     div, hsla, px, Bounds, Context, FontWeight, InteractiveElement, IntoElement,
     MouseButton, ParentElement, Point, Render, Size, StatefulInteractiveElement, Styled, Window, WindowBounds,
-    WindowHandle, WindowOptions, AppContext, Application,
+    WindowHandle, WindowOptions, Application,
 };
 use std::path::Path;
 
+mod agent_settings_view;
 mod asset_loader;
 mod bench_overlay;
 mod career_view;
 mod components;
 mod game_info_view;
 mod match_model;
+pub mod platform;
 mod theme;
 mod tray;
 
+use agent_settings_view::AgentSettingsView;
 use bench_overlay::BenchOverlayView;
 use career_view::{CareerHeaderStats, CareerView};
 use components::input::SearchInput;
@@ -24,10 +27,14 @@ use match_model::{load_real_fixtures, MatchItem};
 use theme::Theme;
 use tray::TrayManager;
 
+pub const MAIN_WINDOW_TITLE: &str = "Yuumi · 英雄联盟对局助手 (GPUI 高性能原生内核)";
+pub const BENCH_WINDOW_TITLE: &str = "Yuumi - 大乱斗板凳席悬浮窗";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabPage {
-    Career,
     GameInfo,
+    Career,
+    Settings,
 }
 
 pub struct MainWindow {
@@ -36,6 +43,7 @@ pub struct MainWindow {
     matches: Vec<MatchItem>,
     stats: CareerHeaderStats,
     game_info: GameInfoData,
+    settings_view: AgentSettingsView,
     current_tab: TabPage,
     _tray: Option<TrayManager>,
     overlay_window: Option<WindowHandle<BenchOverlayView>>,
@@ -56,6 +64,7 @@ impl MainWindow {
 
         let stats = CareerHeaderStats::compute(&matches);
         let game_info = load_mock_game_info();
+        let settings_view = AgentSettingsView::new();
         let tray = TrayManager::new().ok();
         let search_input = SearchInput::new("输入召唤师名 / 英雄过滤...");
 
@@ -76,11 +85,12 @@ impl MainWindow {
             .detach();
 
         Self {
-            titlebar: TitleBar::new("Yuumi · 英雄联盟对局助手 (GPUI 高性能原生内核)"),
+            titlebar: TitleBar::new(MAIN_WINDOW_TITLE),
             search_input,
             matches,
             stats,
             game_info,
+            settings_view,
             current_tab: TabPage::GameInfo,
             _tray: tray,
             overlay_window: None,
@@ -101,6 +111,36 @@ impl MainWindow {
 
     pub fn switch_tab(&mut self, tab: TabPage, cx: &mut Context<Self>) {
         self.current_tab = tab;
+        cx.notify();
+    }
+
+    pub fn toggle_auto_accept(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.match_config.auto_accept = !self.settings_view.match_config.auto_accept;
+        cx.notify();
+    }
+
+    pub fn toggle_auto_reconnect(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.match_config.auto_reconnect = !self.settings_view.match_config.auto_reconnect;
+        cx.notify();
+    }
+
+    pub fn toggle_auto_play_again(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.match_config.auto_play_again = !self.settings_view.match_config.auto_play_again;
+        cx.notify();
+    }
+
+    pub fn toggle_auto_pick(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.bp_config.auto_pick = !self.settings_view.bp_config.auto_pick;
+        cx.notify();
+    }
+
+    pub fn toggle_auto_ban(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.bp_config.auto_ban = !self.settings_view.bp_config.auto_ban;
+        cx.notify();
+    }
+
+    pub fn toggle_auto_spell(&mut self, cx: &mut Context<Self>) {
+        self.settings_view.bp_config.auto_spell = !self.settings_view.bp_config.auto_spell;
         cx.notify();
     }
 
@@ -131,8 +171,19 @@ impl MainWindow {
                 },
                 |_window, cx| cx.new(|_cx| BenchOverlayView::new()),
             );
+
             if let Ok(h) = new_handle {
                 self.overlay_window = Some(h);
+                // 异步将板凳席小窗设置为 Windows 原生置顶与工具窗口（隐藏任务栏图标）
+                cx.background_executor()
+                    .spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        if let Some(hwnd) = platform::find_window_by_title(BENCH_WINDOW_TITLE) {
+                            platform::set_window_topmost(hwnd, true);
+                            platform::set_window_toolwindow(hwnd);
+                        }
+                    })
+                    .detach();
             }
             cx.notify();
         }
@@ -153,17 +204,19 @@ impl Render for MainWindow {
             .flex_col()
             .bg(Theme::BG_APP)
             .font_family(Theme::font_family())
-            // 1. 无边框自定义标题栏
+            // 1. 无边框自定义标题栏（接入 Win32 最小化与安全退出）
             .child(self.titlebar.render(
                 window,
                 |_w, _app| {
-                    // 最小化（后续接入 Win32 ShowWindow(SW_MINIMIZE)）
+                    if let Some(hwnd) = platform::find_window_by_title(MAIN_WINDOW_TITLE) {
+                        platform::minimize_window(hwnd);
+                    }
                 },
                 |_w, app| {
                     app.quit();
                 },
             ))
-            // 2. 顶部快捷操作栏（搜索框、悬浮窗开关、状态指标）
+            // 2. 顶部快捷操作栏（搜索框、选项卡切换、悬浮窗开关、状态指标）
             .child(
                 div()
                     .w_full()
@@ -203,7 +256,7 @@ impl Render for MainWindow {
                             .flex()
                             .items_center()
                             .gap_3()
-                            // 选项卡切换：对局信息 (GameInfo) / 个人生涯 (Career)
+                            // 选项卡切换：对局信息 (GameInfo) / 个人生涯 (Career) / 自动化设置 (Settings)
                             .child(
                                 div()
                                     .flex()
@@ -274,6 +327,38 @@ impl Render for MainWindow {
                                                 },
                                             ))
                                             .child("📊 生涯历史"),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("tab-settings")
+                                            .px_3()
+                                            .py(px(3.0))
+                                            .rounded_md()
+                                            .bg(if self.current_tab == TabPage::Settings {
+                                                Theme::CARD_BG_HOVER
+                                            } else {
+                                                hsla(0.0, 0.0, 0.0, 0.0)
+                                            })
+                                            .border_1()
+                                            .border_color(if self.current_tab == TabPage::Settings {
+                                                Theme::CARD_BORDER
+                                            } else {
+                                                hsla(0.0, 0.0, 0.0, 0.0)
+                                            })
+                                            .text_xs()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(if self.current_tab == TabPage::Settings {
+                                                Theme::ACCENT_PRIMARY
+                                            } else {
+                                                Theme::TEXT_SECONDARY
+                                            })
+                                            .cursor_pointer()
+                                            .on_mouse_down(MouseButton::Left, cx.listener(
+                                                |this, _ev, _window, cx| {
+                                                    this.switch_tab(TabPage::Settings, cx);
+                                                },
+                                            ))
+                                            .child("⚙️ 自动流程"),
                                     ),
                             )
                             // 搜索输入组件
@@ -340,12 +425,71 @@ impl Render for MainWindow {
                                     },
                                 )
                             }))
+                    })
+                    .when(self.current_tab == TabPage::Settings, |el| {
+                        let view = view_entity.clone();
+                        let p_accept = {
+                            let v = view.clone();
+                            move |_ev: &_, _win: &mut _, app: &mut _| {
+                                v.update(app, |this, cx| this.toggle_auto_accept(cx));
+                            }
+                        };
+                        let p_reconn = {
+                            let v = view.clone();
+                            move |_ev: &_, _win: &mut _, app: &mut _| {
+                                v.update(app, |this, cx| this.toggle_auto_reconnect(cx));
+                            }
+                        };
+                        let p_again = {
+                            let v = view.clone();
+                            move |_ev: &_, _win: &mut _, app: &mut _| {
+                                v.update(app, |this, cx| this.toggle_auto_play_again(cx));
+                            }
+                        };
+                        let p_pick = {
+                            let v = view.clone();
+                            move |_ev: &_, _win: &mut _, app: &mut _| {
+                                v.update(app, |this, cx| this.toggle_auto_pick(cx));
+                            }
+                        };
+                        let p_ban = {
+                            let v = view.clone();
+                            move |_ev: &_, _win: &mut _, app: &mut _| {
+                                v.update(app, |this, cx| this.toggle_auto_ban(cx));
+                            }
+                        };
+                        let p_spell = {
+                            let v = view.clone();
+                            move |_ev: &_, _win: &mut _, app: &mut _| {
+                                v.update(app, |this, cx| this.toggle_auto_spell(cx));
+                            }
+                        };
+                        el.child(self.settings_view.render_panel(
+                            p_accept, p_reconn, p_again, p_pick, p_ban, p_spell,
+                        ))
                     }),
             )
     }
 }
 
 fn main() {
+    // 1. Windows 单实例互斥量检测（Named Mutex）
+    let mutex_name = "Global\\Yuumi_GPUI_SingleInstance_Mutex";
+    let _instance_guard = match platform::acquire_single_instance(mutex_name) {
+        Ok(guard) => guard,
+        Err(platform::SingleInstanceError::AlreadyRunning) => {
+            eprintln!("检测到 Yuumi 已在运行中，激活现有窗口...");
+            if let Some(hwnd) = platform::find_window_by_title(MAIN_WINDOW_TITLE) {
+                platform::restore_and_foreground(hwnd);
+            }
+            return;
+        }
+        Err(e) => {
+            eprintln!("互斥量检测失败: {}", e);
+            return;
+        }
+    };
+
     let app = Application::new();
 
     app.run(move |cx| {
