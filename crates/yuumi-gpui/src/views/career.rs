@@ -496,10 +496,9 @@ impl CareerView {
                             .child("暂无近期的对局历史记录"),
                     )
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(Theme::TEXT_MUTED)
-                            .child("请在英雄联盟客户端完成对局，或点击右上角「🔄 刷新」拉取最新战绩"),
+                        div().text_xs().text_color(Theme::TEXT_MUTED).child(
+                            "请在英雄联盟客户端完成对局，或点击右上角「🔄 刷新」拉取最新战绩",
+                        ),
                     )
             } else {
                 div().w_full().flex().flex_col().children(
@@ -1147,6 +1146,22 @@ impl CareerView {
         let deaths = m.display.deaths;
         let assists = m.display.assists;
         let game_id = m.display.game_id;
+        let detail_line = format!(
+            "对局编号: {} · 输出 {:.1}k · 治疗 {:.1}k · 补刀 {} · 金币 {:.1}k",
+            game_id,
+            m.display.total_damage as f32 / 1000.0,
+            m.display.total_heal as f32 / 1000.0,
+            m.display.cs,
+            m.display.gold as f32 / 1000.0
+        );
+        let augment_line = if m.display.augment_names.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "海克斯强化: {}",
+                m.display.augment_names.join(" · ")
+            ))
+        };
 
         div()
             .w_full()
@@ -1368,10 +1383,16 @@ impl CareerView {
                         .justify_between()
                         .text_xs()
                         .text_color(Theme::TEXT_SECONDARY)
-                        .child(div().child(format!(
-                            "对局编号: {} · 伤害占比: 26.4% · 承受伤害: 18.2k",
-                            game_id
-                        )))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(div().child(detail_line))
+                                .when_some(augment_line, |this, text| {
+                                    this.child(div().text_color(Theme::TEXT_MUTED).child(text))
+                                }),
+                        )
                         .child(
                             div()
                                 .flex()

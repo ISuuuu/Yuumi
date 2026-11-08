@@ -1,664 +1,267 @@
 //! 10 人对局信息视图 (GameInfoView)
-//! 纯白水晶极光风格，支持左/上蓝方与右/下红方 10 人看板
-//! 深度复用 yuumi-core 的阵营推断、身份门禁与战绩统计算法
+//! 纯白水晶极光风格，支持左蓝方与右红方 10 人真实看板
+//! 数据由 `yuumi_core::parsers::game_info` 实时构建（段位 / 近期 KDA / 宿命对局）
 
 use crate::components::lcu_image::LcuImage;
 use crate::theme::Theme;
+use gpui::prelude::FluentBuilder;
 use gpui::*;
-use yuumi_core::gameflow::match_stats::{compute_match_stats, MatchLike};
-use yuumi_core::gameflow::player_identity::{
-    get_valid_tpid, is_identity_compatible, EntryIdentity, IdentityPayload,
-};
-use yuumi_core::gameflow::team_builder::{
-    resolve_team_side, MapSide, SnapshotParticipant, TeamBuildContext,
-};
-
-/// 简化对局样本（实现 MatchLike 接口以便计算统计数据）
-#[derive(Debug, Clone)]
-pub struct SimplePlayerMatch {
-    pub is_remake: bool,
-    pub is_win: bool,
-    pub kills: u32,
-    pub deaths: u32,
-    pub assists: u32,
-    pub position: Option<String>,
-    pub champion_id: i64,
-}
-
-impl MatchLike for SimplePlayerMatch {
-    fn is_remake(&self) -> bool {
-        self.is_remake
-    }
-
-    fn is_win(&self) -> bool {
-        self.is_win
-    }
-
-    fn kills(&self) -> u32 {
-        self.kills
-    }
-
-    fn deaths(&self) -> u32 {
-        self.deaths
-    }
-
-    fn assists(&self) -> u32 {
-        self.assists
-    }
-
-    fn position(&self) -> Option<&str> {
-        self.position.as_deref()
-    }
-
-    fn champion_id(&self) -> i64 {
-        self.champion_id
-    }
-}
-
-/// 玩家排位与个人近期数据
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct GameInfoPlayer {
-    pub puuid: String,
-    pub summoner_id: i64,
-    pub cell_id: i64,
-    pub summoner_name: String,
-    pub tag_line: String,
-    pub champion_id: i64,
-    pub champion_name: String,
-    pub champion_title: String,
-    pub rank_tier: String,
-    pub rank_division: String,
-    pub rank_lp: u32,
-    pub team_participant_id: Option<String>,
-    pub party_id: Option<String>,
-    pub premade_group_id: Option<usize>,
-    pub win_rate: u32,
-    pub avg_kda: f64,
-    pub kills: u32,
-    pub deaths: u32,
-    pub assists: u32,
-    pub streak_text: Option<String>,
-    pub streak_is_win: bool,
-    pub is_local_player: bool,
-    pub role: &'static str,
-}
-
-/// 10 人对局信息视图模型
-#[derive(Debug, Clone)]
-pub struct GameInfoData {
-    pub blue_team: Vec<GameInfoPlayer>,
-    pub red_team: Vec<GameInfoPlayer>,
-    pub user_side: Option<MapSide>,
-    pub side_matched: bool,
-    pub queue_name: String,
-}
-
-#[allow(clippy::too_many_arguments)]
-fn make_mock_player(
-    puuid: &str,
-    summoner_id: i64,
-    cell_id: i64,
-    name: &str,
-    tag: &str,
-    champ_id: i64,
-    champ_name: &str,
-    champ_title: &str,
-    tier: &str,
-    division: &str,
-    lp: u32,
-    role: &'static str,
-    premade: Option<usize>,
-    tpid: Option<String>,
-    wins: usize,
-    losses: usize,
-    k: u32,
-    d: u32,
-    a: u32,
-    is_local: bool,
-) -> GameInfoPlayer {
-    let mut matches = Vec::new();
-    for _ in 0..wins {
-        matches.push(SimplePlayerMatch {
-            is_remake: false,
-            is_win: true,
-            kills: k,
-            deaths: d,
-            assists: a,
-            position: Some("MIDDLE".into()),
-            champion_id: champ_id,
-        });
-    }
-    for _ in 0..losses {
-        matches.push(SimplePlayerMatch {
-            is_remake: false,
-            is_win: false,
-            kills: k.saturating_sub(2),
-            deaths: d + 2,
-            assists: a,
-            position: Some("MIDDLE".into()),
-            champion_id: champ_id,
-        });
-    }
-    let computed = compute_match_stats(&matches);
-    let streak_text = computed.streak.as_ref().map(|s| {
-        format!(
-            "{}{}",
-            s.count,
-            match s.streak_type {
-                yuumi_core::gameflow::match_stats::StreakType::Win => "连胜",
-                yuumi_core::gameflow::match_stats::StreakType::Loss => "连败",
-            }
-        )
-    });
-    let streak_is_win = computed
-        .streak
-        .as_ref()
-        .is_some_and(|s| s.streak_type == yuumi_core::gameflow::match_stats::StreakType::Win);
-
-    GameInfoPlayer {
-        puuid: puuid.into(),
-        summoner_id,
-        cell_id,
-        summoner_name: name.into(),
-        tag_line: tag.into(),
-        champion_id: champ_id,
-        champion_name: champ_name.into(),
-        champion_title: champ_title.into(),
-        rank_tier: tier.into(),
-        rank_division: division.into(),
-        rank_lp: lp,
-        team_participant_id: tpid,
-        party_id: None,
-        premade_group_id: premade,
-        win_rate: computed.win_rate,
-        avg_kda: computed.avg_kda,
-        kills: k,
-        deaths: d,
-        assists: a,
-        streak_text,
-        streak_is_win,
-        is_local_player: is_local,
-        role,
-    }
-}
-
-/// 生成 10 人对局模拟数据
-pub fn load_mock_game_info() -> GameInfoData {
-    // 构造对局双方参赛者快照
-    let blue_snapshots = vec![
-        SnapshotParticipant {
-            puuid: Some("puuid-blue-top"),
-            summoner_id: Some(10001),
-            summoner_name: Some("寒霜之刃"),
-            game_name: Some("寒霜之刃"),
-            cell_id: Some(0),
-            ..Default::default()
-        },
-        SnapshotParticipant {
-            puuid: Some("puuid-blue-jug"),
-            summoner_id: Some(10002),
-            summoner_name: Some("暗影猎犬"),
-            game_name: Some("暗影猎犬"),
-            cell_id: Some(1),
-            ..Default::default()
-        },
-        SnapshotParticipant {
-            puuid: Some("puuid-local-mid"),
-            summoner_id: Some(10003),
-            summoner_name: Some("悠米本米"),
-            game_name: Some("悠米本米"),
-            cell_id: Some(2),
-            ..Default::default()
-        },
-        SnapshotParticipant {
-            puuid: Some("puuid-blue-adc"),
-            summoner_id: Some(10004),
-            summoner_name: Some("金克丝超闪"),
-            game_name: Some("金克丝超闪"),
-            cell_id: Some(3),
-            ..Default::default()
-        },
-        SnapshotParticipant {
-            puuid: Some("puuid-blue-sup"),
-            summoner_id: Some(10005),
-            summoner_name: Some("时光守护者"),
-            game_name: Some("时光守护者"),
-            cell_id: Some(4),
-            ..Default::default()
-        },
-    ];
-
-    let red_snapshots = vec![
-        SnapshotParticipant {
-            puuid: Some("puuid-red-top"),
-            summoner_id: Some(20001),
-            summoner_name: Some("诺克萨斯之手"),
-            game_name: Some("诺克萨斯之手"),
-            cell_id: Some(5),
-            ..Default::default()
-        },
-        SnapshotParticipant {
-            puuid: Some("puuid-red-jug"),
-            summoner_id: Some(20002),
-            summoner_name: Some("盲僧小王"),
-            game_name: Some("盲僧小王"),
-            cell_id: Some(6),
-            ..Default::default()
-        },
-        SnapshotParticipant {
-            puuid: Some("puuid-red-mid"),
-            summoner_id: Some(20003),
-            summoner_name: Some("九尾妖狐"),
-            game_name: Some("九尾妖狐"),
-            cell_id: Some(7),
-            ..Default::default()
-        },
-        SnapshotParticipant {
-            puuid: Some("puuid-red-adc"),
-            summoner_id: Some(20004),
-            summoner_name: Some("狂暴圣枪"),
-            game_name: Some("狂暴圣枪"),
-            cell_id: Some(8),
-            ..Default::default()
-        },
-        SnapshotParticipant {
-            puuid: Some("puuid-red-sup"),
-            summoner_id: Some(20005),
-            summoner_name: Some("幻翎洛洛"),
-            game_name: Some("幻翎洛洛"),
-            cell_id: Some(9),
-            ..Default::default()
-        },
-    ];
-
-    let ctx = TeamBuildContext {
-        current_summoner_id: Some(10003),
-        current_summoner_puuid: Some("puuid-local-mid"),
-        map_side: None,
-        champ_select_team_snapshot: &blue_snapshots,
-    };
-
-    // 1. 使用 yuumi-core 阵营推断算法
-    let (user_side, side_matched) = resolve_team_side(&blue_snapshots, &red_snapshots, &ctx);
-
-    // 2. 身份门禁核验
-    let entry = EntryIdentity {
-        puuid: Some("puuid-local-mid"),
-        summoner_id: Some(10003),
-    };
-    let payload = IdentityPayload {
-        puuid: Some("puuid-local-mid"),
-        summoner_id: Some(10003),
-        cell_id: Some(2),
-    };
-    let _ = is_identity_compatible(Some(entry), payload);
-
-    // 3. 组队高亮提取：蓝方两人开黑 (tpid = party-blue-duo)，红方三人开黑 (tpid = party-red-trio)
-    let tpid_blue_duo = get_valid_tpid(Some("party-blue-duo"), None);
-    let tpid_red_trio = get_valid_tpid(Some("party-red-trio"), None);
-
-    let blue_team = vec![
-        make_mock_player(
-            "puuid-blue-top",
-            10001,
-            0,
-            "寒霜之刃",
-            "CN1",
-            84,
-            "阿卡丽",
-            "离群之刺",
-            "宗师",
-            "I",
-            485,
-            "上单",
-            None,
-            None,
-            14,
-            6,
-            7,
-            3,
-            5,
-            false,
-        ),
-        make_mock_player(
-            "puuid-blue-jug",
-            10002,
-            1,
-            "暗影猎犬",
-            "001",
-            121,
-            "卡兹克",
-            "虚空掠夺者",
-            "大师",
-            "I",
-            120,
-            "打野",
-            None,
-            None,
-            12,
-            8,
-            5,
-            4,
-            8,
-            false,
-        ),
-        make_mock_player(
-            "puuid-local-mid",
-            10003,
-            2,
-            "悠米本米",
-            "GPUI",
-            350,
-            "悠米",
-            "魔法猫咪",
-            "王者",
-            "I",
-            890,
-            "中单",
-            None,
-            None,
-            16,
-            4,
-            9,
-            2,
-            7,
-            true,
-        ),
-        make_mock_player(
-            "puuid-blue-adc",
-            10004,
-            3,
-            "金克丝超闪",
-            "ADC",
-            222,
-            "金克丝",
-            "暴走萝莉",
-            "大师",
-            "I",
-            230,
-            "下路",
-            Some(0),
-            tpid_blue_duo.clone(),
-            15,
-            5,
-            11,
-            4,
-            6,
-            false,
-        ),
-        make_mock_player(
-            "puuid-blue-sup",
-            10005,
-            4,
-            "时光守护者",
-            "SUP",
-            26,
-            "基兰",
-            "时光守护者",
-            "大师",
-            "I",
-            180,
-            "辅助",
-            Some(0),
-            tpid_blue_duo,
-            13,
-            7,
-            2,
-            3,
-            16,
-            false,
-        ),
-    ];
-
-    let red_team = vec![
-        make_mock_player(
-            "puuid-red-top",
-            20001,
-            5,
-            "诺克萨斯之手",
-            "KR1",
-            122,
-            "德莱厄斯",
-            "诺克萨斯之手",
-            "宗师",
-            "I",
-            512,
-            "上单",
-            Some(1),
-            tpid_red_trio.clone(),
-            11,
-            9,
-            8,
-            5,
-            4,
-            false,
-        ),
-        make_mock_player(
-            "puuid-red-jug",
-            20002,
-            6,
-            "盲僧小王",
-            "JUG",
-            64,
-            "李青",
-            "盲僧",
-            "宗师",
-            "I",
-            620,
-            "打野",
-            Some(1),
-            tpid_red_trio.clone(),
-            13,
-            7,
-            7,
-            4,
-            9,
-            false,
-        ),
-        make_mock_player(
-            "puuid-red-mid",
-            20003,
-            7,
-            "九尾妖狐",
-            "MID",
-            103,
-            "阿狸",
-            "九尾妖狐",
-            "王者",
-            "I",
-            780,
-            "中单",
-            Some(1),
-            tpid_red_trio,
-            14,
-            6,
-            8,
-            3,
-            8,
-            false,
-        ),
-        make_mock_player(
-            "puuid-red-adc",
-            20004,
-            8,
-            "狂暴圣枪",
-            "BOT",
-            236,
-            "卢锡安",
-            "圣枪游侠",
-            "大师",
-            "I",
-            340,
-            "下路",
-            None,
-            None,
-            10,
-            10,
-            9,
-            6,
-            5,
-            false,
-        ),
-        make_mock_player(
-            "puuid-red-sup",
-            20005,
-            9,
-            "幻翎洛洛",
-            "RAK",
-            497,
-            "洛",
-            "幻翎",
-            "大师",
-            "I",
-            210,
-            "辅助",
-            None,
-            None,
-            9,
-            11,
-            1,
-            5,
-            14,
-            false,
-        ),
-    ];
-
-    GameInfoData {
-        blue_team,
-        red_team,
-        user_side,
-        side_matched,
-        queue_name: "单双排位赛 5v5 (召唤师峡谷)".into(),
-    }
-}
+use yuumi_core::gameflow::team_builder::MapSide;
+use yuumi_core::parsers::game_info::{phase_label, GameInfoPlayer, LiveGameInfo};
 
 pub struct GameInfoView;
 
 impl GameInfoView {
     /// 渲染 10 人对局信息总看板
-    pub fn render(data: &GameInfoData) -> gpui::AnyElement {
-        let is_blue_my_side = data.user_side == Some(MapSide::Blue);
-        let is_red_my_side = data.user_side == Some(MapSide::Red);
-
+    ///
+    /// - `data`：最近一次实时快照；退回大厅后仍保留上一场数据
+    /// - `phase`：当前 gameflow 阶段
+    /// - `is_loading`：正在并发拉取 10 人数据
+    /// - `connected`：LCU 是否已连接
+    pub fn render(
+        data: Option<&LiveGameInfo>,
+        phase: &str,
+        is_loading: bool,
+        connected: bool,
+    ) -> gpui::AnyElement {
         div()
             .w_full()
             .flex()
             .flex_col()
             .gap_4()
-            // 顶部状态栏：对局模式与阵营指示
+            .child(Self::render_status_bar(data, phase, is_loading, connected))
+            .when_some(data, |this, info| {
+                this.child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .gap_4()
+                        .child(Self::render_team_column(
+                            &info.blue_team,
+                            MapSide::Blue,
+                            info.user_side == Some(MapSide::Blue),
+                        ))
+                        .child(Self::render_team_column(
+                            &info.red_team,
+                            MapSide::Red,
+                            info.user_side == Some(MapSide::Red),
+                        )),
+                )
+            })
+            .when(data.is_none(), |this| {
+                this.child(Self::render_empty_state(phase, is_loading, connected))
+            })
+            .into_any_element()
+    }
+
+    /// 顶部状态栏：对局模式、阶段、阵营指示与快照提示
+    fn render_status_bar(
+        data: Option<&LiveGameInfo>,
+        phase: &str,
+        is_loading: bool,
+        connected: bool,
+    ) -> gpui::AnyElement {
+        let queue_name = data
+            .map(|info| info.queue_name.clone())
+            .unwrap_or_else(|| "尚未获取对局".to_string());
+        let phase_name = data
+            .map(|info| info.phase_label.clone())
+            .unwrap_or_else(|| phase_label(phase).to_string());
+        let is_active = matches!(
+            phase,
+            "ChampSelect" | "GameStart" | "InProgress" | "Reconnect"
+        );
+        let is_blue_my_side = data
+            .map(|info| info.user_side == Some(MapSide::Blue))
+            .unwrap_or(false);
+        let is_red_my_side = data
+            .map(|info| info.user_side == Some(MapSide::Red))
+            .unwrap_or(false);
+
+        let mut left = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(div().size(px(10.0)).rounded_full().bg(if is_loading {
+                Theme::GOLD
+            } else if connected {
+                Theme::AURORA_CYAN
+            } else {
+                Theme::TEXT_MUTED
+            }))
             .child(
                 div()
-                    .w_full()
-                    .bg(Theme::CARD_BG)
-                    .border_1()
-                    .border_color(Theme::CARD_BORDER)
-                    .rounded_xl()
-                    .px_4()
-                    .py_3()
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(Theme::TEXT_PRIMARY)
+                    .child(queue_name),
+            )
+            .child(
+                div()
+                    .px_2()
+                    .py(px(2.0))
+                    .rounded_md()
+                    .bg(Theme::BADGE_BG)
+                    .text_xs()
+                    .text_color(Theme::TEXT_SECONDARY)
+                    .child(phase_name),
+            );
+
+        if is_loading {
+            left = left.child(
+                div()
+                    .px_2()
+                    .py(px(2.0))
+                    .rounded_md()
+                    .bg(Theme::ACCENT_LIGHT)
+                    .text_xs()
+                    .text_color(Theme::ACCENT_PRIMARY)
+                    .child("正在拉取 10 人数据…"),
+            );
+        } else if data.is_some() && !is_active {
+            left = left.child(
+                div()
+                    .px_2()
+                    .py(px(2.0))
+                    .rounded_md()
+                    .bg(Theme::BADGE_BG)
+                    .text_xs()
+                    .text_color(Theme::TEXT_MUTED)
+                    .child("上一场对局快照"),
+            );
+        }
+
+        div()
+            .w_full()
+            .bg(Theme::CARD_BG)
+            .border_1()
+            .border_color(Theme::CARD_BORDER)
+            .rounded_xl()
+            .px_4()
+            .py_3()
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(left)
+            .child(
+                div()
                     .flex()
                     .items_center()
-                    .justify_between()
+                    .gap_4()
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap_3()
-                            .child(div().size(px(10.0)).rounded_full().bg(Theme::AURORA_CYAN))
+                            .gap_2()
                             .child(
                                 div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child(data.queue_name.clone()),
+                                    .size(px(8.0))
+                                    .rounded_full()
+                                    .bg(Theme::BLUE_SIDE_ACCENT),
                             )
                             .child(
                                 div()
-                                    .px_2()
-                                    .py(px(2.0))
-                                    .rounded_md()
-                                    .bg(Theme::BADGE_BG)
                                     .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
                                     .text_color(Theme::TEXT_SECONDARY)
-                                    .child(if data.side_matched {
-                                        "精准推断自身对局"
+                                    .child(if is_blue_my_side {
+                                        "蓝方 (我方队伍)"
                                     } else {
-                                        "脱敏槽位推断"
+                                        "蓝方队伍"
                                     }),
                             ),
                     )
+                    .child(div().text_xs().text_color(Theme::TEXT_MUTED).child("VS"))
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap_4()
+                            .gap_2()
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .size(px(8.0))
-                                            .rounded_full()
-                                            .bg(Theme::BLUE_SIDE_ACCENT),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(Theme::TEXT_SECONDARY)
-                                            .child(if is_blue_my_side {
-                                                "蓝方 (我方队伍)"
-                                            } else {
-                                                "蓝方队伍"
-                                            }),
-                                    ),
+                                    .size(px(8.0))
+                                    .rounded_full()
+                                    .bg(Theme::RED_SIDE_ACCENT),
                             )
-                            .child(div().text_xs().text_color(Theme::TEXT_MUTED).child("VS"))
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .size(px(8.0))
-                                            .rounded_full()
-                                            .bg(Theme::RED_SIDE_ACCENT),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(Theme::TEXT_SECONDARY)
-                                            .child(if is_red_my_side {
-                                                "红方 (我方队伍)"
-                                            } else {
-                                                "红方队伍"
-                                            }),
-                                    ),
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(Theme::TEXT_SECONDARY)
+                                    .child(if is_red_my_side {
+                                        "红方 (我方队伍)"
+                                    } else {
+                                        "红方队伍"
+                                    }),
                             ),
                     ),
             )
-            // 10 人卡片双列对照排布 (左蓝右红)
+            .into_any_element()
+    }
+
+    /// 空态引导：未连接 / 拉取中 / 未进入对局
+    fn render_empty_state(phase: &str, is_loading: bool, connected: bool) -> gpui::AnyElement {
+        let (title, subtitle) = if !connected {
+            (
+                "尚未连接到英雄联盟客户端",
+                "启动客户端并登录后会自动检测 LCU 进程，无需手动操作。",
+            )
+        } else if is_loading {
+            (
+                "正在并发拉取双方 10 名玩家数据",
+                "正在读取段位、近 20 场战绩与同局交手记录，请稍候…",
+            )
+        } else if matches!(phase, "ChampSelect" | "GameStart" | "InProgress") {
+            (
+                "正在读取当前对局名单",
+                "对局已开始，正在等待客户端返回双方参赛者信息。",
+            )
+        } else {
+            (
+                "当前未进入对局",
+                "进入选人阶段或加载对局后，这里会自动呈现双方 10 人的段位与近期战绩。",
+            )
+        };
+
+        div()
+            .w_full()
+            .bg(Theme::CARD_BG)
+            .border_1()
+            .border_color(Theme::CARD_BORDER)
+            .rounded_xl()
+            .py_16()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap_3()
             .child(
                 div()
-                    .w_full()
+                    .size(px(56.0))
+                    .rounded_full()
+                    .bg(Theme::ACCENT_LIGHT)
+                    .border_1()
+                    .border_color(Theme::AURORA_CYAN)
                     .flex()
-                    .gap_4()
-                    // 蓝方 5 人列表
-                    .child(Self::render_team_column(
-                        &data.blue_team,
-                        MapSide::Blue,
-                        is_blue_my_side,
-                    ))
-                    // 红方 5 人列表
-                    .child(Self::render_team_column(
-                        &data.red_team,
-                        MapSide::Red,
-                        is_red_my_side,
-                    )),
+                    .items_center()
+                    .justify_center()
+                    .text_lg()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(Theme::ACCENT_PRIMARY)
+                    .child("10"),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(Theme::TEXT_PRIMARY)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(Theme::TEXT_MUTED)
+                    .child(subtitle),
             )
             .into_any_element()
     }
@@ -697,7 +300,6 @@ impl GameInfoView {
             .flex()
             .flex_col()
             .gap_3()
-            // 阵营标题条
             .child(
                 div()
                     .w_full()
@@ -731,7 +333,6 @@ impl GameInfoView {
                             .child(format!("共 {} 名选手", players.len())),
                     ),
             )
-            // 5 位玩家卡片
             .children(
                 players
                     .iter()
@@ -748,13 +349,18 @@ impl GameInfoView {
             (color, format!("组队 {}", idx + 1))
         });
 
-        let mut left_meta = div().flex().items_center().gap_2();
-        left_meta = left_meta.child(
+        let display_name = if player.tag_line.is_empty() {
+            player.summoner_name.clone()
+        } else {
+            format!("{} #{}", player.summoner_name, player.tag_line)
+        };
+
+        let mut left_meta = div().flex().items_center().gap_2().child(
             div()
                 .text_sm()
                 .font_weight(FontWeight::BOLD)
                 .text_color(Theme::TEXT_PRIMARY)
-                .child(format!("{} #{}", player.summoner_name, player.tag_line)),
+                .child(display_name),
         );
         if is_local {
             left_meta = left_meta.child(
@@ -767,6 +373,18 @@ impl GameInfoView {
                     .font_weight(FontWeight::BOLD)
                     .text_color(rgb(0xffffff))
                     .child("本机"),
+            );
+        }
+        if player.is_bot {
+            left_meta = left_meta.child(
+                div()
+                    .px_2()
+                    .py(px(1.0))
+                    .rounded_md()
+                    .bg(Theme::BADGE_BG)
+                    .text_xs()
+                    .text_color(Theme::TEXT_MUTED)
+                    .child("机器人"),
             );
         }
         if let Some((color, tag)) = premade_style {
@@ -782,6 +400,26 @@ impl GameInfoView {
                     .font_weight(FontWeight::BOLD)
                     .text_color(color)
                     .child(tag),
+            );
+        }
+        if let Some(fate) = player.fate.as_ref() {
+            let (fg, bg, border) = if fate.ally {
+                (Theme::WIN_TEXT, Theme::WIN_BG, Theme::WIN_BORDER)
+            } else {
+                (Theme::LOSS_TEXT, Theme::LOSS_BG, Theme::LOSS_BORDER)
+            };
+            left_meta = left_meta.child(
+                div()
+                    .px_2()
+                    .py(px(1.0))
+                    .rounded_md()
+                    .bg(bg)
+                    .border_1()
+                    .border_color(border)
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(fg)
+                    .child(fate.badge_text()),
             );
         }
 
@@ -804,13 +442,11 @@ impl GameInfoView {
             .items_center()
             .justify_between()
             .hover(|s| s.bg(Theme::CARD_BG_HOVER))
-            // 左半部分：英雄头像、名称、分路、召唤师名与排位
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_3()
-                    // 英雄头像 / 占位
                     .child(
                         div()
                             .relative()
@@ -851,10 +487,9 @@ impl GameInfoView {
                                     .justify_center()
                                     .text_xs()
                                     .text_color(rgb(0xffffff))
-                                    .child(player.role),
+                                    .child(player.position.clone()),
                             ),
                     )
-                    // 玩家文本信息
                     .child(
                         div().flex().flex_col().gap_1().child(left_meta).child(
                             div()
@@ -866,10 +501,7 @@ impl GameInfoView {
                                         .text_xs()
                                         .font_weight(FontWeight::MEDIUM)
                                         .text_color(Theme::TEXT_SECONDARY)
-                                        .child(format!(
-                                            "{} · {}",
-                                            player.champion_name, player.champion_title
-                                        )),
+                                        .child(player.champion_name.clone()),
                                 )
                                 .child(
                                     div()
@@ -879,37 +511,62 @@ impl GameInfoView {
                                         .bg(Theme::BADGE_BG)
                                         .text_xs()
                                         .text_color(Theme::TEXT_MUTED)
-                                        .child(format!(
-                                            "{} {} ({} LP)",
-                                            player.rank_tier, player.rank_division, player.rank_lp
-                                        )),
+                                        .child(player.rank_display.clone()),
                                 ),
                         ),
                     ),
             );
 
-        let mut right_pane = div().flex().items_center().gap_4().child(
-            div()
-                .flex()
-                .flex_col()
-                .items_end()
-                .gap_1()
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(if player.win_rate >= 50 {
-                            Theme::WIN_TEXT
-                        } else {
-                            Theme::LOSS_TEXT
-                        })
-                        .child(format!("胜率 {}%", player.win_rate)),
-                )
-                .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(format!(
-                    "{:.2} KDA ({}/{}/{})",
-                    player.avg_kda, player.kills, player.deaths, player.assists
-                ))),
-        );
+        let mut right_pane = div().flex().items_center().gap_4();
+
+        if player.data_available {
+            right_pane = right_pane.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_end()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(if player.win_rate >= 50 {
+                                Theme::WIN_TEXT
+                            } else {
+                                Theme::LOSS_TEXT
+                            })
+                            .child(format!(
+                                "胜率 {}% ({}-{})",
+                                player.win_rate, player.ranked_wins, player.ranked_losses
+                            )),
+                    )
+                    .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(format!(
+                        "{:.2} KDA ({:.1}/{:.1}/{:.1})",
+                        player.avg_kda, player.avg_kills, player.avg_deaths, player.avg_assists
+                    ))),
+            );
+        } else {
+            right_pane = right_pane.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_end()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("战绩获取中"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("暂无可见战绩"),
+                    ),
+            );
+        }
 
         if let Some(streak) = player.streak_text.clone() {
             right_pane = right_pane.child(

@@ -1,7 +1,8 @@
 //! 真实 LCU 实时连接与数据编排管理服务
 
 use std::sync::Arc;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, watch, RwLock};
+use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 use yuumi_core::agents::{
     auto_bp::{request_bench_swap, request_reroll, ChampSelectSession},
@@ -16,12 +17,25 @@ use yuumi_core::lcu::{
     monitor::{detect_lcu, LcuConnectionInfo},
     ws::{start_ws, LcuWsEvent, LcuWsHandle},
 };
+use yuumi_core::parsers::game_info::{
+    fetch_live_game_info, ChampSelectSnapshot, GameInfoSource, GameflowSessionSnapshot,
+    LiveGameInfo,
+};
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
 use yuumi_core::parsers::mastery::ChampionMasteryItem;
 use yuumi_core::parsers::match_parser::{fetch_match_history, MatchDisplay};
 use yuumi_core::parsers::summoner::{fetch_current_summoner, SummonerInfo};
 
 use crate::services::agent_runtime::{AgentRuntime, BpAgentEvent, MatchAgentEvent};
+
+/// 选人会话变化后的对局信息拉取防抖间隔
+const CHAMP_SELECT_DEBOUNCE: Duration = Duration::from_millis(500);
+/// 进入对局阶段后的拉取延迟（等待 gameflow session 填充 gameData）
+const IN_PROGRESS_DELAY: Duration = Duration::from_millis(800);
+/// 对局结束到战绩落库的等待时间
+const POST_GAME_HISTORY_DELAY: Duration = Duration::from_secs(3);
+/// 生涯页展示的近期对局条数（LCU 产品接口实际会多返回一场，统一裁剪）
+const CAREER_MATCH_LIMIT: usize = 20;
 
 /// 全局连接状态
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +57,10 @@ pub enum LiveLcuEvent {
     MatchHistoryLoaded(Vec<MatchDisplay>),
     ChampionMasteryLoaded(Vec<ChampionMasteryItem>),
     LootSummaryLoaded(EssenceBalances, Vec<LootInventoryItem>),
+    /// 10 人对局信息开始拉取（前端置加载态）
+    GameInfoLoading,
+    /// 10 人对局信息快照更新（退回大厅后仍保留最后一次）
+    GameInfoUpdated(Arc<LiveGameInfo>),
     GameDataReady(Arc<GameDataAssets>),
 }
 
@@ -60,6 +78,18 @@ pub struct LiveLcuService {
     pub game_data_assets: Arc<tokio::sync::RwLock<Option<Arc<GameDataAssets>>>>,
     /// 当前连接生命周期内的 Agent 后台运行时（未连接时为 None）
     agent_runtime: Arc<tokio::sync::RwLock<Option<AgentRuntime>>>,
+    /// 本人近期真实战绩（宿命对局判定与生涯页共用）
+    recent_matches: Arc<RwLock<Vec<MatchDisplay>>>,
+    /// 最近一次对局信息快照（退回大厅后保留）
+    game_info: Arc<RwLock<Option<Arc<LiveGameInfo>>>>,
+    /// 当前 gameflow 阶段
+    current_phase: Arc<RwLock<String>>,
+    /// 对局信息拉取任务（防抖用）
+    game_info_task: Arc<RwLock<Option<JoinHandle<()>>>>,
+    /// 最近一次拉取的会话指纹，避免同内容重复拉取
+    last_game_info_key: Arc<RwLock<String>>,
+    /// 对局信息拉取串行化
+    refresh_lock: Arc<RwLock<()>>,
 }
 
 impl LiveLcuService {
@@ -80,6 +110,12 @@ impl LiveLcuService {
             client: Arc::new(tokio::sync::RwLock::new(None)),
             game_data_assets: Arc::new(tokio::sync::RwLock::new(None)),
             agent_runtime: Arc::new(tokio::sync::RwLock::new(None)),
+            recent_matches: Arc::new(RwLock::new(Vec::new())),
+            game_info: Arc::new(RwLock::new(None)),
+            current_phase: Arc::new(RwLock::new("None".to_string())),
+            game_info_task: Arc::new(RwLock::new(None)),
+            last_game_info_key: Arc::new(RwLock::new(String::new())),
+            refresh_lock: Arc::new(RwLock::new(())),
         }
     }
 
@@ -99,6 +135,16 @@ impl LiveLcuService {
     /// 获取当前预加载的 GameDataAssets
     pub async fn get_game_data_assets(&self) -> Option<Arc<GameDataAssets>> {
         self.game_data_assets.read().await.clone()
+    }
+
+    /// 当前 gameflow 阶段
+    pub async fn get_current_phase(&self) -> String {
+        self.current_phase.read().await.clone()
+    }
+
+    /// 获取本人近期真实战绩（宿命判定数据源）
+    async fn get_recent_matches(&self) -> Vec<MatchDisplay> {
+        self.recent_matches.read().await.clone()
     }
 
     /// 启动后台常驻监控与 WebSocket 分发循环
@@ -199,6 +245,10 @@ impl LiveLcuService {
                         );
                         *self.agent_runtime.write().await = Some(runtime);
 
+                        // 重连后若正处于对局，补拉当前 10 人对局信息
+                        let phase = self.get_current_phase().await;
+                        self.schedule_game_info_refresh(phase, Duration::ZERO).await;
+
                         // 建立 WebSocket 连接
                         let ws_handle = start_ws(info.port, info.token.clone());
                         let mut ws_rx = ws_handle.subscribe_events();
@@ -224,6 +274,13 @@ impl LiveLcuService {
                     self.asset_cache.set_lcu_client(None);
                     *self.client.write().await = None;
                     self.supervisor.cancel_all().await;
+
+                    // 取消对局信息拉取任务并重置去重指纹
+                    if let Some(task) = self.game_info_task.write().await.take() {
+                        task.abort();
+                    }
+                    *self.last_game_info_key.write().await = String::new();
+                    *self.recent_matches.write().await = Vec::new();
 
                     // 关闭 Agent Worker：先取出（释放锁）再带超时等待，避免跨 await 持锁
                     let runtime = { self.agent_runtime.write().await.take() };
@@ -253,12 +310,36 @@ impl LiveLcuService {
 
         match event.uri.as_str() {
             "/lol-gameflow/v1/gameflow-phase" => {
-                if let Some(phase_str) = event.data.as_str() {
-                    if let Some(d) = &dispatcher {
-                        d.dispatch_match(MatchAgentEvent::PhaseChanged(phase_str.to_string()));
+                let Some(phase_str) = event.data.as_str().map(|s| s.to_string()) else {
+                    return;
+                };
+                if let Some(d) = &dispatcher {
+                    d.dispatch_match(MatchAgentEvent::PhaseChanged(phase_str.clone()));
+                }
+                let phase = GamePhase::from(phase_str.as_str());
+                *self.current_phase.write().await = phase_str.clone();
+                let _ = self
+                    .event_tx
+                    .send(LiveLcuEvent::GamePhaseChanged(phase.clone()));
+
+                match phase {
+                    GamePhase::ChampSelect => {
+                        self.schedule_game_info_refresh(phase_str, CHAMP_SELECT_DEBOUNCE)
+                            .await;
                     }
-                    let phase = GamePhase::from(phase_str);
-                    let _ = self.event_tx.send(LiveLcuEvent::GamePhaseChanged(phase));
+                    GamePhase::GameStart | GamePhase::InProgress | GamePhase::Reconnect => {
+                        self.schedule_game_info_refresh(phase_str, IN_PROGRESS_DELAY)
+                            .await;
+                    }
+                    GamePhase::PreEndOfGame | GamePhase::WaitingForStats | GamePhase::EndOfGame => {
+                        // 对局结束：延迟刷新生涯战绩，10 人快照保留
+                        let this = self.clone();
+                        tokio::spawn(async move {
+                            sleep(POST_GAME_HISTORY_DELAY).await;
+                            this.refresh_career_data().await;
+                        });
+                    }
+                    _ => {}
                 }
             }
             "/lol-matchmaking/v1/ready-check" => {
@@ -276,6 +357,21 @@ impl LiveLcuService {
                     let _ = self
                         .event_tx
                         .send(LiveLcuEvent::ChampSelectUpdated(session));
+                }
+                // 选人内容变化（锁英雄 / 换位）时刷新对局信息看板
+                if self.get_current_phase().await == "ChampSelect" {
+                    self.schedule_game_info_refresh(
+                        "ChampSelect".to_string(),
+                        CHAMP_SELECT_DEBOUNCE,
+                    )
+                    .await;
+                }
+            }
+            "/lol-gameflow/v1/session" => {
+                let phase = self.get_current_phase().await;
+                if matches!(phase.as_str(), "GameStart" | "InProgress" | "Reconnect") {
+                    self.schedule_game_info_refresh(phase, IN_PROGRESS_DELAY)
+                        .await;
                 }
             }
             _ => {}
@@ -311,16 +407,23 @@ impl LiveLcuService {
             summoner.full_name()
         );
 
-        // 并发拉取战绩 (近 20 场)
+        // 并发拉取战绩 (近 20 场，endIndex 为闭区间故取 19)
         let c_matches = client.clone();
         let puuid_clone = summoner.puuid.clone();
         let assets_clone = assets.clone();
-        let event_tx_matches = self.event_tx.clone();
+        let this_matches = self.clone();
         let matches_task = tokio::spawn(async move {
-            match fetch_match_history(&c_matches, &puuid_clone, Some(0), Some(20), &assets_clone).await {
-                Ok(matches) => {
+            match fetch_match_history(&c_matches, &puuid_clone, Some(0), Some(19), &assets_clone)
+                .await
+            {
+                Ok(mut matches) => {
+                    matches.truncate(CAREER_MATCH_LIMIT);
                     log::info!("[LiveLcu] 成功拉取当前召唤师战绩: count={}", matches.len());
-                    let _ = event_tx_matches.send(LiveLcuEvent::MatchHistoryLoaded(matches));
+                    // 同步缓存本人近期战绩，供宿命对局判定复用
+                    *this_matches.recent_matches.write().await = matches.clone();
+                    let _ = this_matches
+                        .event_tx
+                        .send(LiveLcuEvent::MatchHistoryLoaded(matches));
                 }
                 Err(e) => {
                     log::error!("[LiveLcu] 拉取当前召唤师战绩失败: {}", e);
@@ -384,5 +487,100 @@ impl LiveLcuService {
             .await
             .ok_or_else(|| "英雄联盟客户端未连接".to_string())?;
         request_reroll(&client).await
+    }
+
+    /// 防抖调度对局信息刷新：取消上一次未完成的任务，延迟后重新拉取
+    async fn schedule_game_info_refresh(&self, phase: String, delay: Duration) {
+        let mut slot = self.game_info_task.write().await;
+        if let Some(handle) = slot.take() {
+            handle.abort();
+        }
+        let this = self.clone();
+        *slot = Some(tokio::spawn(async move {
+            if !delay.is_zero() {
+                sleep(delay).await;
+            }
+            this.refresh_game_info(&phase).await;
+        }));
+    }
+
+    /// 读取当前阶段的 10 人会话并并发拉取段位 / 近期 KDA / 宿命对局
+    async fn refresh_game_info(&self, phase: &str) {
+        let _guard = self.refresh_lock.write().await;
+
+        let Some(client) = self.get_client().await else {
+            log::debug!("[LiveLcu] LCU 未连接，跳过对局信息拉取");
+            return;
+        };
+
+        let source = match phase {
+            "ChampSelect" => match client.get("/lol-champ-select/v1/session").await {
+                Ok(value) => serde_json::from_value::<ChampSelectSnapshot>(value)
+                    .ok()
+                    .and_then(|snapshot| GameInfoSource::from_champ_select(&snapshot)),
+                Err(e) => {
+                    log::debug!("[LiveLcu] 读取选人会话失败: {}", e);
+                    None
+                }
+            },
+            _ => match client.get("/lol-gameflow/v1/session").await {
+                Ok(value) => serde_json::from_value::<GameflowSessionSnapshot>(value)
+                    .ok()
+                    .and_then(|snapshot| GameInfoSource::from_gameflow(phase, &snapshot)),
+                Err(e) => {
+                    log::debug!("[LiveLcu] 读取对局会话失败: {}", e);
+                    None
+                }
+            },
+        };
+
+        let Some(source) = source else {
+            log::debug!("[LiveLcu] 当前阶段（{}）暂无可用对局会话", phase);
+            return;
+        };
+
+        let key = source.refresh_key();
+        if self.game_info.read().await.is_some() && *self.last_game_info_key.read().await == key {
+            return;
+        }
+
+        let assets = self.get_game_data_assets().await;
+        let summoner = fetch_current_summoner(&client).await.ok();
+        let (Some(assets), Some(summoner)) = (assets, summoner) else {
+            log::debug!("[LiveLcu] 召唤师或资源字典未就绪，跳过对局信息拉取");
+            return;
+        };
+
+        let self_summoner_id = summoner.summoner_id.and_then(|id| i64::try_from(id).ok());
+        let recent = self.get_recent_matches().await;
+
+        log::info!(
+            "[LiveLcu] 开始拉取对局信息: phase={}, queue={}, 玩家={}",
+            source.phase,
+            source.queue_id,
+            source.puuids().len()
+        );
+        let _ = self.event_tx.send(LiveLcuEvent::GameInfoLoading);
+
+        let info = fetch_live_game_info(
+            &client,
+            &summoner.puuid,
+            self_summoner_id,
+            source,
+            &recent,
+            &assets,
+        )
+        .await;
+
+        log::info!(
+            "[LiveLcu] 对局信息就绪: {} vs {}",
+            info.blue_team.len(),
+            info.red_team.len()
+        );
+
+        let info = Arc::new(info);
+        *self.last_game_info_key.write().await = key;
+        *self.game_info.write().await = Some(info.clone());
+        let _ = self.event_tx.send(LiveLcuEvent::GameInfoUpdated(info));
     }
 }

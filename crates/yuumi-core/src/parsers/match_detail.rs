@@ -106,6 +106,8 @@ pub struct GameDetail {
     pub map_id: u32,
     pub duration: String,
     pub date: String,
+    /// 对局创建时间（毫秒时间戳），宿命对局时间展示用
+    pub game_creation: u64,
     pub queue_name: String,
     pub map_name: String,
     pub win: bool,
@@ -382,6 +384,7 @@ impl RawGameDetail {
             map_id,
             duration,
             date,
+            game_creation: self.game_creation,
             queue_name,
             map_name,
             win: blue_win,
