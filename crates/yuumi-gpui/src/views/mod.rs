@@ -7,7 +7,7 @@ pub mod settings;
 pub mod tools;
 
 pub use career::CareerView;
-pub use game_info::GameInfoView;
+pub use game_info::{GameInfoTeamTab, GameInfoView, GameInfoViewMode};
 pub use home::HomeView;
 pub use saved_players::SavedPlayersView;
 pub use search::SearchView;

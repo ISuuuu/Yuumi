@@ -24,12 +24,12 @@ use bench_overlay::{load_saved_origin, BenchOverlayView};
 use components::input::SearchInput;
 use components::sidebar::Sidebar;
 use components::titlebar::{phase_label, TitleBar};
-use game_info_view::GameInfoView;
 use match_model::MatchItem;
 use services::{ConnectionStatus, LiveLcuEvent, LiveLcuService};
 use theme::Theme;
 use tray::TrayManager;
 use views::career::{CareerHeaderStats, CareerView};
+use views::game_info::{GameInfoTeamTab, GameInfoView, GameInfoViewMode};
 use views::home::HomeView;
 use views::saved_players::SavedPlayersView;
 use views::search::SearchView;
@@ -83,6 +83,10 @@ pub struct MainWindow {
     game_info: Option<Arc<LiveGameInfo>>,
     /// 是否正在并发拉取 10 人数据
     game_info_loading: bool,
+    /// 10 人对局信息视图模式：按队伍(5列) 或 全部战绩(10列)
+    game_info_view_mode: GameInfoViewMode,
+    /// 10 人对局信息按队伍模式下的选中队伍 Tab (友方 / 敌方)
+    game_info_active_tab: GameInfoTeamTab,
     /// 当前 gameflow 阶段
     current_phase: String,
     tools_view: ToolsView,
@@ -159,6 +163,8 @@ impl MainWindow {
             career_view,
             game_info: None,
             game_info_loading: false,
+            game_info_view_mode: GameInfoViewMode::ByTeam,
+            game_info_active_tab: GameInfoTeamTab::Ally,
             current_phase: "None".to_string(),
             tools_view,
             search_view,
@@ -553,6 +559,34 @@ impl MainWindow {
         cx.notify();
     }
 
+    /// 加载高保真对局演示预览数据（优先真实快照，兜底演示）
+    pub fn load_game_info_demo(&mut self, cx: &mut Context<Self>) {
+        self.game_info = Some(std::sync::Arc::new(
+            yuumi_core::parsers::game_info::LiveGameInfo::load_snapshot_or_demo(),
+        ));
+        cx.notify();
+    }
+
+    pub fn switch_game_info_view_mode(&mut self, mode: GameInfoViewMode, cx: &mut Context<Self>) {
+        self.game_info_view_mode = mode;
+        cx.notify();
+    }
+
+    pub fn switch_game_info_team_tab(&mut self, tab: GameInfoTeamTab, cx: &mut Context<Self>) {
+        self.game_info_active_tab = tab;
+        cx.notify();
+    }
+
+    /// 退出演示预览模式
+    pub fn exit_game_info_demo(&mut self, cx: &mut Context<Self>) {
+        if let Some(info) = &self.game_info {
+            if info.is_demo {
+                self.game_info = None;
+                cx.notify();
+            }
+        }
+    }
+
     pub fn select_theme_index(&mut self, idx: usize, cx: &mut Context<Self>) {
         self.settings_view.selected_theme_index = idx;
         cx.notify();
@@ -799,11 +833,39 @@ impl Render for MainWindow {
                                     self.connection_status,
                                     ConnectionStatus::Connected { .. }
                                 );
-                                el.p_4().child(GameInfoView::render(
+                                let view_mode = self.game_info_view_mode;
+                                let active_tab = self.game_info_active_tab;
+                                let view_load_demo = view_entity.clone();
+                                let view_exit_demo = view_entity.clone();
+                                let view_mode_cb = view_entity.clone();
+                                let view_tab_cb = view_entity.clone();
+                                el.px_3().py_2().child(GameInfoView::render(
                                     self.game_info.as_deref(),
                                     self.current_phase.as_str(),
                                     self.game_info_loading,
                                     connected,
+                                    view_mode,
+                                    active_tab,
+                                    move |_event, _window, app| {
+                                        view_load_demo.update(app, |this, cx| {
+                                            this.load_game_info_demo(cx);
+                                        });
+                                    },
+                                    move |_event, _window, app| {
+                                        view_exit_demo.update(app, |this, cx| {
+                                            this.exit_game_info_demo(cx);
+                                        });
+                                    },
+                                    move |mode, _window, app| {
+                                        view_mode_cb.update(app, |this, cx| {
+                                            this.switch_game_info_view_mode(mode, cx);
+                                        });
+                                    },
+                                    move |tab, _window, app| {
+                                        view_tab_cb.update(app, |this, cx| {
+                                            this.switch_game_info_team_tab(tab, cx);
+                                        });
+                                    },
                                 ))
                             })
                             .when(self.current_route == Route::Search, |el| {
