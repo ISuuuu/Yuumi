@@ -1,5 +1,38 @@
+//! 自定义标题栏（对照 Vue `src/components/layout/CustomTitleBar.vue`）
+//!
+//! 复刻要点：高 38、左侧 Logo 20×20 与 Yummi 标题、连接且处于对局阶段时的中文阶段徽章、
+//! 右侧 32×26 的最小化 / 最大化（还原）/ 关闭按钮；空白区负责拖拽与双击最大化。
+
+use crate::assets::logo_image;
+use crate::components::icon::icon;
+use crate::platform;
 use crate::theme::Theme;
+use gpui::prelude::*;
 use gpui::*;
+
+pub const APP_NAME: &str = "Yummi";
+
+/// 游戏阶段英文枚举 → 旧版中文文案（`src/locales/zh-CN.json` 的 `phase.*`）
+pub fn phase_label(phase: &str) -> Option<&'static str> {
+    match phase {
+        "Lobby" => Some("房间组队中"),
+        "Matchmaking" => Some("匹配中"),
+        "CheckedIntoTournament" => Some("锦标赛签到"),
+        "ReadyCheck" => Some("确认对局"),
+        "ChampSelect" => Some("选择英雄"),
+        "GameStart" => Some("游戏加载"),
+        "FailedToLaunch" => Some("启动失败"),
+        "InProgress" => Some("游戏中"),
+        "Reconnect" => Some("重新连接"),
+        "WaitingForStats" => Some("等待数据"),
+        "PreEndOfGame" => Some("结算中"),
+        "EndOfGame" => Some("对局结束"),
+        "TerminatedInError" | "TerminatedByError" => Some("对局异常终止"),
+        "TerminatedInSeries" => Some("系列赛终止"),
+        "WatchInProgress" => Some("观战中"),
+        _ => None,
+    }
+}
 
 pub struct TitleBar {
     pub title: SharedString,
@@ -15,95 +48,175 @@ impl TitleBar {
         }
     }
 
+    /// 渲染标题栏
+    ///
+    /// - `show_back`：历史栈非空时展示返回键（对照 Vue 的 `pageHistory.length > 0`）
+    /// - `phase`：连接态下的真实游戏阶段，`None` 表示不展示阶段徽章
     pub fn render(
         &self,
-        _window: &mut Window,
+        show_back: bool,
+        phase: Option<&'static str>,
+        window: &mut Window,
+        on_back: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_minimize: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_close: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let title = self.title.clone();
-        let close_cb = on_close.clone();
-        let min_cb = on_minimize.clone();
+        let back_cb = on_back;
+        let min_cb = on_minimize;
+        let max_window = window.is_maximized();
+        let close_cb = on_close;
 
         div()
-            .h(px(38.0))
-            .w_full()
             .flex()
             .items_center()
             .justify_between()
-            .px_3()
-            .bg(Theme::CARD_BG)
+            .h(Theme::TITLEBAR_HEIGHT)
+            .flex_shrink_0()
+            .px(px(8.0))
+            .bg(Theme::TITLEBAR_BG)
             .border_b_1()
             .border_color(Theme::CARD_BORDER)
-            // 左侧：Logo 与应用标题
+            // 整条标题栏即拖拽区；双击切换最大化，按钮自身会阻止冒泡
+            .on_mouse_down(
+                MouseButton::Left,
+                move |ev: &MouseDownEvent, window, app| {
+                    app.stop_propagation();
+                    if ev.click_count >= 2 {
+                        window.zoom_window();
+                        return;
+                    }
+                    if let Some(hwnd) = platform::find_main_window_hwnd() {
+                        platform::begin_window_drag(hwnd);
+                    } else {
+                        window.start_window_move();
+                    }
+                },
+            )
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap_2()
+                    .gap(px(4.0))
+                    .when(show_back, |el| {
+                        el.child(
+                            div()
+                                .id("titlebar-back")
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .w(px(32.0))
+                                .h(px(26.0))
+                                .rounded(px(4.0))
+                                .hover(|s| s.bg(Theme::HOVER_BG))
+                                .cursor_pointer()
+                                .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+                                    app.stop_propagation();
+                                    back_cb(window, app);
+                                })
+                                .child(icon("icons/back.svg", 14.0, Theme::TEXT_MUTED)),
+                        )
+                    })
+                    .child(match logo_image() {
+                        Some(logo) => div()
+                            .flex_none()
+                            .w(px(20.0))
+                            .h(px(20.0))
+                            .ml(px(4.0))
+                            .child(img(logo).size_full().object_fit(ObjectFit::Contain)),
+                        None => div().flex_none().w(px(20.0)).h(px(20.0)).ml(px(4.0)),
+                    })
                     .child(
-                        // 极光渐变小圆点
                         div()
-                            .size(px(12.0))
-                            .rounded_full()
-                            .bg(Theme::AURORA_CYAN)
-                            .border_1()
-                            .border_color(Theme::AURORA_BLUE),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
-                            .child(title),
-                    )
-                    .child(
-                        // 状态小药丸
-                        div()
-                            .px_2()
-                            .py(px(1.0))
-                            .rounded_full()
-                            .bg(Theme::ACCENT_LIGHT)
-                            .text_xs()
-                            .text_color(Theme::ACCENT_PRIMARY)
-                            .child("GPUI 原型 v0.1.0"),
+                            .flex()
+                            .items_center()
+                            .ml(px(2.0))
+                            .child(
+                                div()
+                                    .text_size(px(12.8))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .child(title),
+                            )
+                            .when_some(phase, |el, label| {
+                                el.child(
+                                    div()
+                                        .ml(px(6.0))
+                                        .px(px(6.0))
+                                        .py(px(1.0))
+                                        .rounded(px(4.0))
+                                        .bg(Theme::ACCENT_LIGHT)
+                                        .text_size(px(12.5))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(Theme::ACCENT_PRIMARY)
+                                        .child(format!("· {}", label)),
+                                )
+                            }),
                     ),
             )
-            // 右侧：最小化与关闭按钮
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap_1()
+                    .gap(px(2.0))
                     .child(
                         div()
                             .id("btn-minimize")
-                            .px_3()
-                            .py_1()
-                            .rounded_sm()
-                            .text_sm()
-                            .text_color(Theme::TEXT_SECONDARY)
-                            .hover(|s| s.bg(rgba(0x00000010)))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .w(px(32.0))
+                            .h(px(26.0))
+                            .rounded(px(4.0))
+                            .hover(|s| s.bg(Theme::HOVER_BG))
                             .cursor_pointer()
-                            .on_mouse_down(MouseButton::Left, move |_ev, window, cx| {
-                                min_cb(window, cx);
+                            .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+                                app.stop_propagation();
+                                min_cb(window, app);
                             })
-                            .child("—"),
+                            .child(icon("icons/minimize.svg", 14.0, Theme::TEXT_MUTED)),
+                    )
+                    .child(
+                        div()
+                            .id("btn-maximize")
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .w(px(32.0))
+                            .h(px(26.0))
+                            .rounded(px(4.0))
+                            .hover(|s| s.bg(Theme::HOVER_BG))
+                            .cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+                                app.stop_propagation();
+                                window.zoom_window();
+                            })
+                            .child(icon(
+                                if max_window {
+                                    "icons/restore.svg"
+                                } else {
+                                    "icons/maximize.svg"
+                                },
+                                14.0,
+                                Theme::TEXT_MUTED,
+                            )),
                     )
                     .child(
                         div()
                             .id("btn-close")
-                            .px_3()
-                            .py_1()
-                            .rounded_sm()
-                            .text_sm()
-                            .text_color(Theme::TEXT_SECONDARY)
-                            .hover(|s| s.bg(rgba(0xe53e3e20)).text_color(rgb(0xe53e3e)))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .w(px(32.0))
+                            .h(px(26.0))
+                            .rounded(px(4.0))
+                            .hover(|s| s.bg(Theme::LOSS_BAR))
                             .cursor_pointer()
-                            .on_mouse_down(MouseButton::Left, move |_ev, window, cx| {
-                                close_cb(window, cx);
+                            .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+                                app.stop_propagation();
+                                close_cb(window, app);
                             })
-                            .child("✕"),
+                            .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED)),
                     ),
             )
     }

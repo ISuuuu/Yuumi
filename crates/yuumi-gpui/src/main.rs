@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 mod agent_settings_view;
 mod asset_loader;
+mod assets;
 mod bench_overlay;
 mod career_view;
 mod components;
@@ -22,7 +23,7 @@ pub mod views;
 use bench_overlay::{load_saved_origin, BenchOverlayView};
 use components::input::SearchInput;
 use components::sidebar::Sidebar;
-use components::titlebar::TitleBar;
+use components::titlebar::{phase_label, TitleBar};
 use game_info_view::GameInfoView;
 use match_model::MatchItem;
 use services::{ConnectionStatus, LiveLcuEvent, LiveLcuService};
@@ -39,7 +40,8 @@ use yuumi_core::agents::{AutomationSettings, ChampSelectSession, GamePhase};
 use yuumi_core::lcu::game_data::GameDataAssets;
 use yuumi_core::parsers::game_info::LiveGameInfo;
 
-pub const MAIN_WINDOW_TITLE: &str = "Yuumi · 英雄联盟对局助手 (GPUI 高性能原生内核)";
+/// 主窗口 Win32 标题（与标题栏显示的应用名保持一致，对照 Vue `tauri.conf.json` 的 `title`）
+pub const MAIN_WINDOW_TITLE: &str = components::titlebar::APP_NAME;
 pub const BENCH_WINDOW_TITLE: &str = "Yuumi - 大乱斗板凳席悬浮窗";
 
 /// 预热图片资源：网络拉取与解码在 Tokio 运行时执行，完成后回到主线程重绘。
@@ -88,6 +90,10 @@ pub struct MainWindow {
     saved_players_view: SavedPlayersView,
     settings_view: SettingsView,
     current_route: Route,
+    /// 侧栏是否展开（64 ↔ 210，对照 Vue NavigationSidebar）
+    sidebar_expanded: bool,
+    /// 路由历史，供标题栏返回键使用（对照 Vue pageHistory）
+    route_history: Vec<Route>,
     _tray: Option<TrayManager>,
     overlay_window: Option<WindowHandle<BenchOverlayView>>,
     live_service: LiveLcuService,
@@ -146,7 +152,7 @@ impl MainWindow {
 
         // 启动即保持空态，真实战绩到达后由事件统一预热资源并重绘
         Self {
-            titlebar: TitleBar::new(MAIN_WINDOW_TITLE),
+            titlebar: TitleBar::new(components::titlebar::APP_NAME),
             search_input,
             matches,
             stats,
@@ -159,6 +165,8 @@ impl MainWindow {
             saved_players_view,
             settings_view,
             current_route: Route::Home,
+            sidebar_expanded: false,
+            route_history: Vec::new(),
             _tray: tray,
             overlay_window: None,
             live_service,
@@ -445,7 +453,27 @@ impl MainWindow {
     }
 
     pub fn switch_route(&mut self, route: Route, cx: &mut Context<Self>) {
-        self.current_route = route;
+        if route != self.current_route {
+            self.route_history.push(self.current_route);
+            if self.route_history.len() > 20 {
+                self.route_history.remove(0);
+            }
+            self.current_route = route;
+        }
+        cx.notify();
+    }
+
+    /// 返回上一路由（标题栏返回键）
+    pub fn go_back(&mut self, cx: &mut Context<Self>) {
+        if let Some(previous) = self.route_history.pop() {
+            self.current_route = previous;
+            cx.notify();
+        }
+    }
+
+    /// 折叠 / 展开侧栏
+    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_expanded = !self.sidebar_expanded;
         cx.notify();
     }
 
@@ -667,57 +695,79 @@ impl Render for MainWindow {
         let _is_overlay_open = self.overlay_window.is_some();
         let view_entity = cx.entity().clone();
 
+        // 标题栏依据真实连接状态与游戏阶段展示上下文徽章
+        let connected = matches!(self.connection_status, ConnectionStatus::Connected { .. });
+        let phase = if connected {
+            phase_label(self.current_phase.as_str())
+        } else {
+            None
+        };
+        let show_back = !self.route_history.is_empty();
+
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(Theme::BG_APP)
             .font_family(Theme::font_family())
-            // 1. 无边框自定义标题栏（接入 Win32 最小化与安全退出）
+            // 1. 无边框自定义标题栏（Logo + Yummi + 阶段徽章 + 窗口按钮）
             .child(self.titlebar.render(
+                show_back,
+                phase,
                 window,
-                |_w, _app| {
-                    if let Some(hwnd) = platform::find_main_window_hwnd() {
-                        platform::minimize_window(hwnd);
+                {
+                    let entity = view_entity.clone();
+                    move |_w, app| {
+                        entity.update(app, |this, cx| this.go_back(cx));
                     }
+                },
+                |w, _app| {
+                    w.minimize_window();
                 },
                 |_w, app| {
                     app.quit();
                 },
             ))
-            // 2. 主体区域：48px 极光侧边栏 + 主路由视口
+            // 2. 主体区域：64/210 导航侧栏 + 主路由视口
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .flex_1()
                     .overflow_hidden()
-                    // 左侧 48px 导航侧边栏
-                    .child(Sidebar::render(self.current_route, {
-                        let entity = view_entity.clone();
-                        move |route, _window, app| {
-                            entity.update(app, |this, cx| {
-                                this.switch_route(route, cx);
-                            });
-                        }
-                    }))
-                    // 右侧主视口
+                    .child(Sidebar::render(
+                        self.current_route,
+                        self.sidebar_expanded,
+                        self.career_view.summoner.as_ref(),
+                        {
+                            let entity = view_entity.clone();
+                            move |route, _window, app| {
+                                entity.update(app, |this, cx| {
+                                    this.switch_route(route, cx);
+                                });
+                            }
+                        },
+                        {
+                            let entity = view_entity.clone();
+                            move |_window, app| {
+                                entity.update(app, |this, cx| {
+                                    this.toggle_sidebar(cx);
+                                });
+                            }
+                        },
+                    ))
+                    // 右侧主视口：首页自行撑满，其余路由沿用统一滚动
                     .child(
                         div()
                             .id("main-scroll-view")
                             .flex_1()
                             .h_full()
-                            .overflow_y_scroll()
+                            .min_w(px(0.0))
+                            .when(self.current_route != Route::Home, |el| {
+                                el.overflow_y_scroll()
+                            })
                             .when(self.current_route == Route::Home, |el| {
-                                let entity = view_entity.clone();
-                                el.p_4().child(HomeView::render(
-                                    &self.connection_status,
-                                    move |target_route, _window, app| {
-                                        entity.update(app, |this, cx| {
-                                            this.switch_route(target_route, cx);
-                                        });
-                                    },
-                                ))
+                                el.child(HomeView::render(&self.connection_status))
                             })
                             .when(self.current_route == Route::Career, |el| {
                                 let view = view_entity.clone();
@@ -1087,6 +1137,21 @@ impl Render for MainWindow {
     }
 }
 
+/// 主窗口默认内容区 1200 × 910（对照 Vue `src-tauri/tauri.conf.json`），居中并按可用工作区收敛
+fn main_window_bounds(cx: &App) -> WindowBounds {
+    let mut width = px(1200.0);
+    let mut height = px(910.0);
+    if let Some(display) = cx.primary_display() {
+        let bounds = display.bounds();
+        // 预留任务栏与阴影边距，保证窗口按钮始终可见
+        let max_width = (bounds.size.width - px(80.0)).max(px(720.0));
+        let max_height = (bounds.size.height - px(120.0)).max(px(480.0));
+        width = width.min(max_width);
+        height = height.min(max_height);
+    }
+    WindowBounds::centered(Size { width, height }, cx)
+}
+
 fn main() {
     // 显式安装全局默认 CryptoProvider，防止 rustls 0.23+ 多 provider 特性冲突
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -1122,22 +1187,17 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     log::info!("Yuumi GPUI 原生 Direct3D 11/DirectWrite 渲染宿主正在启动...");
 
-    // 3. 创建 GPUI 原生应用程序宿主
-    let app = Application::new();
+    // 3. 创建 GPUI 原生应用程序宿主（挂载内嵌图标与 Logo 资源）
+    let app = Application::new().with_assets(assets::Assets);
 
     app.run(move |cx| {
-        // 创建主应用窗口（无边框，极光现代无缝阴影，居中显示）
+        // 创建主应用窗口（无边框，1200×910 居中，可调整大小）
         let window_options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds {
-                origin: Point {
-                    x: px(160.0),
-                    y: px(80.0),
-                },
-                size: Size {
-                    width: px(1080.0),
-                    height: px(720.0),
-                },
-            })),
+            window_bounds: Some(main_window_bounds(cx)),
+            window_min_size: Some(Size {
+                width: px(880.0),
+                height: px(600.0),
+            }),
             // 彻底禁用操作系统传统标题栏（appears_transparent=true 仍隐藏系统标题栏）；
             // title 用于 Win32 侧精确定位主窗口：单实例二次启动时激活已有窗口依赖它
             titlebar: Some(TitlebarOptions {

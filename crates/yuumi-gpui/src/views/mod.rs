@@ -38,15 +38,16 @@ impl Route {
         }
     }
 
-    pub fn icon(&self) -> &'static str {
+    /// 侧栏线性图标资源路径（`crate::assets::Assets` 登记的内嵌 SVG）
+    pub fn icon_path(&self) -> &'static str {
         match self {
-            Route::Home => "🏠",
-            Route::Career => "📊",
-            Route::Search => "🔍",
-            Route::GameInfo => "⚔️",
-            Route::SavedPlayers => "🔖",
-            Route::Tools => "🧰",
-            Route::Settings => "⚙️",
+            Route::Home => "icons/home.svg",
+            Route::Career => "icons/user.svg",
+            Route::Search => "icons/search.svg",
+            Route::GameInfo => "icons/gamepad.svg",
+            Route::SavedPlayers => "icons/bookmark.svg",
+            Route::Tools => "icons/wrench.svg",
+            Route::Settings => "icons/settings.svg",
         }
     }
 }

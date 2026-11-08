@@ -1,230 +1,189 @@
+//! 首页（对照 Vue `src/views/Home.vue` 与 `File/pic/首页-已连接.png`）
+//!
+//! 构图要点：内容区唯一的视觉中心——居中的连接标题 + 最大宽 500 的浅透详情卡，
+//! 右下角固定 120 的猫图；离线态沿用旧版连接提示与等待提示，不与加载态互相替代。
+
+use crate::assets::logo_image;
 use crate::services::ConnectionStatus;
 use crate::theme::Theme;
-use crate::views::Route;
 use gpui::prelude::*;
 use gpui::*;
 
 pub struct HomeView;
 
 impl HomeView {
-    pub fn render(
-        status: &ConnectionStatus,
-        on_navigate: impl Fn(Route, &mut Window, &mut App) + 'static + Clone,
-    ) -> impl IntoElement {
-        let is_connected = matches!(status, ConnectionStatus::Connected { .. });
-        let nav_search = on_navigate.clone();
-        let nav_game = on_navigate.clone();
-        let nav_career = on_navigate.clone();
-        let nav_tools = on_navigate.clone();
-
+    pub fn render(status: &ConnectionStatus) -> impl IntoElement {
         div()
-            .w_full()
+            .relative()
+            .size_full()
+            // 旧版首页内边距：2.5rem / 1.5rem
+            .px(px(24.0))
+            .py(px(40.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(matches!(status, ConnectionStatus::Connected { .. }), |el| {
+                el.child(Self::render_connected(status)).child(
+                    // 连接成功后猫咪移到窗体右下角（距右 / 距底各 40）
+                    div().absolute().bottom(px(40.0)).right(px(40.0)).when_some(
+                        logo_image(),
+                        |el, logo| {
+                            el.child(
+                                img(logo)
+                                    .w(px(120.0))
+                                    .h(px(120.0))
+                                    .object_fit(ObjectFit::Contain)
+                                    .opacity(0.85),
+                            )
+                        },
+                    ),
+                )
+            })
+            .when(
+                !matches!(status, ConnectionStatus::Connected { .. }),
+                |el| el.child(Self::render_offline(status)),
+            )
+    }
+
+    fn render_connected(status: &ConnectionStatus) -> impl IntoElement {
+        let (pid, port) = match status {
+            ConnectionStatus::Connected { info, .. } => {
+                (info.pid.to_string(), info.port.to_string())
+            }
+            _ => ("-".to_string(), "-".to_string()),
+        };
+
+        let mut rows = div()
             .flex()
             .flex_col()
-            .gap_4()
-            // 欢迎横幅 / LCU 状态总览
+            .items_center()
+            .gap(px(10.0))
+            .text_size(px(13.1))
+            .font_family(mono_font_family())
+            .text_color(Theme::TEXT_MUTED);
+
+        for (label, value) in [("PID =", pid), ("--app-port =", port)] {
+            rows = rows.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(8.0))
+                    .whitespace_nowrap()
+                    .child(div().text_color(Theme::TEXT_MUTED).child(label))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(Theme::TEXT_PRIMARY)
+                            .child(value),
+                    ),
+            );
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .w_full()
+            .max_w(px(600.0))
             .child(
                 div()
+                    .text_size(px(28.8))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .text_color(Theme::TEXT_PRIMARY)
+                    .mb(px(20.0))
+                    .child("客户端连接成功 🎉"),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
                     .w_full()
-                    .p_5()
-                    .rounded_xl()
+                    .max_w(px(500.0))
+                    .p(px(24.0))
+                    .rounded(Theme::RADIUS_LG)
                     .bg(Theme::CARD_BG)
                     .border_1()
                     .border_color(Theme::CARD_BORDER)
                     .shadow_sm()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_4()
-                            .child(
-                                div()
-                                    .size(px(56.0))
-                                    .rounded_full()
-                                    .bg(if is_connected {
-                                        Theme::ACCENT_LIGHT
-                                    } else {
-                                        Theme::BADGE_BG
-                                    })
-                                    .border_2()
-                                    .border_color(if is_connected {
-                                        Theme::AURORA_CYAN
-                                    } else {
-                                        Theme::CARD_BORDER
-                                    })
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_2xl()
-                                    .child(if is_connected { "🧙‍♂️" } else { "💤" }),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .text_lg()
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::TEXT_PRIMARY)
-                                                    .child(match status {
-                                                        ConnectionStatus::Connected { summoner, .. } => {
-                                                            if let Some(s) = summoner.as_ref() {
-                                                                s.full_name()
-                                                            } else {
-                                                                "召唤师已上线".to_string()
-                                                            }
-                                                        }
-                                                        ConnectionStatus::Connecting => "正在连接英雄联盟客户端...".to_string(),
-                                                        ConnectionStatus::Disconnected => "英雄联盟客户端未连接".to_string(),
-                                                    }),
-                                            )
-                                            .child(
-                                                div()
-                                                    .px_2()
-                                                    .py(px(2.0))
-                                                    .rounded_md()
-                                                    .text_xs()
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .bg(if is_connected {
-                                                        Theme::WIN_BG
-                                                    } else {
-                                                        Theme::BADGE_BG
-                                                    })
-                                                    .text_color(if is_connected {
-                                                        Theme::WIN_TEXT
-                                                    } else {
-                                                        Theme::TEXT_MUTED
-                                                    })
-                                                    .child(if is_connected { "在线" } else { "离线" }),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(Theme::TEXT_SECONDARY)
-                                            .child(match status {
-                                                ConnectionStatus::Connected { info, .. } => {
-                                                    format!("LCU 通信正常 · 监听端口: {}", info.port)
-                                                }
-                                                ConnectionStatus::Connecting => {
-                                                    "正在检索 LeagueClientUx 进程与 Lockfile...".to_string()
-                                                }
-                                                ConnectionStatus::Disconnected => {
-                                                    "启动英雄联盟客户端后，Yuumi 将自动完成握手并同步对局数据".to_string()
-                                                }
-                                            }),
-                                    ),
-                            ),
-                    ),
-            )
-            // 核心功能卡片网格
-            .child(
-                div()
-                    .w_full()
-                    .grid_cols(4)
-                    .gap_4()
-                    .child(Self::render_quick_entry(
-                        "🔍 战绩查询",
-                        "查询本区任意玩家详细历史与战绩走势",
-                        Theme::AURORA_BLUE,
-                        move |_ev, win, app| {
-                            nav_search(Route::Search, win, app);
-                        },
-                    ))
-                    .child(Self::render_quick_entry(
-                        "⚔️ 对局信息",
-                        "当前 10 人排位段位、组队关系与近期状态看板",
-                        Theme::AURORA_CYAN,
-                        move |_ev, win, app| {
-                            nav_game(Route::GameInfo, win, app);
-                        },
-                    ))
-                    .child(Self::render_quick_entry(
-                        "📊 个人生涯",
-                        "英雄熟练度、战利品开箱与历史胜率深度统计",
-                        Theme::ACCENT_PRIMARY,
-                        move |_ev, win, app| {
-                            nav_career(Route::Career, win, app);
-                        },
-                    ))
-                    .child(Self::render_quick_entry(
-                        "🧰 自动流程",
-                        "自动接受对局、秒选英雄与大乱斗摇号工具",
-                        Theme::PREMADE_COLOR_3,
-                        move |_ev, win, app| {
-                            nav_tools(Route::Tools, win, app);
-                        },
-                    )),
-            )
-            // 系统状态与版本公告卡片
-            .child(
-                div()
-                    .w_full()
-                    .p_4()
-                    .rounded_xl()
-                    .bg(Theme::CARD_BG)
-                    .border_1()
-                    .border_color(Theme::CARD_BORDER)
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
-                            .child("✨ 极光原生内核 (GPUI + Direct3D 11) 运行中"),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(Theme::TEXT_SECONDARY)
-                            .child("彻底摆脱 WebView2 跨进程 IPC 与内存开销。DirectWrite 亚像素抗锯齿排版，启动毫秒级，帧率稳态 60-120fps。"),
-                    ),
+                    .child(rows),
             )
     }
 
-    fn render_quick_entry(
-        title: &'static str,
-        desc: &'static str,
-        accent: Hsla,
-        on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
-    ) -> impl IntoElement {
+    fn render_offline(status: &ConnectionStatus) -> impl IntoElement {
+        let (title, desc) = match status {
+            ConnectionStatus::Connecting => (
+                "正在连接英雄联盟客户端…",
+                "正在检索 LeagueClientUx 进程与 Lockfile",
+            ),
+            _ => ("客户端未连接", "请先启动国服或外服的《英雄联盟》客户端。"),
+        };
+
         div()
-            .p_4()
-            .rounded_xl()
-            .bg(Theme::CARD_BG)
-            .border_1()
-            .border_color(Theme::CARD_BORDER)
-            .shadow_sm()
-            .cursor_pointer()
-            .hover(|s| s.bg(Theme::CARD_BG_HOVER).border_color(accent))
-            .on_mouse_down(MouseButton::Left, on_click)
             .flex()
             .flex_col()
-            .gap_2()
+            .items_center()
+            .text_center()
+            .max_w(px(500.0))
+            .when_some(logo_image(), |el, logo| {
+                el.child(
+                    div().mb(px(24.0)).child(
+                        img(logo)
+                            .w(px(96.0))
+                            .h(px(96.0))
+                            .object_fit(ObjectFit::Contain),
+                    ),
+                )
+            })
             .child(
                 div()
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
+                    .text_size(px(28.8))
+                    .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(Theme::TEXT_PRIMARY)
+                    .mb(px(20.0))
                     .child(title),
             )
             .child(
                 div()
-                    .text_xs()
+                    .text_size(px(14.1))
+                    .line_height(px(22.0))
                     .text_color(Theme::TEXT_SECONDARY)
+                    .mb(px(32.0))
                     .child(desc),
             )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .px(px(18.0))
+                    .py(px(10.0))
+                    .rounded(px(20.0))
+                    .bg(Theme::CARD_BG)
+                    .border_1()
+                    .border_color(Theme::CARD_BORDER)
+                    .shadow_sm()
+                    .child(
+                        // 等待环：静态双环近似原版旋转指示器
+                        div()
+                            .flex_none()
+                            .size(px(14.0))
+                            .rounded_full()
+                            .border(px(2.5))
+                            .border_color(Theme::ACCENT_PRIMARY),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.8))
+                            .text_color(Theme::TEXT_SECONDARY)
+                            .child("正在等待 LeagueClient 启动..."),
+                    ),
+            )
     }
+}
+
+/// 详情卡使用等宽字体，与旧版 `ui-monospace / Consolas` 回退链一致
+fn mono_font_family() -> SharedString {
+    "Consolas, Cascadia Mono, Courier New, monospace".into()
 }
