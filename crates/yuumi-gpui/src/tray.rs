@@ -23,33 +23,12 @@ impl TrayManager {
         tray_menu.append(&show_item).map_err(|e| e.to_string())?;
         tray_menu.append(&quit_item).map_err(|e| e.to_string())?;
 
-        // 动态生成 32x32 极光青色圆点图标（RGBA）
-        let width = 32;
-        let height = 32;
-        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-        for y in 0..height {
-            for x in 0..width {
-                let dx = x as f32 - 16.0;
-                let dy = y as f32 - 16.0;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist <= 12.0 {
-                    // 极光青色 #00f5d4 -> r:0, g:245, b:212
-                    rgba.extend_from_slice(&[0, 245, 212, 255]);
-                } else if dist <= 14.0 {
-                    // 边缘抗锯齿与光晕
-                    let alpha = ((14.0 - dist) / 2.0 * 255.0) as u8;
-                    rgba.extend_from_slice(&[0, 187, 249, alpha]);
-                } else {
-                    rgba.extend_from_slice(&[0, 0, 0, 0]);
-                }
-            }
-        }
-
-        let icon = Icon::from_rgba(rgba, width, height).map_err(|e| e.to_string())?;
+        // 复用 exe 内嵌的 icon.ico（资源 ID 1，含多尺寸），与窗口任务栏图标同源
+        let icon = Icon::from_resource(1, None).map_err(|e| e.to_string())?;
 
         let tray_icon = TrayIconBuilder::new()
             .with_menu(Box::new(tray_menu))
-            .with_tooltip("Yuumi - 英雄联盟对局助手 (GPUI 原型)")
+            .with_tooltip("Yuumi")
             .with_icon(icon)
             .build()
             .map_err(|e| e.to_string())?;
