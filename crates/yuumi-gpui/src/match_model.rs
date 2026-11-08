@@ -67,6 +67,42 @@ pub fn position_to_zh(pos: Option<&str>) -> &'static str {
     }
 }
 
+/// 常玩位置聚合（位置中文名, 场次），按场次降序；无分路信息的对局不计入
+pub fn top_positions(matches: &[MatchItem], limit: usize) -> Vec<(String, usize)> {
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for m in matches {
+        let label = position_to_zh(m.display.position.as_deref());
+        if label == "全能" {
+            continue;
+        }
+        match counts.iter_mut().find(|(name, _)| name == label) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((label.to_string(), 1)),
+        }
+    }
+    counts.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    counts.truncate(limit);
+    counts
+}
+
+/// 近期英雄聚合（英雄名, 头像 URL, 场次），按场次降序
+pub fn top_champions(matches: &[MatchItem], limit: usize) -> Vec<(String, String, usize)> {
+    let mut counts: Vec<(String, String, usize)> = Vec::new();
+    for m in matches {
+        let name = m.display.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        match counts.iter_mut().find(|(n, _, _)| n == name) {
+            Some((_, _, count)) => *count += 1,
+            None => counts.push((name.to_string(), m.display.champion_icon_url.clone(), 1)),
+        }
+    }
+    counts.sort_by_key(|(_, _, count)| std::cmp::Reverse(*count));
+    counts.truncate(limit);
+    counts
+}
+
 /// 解析单局 LCU 对局为 MatchItem
 #[cfg(test)]
 pub fn parse_fixture_game(game: &LcuMatchGame, assets: &GameDataAssets) -> Option<MatchItem> {

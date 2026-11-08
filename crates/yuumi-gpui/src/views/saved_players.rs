@@ -323,11 +323,7 @@ impl SavedPlayersView {
     // ── 渲染入口 ──
 
     /// 统一完整交互式面板渲染
-    pub fn render_panel<F>(
-        &self,
-        window: &mut Window,
-        on_action: F,
-    ) -> impl IntoElement
+    pub fn render_panel<F>(&self, window: &mut Window, on_action: F) -> impl IntoElement
     where
         F: Fn(SavedPlayersAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -343,12 +339,12 @@ impl SavedPlayersView {
             .gap_3()
             .overflow_hidden()
             // 顶部基本信息卡片（固定在上方，绝不随滚动滚走）
-            .child(
-                div()
-                    .flex_none()
-                    .w_full()
-                    .child(self.render_header_bar(total_players, total_encounters, window, on_action.clone())),
-            )
+            .child(div().flex_none().w_full().child(self.render_header_bar(
+                total_players,
+                total_encounters,
+                window,
+                on_action.clone(),
+            )))
             // 下方独立滚动的卡片列表（独占单层平滑滚动）
             .child(
                 div()
@@ -356,11 +352,7 @@ impl SavedPlayersView {
                     .w_full()
                     .min_h(px(0.0))
                     .overflow_hidden()
-                    .child(self.render_players_content(
-                        displayed,
-                        window,
-                        on_action,
-                    )),
+                    .child(self.render_players_content(displayed, window, on_action)),
             )
     }
 
@@ -505,22 +497,38 @@ impl SavedPlayersView {
                                 .on_key_down(move |ev: &KeyDownEvent, win, app| {
                                     let key_str = &ev.keystroke.key;
                                     if key_str == "enter" {
-                                        on_action_search(SavedPlayersAction::SearchSubmit, win, app);
+                                        on_action_search(
+                                            SavedPlayersAction::SearchSubmit,
+                                            win,
+                                            app,
+                                        );
                                     } else if key_str == "backspace" {
                                         let mut s = current_search.clone();
                                         s.pop();
-                                        on_action_search(SavedPlayersAction::SearchInput(s), win, app);
+                                        on_action_search(
+                                            SavedPlayersAction::SearchInput(s),
+                                            win,
+                                            app,
+                                        );
                                     } else if let Some(ref c) = ev.keystroke.key_char {
                                         let mut s = current_search.clone();
                                         s.push_str(c);
-                                        on_action_search(SavedPlayersAction::SearchInput(s), win, app);
+                                        on_action_search(
+                                            SavedPlayersAction::SearchInput(s),
+                                            win,
+                                            app,
+                                        );
                                     } else if key_str.chars().count() == 1
                                         && !ev.keystroke.modifiers.control
                                         && !ev.keystroke.modifiers.alt
                                     {
                                         let mut s = current_search.clone();
                                         s.push_str(key_str);
-                                        on_action_search(SavedPlayersAction::SearchInput(s), win, app);
+                                        on_action_search(
+                                            SavedPlayersAction::SearchInput(s),
+                                            win,
+                                            app,
+                                        );
                                     }
                                 })
                                 .child(
@@ -528,7 +536,12 @@ impl SavedPlayersView {
                                         .flex()
                                         .items_center()
                                         .gap_2()
-                                        .child(div().text_xs().text_color(theme::TEXT_MUTED).child("🔍"))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(theme::TEXT_MUTED)
+                                                .child("🔍"),
+                                        )
                                         .child(
                                             div()
                                                 .text_xs()
@@ -559,9 +572,16 @@ impl SavedPlayersView {
                                             .text_color(Theme::TEXT_MUTED)
                                             .cursor_pointer()
                                             .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
-                                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                on_action_clear(SavedPlayersAction::SearchClear, win, app);
-                                            })
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                move |_ev, win, app| {
+                                                    on_action_clear(
+                                                        SavedPlayersAction::SearchClear,
+                                                        win,
+                                                        app,
+                                                    );
+                                                },
+                                            )
                                             .child("✕"),
                                     )
                                 }),
@@ -605,7 +625,11 @@ impl SavedPlayersView {
                                         })
                                     })
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        on_action_tag(SavedPlayersAction::FilterTag(tag_name.to_string()), win, app);
+                                        on_action_tag(
+                                            SavedPlayersAction::FilterTag(tag_name.to_string()),
+                                            win,
+                                            app,
+                                        );
                                     })
                                     .child(tag_name)
                             }),
@@ -645,11 +669,9 @@ impl SavedPlayersView {
                         .text_color(Theme::TEXT_PRIMARY)
                         .child("未找到符合条件的路人玩家"),
                 )
-                .child(
-                    div().text_xs().text_color(Theme::TEXT_MUTED).child(
-                        "对局结束后曾同局的玩家将自动收录在此，您也可以给他们添加高亮标签与备注。",
-                    ),
-                )
+                .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(
+                    "对局结束后曾同局的玩家将自动收录在此，您也可以给他们添加高亮标签与备注。",
+                ))
                 .into_any_element();
         }
 
@@ -679,9 +701,11 @@ impl SavedPlayersView {
                     }
                 }
             })
-            .children(displayed.into_iter().map(|p| {
-                self.render_player_card(p, window, on_action.clone())
-            }))
+            .children(
+                displayed
+                    .into_iter()
+                    .map(|p| self.render_player_card(p, window, on_action.clone())),
+            )
             .when(has_more, |this| {
                 let on_more = on_more_click.clone();
                 this.child(
@@ -714,26 +738,18 @@ impl SavedPlayersView {
                                 } else {
                                     "⬇ 向下滚动自动加载更多记录"
                                 })
-                                .child(format!(
-                                    "({} / {} 人)",
-                                    loaded_count, total_count
-                                )),
+                                .child(format!("({} / {} 人)", loaded_count, total_count)),
                         ),
                 )
             })
             .when(!has_more && total_count > 0, |this| {
                 this.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .py_3()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(Theme::TEXT_MUTED)
-                                .child(format!("已载入全部 {} 位路人记录", total_count)),
-                        ),
+                    div().flex().items_center().justify_center().py_3().child(
+                        div()
+                            .text_xs()
+                            .text_color(Theme::TEXT_MUTED)
+                            .child(format!("已载入全部 {} 位路人记录", total_count)),
+                    ),
                 )
             })
             .into_any_element()

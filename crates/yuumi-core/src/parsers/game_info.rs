@@ -47,6 +47,40 @@ pub struct RankedQueueEntry {
     pub wins: u32,
     #[serde(default)]
     pub losses: u32,
+    /// 本赛季最高段位
+    #[serde(default)]
+    pub highest_tier: String,
+    #[serde(default)]
+    pub highest_division: String,
+    /// 上赛季结算段位
+    #[serde(default)]
+    pub previous_season_end_tier: String,
+    #[serde(default)]
+    pub previous_season_end_division: String,
+    /// 定级赛未完成时 `tier` 为空串
+    #[serde(default)]
+    pub is_provisional: bool,
+}
+
+impl RankedQueueEntry {
+    /// 是否已完成定级（定级中 `tier` 为空）
+    pub fn is_placed(&self) -> bool {
+        !self.tier.trim().is_empty()
+    }
+
+    /// 该队列总场次
+    pub fn total_games(&self) -> u32 {
+        self.wins.saturating_add(self.losses)
+    }
+
+    /// 该队列胜率（0-100，无场次返回 0）
+    pub fn win_rate(&self) -> f32 {
+        let total = self.total_games();
+        if total == 0 {
+            return 0.0;
+        }
+        self.wins as f32 / total as f32 * 100.0
+    }
 }
 
 /// `/lol-ranked/v1/ranked-stats/{puuid}` 响应
@@ -89,18 +123,29 @@ pub fn tier_display(tier: &str) -> &'static str {
     }
 }
 
-/// 段位展示串，例如 "钻石 I · 45 LP"；无段位返回 "未定级"
-pub fn rank_display(tier: &str, division: &str, league_points: u32) -> String {
+/// 段位简称，例如 "钻石 I"、"大师"；无段位返回 "未定级"
+pub fn rank_tier_label(tier: &str, division: &str) -> String {
     let tier_zh = tier_display(tier);
     if tier_zh == "未定级" {
         return tier_zh.to_string();
     }
     let division = division.trim();
-    if division.is_empty() || matches!(tier_zh, "大师" | "宗师" | "王者") {
-        format!("{} · {} LP", tier_zh, league_points)
-    } else {
-        format!("{} {} · {} LP", tier_zh, division, league_points)
+    if division.is_empty() || division.eq_ignore_ascii_case("NA") {
+        return tier_zh.to_string();
     }
+    if matches!(tier_zh, "大师" | "宗师" | "王者") {
+        return tier_zh.to_string();
+    }
+    format!("{} {}", tier_zh, division)
+}
+
+/// 段位展示串，例如 "钻石 I · 45 LP"；无段位返回 "未定级"
+pub fn rank_display(tier: &str, division: &str, league_points: u32) -> String {
+    let label = rank_tier_label(tier, division);
+    if label == "未定级" {
+        return label;
+    }
+    format!("{} · {} LP", label, league_points)
 }
 
 // ─── 会话参与者 ───
@@ -802,6 +847,13 @@ pub fn build_live_game_info(
 
 // ─── 实时拉取 ───
 
+/// 拉取指定召唤师的完整排位数据（含单排 / 灵活各队列）
+pub async fn fetch_ranked_stats(client: &LcuClient, puuid: &str) -> Result<RankedStats, String> {
+    let path = format!("/lol-ranked/v1/ranked-stats/{}", puuid);
+    let value = client.get(&path).await?;
+    serde_json::from_value(value).map_err(|e| format!("解析排位数据失败: {}", e))
+}
+
 /// 拉取单个玩家的排位与近期对局（任一失败均降级为空）
 async fn fetch_player_data(
     client: &LcuClient,
@@ -1113,6 +1165,7 @@ mod tests {
                     league_points: 210,
                     wins: 66,
                     losses: 34,
+                    ..Default::default()
                 }),
                 recent,
             },

@@ -1,11 +1,135 @@
-use crate::components::lcu_image::LcuImage;
-use crate::match_model::{compute_match_stats, position_to_zh, MatchItem};
+use crate::components::dropdown::{dropdown_item, dropdown_menu, dropdown_trigger};
+use crate::components::icon::icon;
+use crate::components::lcu_image::{LcuImage, LcuImageShape};
+use crate::components::text_field::{text_field, TextFieldOptions};
+use crate::match_model::{
+    compute_match_stats, position_to_zh, top_champions, top_positions, MatchItem,
+};
 use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use yuumi_core::parsers::game_info::{rank_tier_label, RankedQueueEntry, RankedStats};
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
 use yuumi_core::parsers::mastery::ChampionMasteryItem;
 use yuumi_core::parsers::summoner::SummonerInfo;
+
+/// 生成一段圆弧的描边路径（角度以正右方为 0°，顺时针为正）
+///
+/// GPUI 的 `PathBuilder::stroke` 只有直线与贝塞尔，圆弧按 64 段折线逼近；
+/// 104px 环上每段弦高误差小于 0.1px，视觉上等价于真弧。
+fn arc_path(
+    center: Point<Pixels>,
+    radius: f32,
+    start_deg: f32,
+    sweep_deg: f32,
+    stroke_width: f32,
+) -> Option<Path<Pixels>> {
+    const STEPS: usize = 64;
+    let cx = f32::from(center.x);
+    let cy = f32::from(center.y);
+    let point_at = |deg: f32| {
+        let rad = deg.to_radians();
+        point(px(cx + radius * rad.cos()), px(cy + radius * rad.sin()))
+    };
+
+    let mut builder = PathBuilder::stroke(px(stroke_width));
+    builder.move_to(point_at(start_deg));
+    for step in 1..=STEPS {
+        let deg = start_deg + sweep_deg * (step as f32 / STEPS as f32);
+        builder.line_to(point_at(deg));
+    }
+    builder.build().ok()
+}
+
+/// 排位表单元格：按权重等分整行宽度
+fn ranked_cell(
+    value: String,
+    width: f32,
+    color: Hsla,
+    size: f32,
+    medium: bool,
+) -> impl IntoElement {
+    let mut cell = div()
+        .w(px(width))
+        .text_size(px(size))
+        .text_color(color)
+        .whitespace_nowrap()
+        .overflow_hidden()
+        .child(value);
+    if medium {
+        cell = cell.font_weight(FontWeight::MEDIUM);
+    }
+    cell
+}
+
+/// 单行排位数据（缺失队列按空数据占位）
+fn ranked_row(label: &str, entry: Option<&RankedQueueEntry>) -> [String; 9] {
+    let placeholder = RankedQueueEntry::default();
+    let entry = entry.unwrap_or(&placeholder);
+    let total = entry.total_games();
+
+    let rank_label = if entry.is_placed() {
+        rank_tier_label(&entry.tier, &entry.division)
+    } else if entry.is_provisional {
+        "定级中".to_string()
+    } else {
+        "未定级".to_string()
+    };
+
+    [
+        label.to_string(),
+        total.to_string(),
+        if total == 0 {
+            "—".to_string()
+        } else {
+            format!("{:.1}%", entry.win_rate())
+        },
+        entry.wins.to_string(),
+        entry.losses.to_string(),
+        rank_label,
+        if entry.is_placed() {
+            entry.league_points.to_string()
+        } else {
+            "—".to_string()
+        },
+        rank_label_or_dash(&entry.highest_tier, &entry.highest_division),
+        rank_label_or_dash(
+            &entry.previous_season_end_tier,
+            &entry.previous_season_end_division,
+        ),
+    ]
+}
+
+/// 段位标签，未定级时返回破折号（用于「赛季最高」「上赛季结算」列）
+fn rank_label_or_dash(tier: &str, division: &str) -> String {
+    let label = rank_tier_label(tier, division);
+    if label == "未定级" {
+        "—".to_string()
+    } else {
+        label
+    }
+}
+
+/// 近期统计横条中的单个指标块
+fn bar_stat(label: &'static str, value: String, value_color: Hsla) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(2.0))
+        .child(
+            div()
+                .text_size(px(11.0))
+                .text_color(Theme::TEXT_MUTED)
+                .child(label),
+        )
+        .child(
+            div()
+                .text_size(px(14.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(value_color)
+                .child(value),
+        )
+}
 
 fn format_num(val: i64) -> String {
     let s = val.to_string();
@@ -29,12 +153,174 @@ pub enum CareerTab {
     Loot,
 }
 
+/// 近期统计横条右侧的浮层
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CareerPopup {
+    QueueMenu,
+    Teammates,
+}
+
+/// 生涯页队列下拉选项（对照 Vue MatchHistoryTab.vue 的 QUEUE_OPTIONS）
+#[derive(Debug, Clone, Copy)]
+pub struct QueueOption {
+    pub label: &'static str,
+    pub id: Option<i32>,
+}
+
+pub const QUEUE_OPTIONS: [QueueOption; 7] = [
+    QueueOption {
+        label: "全部",
+        id: None,
+    },
+    QueueOption {
+        label: "单双排位",
+        id: Some(420),
+    },
+    QueueOption {
+        label: "灵活排位",
+        id: Some(440),
+    },
+    QueueOption {
+        label: "匹配模式",
+        id: Some(430),
+    },
+    QueueOption {
+        label: "极地大乱斗",
+        id: Some(450),
+    },
+    QueueOption {
+        label: "海克斯大乱斗",
+        id: Some(2400),
+    },
+    QueueOption {
+        label: "经典海斗",
+        id: Some(2450),
+    },
+];
+
+/// 横条动作
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CareerBarAction {
+    TogglePopup(CareerPopup),
+    ClosePopup,
+    SelectQueue(Option<i32>),
+}
+
+/// 熟练度宝箱状态筛选（对照 Vue `chestFilterOptions`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChestFilter {
+    All,
+    Eligible,
+    Granted,
+}
+
+impl ChestFilter {
+    pub const ALL: [Self; 3] = [Self::All, Self::Eligible, Self::Granted];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::All => "全部宝箱状态",
+            Self::Eligible => "可获取宝箱",
+            Self::Granted => "已获取宝箱",
+        }
+    }
+
+    pub fn matches(&self, m: &ChampionMasteryItem) -> bool {
+        match self {
+            Self::All => true,
+            Self::Eligible => m.eligible_for_chest && !m.chest_granted,
+            Self::Granted => m.chest_granted,
+        }
+    }
+}
+
+/// 熟练度等级区间筛选（对照 Vue `levelFilterOptions`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LevelFilter {
+    All,
+    Lv10Plus,
+    Lv7To9,
+    Lv4To6,
+    Lv1To3,
+}
+
+impl LevelFilter {
+    pub const ALL: [Self; 5] = [
+        Self::All,
+        Self::Lv10Plus,
+        Self::Lv7To9,
+        Self::Lv4To6,
+        Self::Lv1To3,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::All => "全部等级",
+            Self::Lv10Plus => "Lv.10+",
+            Self::Lv7To9 => "Lv.7-9",
+            Self::Lv4To6 => "Lv.4-6",
+            Self::Lv1To3 => "Lv.1-3",
+        }
+    }
+
+    pub fn matches(&self, level: i32) -> bool {
+        match self {
+            Self::All => true,
+            Self::Lv10Plus => level >= 10,
+            Self::Lv7To9 => (7..=9).contains(&level),
+            Self::Lv4To6 => (4..=6).contains(&level),
+            Self::Lv1To3 => (1..=3).contains(&level),
+        }
+    }
+}
+
+/// 熟练度排序字段（对照 Vue `sortOptions`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MasterySort {
+    Points,
+    Level,
+    Milestone,
+    LastPlay,
+}
+
+impl MasterySort {
+    pub const ALL: [Self; 4] = [Self::Points, Self::Level, Self::Milestone, Self::LastPlay];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Points => "熟练度分数",
+            Self::Level => "熟练度等级",
+            Self::Milestone => "赛段里程碑",
+            Self::LastPlay => "最近对局",
+        }
+    }
+}
+
+/// 熟练度筛选行里的三个 n-select（Vue ChampionMasteryTab.vue:235/242/252）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MasteryDropdown {
+    Chest,
+    Level,
+    Sort,
+}
+
+/// 熟练度筛选行触发的单一动作
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MasteryFilterAction {
+    Chest(ChestFilter),
+    Level(LevelFilter),
+    Sort(MasterySort),
+    ToggleSortDir,
+    ToggleDropdown(MasteryDropdown),
+    CloseDropdown,
+}
+
 impl CareerTab {
     pub fn label(&self) -> &'static str {
         match self {
-            CareerTab::Matches => "对局历史",
+            CareerTab::Matches => "生涯战绩",
+            CareerTab::Loot => "战利品",
             CareerTab::Mastery => "英雄熟练度",
-            CareerTab::Loot => "战利品管理",
         }
     }
 }
@@ -101,7 +387,22 @@ impl CareerHeaderStats {
 pub struct CareerView {
     pub active_tab: CareerTab,
     pub summoner: Option<SummonerInfo>,
+    /// 复制 Riot ID 后的短暂反馈态
+    pub copied: bool,
+    /// 本人排位数据（单排 / 灵活）
+    pub ranked: Option<RankedStats>,
     pub mastery_list: Vec<ChampionMasteryItem>,
+    /// 熟练度页签的筛选与排序状态
+    pub mastery_query: String,
+    pub mastery_chest: ChestFilter,
+    pub mastery_level: LevelFilter,
+    pub mastery_sort: MasterySort,
+    pub mastery_sort_desc: bool,
+    /// 熟练度筛选行当前展开的下拉
+    pub mastery_dropdown: Option<MasteryDropdown>,
+    /// 近期统计横条：队列筛选（None = 全部）与当前浮层
+    pub selected_queue: Option<i32>,
+    pub popup: Option<CareerPopup>,
     pub essences: EssenceBalances,
     pub loot_items: Vec<LootInventoryItem>,
 }
@@ -111,7 +412,17 @@ impl Default for CareerView {
         Self {
             active_tab: CareerTab::Matches,
             summoner: None,
+            copied: false,
+            ranked: None,
             mastery_list: Self::mock_masteries(),
+            mastery_query: String::new(),
+            mastery_chest: ChestFilter::All,
+            mastery_level: LevelFilter::All,
+            mastery_sort: MasterySort::Points,
+            mastery_sort_desc: true,
+            mastery_dropdown: None,
+            selected_queue: None,
+            popup: None,
             essences: EssenceBalances {
                 blue_essence: 32680,
                 orange_essence: 8450,
@@ -242,6 +553,9 @@ impl CareerView {
     }
 
     /// 渲染整个生涯页面
+    ///
+    /// 版面顺序对照 Vue `Career.vue`：居中限宽内容列 → 资料卡 → 卡外页签 → 当前页签内容。
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         matches: &[MatchItem],
@@ -249,61 +563,113 @@ impl CareerView {
         on_tab_change: impl Fn(CareerTab, &mut Window, &mut App) + 'static + Clone,
         on_toggle_match: impl Fn(usize, &mut Window, &mut App) + 'static + Clone,
         on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
+        on_copy_name: impl Fn(&mut Window, &mut App) + 'static + Clone,
+        on_history: impl Fn(&mut Window, &mut App) + 'static + Clone,
+        mastery_focus: &FocusHandle,
+        mastery_search_focused: bool,
+        on_mastery_query: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
+        on_mastery_filter: impl Fn(MasteryFilterAction, &mut Window, &mut App) + 'static + Clone,
+        on_career_bar: impl Fn(CareerBarAction, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let active_tab = self.active_tab;
 
         div()
             .w_full()
-            .h_full()
-            .p_4()
+            .px(px(24.0))
+            .py(px(16.0))
             .flex()
             .flex_col()
-            .gap_4()
-            // 顶部召唤师身份与 Tab 胶囊导航栏
-            .child(self.render_summoner_header(stats, on_tab_change, on_refresh))
-            // 主体内容区域（根据当前 Sub-Tab 切换）
+            .items_center()
             .child(
                 div()
                     .w_full()
-                    .flex_1()
-                    .id("career-tab-content-scroll")
-                    .overflow_y_scroll()
-                    .when(active_tab == CareerTab::Matches, |this| {
-                        this.child(Self::render_matches_tab(matches, stats, on_toggle_match))
-                    })
-                    .when(active_tab == CareerTab::Mastery, |this| {
-                        this.child(self.render_mastery_tab())
-                    })
-                    .when(active_tab == CareerTab::Loot, |this| {
-                        this.child(self.render_loot_tab())
-                    }),
+                    .max_w(px(1000.0))
+                    .flex()
+                    .flex_col()
+                    // 顶部召唤师资料卡（三段式）
+                    .child(self.render_summoner_header(
+                        on_refresh.clone(),
+                        on_copy_name,
+                        on_history,
+                    ))
+                    // 卡外侧栏页签
+                    .child(self.render_tabs(on_tab_change))
+                    // 主体内容区域（根据当前 Sub-Tab 切换）
+                    .child(
+                        div()
+                            .w_full()
+                            .grid()
+                            .grid_cols(1)
+                            .pt(px(16.0))
+                            .when(active_tab == CareerTab::Matches, |this| {
+                                this.child(self.render_matches_tab(
+                                    matches,
+                                    stats,
+                                    on_toggle_match,
+                                    on_career_bar,
+                                ))
+                            })
+                            .when(active_tab == CareerTab::Mastery, |this| {
+                                this.child(self.render_mastery_tab(
+                                    mastery_focus,
+                                    mastery_search_focused,
+                                    on_mastery_query,
+                                    on_mastery_filter,
+                                    on_refresh,
+                                ))
+                            })
+                            .when(active_tab == CareerTab::Loot, |this| {
+                                this.child(self.render_loot_tab())
+                            }),
+                    ),
             )
     }
 
-    /// 渲染顶部召唤师身份与 Sub-Tab 切换胶囊
+    /// 渲染资料卡：左侧弹性留空 / 中间资料组 / 右侧动作，保证资料组始终居中
     fn render_summoner_header(
         &self,
-        stats: &CareerHeaderStats,
-        on_tab_change: impl Fn(CareerTab, &mut Window, &mut App) + 'static + Clone,
         on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
+        on_copy_name: impl Fn(&mut Window, &mut App) + 'static + Clone,
+        on_history: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
-        let name_str = self
+        let game_name = self
             .summoner
             .as_ref()
-            .map(|s| s.full_name())
-            .unwrap_or_else(|| "悠米 #GPUI".to_string());
-        let level_str = self
+            .and_then(|s| s.game_name.clone().filter(|n| !n.is_empty()))
+            .or_else(|| {
+                self.summoner
+                    .as_ref()
+                    .and_then(|s| s.display_name.clone())
+                    .filter(|n| !n.is_empty())
+            })
+            .unwrap_or_else(|| "召唤师".to_string());
+        let tag_line = self
+            .summoner
+            .as_ref()
+            .and_then(|s| s.tag_line.clone())
+            .filter(|t| !t.is_empty());
+        let level = self
             .summoner
             .as_ref()
             .and_then(|s| s.summoner_level)
-            .map(|l| format!("Lv. {}", l))
-            .unwrap_or_else(|| "Lv. 428".to_string());
-
+            .unwrap_or(0);
+        let progress = self
+            .summoner
+            .as_ref()
+            .and_then(|s| s.percent_complete_for_next_level)
+            .unwrap_or(0)
+            .min(100);
         let icon_path = self
             .summoner
             .as_ref()
             .map(|s| s.icon_path())
             .unwrap_or_else(|| "/lol-game-data/assets/v1/profile-icons/29.jpg".to_string());
+        let is_private = self
+            .summoner
+            .as_ref()
+            .and_then(|s| s.privacy.as_deref())
+            .is_some_and(|p| p.eq_ignore_ascii_case("PRIVATE"));
+        let copied = self.copied;
 
         div()
             .w_full()
@@ -311,173 +677,269 @@ impl CareerView {
             .border_1()
             .border_color(Theme::CARD_BORDER)
             .rounded_xl()
-            .p_4()
+            .px(px(24.0))
+            .py(px(24.0))
             .shadow_sm()
             .flex()
             .items_center()
-            .justify_between()
-            // 左侧：头像 + 召唤师名 + 等级
+            // 左：弹性留空（与右侧等宽，使中间资料组以卡片中心线居中）
+            .child(div().flex_1())
+            // 中：头像进度环 + 昵称 / TagLine 资料组
             .child(
                 div()
+                    .flex_none()
                     .flex()
                     .items_center()
-                    .gap_4()
-                    .child(
-                        // 头像带极光光环
-                        div()
-                            .relative()
-                            .size(px(58.0))
-                            .rounded_xl()
-                            .border_2()
-                            .border_color(Theme::AURORA_CYAN)
-                            .overflow_hidden()
-                            .child(
-                                LcuImage::new(icon_path)
-                                    .size(px(58.0))
-                                    .shape(crate::components::lcu_image::LcuImageShape::Rounded)
-                                    .placeholder("悠"),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .bottom_0()
-                                    .left_0()
-                                    .right_0()
-                                    .bg(rgba(0x000000aa))
-                                    .py(px(1.0))
-                                    .flex()
-                                    .justify_center()
-                                    .text_xs()
-                                    .text_color(rgb(0xffffff))
-                                    .child(level_str),
-                            ),
-                    )
+                    .gap(px(20.0))
+                    .child(Self::render_level_ring(icon_path, level, progress))
                     .child(
                         div()
                             .flex()
                             .flex_col()
-                            .gap_1()
+                            .gap(px(4.0))
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap_2()
+                                    .gap(px(6.0))
                                     .child(
                                         div()
-                                            .text_lg()
-                                            .font_weight(FontWeight::BOLD)
+                                            .text_size(px(26.0))
+                                            .font_weight(FontWeight::EXTRA_BOLD)
                                             .text_color(Theme::TEXT_PRIMARY)
-                                            .child(name_str),
+                                            .child(game_name),
                                     )
-                                    .child(
+                                    .when(is_private, |this| {
+                                        this.child(icon("icons/lock.svg", 17.0, Theme::GOLD))
+                                    })
+                                    .child({
+                                        let cb = on_copy_name.clone();
                                         div()
-                                            .px_2()
-                                            .py(px(2.0))
+                                            .size(px(28.0))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
                                             .rounded_md()
-                                            .bg(Theme::BADGE_BG)
-                                            .text_xs()
-                                            .text_color(Theme::AURORA_BLUE)
-                                            .child("当前召唤师"),
-                                    ),
+                                            .border_1()
+                                            .border_color(Theme::CARD_BORDER)
+                                            .bg(Theme::HOVER_BG)
+                                            .cursor_pointer()
+                                            .hover(|s| {
+                                                s.bg(Theme::HOVER_BG_STRONG)
+                                                    .border_color(Theme::ACCENT_PRIMARY)
+                                            })
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                move |_ev, win, app| cb(win, app),
+                                            )
+                                            .child(icon("icons/copy.svg", 14.0, Theme::TEXT_MUTED))
+                                    })
+                                    .when(copied, |this| {
+                                        this.child(
+                                            div()
+                                                .text_size(px(12.0))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(Theme::WIN_TEXT)
+                                                .child("已复制"),
+                                        )
+                                    }),
                             )
-                            .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(format!(
-                                "近 {} 场胜率 {:.1}% · KDA {:.2}:1",
-                                stats.total_games, stats.win_rate, stats.avg_kda_ratio
-                            ))),
+                            .when_some(tag_line, |this, tag| {
+                                this.child(
+                                    div()
+                                        .text_size(px(13.0))
+                                        .text_color(Theme::TEXT_MUTED)
+                                        .child(format!("# {}", tag)),
+                                )
+                            }),
                     ),
             )
-            // 右侧：三大 Sub-Tab 极光胶囊切换器
+            // 右：竖排动作按钮（刷新 → 历史战绩）
             .child(
                 div()
+                    .flex_1()
                     .flex()
-                    .items_center()
-                    .gap_2()
-                    .p_1()
-                    .bg(Theme::BADGE_BG)
-                    .rounded_xl()
-                    .border_1()
-                    .border_color(Theme::CARD_BORDER)
-                    .children(
-                        [CareerTab::Matches, CareerTab::Mastery, CareerTab::Loot]
-                            .into_iter()
-                            .map(|tab| {
-                                let is_active = self.active_tab == tab;
-                                let cb = on_tab_change.clone();
-                                div()
-                                    .px_4()
-                                    .py_2()
-                                    .rounded_lg()
-                                    .cursor_pointer()
-                                    .text_sm()
-                                    .font_weight(if is_active {
-                                        FontWeight::BOLD
-                                    } else {
-                                        FontWeight::NORMAL
-                                    })
-                                    .bg(if is_active {
-                                        Theme::CARD_BG
-                                    } else {
-                                        transparent_black()
-                                    })
-                                    .text_color(if is_active {
-                                        Theme::ACCENT_PRIMARY
-                                    } else {
-                                        Theme::TEXT_SECONDARY
-                                    })
-                                    .border_1()
-                                    .border_color(if is_active {
-                                        Theme::AURORA_CYAN
-                                    } else {
-                                        transparent_black()
-                                    })
-                                    .when(is_active, |s| s.shadow_sm())
-                                    .hover(|s| s.bg(rgba(0xffffff66)))
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        cb(tab, win, app);
-                                    })
-                                    .child(tab.label())
-                            }),
-                    )
+                    .flex_col()
+                    .items_end()
+                    .gap(px(8.0))
+                    .child(Self::action_button("刷新", on_refresh))
+                    .child(Self::action_button("历史战绩", on_history)),
+            )
+    }
+
+    /// 头像等级进度环：104×104，300° 弧、缺口朝下，等级贴在环下缘
+    fn render_level_ring(icon_path: String, level: u32, progress: u32) -> impl IntoElement {
+        div()
+            .relative()
+            .flex_none()
+            .size(px(104.0))
+            .child(
+                canvas(
+                    |bounds, _window, _cx| bounds,
+                    move |bounds, _, window, _cx| {
+                        let size = f32::from(bounds.size.width).min(f32::from(bounds.size.height));
+                        let radius = size * 0.45;
+                        let stroke = size * 0.05;
+                        let center = bounds.center();
+                        if let Some(track) = arc_path(center, radius, 120.0, 300.0, stroke) {
+                            window.paint_path(track, rgb(0xe2e8f0));
+                        }
+                        let sweep = 300.0 * (progress.min(100) as f32 / 100.0);
+                        if sweep > 0.5 {
+                            if let Some(fill) = arc_path(center, radius, 120.0, sweep, stroke) {
+                                window.paint_path(fill, Theme::ACCENT_PRIMARY);
+                            }
+                        }
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size(px(104.0)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top(px(13.0))
+                    .left(px(13.0))
+                    .size(px(78.0))
+                    .rounded_full()
+                    .overflow_hidden()
                     .child(
-                        div()
-                            .px_3()
-                            .py_2()
-                            .rounded_lg()
-                            .cursor_pointer()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .bg(Theme::CARD_BG)
-                            .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .text_color(Theme::AURORA_BLUE)
-                            .hover(|s| s.bg(rgba(0xffffff88)).border_color(Theme::AURORA_CYAN))
-                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                on_refresh(win, app);
-                            })
-                            .child("🔄 刷新"),
+                        LcuImage::new(icon_path)
+                            .size(px(78.0))
+                            .shape(LcuImageShape::Circle)
+                            .placeholder("悠"),
                     ),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left_0()
+                    .right_0()
+                    .flex()
+                    .justify_center()
+                    .text_size(px(11.5))
+                    .font_weight(FontWeight::BOLD)
+                    .line_height(px(12.0))
+                    .text_color(Theme::TEXT_PRIMARY)
+                    .child(level.to_string()),
+            )
+    }
+
+    /// 资料卡右侧的竖排动作按钮
+    fn action_button(
+        label: &'static str,
+        on_click: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> impl IntoElement {
+        div()
+            .px(px(16.0))
+            .py(px(6.0))
+            .rounded_md()
+            .border_1()
+            .border_color(Theme::CARD_BORDER)
+            .bg(Theme::CARD_BG)
+            .text_size(px(13.0))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(Theme::TEXT_PRIMARY)
+            .cursor_pointer()
+            .hover(|s| {
+                s.bg(Theme::CARD_BG_HOVER)
+                    .border_color(Theme::ACCENT_PRIMARY)
+            })
+            .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
+            .child(label)
+    }
+
+    /// 卡外页签行：左对齐，顺序为 生涯战绩 → 战利品 → 英雄熟练度
+    fn render_tabs(
+        &self,
+        on_tab_change: impl Fn(CareerTab, &mut Window, &mut App) + 'static + Clone,
+    ) -> impl IntoElement {
+        div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap_2()
+            .mt(px(12.0))
+            .pb(px(8.0))
+            .border_b_1()
+            .border_color(Theme::CARD_BORDER)
+            .children(
+                [CareerTab::Matches, CareerTab::Loot, CareerTab::Mastery]
+                    .into_iter()
+                    .map(|tab| {
+                        let is_active = self.active_tab == tab;
+                        let cb = on_tab_change.clone();
+                        div()
+                            .px(px(16.0))
+                            .py(px(6.0))
+                            .rounded_md()
+                            .border_1()
+                            .cursor_pointer()
+                            .text_size(px(14.0))
+                            .font_weight(FontWeight::BOLD)
+                            .bg(if is_active {
+                                Theme::ACCENT_LIGHT
+                            } else {
+                                transparent_black()
+                            })
+                            .text_color(if is_active {
+                                Theme::ACCENT_PRIMARY
+                            } else {
+                                Theme::TEXT_MUTED
+                            })
+                            .border_color(if is_active {
+                                Theme::SIDEBAR_ACTIVE_BORDER
+                            } else {
+                                transparent_black()
+                            })
+                            .when(!is_active, |this| {
+                                this.hover(|s| {
+                                    s.bg(Theme::CARD_BG_HOVER).text_color(Theme::ACCENT_PRIMARY)
+                                })
+                            })
+                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                cb(tab, win, app);
+                            })
+                            .child(tab.label())
+                    }),
             )
     }
 
     /// Tab 1: 对局历史与战绩概览
     fn render_matches_tab(
+        &self,
         matches: &[MatchItem],
         stats: &CareerHeaderStats,
         on_toggle_match: impl Fn(usize, &mut Window, &mut App) + 'static + Clone,
+        on_career_bar: impl Fn(CareerBarAction, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
-        let is_empty = matches.is_empty();
+        // 队列筛选只作用于战绩列表，统计横条仍基于全量（对照 Vue filteredMatches）
+        let shown: Vec<&MatchItem> = matches
+            .iter()
+            .filter(|m| {
+                self.selected_queue
+                    .is_none_or(|qid| m.display.queue_id == qid)
+            })
+            .collect();
+        let is_empty = shown.is_empty();
 
+        // 单列 grid：子项由网格轨道拉伸到整行宽度
+        // （GPUI 里 `w_full` 在非定宽父级下会退化为 auto，故整页统一用 grid 轨道传递宽度）
         div()
-            .w_full()
-            .flex()
-            .flex_col()
+            .min_w(px(0.0))
+            .grid()
+            .grid_cols(1)
             .gap_4()
-            // 战绩指标统计卡片
-            .child(Self::render_header(stats))
+            // 排位表（单排 / 灵活）
+            .child(self.render_ranked_card())
+            // 近期统计横条
+            .child(self.render_recent_bar(matches, stats, on_career_bar))
             // 紧凑战绩列表或空态引导
             .child(if is_empty {
                 div()
-                    .w_full()
                     .bg(Theme::CARD_BG)
                     .border_1()
                     .border_color(Theme::CARD_BORDER)
@@ -495,216 +957,530 @@ impl CareerView {
                             .text_color(Theme::TEXT_PRIMARY)
                             .child("暂无近期的对局历史记录"),
                     )
-                    .child(
-                        div().text_xs().text_color(Theme::TEXT_MUTED).child(
-                            "请在英雄联盟客户端完成对局，或点击右上角「🔄 刷新」拉取最新战绩",
-                        ),
-                    )
+                    .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(
+                        "请在英雄联盟客户端完成对局，或点击资料卡右侧的「刷新」拉取最新战绩",
+                    ))
             } else {
-                div().w_full().flex().flex_col().children(
-                    matches
-                        .iter()
+                div().flex().flex_col().gap_2().children(
+                    shown
+                        .into_iter()
                         .enumerate()
                         .map(|(idx, m)| Self::render_match_card(m, idx, on_toggle_match.clone())),
                 )
             })
     }
 
-    /// Tab 2: 英雄熟练度与里程碑网格
-    fn render_mastery_tab(&self) -> impl IntoElement {
-        let total_points: i64 = self.mastery_list.iter().map(|m| m.champion_points).sum();
-        let total_champs = self.mastery_list.len();
-        let chests_count = self.mastery_list.iter().filter(|m| m.chest_granted).count();
+    /// 排位表：类型 → 总场次 → 胜率 → 胜场 → 负场 → 段位 → 胜点 → 赛季最高 → 上赛季结算
+    fn render_ranked_card(&self) -> impl IntoElement {
+        const COLUMNS: [(&str, f32); 9] = [
+            ("类型", 96.0),
+            ("总场次", 76.0),
+            ("胜率", 76.0),
+            ("胜场", 64.0),
+            ("负场", 64.0),
+            ("段位", 160.0),
+            ("胜点", 72.0),
+            ("赛季最高", 180.0),
+            ("上赛季结算", 180.0),
+        ];
+
+        let rows: Vec<[String; 9]> = match self.ranked.as_ref() {
+            Some(stats) => vec![
+                ranked_row("单排", stats.queue_map.get("RANKED_SOLO_5x5")),
+                ranked_row("灵活", stats.queue_map.get("RANKED_FLEX_SR")),
+            ],
+            None => Vec::new(),
+        };
 
         div()
-            .w_full()
+            .bg(Theme::CARD_BG)
+            .border_1()
+            .border_color(Theme::CARD_BORDER)
+            .rounded_xl()
+            .px(px(16.0))
+            .py(px(12.0))
             .flex()
             .flex_col()
-            .gap_4()
-            // 熟练度概览指标卡片
             .child(
                 div()
-                    .w_full()
+                    .flex()
+                    .items_center()
+                    .py(px(6.0))
+                    .children(COLUMNS.iter().map(|(label, weight)| {
+                        ranked_cell(label.to_string(), *weight, Theme::TEXT_MUTED, 11.5, false)
+                    })),
+            )
+            .when(rows.is_empty(), |this| {
+                this.child(
+                    div()
+                        .py(px(10.0))
+                        .text_size(px(12.5))
+                        .text_color(Theme::TEXT_MUTED)
+                        .child("排位数据读取中…"),
+                )
+            })
+            .children(rows.into_iter().enumerate().map(|(idx, values)| {
+                let mut row = div()
+                    .flex()
+                    .items_center()
+                    .py(px(8.0))
+                    .border_t_1()
+                    .border_color(Theme::CARD_BORDER);
+                if idx == 0 {
+                    row = row.border_t_1().border_color(Theme::CARD_BORDER);
+                }
+                row.children(
+                    values
+                        .into_iter()
+                        .zip(COLUMNS.iter())
+                        .map(|(value, (_, weight))| {
+                            ranked_cell(value, *weight, Theme::TEXT_PRIMARY, 13.0, true)
+                        }),
+                )
+            }))
+    }
+
+    /// 近期统计横条：局数 / 胜负 / KDA + 常玩位置 + 近期英雄头像
+    /// 近期统计横条：局数/胜负/KDA + 常玩位置 + 近期英雄，右侧为队列下拉与最近队友
+    fn render_recent_bar(
+        &self,
+        matches: &[MatchItem],
+        stats: &CareerHeaderStats,
+        on_bar: impl Fn(CareerBarAction, &mut Window, &mut App) + 'static + Clone,
+    ) -> impl IntoElement {
+        let positions = top_positions(matches, 3);
+        let champions = top_champions(matches, 5);
+        let queue_label = QUEUE_OPTIONS
+            .iter()
+            .find(|o| o.id == self.selected_queue)
+            .map(|o| o.label)
+            .unwrap_or("全部");
+
+        div()
+            .relative()
+            .bg(Theme::CARD_BG)
+            .border_1()
+            .border_color(Theme::CARD_BORDER)
+            .rounded_xl()
+            .px(px(16.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(18.0))
+            .child(bar_stat(
+                "近期对局",
+                format!("{} 场", stats.total_games),
+                Theme::TEXT_PRIMARY,
+            ))
+            .child(bar_stat(
+                "胜负",
+                format!("{} 胜 {} 负", stats.wins, stats.losses),
+                if stats.win_rate >= 50.0 {
+                    Theme::WIN_TEXT
+                } else {
+                    Theme::LOSS_TEXT
+                },
+            ))
+            .child(bar_stat(
+                "KDA",
+                format!("{:.2} : 1", stats.avg_kda_ratio),
+                Theme::TEXT_PRIMARY,
+            ))
+            .child(div().w(px(1.0)).h(px(28.0)).bg(Theme::CARD_BORDER))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .when(positions.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(Theme::TEXT_MUTED)
+                                .child("暂无分路数据"),
+                        )
+                    })
+                    .children(positions.into_iter().map(|(label, count)| {
+                        div()
+                            .px(px(8.0))
+                            .py(px(3.0))
+                            .rounded_md()
+                            .bg(Theme::HOVER_BG)
+                            .text_size(px(12.0))
+                            .text_color(Theme::TEXT_SECONDARY)
+                            .child(format!("{} {}", label, count))
+                    })),
+            )
+            .child(div().w(px(1.0)).h(px(28.0)).bg(Theme::CARD_BORDER))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .when(champions.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(Theme::TEXT_MUTED)
+                                .child("暂无英雄数据"),
+                        )
+                    })
+                    .children(champions.into_iter().map(|(name, icon_url, _count)| {
+                        div()
+                            .id(SharedString::from(format!("recent-champ-{}", name)))
+                            .child(
+                                LcuImage::new(icon_url)
+                                    .size(px(26.0))
+                                    .shape(LcuImageShape::Circle)
+                                    .placeholder("英"),
+                            )
+                    })),
+            )
+            .child(div().flex_1())
+            // 触发器 1：队列下拉
+            .child({
+                let on_toggle = on_bar.clone();
+                let items = QUEUE_OPTIONS.into_iter().map(|option| {
+                    let cb = on_bar.clone();
+                    dropdown_item(
+                        option.label,
+                        self.selected_queue == option.id,
+                        move |win, app| cb(CareerBarAction::SelectQueue(option.id), win, app),
+                    )
+                });
+                dropdown_trigger(
+                    "career-queue-trigger",
+                    queue_label.to_string(),
+                    self.popup == Some(CareerPopup::QueueMenu),
+                    dropdown_menu(150.0, items),
+                    move |win, app| {
+                        on_toggle(
+                            CareerBarAction::TogglePopup(CareerPopup::QueueMenu),
+                            win,
+                            app,
+                        )
+                    },
+                )
+            })
+            // 触发器 2：最近队友下拉
+            .child({
+                let on_toggle = on_bar.clone();
+                dropdown_trigger(
+                    "career-teammates-trigger",
+                    "最近队友".to_string(),
+                    self.popup == Some(CareerPopup::Teammates),
+                    teammates_placeholder(),
+                    move |win, app| {
+                        on_toggle(
+                            CareerBarAction::TogglePopup(CareerPopup::Teammates),
+                            win,
+                            app,
+                        )
+                    },
+                )
+            })
+    }
+
+    /// Tab 2: 英雄熟练度与里程碑网格
+    /// Tab 2: 英雄熟练度（四张统计卡 → 筛选行 → 四列网格）
+    fn render_mastery_tab(
+        &self,
+        focus: &FocusHandle,
+        search_focused: bool,
+        on_query: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
+        on_filter: impl Fn(MasteryFilterAction, &mut Window, &mut App) + 'static + Clone,
+        on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
+    ) -> impl IntoElement {
+        let total_points: i64 = self.mastery_list.iter().map(|m| m.champion_points).sum();
+        let total_champs = self.mastery_list.len();
+        let granted = self.mastery_list.iter().filter(|m| m.chest_granted).count();
+        let eligible = self
+            .mastery_list
+            .iter()
+            .filter(|m| m.eligible_for_chest && !m.chest_granted)
+            .count();
+        let top = self.mastery_list.iter().max_by(|a, b| {
+            a.champion_level
+                .cmp(&b.champion_level)
+                .then(a.champion_points.cmp(&b.champion_points))
+        });
+
+        // 筛选与排序（对照 Vue `filteredMasteryList`）
+        let query = self.mastery_query.trim().to_lowercase();
+        let mut list: Vec<&ChampionMasteryItem> = self
+            .mastery_list
+            .iter()
+            .filter(|m| {
+                let text_ok = query.is_empty()
+                    || m.champion_name.to_lowercase().contains(&query)
+                    || m.champion_id.to_string().contains(&query);
+                text_ok
+                    && self.mastery_chest.matches(m)
+                    && self.mastery_level.matches(m.champion_level)
+            })
+            .collect();
+        list.sort_by(|a, b| {
+            let ord = match self.mastery_sort {
+                MasterySort::Points => a.champion_points.cmp(&b.champion_points),
+                MasterySort::Level => a
+                    .champion_level
+                    .cmp(&b.champion_level)
+                    .then(a.champion_points.cmp(&b.champion_points)),
+                MasterySort::Milestone => a
+                    .champion_season_milestone
+                    .cmp(&b.champion_season_milestone)
+                    .then(a.champion_points.cmp(&b.champion_points)),
+                MasterySort::LastPlay => a
+                    .last_play_time
+                    .cmp(&b.last_play_time)
+                    .then(a.champion_points.cmp(&b.champion_points)),
+            };
+            if self.mastery_sort_desc {
+                ord.reverse()
+            } else {
+                ord
+            }
+        });
+
+        div()
+            .min_w(px(0.0))
+            .grid()
+            .grid_cols(1)
+            .gap_4()
+            // 四张统计卡
+            .child(
+                div()
                     .grid()
-                    .grid_cols(3)
+                    .grid_cols(4)
+                    .gap_3()
+                    .child(mastery_stat(
+                        "熟练英雄总数",
+                        format!("{} 位", total_champs),
+                        "已记录熟练度的英雄".to_string(),
+                        Theme::TEXT_PRIMARY,
+                    ))
+                    .child(mastery_stat(
+                        "熟练度总分",
+                        format!("{} 分", format_num(total_points)),
+                        "全部英雄累计".to_string(),
+                        Theme::ACCENT_PRIMARY,
+                    ))
+                    .child(mastery_stat(
+                        "最高等级英雄",
+                        top.map(|m| format!("Lv.{} {}", m.champion_level, m.champion_name))
+                            .unwrap_or_else(|| "--".to_string()),
+                        top.map(|m| format!("{} 分", format_num(m.champion_points)))
+                            .unwrap_or_default(),
+                        Theme::AURORA_BLUE,
+                    ))
+                    .child(mastery_stat(
+                        "里程碑宝箱",
+                        format!("已获取 {}", granted),
+                        format!("另有 {} 个可获取", eligible),
+                        crate::theme::GOLD,
+                    )),
+            )
+            // 筛选行：左 搜索 / 宝箱 / 等级，右 排序 / 升降序 / 刷新
+            .child(
+                div()
+                    .bg(Theme::CARD_BG)
+                    .border_1()
+                    .border_color(Theme::CARD_BORDER)
+                    .rounded_xl()
+                    .p_3()
+                    .flex()
+                    .flex_col()
                     .gap_3()
                     .child(
                         div()
-                            .p_3()
-                            .rounded_xl()
-                            .bg(Theme::CARD_BG)
-                            .border_1()
-                            .border_color(Theme::CARD_BORDER)
                             .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .child("熟练度总点数"),
-                            )
-                            .child(
-                                div()
-                                    .text_xl()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::ACCENT_PRIMARY)
-                                    .child(format!("{} pts", format_num(total_points))),
-                            ),
+                            .items_center()
+                            .flex_wrap()
+                            .gap_2()
+                            .child({
+                                let cb = on_query.clone();
+                                let clear = on_query.clone();
+                                text_field(
+                                    "mastery-search",
+                                    &self.mastery_query,
+                                    "搜索英雄名 / ID",
+                                    px(200.0),
+                                    focus,
+                                    search_focused,
+                                    TextFieldOptions {
+                                        max_chars: Some(24),
+                                        ..Default::default()
+                                    },
+                                    move |text, win, app| cb(text, win, app),
+                                    move |win, app| clear(String::new(), win, app),
+                                    |_text, _win, _app| {},
+                                )
+                            })
+                            // 宝箱状态 n-select
+                            .child({
+                                let cb = on_filter.clone();
+                                let items = ChestFilter::ALL.into_iter().map(|value| {
+                                    let item_cb = on_filter.clone();
+                                    dropdown_item(
+                                        value.label(),
+                                        self.mastery_chest == value,
+                                        move |win, app| {
+                                            item_cb(MasteryFilterAction::Chest(value), win, app)
+                                        },
+                                    )
+                                });
+                                dropdown_trigger(
+                                    "mastery-chest-select",
+                                    self.mastery_chest.label().to_string(),
+                                    self.mastery_dropdown == Some(MasteryDropdown::Chest),
+                                    dropdown_menu(150.0, items),
+                                    move |win, app| {
+                                        cb(
+                                            MasteryFilterAction::ToggleDropdown(
+                                                MasteryDropdown::Chest,
+                                            ),
+                                            win,
+                                            app,
+                                        )
+                                    },
+                                )
+                            })
+                            // 等级 n-select
+                            .child({
+                                let cb = on_filter.clone();
+                                let items = LevelFilter::ALL.into_iter().map(|value| {
+                                    let item_cb = on_filter.clone();
+                                    dropdown_item(
+                                        value.label(),
+                                        self.mastery_level == value,
+                                        move |win, app| {
+                                            item_cb(MasteryFilterAction::Level(value), win, app)
+                                        },
+                                    )
+                                });
+                                dropdown_trigger(
+                                    "mastery-level-select",
+                                    self.mastery_level.label().to_string(),
+                                    self.mastery_dropdown == Some(MasteryDropdown::Level),
+                                    dropdown_menu(130.0, items),
+                                    move |win, app| {
+                                        cb(
+                                            MasteryFilterAction::ToggleDropdown(
+                                                MasteryDropdown::Level,
+                                            ),
+                                            win,
+                                            app,
+                                        )
+                                    },
+                                )
+                            }),
                     )
                     .child(
                         div()
-                            .p_3()
-                            .rounded_xl()
-                            .bg(Theme::CARD_BG)
-                            .border_1()
-                            .border_color(Theme::CARD_BORDER)
                             .flex()
-                            .flex_col()
-                            .gap_1()
+                            .items_center()
+                            .flex_wrap()
+                            .gap_2()
+                            .child(div().flex_1())
                             .child(
                                 div()
-                                    .text_xs()
+                                    .text_size(px(12.0))
                                     .text_color(Theme::TEXT_MUTED)
-                                    .child("已成就有英雄"),
+                                    .child("排序:"),
                             )
-                            .child(
+                            .child({
+                                let cb = on_filter.clone();
+                                let items = MasterySort::ALL.into_iter().map(|value| {
+                                    let item_cb = on_filter.clone();
+                                    dropdown_item(
+                                        value.label(),
+                                        self.mastery_sort == value,
+                                        move |win, app| {
+                                            item_cb(MasteryFilterAction::Sort(value), win, app)
+                                        },
+                                    )
+                                });
+                                dropdown_trigger(
+                                    "mastery-sort-select",
+                                    self.mastery_sort.label().to_string(),
+                                    self.mastery_dropdown == Some(MasteryDropdown::Sort),
+                                    dropdown_menu(140.0, items),
+                                    move |win, app| {
+                                        cb(
+                                            MasteryFilterAction::ToggleDropdown(
+                                                MasteryDropdown::Sort,
+                                            ),
+                                            win,
+                                            app,
+                                        )
+                                    },
+                                )
+                            })
+                            .child({
+                                let cb = on_filter.clone();
+                                filter_chip(
+                                    if self.mastery_sort_desc {
+                                        "降序 ↓"
+                                    } else {
+                                        "升序 ↑"
+                                    },
+                                    false,
+                                    move |win, app| {
+                                        cb(MasteryFilterAction::ToggleSortDir, win, app)
+                                    },
+                                )
+                            })
+                            .child({
                                 div()
-                                    .text_xl()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::AURORA_BLUE)
-                                    .child(format!("{} 位英雄", total_champs)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .p_3()
-                            .rounded_xl()
-                            .bg(Theme::CARD_BG)
-                            .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .child("赛段宝箱进度"),
-                            )
-                            .child(
-                                div()
-                                    .text_xl()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(crate::theme::GOLD)
-                                    .child(format!("已获取 {} 个", chests_count)),
-                            ),
+                                    .px(px(10.0))
+                                    .py(px(5.0))
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER)
+                                    .bg(Theme::CARD_BG)
+                                    .text_size(px(12.0))
+                                    .text_color(Theme::TEXT_SECONDARY)
+                                    .cursor_pointer()
+                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        on_refresh(win, app)
+                                    })
+                                    .child("刷新")
+                            }),
                     ),
             )
-            // 英雄熟练度卡片网格（4 列）
-            .child(div().w_full().grid().grid_cols(4).gap_3().children(
-                self.mastery_list.iter().map(|m| {
-                    div()
-                        .p_3()
-                        .rounded_xl()
-                        .bg(Theme::CARD_BG)
-                        .border_1()
-                        .border_color(Theme::CARD_BORDER)
-                        .hover(|s| s.border_color(Theme::AURORA_CYAN).bg(rgba(0xffffff88)))
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_3()
-                                .child(
-                                    div()
-                                        .relative()
-                                        .size(px(44.0))
-                                        .rounded_lg()
-                                        .border_1()
-                                        .border_color(Theme::CARD_BORDER)
-                                        .overflow_hidden()
-                                        .child(
-                                            LcuImage::new(m.champion_icon_url.clone())
-                                                .size(px(44.0))
-                                                .shape(crate::components::lcu_image::LcuImageShape::Rounded)
-                                                .placeholder(format!("{}", m.champion_id)),
-                                        )
-                                        .child(
-                                            div()
-                                                .absolute()
-                                                .bottom_0()
-                                                .right_0()
-                                                .px_1()
-                                                .rounded_tl_md()
-                                                .bg(rgba(0x000000bb))
-                                                .text_xs()
-                                                .text_color(rgb(0xffffff))
-                                                .child(format!("Lv.{}", m.champion_level)),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap_1()
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::TEXT_PRIMARY)
-                                                .child(m.champion_name.clone()),
-                                        )
-                                        .child(
-                                            div().text_xs().text_color(Theme::TEXT_MUTED).child(
-                                                format!("{} 点", format_num(m.champion_points)),
-                                            ),
-                                        ),
-                                ),
-                        )
-                        // 赛段里程碑等级与宝箱标签
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .pt_1()
-                                .border_t_1()
-                                .border_color(Theme::CARD_BORDER)
-                                .text_xs()
-                                .child(
-                                    div().text_color(Theme::TEXT_SECONDARY).child(format!(
-                                        "赛段里程碑 {}",
-                                        m.champion_season_milestone
-                                    )),
-                                )
-                                .child(
-                                    div()
-                                        .px_2()
-                                        .py(px(1.0))
-                                        .rounded_md()
-                                        .bg(if m.chest_granted {
-                                            Theme::BADGE_BG
-                                        } else {
-                                            Theme::ACCENT_LIGHT
-                                        })
-                                        .text_color(if m.chest_granted {
-                                            Theme::TEXT_MUTED
-                                        } else {
-                                            Theme::ACCENT_PRIMARY
-                                        })
-                                        .child(if m.chest_granted {
-                                            "已领宝箱"
-                                        } else {
-                                            "可获宝箱"
-                                        }),
-                                ),
-                        )
-                }),
-            ))
+            // 英雄卡片网格（默认四列）
+            .child(if list.is_empty() {
+                div()
+                    .bg(Theme::CARD_BG)
+                    .border_1()
+                    .border_color(Theme::CARD_BORDER)
+                    .rounded_xl()
+                    .p_8()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_base()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(Theme::TEXT_PRIMARY)
+                            .child("没有符合条件的英雄"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("请调整搜索词、宝箱状态或等级筛选"),
+                    )
+            } else {
+                div()
+                    .grid()
+                    .grid_cols(4)
+                    .gap_3()
+                    .children(list.into_iter().map(mastery_card))
+            })
     }
 
     /// Tab 3: 战利品管理与精粹资产网格
@@ -987,108 +1763,6 @@ impl CareerView {
     }
 
     /// 渲染顶部统计面板（兼容原有 Matches 列表内部调用）
-    pub fn render_header(stats: &CareerHeaderStats) -> impl IntoElement {
-        div()
-            .w_full()
-            .bg(Theme::CARD_BG)
-            .border_1()
-            .border_color(Theme::CARD_BORDER)
-            .rounded_xl()
-            .p_4()
-            .mb_2()
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_base()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
-                            .child("近期对局整体胜率看板"),
-                    )
-                    .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(format!(
-                        "共统计近 {} 场比赛 · 包括排位、匹配与大乱斗",
-                        stats.total_games
-                    ))),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_6()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_lg()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(if stats.win_rate >= 50.0 {
-                                        Theme::WIN_TEXT
-                                    } else {
-                                        Theme::LOSS_TEXT
-                                    })
-                                    .child(format!("{:.1}%", stats.win_rate)),
-                            )
-                            .child(div().text_xs().text_color(Theme::TEXT_SECONDARY).child(
-                                format!(
-                                    "{} 胜 {} 负 ({} 重开)",
-                                    stats.wins, stats.losses, stats.remakes
-                                ),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_lg()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child(format!("{:.2}:1 KDA", stats.avg_kda_ratio)),
-                            )
-                            .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(format!(
-                                "{:.1} / {:.1} / {:.1}",
-                                stats.avg_kills, stats.avg_deaths, stats.avg_assists
-                            ))),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(Theme::TEXT_SECONDARY)
-                            .child("分路胜率偏好: 中单 40% · 下路 30% · 上单 20% · 辅助 10%"),
-                    )
-                    .child(
-                        div()
-                            .h(px(6.0))
-                            .w(px(180.0))
-                            .rounded_full()
-                            .bg(Theme::BADGE_BG)
-                            .overflow_hidden()
-                            .flex()
-                            .child(div().w_2_5().h_full().bg(Theme::AURORA_CYAN))
-                            .child(div().w_1_4().h_full().bg(Theme::AURORA_BLUE))
-                            .child(div().w_1_5().h_full().bg(Theme::ACCENT_PRIMARY)),
-                    ),
-            )
-    }
-
     /// 渲染单条紧凑战绩卡片（112px 黄金行高）
     pub fn render_match_card(
         m: &MatchItem,
@@ -1165,7 +1839,6 @@ impl CareerView {
 
         div()
             .w_full()
-            .mb_2()
             .flex()
             .flex_col()
             .rounded_xl()
@@ -1420,4 +2093,247 @@ impl CareerView {
                 )
             })
     }
+}
+
+/// 熟练度统计卡
+fn mastery_stat(
+    label: &'static str,
+    value: String,
+    sub: String,
+    value_color: Hsla,
+) -> impl IntoElement {
+    div()
+        .p_3()
+        .rounded_xl()
+        .bg(Theme::CARD_BG)
+        .border_1()
+        .border_color(Theme::CARD_BORDER)
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(label))
+        .child(
+            div()
+                .text_lg()
+                .font_weight(FontWeight::BOLD)
+                .text_color(value_color)
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .child(value),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(Theme::TEXT_MUTED)
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .child(sub),
+        )
+}
+
+/// 筛选行的小分段按钮
+fn filter_chip(
+    label: &'static str,
+    active: bool,
+    on_click: impl Fn(&mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .px(px(10.0))
+        .py(px(5.0))
+        .rounded_md()
+        .border_1()
+        .border_color(if active {
+            Theme::SIDEBAR_ACTIVE_BORDER
+        } else {
+            Theme::CARD_BORDER
+        })
+        .bg(if active {
+            Theme::ACCENT_LIGHT
+        } else {
+            Theme::CARD_BG
+        })
+        .text_size(px(12.0))
+        .font_weight(if active {
+            FontWeight::BOLD
+        } else {
+            FontWeight::NORMAL
+        })
+        .text_color(if active {
+            Theme::ACCENT_PRIMARY
+        } else {
+            Theme::TEXT_MUTED
+        })
+        .cursor_pointer()
+        .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+        .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
+        .child(label)
+}
+
+/// 单个英雄熟练度卡：头像 + 等级 / 名 + 点数 / 进度条 + 下级所需点数 / 里程碑与宝箱
+fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
+    let since = m.champion_points_since_last_level.max(0);
+    let until = m.champion_points_until_next_level.max(0);
+    let pct = if until <= 0 {
+        100.0
+    } else {
+        (since as f32 / (since + until) as f32 * 100.0).clamp(0.0, 100.0)
+    };
+
+    div()
+        .p_3()
+        .rounded_xl()
+        .bg(Theme::CARD_BG)
+        .border_1()
+        .border_color(Theme::CARD_BORDER)
+        .hover(|s| s.border_color(Theme::AURORA_CYAN))
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(
+                    div()
+                        .relative()
+                        .size(px(44.0))
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(Theme::CARD_BORDER)
+                        .overflow_hidden()
+                        .flex_none()
+                        .child(
+                            LcuImage::new(m.champion_icon_url.clone())
+                                .size(px(44.0))
+                                .shape(LcuImageShape::Rounded)
+                                .placeholder(format!("{}", m.champion_id)),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .bottom_0()
+                                .right_0()
+                                .px_1()
+                                .rounded_tl_md()
+                                .bg(rgba(0x000000bb))
+                                .text_xs()
+                                .text_color(rgb(0xffffff))
+                                .child(format!("Lv.{}", m.champion_level)),
+                        ),
+                )
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(Theme::TEXT_PRIMARY)
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .child(m.champion_name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(Theme::TEXT_MUTED)
+                                .child(format!("{} 点", format_num(m.champion_points))),
+                        ),
+                ),
+        )
+        .child(
+            div()
+                .w_full()
+                .h(px(6.0))
+                .rounded_full()
+                .bg(Theme::BADGE_BG)
+                .overflow_hidden()
+                .child(
+                    div()
+                        .h_full()
+                        .w(px(217.0 * pct / 100.0))
+                        .rounded_full()
+                        .bg(Theme::ACCENT_PRIMARY),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .text_xs()
+                .child(
+                    div()
+                        .text_color(Theme::TEXT_SECONDARY)
+                        .child(format!("{:.0}%", pct)),
+                )
+                .child(div().text_color(Theme::TEXT_MUTED).child(if until <= 0 {
+                    "已达最高等级".to_string()
+                } else {
+                    format!("距下一级还需 {} 点", format_num(until))
+                })),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .pt_1()
+                .border_t_1()
+                .border_color(Theme::CARD_BORDER)
+                .text_xs()
+                .child(
+                    div()
+                        .text_color(Theme::TEXT_SECONDARY)
+                        .child(format!("赛段里程碑 {}", m.champion_season_milestone)),
+                )
+                .child(
+                    div()
+                        .px_2()
+                        .py(px(1.0))
+                        .rounded_md()
+                        .bg(if m.chest_granted {
+                            Theme::BADGE_BG
+                        } else {
+                            Theme::ACCENT_LIGHT
+                        })
+                        .text_color(if m.chest_granted {
+                            Theme::TEXT_MUTED
+                        } else {
+                            Theme::ACCENT_PRIMARY
+                        })
+                        .child(if m.chest_granted {
+                            "已获宝箱"
+                        } else {
+                            "可获宝箱"
+                        }),
+                ),
+        )
+}
+
+/// 最近队友下拉：数据链路（对局详情批量聚合）未接通时的说明
+fn teammates_placeholder() -> impl IntoElement {
+    div()
+        .w(px(240.0))
+        .p_3()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_size(px(13.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(Theme::TEXT_PRIMARY)
+                .child("最近队友"),
+        )
+        .child(
+            div()
+                .text_size(px(12.0))
+                .text_color(Theme::TEXT_MUTED)
+                .child("需要按对局详情批量聚合队友数据，GPUI 服务层尚未接通"),
+        )
 }

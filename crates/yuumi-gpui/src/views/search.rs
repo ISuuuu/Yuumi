@@ -1,8 +1,11 @@
 use crate::components::badge::{Badge, BadgeVariant};
 use crate::components::card::Card;
+use crate::components::dropdown::{dropdown_item, dropdown_menu, dropdown_trigger};
 use crate::components::lcu_image::LcuImage;
+use crate::components::text_field::{text_field, TextFieldOptions};
 use crate::match_model::{GameDetail, GameDetailTeam, MatchItem};
 use crate::theme;
+use crate::views::career::QUEUE_OPTIONS;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::collections::HashMap;
@@ -27,6 +30,8 @@ pub struct SearchView {
     pub search_error: Option<String>,
     /// 当前查询到的召唤师显示名
     pub current_summoner_name: Option<String>,
+    /// 队列筛选下拉是否展开
+    pub queue_menu_open: bool,
     /// 键盘焦点句柄
     pub focus_handle: FocusHandle,
 }
@@ -43,6 +48,7 @@ impl SearchView {
             is_searching: false,
             search_error: None,
             current_summoner_name: None,
+            queue_menu_open: false,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -110,6 +116,8 @@ impl SearchView {
         on_filter_queue: impl Fn(Option<i32>, &mut Window, &mut App) + 'static + Clone,
         on_search: impl Fn(&str, &mut Window, &mut App) + 'static + Clone,
         on_input_change: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
+        is_search_focused: bool,
+        on_toggle_queue_menu: impl Fn(bool, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let filtered = self.filtered_matches();
         let selected_game_id = self
@@ -127,7 +135,13 @@ impl SearchView {
             .gap_3()
             .overflow_hidden()
             // 顶部搜索与模式筛选卡片
-            .child(self.render_header_card(on_filter_queue, on_search, on_input_change))
+            .child(self.render_header_card(
+                on_filter_queue,
+                on_search,
+                on_input_change,
+                is_search_focused,
+                on_toggle_queue_menu,
+            ))
             // 下方主内容：左侧列表 + 右侧对抗详情
             .child(
                 div()
@@ -148,6 +162,8 @@ impl SearchView {
         on_filter_queue: impl Fn(Option<i32>, &mut Window, &mut App) + 'static + Clone,
         on_search: impl Fn(&str, &mut Window, &mut App) + 'static + Clone,
         on_input_change: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
+        is_search_focused: bool,
+        on_toggle_queue_menu: impl Fn(bool, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let query_text = self.search_query.clone();
         let is_searching = self.is_searching;
@@ -169,79 +185,28 @@ impl SearchView {
                                 .text_color(theme::TEXT_PRIMARY)
                                 .child("召唤师查询"),
                         )
-                        // 搜索输入胶囊
+                        // 搜索输入胶囊（统一走 text_field，回车提交 / 搜索中禁用）
                         .child({
-                            let q_for_key = query_text.clone();
-                            let on_search_key = on_search.clone();
-                            let on_input_key = on_input_change.clone();
-                            let focus_handle = self.focus_handle.clone();
-                            div()
-                                .id("search-query-input")
-                                .track_focus(&focus_handle)
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .bg(theme::BG_INPUT)
-                                .border_1()
-                                .border_color(if is_searching {
-                                    theme::PRIMARY
-                                } else {
-                                    theme::BORDER_SECONDARY
-                                })
-                                .rounded(px(6.0))
-                                .px_3()
-                                .py_1()
-                                .w(px(280.0))
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, _app| {
-                                    win.focus(&focus_handle);
-                                })
-                                .on_key_down(move |ev: &KeyDownEvent, win, app| {
-                                    if is_searching {
-                                        return;
-                                    }
-                                    let key_str = &ev.keystroke.key;
-                                    if key_str == "enter" {
-                                        on_search_key(&q_for_key, win, app);
-                                    } else if key_str == "backspace" {
-                                        let mut s = q_for_key.clone();
-                                        s.pop();
-                                        on_input_key(s, win, app);
-                                    } else if let Some(ref c) = ev.keystroke.key_char {
-                                        let mut s = q_for_key.clone();
-                                        s.push_str(c);
-                                        on_input_key(s, win, app);
-                                    }
-                                })
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(theme::TEXT_MUTED)
-                                                .child("🔍"),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(if self.search_query.is_empty() {
-                                                    theme::TEXT_MUTED
-                                                } else {
-                                                    theme::TEXT_PRIMARY
-                                                })
-                                                .child(if self.search_query.is_empty() {
-                                                    "输入召唤师名称#标签 (按回车或点击查询)"
-                                                        .to_string()
-                                                } else {
-                                                    self.search_query.clone()
-                                                }),
-                                        ),
-                                )
-                                .when(is_searching, |el| {
-                                    el.child(div().text_xs().text_color(theme::PRIMARY).child("⏳"))
-                                })
+                            let on_change = on_input_change.clone();
+                            let on_clear = on_input_change.clone();
+                            let on_submit = on_search.clone();
+                            text_field(
+                                "search-query-input",
+                                &query_text,
+                                "输入召唤师名称#标签 (按回车或点击查询)",
+                                px(280.0),
+                                &self.focus_handle,
+                                is_search_focused,
+                                TextFieldOptions {
+                                    disabled: is_searching,
+                                    loading: is_searching,
+                                    leading_icon: Some("🔍"),
+                                    max_chars: Some(64),
+                                },
+                                move |text, win, app| on_change(text, win, app),
+                                move |win, app| on_clear(String::new(), win, app),
+                                move |text, win, app| on_submit(text, win, app),
+                            )
                         })
                         // 查询高亮按钮
                         .child({
@@ -300,73 +265,36 @@ impl SearchView {
                             },
                         ),
                 )
-                // 快捷队列过滤胶囊标签组
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child({
-                            let cb = on_filter_queue.clone();
-                            div()
-                                .cursor_pointer()
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    cb(None, win, app);
-                                })
-                                .child(Badge::new("全部模式").variant(
-                                    if self.active_queue_filter.is_none() {
-                                        BadgeVariant::Primary
-                                    } else {
-                                        BadgeVariant::Ghost
-                                    },
-                                ))
-                        })
-                        .child({
-                            let cb = on_filter_queue.clone();
-                            div()
-                                .cursor_pointer()
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    cb(Some(420), win, app);
-                                })
-                                .child(Badge::new("单双排位").variant(
-                                    if self.active_queue_filter == Some(420) {
-                                        BadgeVariant::Primary
-                                    } else {
-                                        BadgeVariant::Ghost
-                                    },
-                                ))
-                        })
-                        .child({
-                            let cb = on_filter_queue.clone();
-                            div()
-                                .cursor_pointer()
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    cb(Some(450), win, app);
-                                })
-                                .child(Badge::new("极地大乱斗").variant(
-                                    if self.active_queue_filter == Some(450) {
-                                        BadgeVariant::Primary
-                                    } else {
-                                        BadgeVariant::Ghost
-                                    },
-                                ))
-                        })
-                        .child({
-                            let cb = on_filter_queue.clone();
-                            div()
-                                .cursor_pointer()
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    cb(Some(440), win, app);
-                                })
-                                .child(Badge::new("灵活组排").variant(
-                                    if self.active_queue_filter == Some(440) {
-                                        BadgeVariant::Primary
-                                    } else {
-                                        BadgeVariant::Ghost
-                                    },
-                                ))
-                        }),
-                ),
+                // 队列筛选下拉（Vue Search.vue:1261 的 n-select）
+                .child({
+                    let on_toggle = on_toggle_queue_menu.clone();
+                    let is_open = self.queue_menu_open;
+                    let label = QUEUE_OPTIONS
+                        .iter()
+                        .find(|o| o.id == self.active_queue_filter)
+                        .map(|o| o.label)
+                        .unwrap_or("全部")
+                        .to_string();
+                    let items = QUEUE_OPTIONS.into_iter().map(|option| {
+                        let select_cb = on_filter_queue.clone();
+                        let close_cb = on_toggle_queue_menu.clone();
+                        dropdown_item(
+                            option.label,
+                            self.active_queue_filter == option.id,
+                            move |win, app| {
+                                select_cb(option.id, win, app);
+                                close_cb(false, win, app);
+                            },
+                        )
+                    });
+                    dropdown_trigger(
+                        "search-queue-select",
+                        label,
+                        self.queue_menu_open,
+                        dropdown_menu(150.0, items),
+                        move |win, app| on_toggle(!is_open, win, app),
+                    )
+                }),
         )
     }
 

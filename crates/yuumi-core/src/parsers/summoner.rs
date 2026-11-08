@@ -11,6 +11,10 @@ pub struct SummonerInfo {
     pub display_name: Option<String>,
     pub game_name: Option<String>,
     pub tag_line: Option<String>,
+    /// 当前等级进度百分比（0-100），用于资料卡头像进度环
+    pub percent_complete_for_next_level: Option<u32>,
+    /// 隐私状态，值为 `PRIVATE` 时隐藏战绩（昵称旁显示隐私锁）
+    pub privacy: Option<String>,
     pub profile_icon_id: Option<i32>,
     pub puuid: String,
     pub summoner_id: Option<u64>,

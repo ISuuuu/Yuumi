@@ -1,10 +1,12 @@
 use gpui::prelude::*;
 use gpui::{
-    div, px, App, Application, Bounds, Context, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Point, Render, ScrollHandle, Size, StatefulInteractiveElement,
-    Styled, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
+    div, px, App, Application, Bounds, ClipboardItem, Context, FocusHandle, FontWeight,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Point, Render, ScrollHandle, Size,
+    StatefulInteractiveElement, Styled, TitlebarOptions, Window, WindowBounds, WindowHandle,
+    WindowKind, WindowOptions,
 };
 use std::sync::Arc;
+use std::time::Duration;
 
 mod agent_settings_view;
 mod asset_loader;
@@ -21,7 +23,6 @@ mod tray;
 pub mod views;
 
 use bench_overlay::{load_saved_origin, BenchOverlayView};
-use components::input::SearchInput;
 use components::sidebar::Sidebar;
 use components::titlebar::{phase_label, TitleBar};
 use game_info_view::GameInfoView;
@@ -29,7 +30,7 @@ use match_model::MatchItem;
 use services::{ConnectionStatus, LiveLcuEvent, LiveLcuService};
 use theme::Theme;
 use tray::TrayManager;
-use views::career::{CareerHeaderStats, CareerView};
+use views::career::{CareerBarAction, CareerHeaderStats, CareerView, MasteryFilterAction};
 use views::home::HomeView;
 use views::saved_players::SavedPlayersView;
 use views::search::SearchView;
@@ -81,7 +82,8 @@ fn prewarm_assets(paths: Vec<String>, cx: &mut Context<MainWindow>) {
 
 pub struct MainWindow {
     titlebar: TitleBar,
-    search_input: SearchInput,
+    /// 生涯页英雄搜索框的焦点句柄（gpui 0.2 无内置输入元素）
+    career_mastery_focus: FocusHandle,
     matches: Vec<MatchItem>,
     stats: CareerHeaderStats,
     career_view: CareerView,
@@ -121,6 +123,7 @@ impl MainWindow {
 
         let stats = CareerHeaderStats::compute(&matches);
         let career_view = CareerView::new();
+        let career_mastery_focus = cx.focus_handle();
 
         // 加载持久化的自动化开关，并用它初始化工具箱视图
         let automation = AutomationSettings::load();
@@ -130,7 +133,6 @@ impl MainWindow {
         let saved_players_view = SavedPlayersView::new(cx);
         let settings_view = SettingsView::new();
         let tray = TrayManager::new().ok();
-        let search_input = SearchInput::new("输入召唤师名 / 英雄过滤...");
 
         // 初始化真实 LCU 实时监控与调度服务
         let asset_cache = std::sync::Arc::new(yuumi_core::lcu::asset_cache::AssetCache::default());
@@ -161,7 +163,6 @@ impl MainWindow {
         // 启动即保持空态，真实战绩到达后由事件统一预热资源并重绘
         Self {
             titlebar: TitleBar::new(components::titlebar::APP_NAME),
-            search_input,
             matches,
             stats,
             career_view,
@@ -172,6 +173,7 @@ impl MainWindow {
             search_view,
             saved_players_view,
             settings_view,
+            career_mastery_focus,
             current_route: Route::Home,
             sidebar_expanded: false,
             route_history: Vec::new(),
@@ -192,7 +194,10 @@ impl MainWindow {
                 if let ConnectionStatus::Connected { summoner, .. } = &status {
                     if let Some(s) = summoner.as_ref() {
                         self.career_view.summoner = Some(s.clone());
-                        self.saved_players_view.set_self_puuid(Some(s.puuid.clone()));
+                        self.saved_players_view
+                            .set_self_puuid(Some(s.puuid.clone()));
+                        // 资料卡头像也要预热，否则 LcuImage 只显示占位文字
+                        prewarm_assets(vec![s.icon_path()], cx);
                     }
                 }
                 if matches!(status, ConnectionStatus::Disconnected) {
@@ -210,35 +215,58 @@ impl MainWindow {
                 self.stats = CareerHeaderStats::compute(&items);
                 self.search_view.matches = items.clone();
 
-                // 异步预热战绩中的新资源（英雄头像、技能、装备）
+                // 异步预热战绩资源：路径必须与渲染同源
+                // （装备格渲染用 item_icon_urls，旧逻辑按 item_id 拼 /items/{id}.png 导致缓存永远不命中）
                 let mut asset_paths = Vec::new();
                 for m in &items {
-                    if !m.display.champion_icon_url.is_empty() {
-                        asset_paths.push(m.display.champion_icon_url.clone());
-                    }
-                    if !m.display.spell1_icon_url.is_empty() {
-                        asset_paths.push(m.display.spell1_icon_url.clone());
-                    }
-                    if !m.display.spell2_icon_url.is_empty() {
-                        asset_paths.push(m.display.spell2_icon_url.clone());
-                    }
-                    for item_id in &m.display.item_ids {
-                        if *item_id > 0 {
-                            asset_paths
-                                .push(format!("/lol-game-data/assets/v1/items/{}.png", item_id));
+                    let d = &m.display;
+                    for url in [
+                        &d.champion_icon_url,
+                        &d.spell1_icon_url,
+                        &d.spell2_icon_url,
+                        &d.rune_icon_url,
+                    ] {
+                        if !url.is_empty() {
+                            asset_paths.push(url.clone());
                         }
                     }
+                    asset_paths.extend(d.item_icon_urls.iter().filter(|u| !u.is_empty()).cloned());
+                    asset_paths.extend(
+                        d.augment_icon_urls
+                            .iter()
+                            .filter(|u| !u.is_empty())
+                            .cloned(),
+                    );
                 }
+                // 20 场战绩里装备/英雄高度重复，去重以免打爆 LCU 请求
+                asset_paths.sort();
+                asset_paths.dedup();
                 prewarm_assets(asset_paths, cx);
 
                 self.matches = items;
                 cx.notify();
             }
-            LiveLcuEvent::ChampionMasteryLoaded(masteries) => {
+            LiveLcuEvent::RankedStatsLoaded(stats) => {
+                log::info!(
+                    "[MainWindow] 接收到真实排位数据: 队列数={}",
+                    stats.queue_map.len()
+                );
+                self.career_view.ranked = Some(stats);
+                cx.notify();
+            }
+            LiveLcuEvent::ChampionMasteryLoaded(mut masteries) => {
                 log::info!(
                     "[MainWindow] 接收到真实熟练度数据: count={}",
                     masteries.len()
                 );
+                // 解析层不依赖资产字典，英雄名在此用已预加载的资源补全
+                if let Some(assets) = self.game_assets.as_ref() {
+                    for item in masteries.iter_mut() {
+                        if let Some(name) = assets.champions.get(&(item.champion_id as i32)) {
+                            item.champion_name = name.clone();
+                        }
+                    }
+                }
                 let asset_paths: Vec<String> = masteries
                     .iter()
                     .map(|m| m.champion_icon_url.clone())
@@ -294,23 +322,26 @@ impl MainWindow {
                                 .unwrap_or("");
                             let game_id = info.game_id.unwrap_or(0);
                             let queue_type = info.queue_id.to_string();
-                            let players_to_record: Vec<yuumi_core::storage::GamePlayerRecord> = info
-                                .players()
-                                .filter(|p| !p.is_local_player && !p.puuid.is_empty())
-                                .map(|p| yuumi_core::storage::GamePlayerRecord {
-                                    puuid: p.puuid.clone(),
-                                    summoner_name: p.summoner_name.clone(),
-                                    tag_line: if p.tag_line.is_empty() {
-                                        None
-                                    } else {
-                                        Some(p.tag_line.clone())
-                                    },
-                                    profile_icon_id: 0,
-                                    champion_id: p.champion_id,
-                                })
-                                .collect();
+                            let players_to_record: Vec<yuumi_core::storage::GamePlayerRecord> =
+                                info.players()
+                                    .filter(|p| !p.is_local_player && !p.puuid.is_empty())
+                                    .map(|p| yuumi_core::storage::GamePlayerRecord {
+                                        puuid: p.puuid.clone(),
+                                        summoner_name: p.summoner_name.clone(),
+                                        tag_line: if p.tag_line.is_empty() {
+                                            None
+                                        } else {
+                                            Some(p.tag_line.clone())
+                                        },
+                                        profile_icon_id: 0,
+                                        champion_id: p.champion_id,
+                                    })
+                                    .collect();
 
-                            if !players_to_record.is_empty() && !self_puuid.is_empty() && game_id > 0 {
+                            if !players_to_record.is_empty()
+                                && !self_puuid.is_empty()
+                                && game_id > 0
+                            {
                                 match s.record_encounters(
                                     &players_to_record,
                                     self_puuid,
@@ -511,9 +542,91 @@ impl MainWindow {
         });
     }
 
-    pub fn clear_search(&mut self, cx: &mut Context<Self>) {
-        self.search_input.clear();
+    /// 控制战绩查询页队列下拉的开合
+    pub fn set_search_queue_menu(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.search_view.queue_menu_open = open;
         cx.notify();
+    }
+
+    /// 处理近期统计横条的队列筛选与浮层开合
+    pub fn apply_career_bar_action(&mut self, action: CareerBarAction, cx: &mut Context<Self>) {
+        match action {
+            CareerBarAction::TogglePopup(kind) => {
+                self.career_view.popup = if self.career_view.popup == Some(kind) {
+                    None
+                } else {
+                    Some(kind)
+                };
+            }
+            CareerBarAction::ClosePopup => self.career_view.popup = None,
+            CareerBarAction::SelectQueue(id) => {
+                self.career_view.selected_queue = id;
+                self.career_view.popup = None;
+            }
+        }
+        cx.notify();
+    }
+
+    /// 更新熟练度页的英雄搜索词
+    pub fn set_mastery_query(&mut self, text: String, cx: &mut Context<Self>) {
+        self.career_view.mastery_query = text;
+        cx.notify();
+    }
+
+    /// 应用熟练度页的筛选 / 排序动作
+    pub fn apply_mastery_filter(&mut self, action: MasteryFilterAction, cx: &mut Context<Self>) {
+        match action {
+            MasteryFilterAction::Chest(value) => self.career_view.mastery_chest = value,
+            MasteryFilterAction::Level(value) => self.career_view.mastery_level = value,
+            MasteryFilterAction::Sort(value) => self.career_view.mastery_sort = value,
+            MasteryFilterAction::ToggleSortDir => {
+                self.career_view.mastery_sort_desc = !self.career_view.mastery_sort_desc
+            }
+            MasteryFilterAction::ToggleDropdown(kind) => {
+                let slot = &mut self.career_view.mastery_dropdown;
+                *slot = if *slot == Some(kind) {
+                    None
+                } else {
+                    Some(kind)
+                };
+            }
+            MasteryFilterAction::CloseDropdown => self.career_view.mastery_dropdown = None,
+        }
+        cx.notify();
+    }
+
+    /// 复制当前召唤师的 Riot ID，并在资料卡上短暂回显反馈
+    pub fn copy_riot_id(&mut self, cx: &mut Context<Self>) {
+        let text = match self.career_view.summoner.as_ref() {
+            Some(summoner) => summoner.full_name(),
+            None => return,
+        };
+
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.career_view.copied = true;
+        cx.notify();
+
+        cx.spawn(async move |entity, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(1500))
+                .await;
+            let _ = entity.update(cx, |this, cx| {
+                this.career_view.copied = false;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// 跳转到当前召唤师的战绩查询（对照 Vue `Career.vue` 的 `goToHistory`）
+    pub fn open_own_history(&mut self, cx: &mut Context<Self>) {
+        let name = match self.career_view.summoner.as_ref() {
+            Some(summoner) => summoner.full_name(),
+            None => return,
+        };
+
+        self.perform_search(&name, cx);
+        self.switch_route(Route::Search, cx);
     }
 
     pub fn switch_route(&mut self, route: Route, cx: &mut Context<Self>) {
@@ -988,12 +1101,18 @@ impl Render for MainWindow {
                                 let view = view_entity.clone();
                                 let view_matches = view_entity.clone();
                                 let view_refresh = view_entity.clone();
+                                let view_copy = view_entity.clone();
+                                let view_history = view_entity.clone();
+                                let view_query = view_entity.clone();
+                                let view_filter = view_entity.clone();
+                                let view_bar = view_entity.clone();
                                 el.child(self.career_view.render(
                                     &self.matches,
                                     stats,
                                     move |target_tab, _window, app| {
                                         view.update(app, |this, cx| {
                                             this.career_view.active_tab = target_tab;
+                                            this.career_view.popup = None;
                                             cx.notify();
                                         });
                                     },
@@ -1005,6 +1124,30 @@ impl Render for MainWindow {
                                     move |_window, app| {
                                         view_refresh.update(app, |this, cx| {
                                             this.refresh_career(cx);
+                                        });
+                                    },
+                                    move |_window, app| {
+                                        view_copy.update(app, |this, cx| this.copy_riot_id(cx));
+                                    },
+                                    move |_window, app| {
+                                        view_history
+                                            .update(app, |this, cx| this.open_own_history(cx));
+                                    },
+                                    &self.career_mastery_focus,
+                                    self.career_mastery_focus.is_focused(window),
+                                    move |text: String, _window, app| {
+                                        view_query.update(app, |this, cx| {
+                                            this.set_mastery_query(text, cx)
+                                        });
+                                    },
+                                    move |action, _window, app| {
+                                        view_filter.update(app, |this, cx| {
+                                            this.apply_mastery_filter(action, cx)
+                                        });
+                                    },
+                                    move |action: CareerBarAction, _window, app| {
+                                        view_bar.update(app, |this, cx| {
+                                            this.apply_career_bar_action(action, cx)
                                         });
                                     },
                                 ))
@@ -1023,6 +1166,7 @@ impl Render for MainWindow {
                             })
                             .when(self.current_route == Route::Search, |el| {
                                 let view = view_entity.clone();
+                                let view_sq = view.clone();
                                 let on_select_match = {
                                     let v = view.clone();
                                     move |game_id: u64, _win: &mut Window, app: &mut App| {
@@ -1063,68 +1207,75 @@ impl Render for MainWindow {
                                     on_filter_queue,
                                     on_search,
                                     on_input_change,
+                                    self.search_view.focus_handle.is_focused(window),
+                                    move |open, _window, app| {
+                                        view_sq.update(app, |this, cx| {
+                                            this.set_search_queue_menu(open, cx)
+                                        });
+                                    },
                                 ))
                             })
                             .when(self.current_route == Route::SavedPlayers, |el| {
                                 let view = view_entity.clone();
-                                let on_action = move |action: views::saved_players::SavedPlayersAction, _win: &mut Window, app: &mut App| {
-                                    view.update(app, |this, cx| {
-                                        use views::saved_players::SavedPlayersAction;
-                                        match action {
-                                            SavedPlayersAction::FilterTag(tag) => {
-                                                this.saved_players_view.active_tag_filter = tag;
-                                                this.reload_saved_players(cx);
+                                let on_action =
+                                    move |action: views::saved_players::SavedPlayersAction,
+                                          _win: &mut Window,
+                                          app: &mut App| {
+                                        view.update(app, |this, cx| {
+                                            use views::saved_players::SavedPlayersAction;
+                                            match action {
+                                                SavedPlayersAction::FilterTag(tag) => {
+                                                    this.saved_players_view.active_tag_filter = tag;
+                                                    this.reload_saved_players(cx);
+                                                }
+                                                SavedPlayersAction::TogglePin(puuid) => {
+                                                    this.saved_players_view.toggle_pin(&puuid);
+                                                }
+                                                SavedPlayersAction::ToggleExpand(puuid) => {
+                                                    this.saved_players_view.toggle_expand(&puuid);
+                                                }
+                                                SavedPlayersAction::RemovePlayer(puuid) => {
+                                                    this.saved_players_view.remove_player(&puuid);
+                                                }
+                                                SavedPlayersAction::StartEdit(puuid) => {
+                                                    this.saved_players_view.start_edit(&puuid);
+                                                }
+                                                SavedPlayersAction::SaveEdit(puuid) => {
+                                                    this.saved_players_view.save_edit(&puuid);
+                                                }
+                                                SavedPlayersAction::CancelEdit => {
+                                                    this.saved_players_view.cancel_edit();
+                                                }
+                                                SavedPlayersAction::SetEditTag(tag) => {
+                                                    this.saved_players_view.set_editing_tag(&tag);
+                                                }
+                                                SavedPlayersAction::LoadMore => {
+                                                    this.load_more_saved_players(cx);
+                                                }
+                                                SavedPlayersAction::SearchInput(q) => {
+                                                    this.saved_players_view.search_query = q;
+                                                    this.reload_saved_players(cx);
+                                                }
+                                                SavedPlayersAction::SearchSubmit => {
+                                                    this.reload_saved_players(cx);
+                                                }
+                                                SavedPlayersAction::SearchClear => {
+                                                    this.saved_players_view.search_query.clear();
+                                                    this.reload_saved_players(cx);
+                                                }
+                                                SavedPlayersAction::EditTagInput(t) => {
+                                                    this.saved_players_view.editing_tag_buffer = t;
+                                                }
+                                                SavedPlayersAction::EditNotesInput(n) => {
+                                                    this.saved_players_view.editing_notes_buffer =
+                                                        n;
+                                                }
                                             }
-                                            SavedPlayersAction::TogglePin(puuid) => {
-                                                this.saved_players_view.toggle_pin(&puuid);
-                                            }
-                                            SavedPlayersAction::ToggleExpand(puuid) => {
-                                                this.saved_players_view.toggle_expand(&puuid);
-                                            }
-                                            SavedPlayersAction::RemovePlayer(puuid) => {
-                                                this.saved_players_view.remove_player(&puuid);
-                                            }
-                                            SavedPlayersAction::StartEdit(puuid) => {
-                                                this.saved_players_view.start_edit(&puuid);
-                                            }
-                                            SavedPlayersAction::SaveEdit(puuid) => {
-                                                this.saved_players_view.save_edit(&puuid);
-                                            }
-                                            SavedPlayersAction::CancelEdit => {
-                                                this.saved_players_view.cancel_edit();
-                                            }
-                                            SavedPlayersAction::SetEditTag(tag) => {
-                                                this.saved_players_view.set_editing_tag(&tag);
-                                            }
-                                            SavedPlayersAction::LoadMore => {
-                                                this.load_more_saved_players(cx);
-                                            }
-                                            SavedPlayersAction::SearchInput(q) => {
-                                                this.saved_players_view.search_query = q;
-                                                this.reload_saved_players(cx);
-                                            }
-                                            SavedPlayersAction::SearchSubmit => {
-                                                this.reload_saved_players(cx);
-                                            }
-                                            SavedPlayersAction::SearchClear => {
-                                                this.saved_players_view.search_query.clear();
-                                                this.reload_saved_players(cx);
-                                            }
-                                            SavedPlayersAction::EditTagInput(t) => {
-                                                this.saved_players_view.editing_tag_buffer = t;
-                                            }
-                                            SavedPlayersAction::EditNotesInput(n) => {
-                                                this.saved_players_view.editing_notes_buffer = n;
-                                            }
-                                        }
-                                        cx.notify();
-                                    });
-                                };
+                                            cx.notify();
+                                        });
+                                    };
 
-                                el.child(self.saved_players_view.render_panel(
-                                    window,
-                                    on_action,
-                                ))
+                                el.child(self.saved_players_view.render_panel(window, on_action))
                             })
                             .when(self.current_route == Route::Tools, |el| {
                                 let view = view_entity.clone();

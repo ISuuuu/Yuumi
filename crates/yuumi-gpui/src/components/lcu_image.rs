@@ -160,7 +160,23 @@ impl IntoElement for LcuImage {
         }
 
         if let Some(render_img) = cached_img {
-            container.child(img(render_img).size_full().object_fit(self.fit))
+            // 图片元素自带圆角：GPUI 的 img 不随父级 overflow_hidden 的圆角裁切，
+            // 必须把圆角落到 img 自身的 corner_radii 上才会生效
+            let image = match self.shape {
+                LcuImageShape::Circle => img(render_img)
+                    .size_full()
+                    .object_fit(self.fit)
+                    .rounded_full(),
+                LcuImageShape::ItemSlot => img(render_img)
+                    .size_full()
+                    .object_fit(self.fit)
+                    .rounded(px(3.0)),
+                LcuImageShape::Rounded => img(render_img)
+                    .size_full()
+                    .object_fit(self.fit)
+                    .rounded_lg(),
+            };
+            container.child(image)
         } else {
             // 占位显示：纯白水晶极光风格柔和微光 + 占位文本
             if let Some(txt) = self.placeholder_text {

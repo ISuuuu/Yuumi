@@ -18,8 +18,8 @@ use yuumi_core::lcu::{
     ws::{start_ws, LcuWsEvent, LcuWsHandle},
 };
 use yuumi_core::parsers::game_info::{
-    fetch_live_game_info, ChampSelectSnapshot, GameInfoSource, GameflowSessionSnapshot,
-    LiveGameInfo,
+    fetch_live_game_info, fetch_ranked_stats, ChampSelectSnapshot, GameInfoSource,
+    GameflowSessionSnapshot, LiveGameInfo, RankedStats,
 };
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
 use yuumi_core::parsers::mastery::ChampionMasteryItem;
@@ -57,6 +57,8 @@ pub enum LiveLcuEvent {
     MatchHistoryLoaded(Vec<MatchDisplay>),
     ChampionMasteryLoaded(Vec<ChampionMasteryItem>),
     LootSummaryLoaded(EssenceBalances, Vec<LootInventoryItem>),
+    /// 本人排位数据（单排 / 灵活等队列段位）
+    RankedStatsLoaded(RankedStats),
     /// 10 人对局信息开始拉取（前端置加载态）
     GameInfoLoading,
     /// 10 人对局信息快照更新（退回大厅后仍保留最后一次）
@@ -467,7 +469,27 @@ impl LiveLcuService {
             }
         });
 
-        let _ = tokio::join!(matches_task, mastery_task, loot_task);
+        // 并发拉取排位数据（单排 / 灵活）
+        let c_ranked = client.clone();
+        let puuid_ranked = summoner.puuid.clone();
+        let event_tx_ranked = self.event_tx.clone();
+        let ranked_task = tokio::spawn(async move {
+            match fetch_ranked_stats(&c_ranked, &puuid_ranked).await {
+                Ok(stats) => {
+                    log::info!(
+                        "[LiveLcu] 成功拉取排位数据: 队列数={}",
+                        stats.queue_map.len()
+                    );
+                    let _ = event_tx_ranked.send(LiveLcuEvent::RankedStatsLoaded(stats));
+                }
+                Err(e) => {
+                    log::warn!("[LiveLcu] 拉取排位数据失败: {}", e);
+                }
+            }
+        });
+
+        let _ = tokio::join!(matches_task, mastery_task, loot_task, ranked_task);
+
         log::info!("[LiveLcu] 召唤师生涯数据全部拉取完毕并派发完成");
     }
 
