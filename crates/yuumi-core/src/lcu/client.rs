@@ -42,6 +42,7 @@ pub const ALLOWED_API_PREFIXES: &[&str] = &[
     "/lol-login/",
     "/lol-replays/",
     "/lol-inventory/",
+    "/lol-loot/",
     "/lol-champions/",
     "/riotclient/",
     "/system/",

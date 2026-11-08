@@ -4,7 +4,6 @@ use gpui::{
     Point, Render, Size, StatefulInteractiveElement, Styled, TitlebarOptions, Window, WindowBounds,
     WindowHandle, WindowKind, WindowOptions,
 };
-use std::path::Path;
 use std::sync::Arc;
 
 mod agent_settings_view;
@@ -24,8 +23,8 @@ use bench_overlay::{load_saved_origin, BenchOverlayView};
 use components::input::SearchInput;
 use components::sidebar::Sidebar;
 use components::titlebar::TitleBar;
-use game_info_view::{load_mock_game_info, GameInfoData, GameInfoView};
-use match_model::{load_fixture_game_details, load_real_fixtures, MatchItem};
+use game_info_view::GameInfoView;
+use match_model::MatchItem;
 use services::{ConnectionStatus, LiveLcuEvent, LiveLcuService};
 use theme::Theme;
 use tray::TrayManager;
@@ -38,6 +37,7 @@ use views::tools::ToolsView;
 use views::Route;
 use yuumi_core::agents::{AutomationSettings, ChampSelectSession, GamePhase};
 use yuumi_core::lcu::game_data::GameDataAssets;
+use yuumi_core::parsers::game_info::LiveGameInfo;
 
 pub const MAIN_WINDOW_TITLE: &str = "Yuumi · 英雄联盟对局助手 (GPUI 高性能原生内核)";
 pub const BENCH_WINDOW_TITLE: &str = "Yuumi - 大乱斗板凳席悬浮窗";
@@ -77,7 +77,12 @@ pub struct MainWindow {
     matches: Vec<MatchItem>,
     stats: CareerHeaderStats,
     career_view: CareerView,
-    game_info: GameInfoData,
+    /// 当前 10 人对局信息快照（由 LiveLcuService 实时推送，退回大厅后保留最后一次）
+    game_info: Option<Arc<LiveGameInfo>>,
+    /// 是否正在并发拉取 10 人数据
+    game_info_loading: bool,
+    /// 当前 gameflow 阶段
+    current_phase: String,
     tools_view: ToolsView,
     search_view: SearchView,
     saved_players_view: SavedPlayersView,
@@ -97,27 +102,17 @@ pub struct MainWindow {
 
 impl MainWindow {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        // 尝试从项目 testdata 目录加载 8 份真实 LCU 对局抓包快照
-        let fixture_path = Path::new("../../src-tauri/testdata/match");
-        let alt_fixture_path = Path::new("src-tauri/testdata/match");
-        let matches = if fixture_path.exists() {
-            load_real_fixtures(fixture_path)
-        } else if alt_fixture_path.exists() {
-            load_real_fixtures(alt_fixture_path)
-        } else {
-            Vec::new()
-        };
+        // 战绩与 10 人对局信息全部来自真实 LCU 数据，启动时保持平滑空态
+        let matches: Vec<MatchItem> = Vec::new();
 
         let stats = CareerHeaderStats::compute(&matches);
         let career_view = CareerView::new();
-        let game_info = load_mock_game_info();
 
         // 加载持久化的自动化开关，并用它初始化工具箱视图
         let automation = AutomationSettings::load();
         let tools_view = ToolsView::from_settings(&automation);
 
-        let mut search_view = SearchView::new(cx).with_matches(matches.clone());
-        search_view.details_cache = load_fixture_game_details();
+        let search_view = SearchView::new(cx).with_matches(matches.clone());
         let saved_players_view = SavedPlayersView::new();
         let settings_view = SettingsView::new();
         let tray = TrayManager::new().ok();
@@ -149,22 +144,16 @@ impl MainWindow {
         })
         .detach();
 
-        // 异步预热战绩卡片中的核心资源（英雄头像等），拉取后触发视图重绘
-        let asset_paths: Vec<String> = matches
-            .iter()
-            .map(|m| m.display.champion_icon_url.clone())
-            .filter(|u| !u.is_empty())
-            .collect();
-
-        prewarm_assets(asset_paths, cx);
-
+        // 启动即保持空态，真实战绩到达后由事件统一预热资源并重绘
         Self {
             titlebar: TitleBar::new(MAIN_WINDOW_TITLE),
             search_input,
             matches,
             stats,
             career_view,
-            game_info,
+            game_info: None,
+            game_info_loading: false,
+            current_phase: "None".to_string(),
             tools_view,
             search_view,
             saved_players_view,
@@ -191,6 +180,7 @@ impl MainWindow {
                 if matches!(status, ConnectionStatus::Disconnected) {
                     // 客户端断开：立即收起悬浮窗，避免残留空窗
                     self.bench_session = None;
+                    self.game_info_loading = false;
                     self.close_bench_overlay(cx);
                 }
                 self.connection_status = status;
@@ -216,7 +206,8 @@ impl MainWindow {
                     }
                     for item_id in &m.display.item_ids {
                         if *item_id > 0 {
-                            asset_paths.push(format!("/lol-game-data/assets/v1/items/{}.png", item_id));
+                            asset_paths
+                                .push(format!("/lol-game-data/assets/v1/items/{}.png", item_id));
                         }
                     }
                 }
@@ -226,7 +217,10 @@ impl MainWindow {
                 cx.notify();
             }
             LiveLcuEvent::ChampionMasteryLoaded(masteries) => {
-                log::info!("[MainWindow] 接收到真实熟练度数据: count={}", masteries.len());
+                log::info!(
+                    "[MainWindow] 接收到真实熟练度数据: count={}",
+                    masteries.len()
+                );
                 let asset_paths: Vec<String> = masteries
                     .iter()
                     .map(|m| m.champion_icon_url.clone())
@@ -254,11 +248,46 @@ impl MainWindow {
             }
             LiveLcuEvent::GamePhaseChanged(phase) => {
                 log::info!("[MainWindow] 接收到游戏阶段更新: {:?}", phase);
+                self.current_phase = phase.as_str().to_string();
+                if !matches!(
+                    self.current_phase.as_str(),
+                    "ChampSelect" | "GameStart" | "InProgress" | "Reconnect"
+                ) {
+                    self.game_info_loading = false;
+                }
                 if phase != GamePhase::ChampSelect {
                     // 选人结束（或进入其它阶段）即收起板凳席悬浮窗
                     self.bench_session = None;
                     self.close_bench_overlay(cx);
                 }
+                cx.notify();
+            }
+            LiveLcuEvent::GameInfoLoading => {
+                self.game_info_loading = true;
+                cx.notify();
+            }
+            LiveLcuEvent::GameInfoUpdated(info) => {
+                log::info!(
+                    "[MainWindow] 对局信息更新: {} 蓝{}人 vs 红{}人",
+                    info.phase_label,
+                    info.blue_team.len(),
+                    info.red_team.len()
+                );
+                // 预热 10 人英雄头像，避免看板首帧只有占位块
+                let asset_paths: Vec<String> = info
+                    .players()
+                    .filter(|p| p.champion_id > 0)
+                    .map(|p| {
+                        format!(
+                            "/lol-game-data/assets/v1/champion-icons/{}.png",
+                            p.champion_id
+                        )
+                    })
+                    .collect();
+                prewarm_assets(asset_paths, cx);
+
+                self.game_info = Some(info);
+                self.game_info_loading = false;
                 cx.notify();
             }
             LiveLcuEvent::ChampSelectUpdated(session) => {
@@ -622,13 +651,8 @@ impl MainWindow {
             }
 
             let _ = entity.update(cx, |this, cx| {
-                // 如果没有网络或真实拉取失败，尝试使用现有的 mock 详情作为保底
-                if let Some(first_detail) = this.search_view.details_cache.values().next().cloned()
-                {
-                    let mut fallback = first_detail;
-                    fallback.game_id = game_id;
-                    this.search_view.insert_game_detail(game_id, fallback);
-                }
+                // 拉取失败时保持空态，不再用其它对局详情冒充当前对局
+                log::warn!("[MainWindow] 对局详情拉取失败: game_id={}", game_id);
                 this.search_view.is_loading_detail = false;
                 cx.notify();
             });
@@ -721,7 +745,16 @@ impl Render for MainWindow {
                                 ))
                             })
                             .when(self.current_route == Route::GameInfo, |el| {
-                                el.p_4().child(GameInfoView::render(&self.game_info))
+                                let connected = matches!(
+                                    self.connection_status,
+                                    ConnectionStatus::Connected { .. }
+                                );
+                                el.p_4().child(GameInfoView::render(
+                                    self.game_info.as_deref(),
+                                    self.current_phase.as_str(),
+                                    self.game_info_loading,
+                                    connected,
+                                ))
                             })
                             .when(self.current_route == Route::Search, |el| {
                                 let view = view_entity.clone();
