@@ -19,6 +19,7 @@ url = "2.5"
 percent-encoding = "2"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+tokio-util = "0.7"
 futures-util = "0.3"
 rustls = { version = "0.23", features = ["ring"] }
 

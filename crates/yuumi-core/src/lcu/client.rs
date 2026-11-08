@@ -228,6 +228,18 @@ impl LcuClient {
         self.request("POST", path, body, false).await
     }
 
+    pub async fn patch(&self, path: &str, body: Option<Value>) -> Result<Value, String> {
+        self.request("PATCH", path, body, false).await
+    }
+
+    pub async fn put(&self, path: &str, body: Option<Value>) -> Result<Value, String> {
+        self.request("PUT", path, body, false).await
+    }
+
+    pub async fn delete(&self, path: &str) -> Result<Value, String> {
+        self.request("DELETE", path, None, false).await
+    }
+
     pub async fn get_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
         let url = format!("https://127.0.0.1:{}{}", self.port, path);
         let resp = self

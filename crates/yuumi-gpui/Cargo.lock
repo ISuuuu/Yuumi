@@ -8059,6 +8059,7 @@ dependencies = [
  "sysinfo 0.33.1",
  "tokio",
  "tokio-tungstenite",
+ "tokio-util",
  "url",
 ]
 
