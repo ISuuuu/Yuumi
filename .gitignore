@@ -25,6 +25,7 @@ dist-ssr
 
 # Tauri
 src-tauri/target/
+crates/**/target/
 
 # LCU 抓包暂存区（fixtures:capture 产出，挑选后迁入 real/）
 src-tauri/testdata/match/_capture/

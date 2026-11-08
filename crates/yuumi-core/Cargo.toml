@@ -1,0 +1,23 @@
+[package]
+name = "yuumi-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core business logic and LCU client for Yuumi"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "gzip"] }
+sysinfo = "0.33"
+regex-lite = "0.1"
+base64 = "0.22"
+dirs = "6"
+log = { version = "0.4", features = ["std"] }
+chrono = "0.4"
+url = "2.5"
+percent-encoding = "2"
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

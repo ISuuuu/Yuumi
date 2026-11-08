@@ -1,7 +1,7 @@
+use crate::match_model::{compute_match_stats, position_to_zh, MatchItem};
+use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use crate::match_model::{position_to_zh, MatchItem};
-use crate::theme::Theme;
 
 pub struct CareerHeaderStats {
     pub total_games: usize,
@@ -17,7 +17,8 @@ pub struct CareerHeaderStats {
 
 impl CareerHeaderStats {
     pub fn compute(matches: &[MatchItem]) -> Self {
-        let total_games = matches.len();
+        let stats = compute_match_stats(matches);
+        let total_games = stats.total_matches;
         if total_games == 0 {
             return Self {
                 total_games: 0,
@@ -32,49 +33,27 @@ impl CareerHeaderStats {
             };
         }
 
-        let mut wins = 0;
-        let mut losses = 0;
-        let mut remakes = 0;
         let mut total_k = 0;
         let mut total_d = 0;
         let mut total_a = 0;
 
         for m in matches {
-            if m.remake {
-                remakes += 1;
-            } else if m.win {
-                wins += 1;
-            } else {
-                losses += 1;
-            }
-            total_k += m.kills;
-            total_d += m.deaths;
-            total_a += m.assists;
+            total_k += m.display.kills;
+            total_d += m.display.deaths;
+            total_a += m.display.assists;
         }
-
-        let valid_games = wins + losses;
-        let win_rate = if valid_games > 0 {
-            (wins as f32 / valid_games as f32) * 100.0
-        } else {
-            0.0
-        };
 
         let avg_kills = total_k as f32 / total_games as f32;
         let avg_deaths = total_d as f32 / total_games as f32;
         let avg_assists = total_a as f32 / total_games as f32;
-        let avg_kda_ratio = if total_d > 0 {
-            (total_k + total_a) as f32 / total_d as f32
-        } else {
-            (total_k + total_a) as f32
-        };
 
         Self {
             total_games,
-            wins,
-            losses,
-            remakes,
-            win_rate,
-            avg_kda_ratio,
+            wins: stats.win_count,
+            losses: stats.loss_count,
+            remakes: stats.remake_count,
+            win_rate: stats.win_rate as f32,
+            avg_kda_ratio: stats.avg_kda as f32,
             avg_kills,
             avg_deaths,
             avg_assists,
@@ -252,7 +231,7 @@ impl CareerView {
     ) -> impl IntoElement {
         let toggle_cb = on_toggle.clone();
 
-        let (bg_color, border_color, bar_color, win_text_color, win_label) = if m.remake {
+        let (bg_color, border_color, bar_color, win_text_color, win_label) = if m.display.remake {
             (
                 Theme::REMAKE_BG,
                 Theme::REMAKE_BORDER,
@@ -260,7 +239,7 @@ impl CareerView {
                 Theme::REMAKE_TEXT,
                 "重开",
             )
-        } else if m.win {
+        } else if m.display.win {
             (
                 Theme::WIN_BG,
                 Theme::WIN_BORDER,
@@ -278,17 +257,25 @@ impl CareerView {
             )
         };
 
-        let champion_name = m.champion_name.clone();
-        let queue_name = m.queue_name.clone();
-        let duration_str = m.duration_str.clone();
-        let time_str = m.time_str.clone();
-        let kda_ratio = m.kda_ratio.clone();
-        let cs_str = format!("{} 刀 ({})", m.cs, m.cs_per_minute);
-        let gold_str = m.gold_str.clone();
-        let damage_str = m.damage_str.clone();
-        let pos_str = position_to_zh(m.position.as_deref());
-        let items = m.items;
+        let champion_name = m.display.name.clone();
+        let queue_name = m.display.map.clone();
+        let duration_str = m.display.duration.clone();
+        let time_str = m.display.short_time.clone();
+        let kda_ratio = m.display.kda.clone();
+        let cs_str = format!("{} 刀", m.display.cs);
+        let gold_str = format!("{:.1}k", m.display.gold as f32 / 1000.0);
+        let damage_str = format!("{:.1}k", m.display.total_damage as f32 / 1000.0);
+        let pos_str = position_to_zh(m.display.position.as_deref());
+        let mut items = [0i32; 7];
+        for (i, &it) in m.display.item_ids.iter().take(7).enumerate() {
+            items[i] = it;
+        }
         let is_expanded = m.expanded;
+        let champ_level = m.display.champ_level;
+        let kills = m.display.kills;
+        let deaths = m.display.deaths;
+        let assists = m.display.assists;
+        let game_id = m.display.game_id;
 
         div()
             .w_full()
@@ -359,7 +346,7 @@ impl CareerView {
                                                     .bg(rgba(0x000000bb))
                                                     .text_xs()
                                                     .text_color(rgb(0xffffff))
-                                                    .child(format!("{}", m.champ_level)),
+                                                    .child(format!("{}", champ_level)),
                                             ),
                                     )
                                     // 技能与主符文占位
@@ -452,7 +439,7 @@ impl CareerView {
                                     .text_base()
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(Theme::TEXT_PRIMARY)
-                                    .child(format!("{} / {} / {}", m.kills, m.deaths, m.assists)),
+                                    .child(format!("{} / {} / {}", kills, deaths, assists)),
                             )
                             .child(
                                 div()
@@ -551,7 +538,7 @@ impl CareerView {
                         .text_color(Theme::TEXT_SECONDARY)
                         .child(div().child(format!(
                             "对局编号: {} · 伤害占比: 26.4% · 承受伤害: 18.2k",
-                            m.game_id
+                            game_id
                         )))
                         .child(
                             div()
