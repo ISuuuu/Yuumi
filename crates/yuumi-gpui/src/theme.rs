@@ -52,6 +52,30 @@ impl Theme {
     pub const ITEM_SLOT_BG: Hsla = const_hsla(214.0 / 360.0, 0.20, 0.90, 0.70);
     pub const ITEM_SLOT_BORDER: Hsla = const_hsla(214.0 / 360.0, 0.25, 0.82, 0.80);
 
+    // ── 阵营与对局信息（GameInfo）色板 ──
+    pub const BLUE_SIDE_ACCENT: Hsla = const_hsla(205.0 / 360.0, 0.90, 0.52, 1.0); // 蓝方极光蓝
+    pub const BLUE_SIDE_BG: Hsla = const_hsla(205.0 / 360.0, 0.70, 0.96, 0.90);
+    pub const BLUE_SIDE_BORDER: Hsla = const_hsla(205.0 / 360.0, 0.60, 0.85, 0.85);
+
+    pub const RED_SIDE_ACCENT: Hsla = const_hsla(350.0 / 360.0, 0.85, 0.55, 1.0); // 红方极光绯红
+    pub const RED_SIDE_BG: Hsla = const_hsla(350.0 / 360.0, 0.70, 0.97, 0.90);
+    pub const RED_SIDE_BORDER: Hsla = const_hsla(350.0 / 360.0, 0.50, 0.86, 0.85);
+
+    // ── 组队主题强调色（高辨识度色板） ──
+    pub const PREMADE_COLOR_1: Hsla = const_hsla(160.0 / 360.0, 0.90, 0.38, 1.0); // 翡翠青
+    pub const PREMADE_COLOR_2: Hsla = const_hsla(38.0 / 360.0, 0.95, 0.45, 1.0);  // 琥珀金
+    pub const PREMADE_COLOR_3: Hsla = const_hsla(270.0 / 360.0, 0.80, 0.55, 1.0); // 罗兰紫
+    pub const PREMADE_COLOR_4: Hsla = const_hsla(15.0 / 360.0, 0.95, 0.52, 1.0);  // 珊瑚橙
+
+    pub fn premade_color(idx: usize) -> Hsla {
+        match idx % 4 {
+            0 => Self::PREMADE_COLOR_1,
+            1 => Self::PREMADE_COLOR_2,
+            2 => Self::PREMADE_COLOR_3,
+            _ => Self::PREMADE_COLOR_4,
+        }
+    }
+
     // ── 字体族设定 ──
     pub fn font_family() -> SharedString {
         "Microsoft YaHei UI, Segoe UI, PingFang SC, sans-serif".into()

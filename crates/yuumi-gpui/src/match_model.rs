@@ -178,4 +178,35 @@ mod tests {
         assert_eq!(stats.total_matches, 20);
         assert!(stats.win_rate > 0);
     }
+
+    #[test]
+    fn test_game_info_mock_data() {
+        let info = crate::game_info_view::load_mock_game_info();
+        assert_eq!(info.blue_team.len(), 5);
+        assert_eq!(info.red_team.len(), 5);
+        assert_eq!(info.user_side, Some(yuumi_core::gameflow::team_builder::MapSide::Blue));
+        assert!(info.side_matched);
+
+        let local_player = info
+            .blue_team
+            .iter()
+            .find(|p| p.is_local_player)
+            .expect("必须包含本机玩家");
+        assert_eq!(local_player.summoner_name, "悠米本米");
+        assert_eq!(local_player.win_rate, 80);
+
+        let blue_premade: Vec<_> = info
+            .blue_team
+            .iter()
+            .filter(|p| p.premade_group_id.is_some())
+            .collect();
+        assert_eq!(blue_premade.len(), 2);
+
+        let red_premade: Vec<_> = info
+            .red_team
+            .iter()
+            .filter(|p| p.premade_group_id.is_some())
+            .collect();
+        assert_eq!(red_premade.len(), 3);
+    }
 }

@@ -18,6 +18,15 @@ chrono = "0.4"
 url = "2.5"
 percent-encoding = "2"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+rustls = { version = "0.23", features = ["ring"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# MSVC 链接 cdylib/staticlib 时必然生成 .dll.lib/.exp 导入库，
+# 新版 rustc 默认 warn(linker_messages) 刷屏，无害，此处全局允许。
+[lints.rust]
+linker_messages = "allow"
+

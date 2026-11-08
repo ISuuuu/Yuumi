@@ -12,6 +12,7 @@ chrono = "0.4"
 tray-icon = "0.19"
 rfd = "0.15"
 image = "0.25"
+smallvec = "1"
 windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Foundation",

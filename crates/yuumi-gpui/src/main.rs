@@ -1,13 +1,16 @@
+use gpui::prelude::*;
 use gpui::{
-    div, px, Bounds, Context, FontWeight, InteractiveElement, IntoElement,
+    div, hsla, px, Bounds, Context, FontWeight, InteractiveElement, IntoElement,
     MouseButton, ParentElement, Point, Render, Size, StatefulInteractiveElement, Styled, Window, WindowBounds,
     WindowHandle, WindowOptions, AppContext, Application,
 };
 use std::path::Path;
 
+mod asset_loader;
 mod bench_overlay;
 mod career_view;
 mod components;
+mod game_info_view;
 mod match_model;
 mod theme;
 mod tray;
@@ -16,21 +19,30 @@ use bench_overlay::BenchOverlayView;
 use career_view::{CareerHeaderStats, CareerView};
 use components::input::SearchInput;
 use components::titlebar::TitleBar;
+use game_info_view::{load_mock_game_info, GameInfoData, GameInfoView};
 use match_model::{load_real_fixtures, MatchItem};
 use theme::Theme;
 use tray::TrayManager;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabPage {
+    Career,
+    GameInfo,
+}
 
 pub struct MainWindow {
     titlebar: TitleBar,
     search_input: SearchInput,
     matches: Vec<MatchItem>,
     stats: CareerHeaderStats,
+    game_info: GameInfoData,
+    current_tab: TabPage,
     _tray: Option<TrayManager>,
     overlay_window: Option<WindowHandle<BenchOverlayView>>,
 }
 
 impl MainWindow {
-    pub fn new(_cx: &mut Context<Self>) -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         // 尝试从项目 testdata 目录加载 8 份真实 LCU 对局抓包快照
         let fixture_path = Path::new("../../src-tauri/testdata/match");
         let alt_fixture_path = Path::new("src-tauri/testdata/match");
@@ -43,14 +55,33 @@ impl MainWindow {
         };
 
         let stats = CareerHeaderStats::compute(&matches);
+        let game_info = load_mock_game_info();
         let tray = TrayManager::new().ok();
         let search_input = SearchInput::new("输入召唤师名 / 英雄过滤...");
+
+        // 异步预热战绩卡片中的核心资源（英雄头像等），拉取后触发视图重绘
+        let asset_paths: Vec<String> = matches
+            .iter()
+            .map(|m| m.display.champion_icon_url.clone())
+            .filter(|u| !u.is_empty())
+            .collect();
+
+        cx.background_executor()
+            .spawn(async move {
+                let loader = asset_loader::global_asset_loader();
+                for path in asset_paths {
+                    let _ = loader.load_render_image(&path).await;
+                }
+            })
+            .detach();
 
         Self {
             titlebar: TitleBar::new("Yuumi · 英雄联盟对局助手 (GPUI 高性能原生内核)"),
             search_input,
             matches,
             stats,
+            game_info,
+            current_tab: TabPage::GameInfo,
             _tray: tray,
             overlay_window: None,
         }
@@ -65,6 +96,11 @@ impl MainWindow {
 
     pub fn clear_search(&mut self, cx: &mut Context<Self>) {
         self.search_input.clear();
+        cx.notify();
+    }
+
+    pub fn switch_tab(&mut self, tab: TabPage, cx: &mut Context<Self>) {
+        self.current_tab = tab;
         cx.notify();
     }
 
@@ -167,6 +203,79 @@ impl Render for MainWindow {
                             .flex()
                             .items_center()
                             .gap_3()
+                            // 选项卡切换：对局信息 (GameInfo) / 个人生涯 (Career)
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .p(px(2.0))
+                                    .rounded_lg()
+                                    .bg(Theme::BADGE_BG)
+                                    .child(
+                                        div()
+                                            .id("tab-game-info")
+                                            .px_3()
+                                            .py(px(3.0))
+                                            .rounded_md()
+                                            .bg(if self.current_tab == TabPage::GameInfo {
+                                                Theme::CARD_BG_HOVER
+                                            } else {
+                                                hsla(0.0, 0.0, 0.0, 0.0)
+                                            })
+                                            .border_1()
+                                            .border_color(if self.current_tab == TabPage::GameInfo {
+                                                Theme::CARD_BORDER
+                                            } else {
+                                                hsla(0.0, 0.0, 0.0, 0.0)
+                                            })
+                                            .text_xs()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(if self.current_tab == TabPage::GameInfo {
+                                                Theme::ACCENT_PRIMARY
+                                            } else {
+                                                Theme::TEXT_SECONDARY
+                                            })
+                                            .cursor_pointer()
+                                            .on_mouse_down(MouseButton::Left, cx.listener(
+                                                |this, _ev, _window, cx| {
+                                                    this.switch_tab(TabPage::GameInfo, cx);
+                                                },
+                                            ))
+                                            .child("⚔️ 10人对局看板"),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("tab-career")
+                                            .px_3()
+                                            .py(px(3.0))
+                                            .rounded_md()
+                                            .bg(if self.current_tab == TabPage::Career {
+                                                Theme::CARD_BG_HOVER
+                                            } else {
+                                                hsla(0.0, 0.0, 0.0, 0.0)
+                                            })
+                                            .border_1()
+                                            .border_color(if self.current_tab == TabPage::Career {
+                                                Theme::CARD_BORDER
+                                            } else {
+                                                hsla(0.0, 0.0, 0.0, 0.0)
+                                            })
+                                            .text_xs()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(if self.current_tab == TabPage::Career {
+                                                Theme::ACCENT_PRIMARY
+                                            } else {
+                                                Theme::TEXT_SECONDARY
+                                            })
+                                            .cursor_pointer()
+                                            .on_mouse_down(MouseButton::Left, cx.listener(
+                                                |this, _ev, _window, cx| {
+                                                    this.switch_tab(TabPage::Career, cx);
+                                                },
+                                            ))
+                                            .child("📊 生涯历史"),
+                                    ),
+                            )
                             // 搜索输入组件
                             .child(self.search_input.render(move |_w, app| {
                                 search_view.update(app, |this, cx| {
@@ -214,21 +323,24 @@ impl Render for MainWindow {
                     .flex_1()
                     .overflow_y_scroll()
                     .p_4()
-                    // 渲染生涯统计看板
-                    .child(CareerView::render_header(stats))
-                    // 渲染紧凑对局卡片列表（112px 黄金行高）
-                    .children(self.matches.iter().enumerate().map(|(idx, m)| {
-                        let view = view_entity.clone();
-                        CareerView::render_match_card(
-                            m,
-                            idx,
-                            move |clicked_idx, _window, app| {
-                                view.update(app, |this, cx| {
-                                    this.toggle_card_expanded(clicked_idx, cx);
-                                });
-                            },
-                        )
-                    })),
+                    .when(self.current_tab == TabPage::GameInfo, |el| {
+                        el.child(GameInfoView::render(&self.game_info))
+                    })
+                    .when(self.current_tab == TabPage::Career, |el| {
+                        el.child(CareerView::render_header(stats))
+                            .children(self.matches.iter().enumerate().map(|(idx, m)| {
+                                let view = view_entity.clone();
+                                CareerView::render_match_card(
+                                    m,
+                                    idx,
+                                    move |clicked_idx, _window, app| {
+                                        view.update(app, |this, cx| {
+                                            this.toggle_card_expanded(clicked_idx, cx);
+                                        });
+                                    },
+                                )
+                            }))
+                    }),
             )
     }
 }

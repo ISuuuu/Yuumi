@@ -1,3 +1,4 @@
+use crate::asset_loader::global_asset_loader;
 use crate::match_model::{compute_match_stats, position_to_zh, MatchItem};
 use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
@@ -258,6 +259,9 @@ impl CareerView {
         };
 
         let champion_name = m.display.name.clone();
+        let champion_icon_url = m.display.champion_icon_url.clone();
+        let spell1_icon_url = m.display.spell1_icon_url.clone();
+        let spell2_icon_url = m.display.spell2_icon_url.clone();
         let queue_name = m.display.map.clone();
         let duration_str = m.display.duration.clone();
         let time_str = m.display.short_time.clone();
@@ -270,12 +274,18 @@ impl CareerView {
         for (i, &it) in m.display.item_ids.iter().take(7).enumerate() {
             items[i] = it;
         }
+        let item_urls = m.display.item_icon_urls.clone();
         let is_expanded = m.expanded;
         let champ_level = m.display.champ_level;
         let kills = m.display.kills;
         let deaths = m.display.deaths;
         let assists = m.display.assists;
         let game_id = m.display.game_id;
+
+        let loader = global_asset_loader();
+        let champ_img = loader.get_cached_render_image(&champion_icon_url);
+        let spell1_img = loader.get_cached_render_image(&spell1_icon_url);
+        let spell2_img = loader.get_cached_render_image(&spell2_icon_url);
 
         div()
             .w_full()
@@ -325,16 +335,26 @@ impl CareerView {
                                             .bg(Theme::CARD_BG)
                                             .border_1()
                                             .border_color(border_color)
+                                            .overflow_hidden()
                                             .flex()
                                             .items_center()
                                             .justify_center()
-                                            .child(
-                                                div()
-                                                    .text_sm()
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::TEXT_PRIMARY)
-                                                    .child(champion_name),
-                                            )
+                                            .when_some(champ_img, |this, render_image| {
+                                                this.child(
+                                                    img(render_image)
+                                                        .size_full()
+                                                        .object_fit(ObjectFit::Cover),
+                                                )
+                                            })
+                                            .when(m.display.champion_icon_url.is_empty() || loader.get_cached_render_image(&champion_icon_url).is_none(), |this| {
+                                                this.child(
+                                                    div()
+                                                        .text_sm()
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .text_color(Theme::TEXT_PRIMARY)
+                                                        .child(champion_name),
+                                                )
+                                            })
                                             // 等级角标
                                             .child(
                                                 div()
@@ -362,12 +382,25 @@ impl CareerView {
                                                     .bg(Theme::BADGE_BG)
                                                     .border_1()
                                                     .border_color(Theme::CARD_BORDER)
+                                                    .overflow_hidden()
                                                     .flex()
                                                     .items_center()
                                                     .justify_center()
-                                                    .text_xs()
-                                                    .text_color(Theme::TEXT_MUTED)
-                                                    .child("D"),
+                                                    .when_some(spell1_img, |this, render_image| {
+                                                        this.child(
+                                                            img(render_image)
+                                                                .size_full()
+                                                                .object_fit(ObjectFit::Cover),
+                                                        )
+                                                    })
+                                                    .when(spell1_icon_url.is_empty() || loader.get_cached_render_image(&spell1_icon_url).is_none(), |this| {
+                                                        this.child(
+                                                            div()
+                                                                .text_xs()
+                                                                .text_color(Theme::TEXT_MUTED)
+                                                                .child("D"),
+                                                        )
+                                                    }),
                                             )
                                             .child(
                                                 div()
@@ -376,12 +409,25 @@ impl CareerView {
                                                     .bg(Theme::BADGE_BG)
                                                     .border_1()
                                                     .border_color(Theme::CARD_BORDER)
+                                                    .overflow_hidden()
                                                     .flex()
                                                     .items_center()
                                                     .justify_center()
-                                                    .text_xs()
-                                                    .text_color(Theme::TEXT_MUTED)
-                                                    .child("F"),
+                                                    .when_some(spell2_img, |this, render_image| {
+                                                        this.child(
+                                                            img(render_image)
+                                                                .size_full()
+                                                                .object_fit(ObjectFit::Cover),
+                                                        )
+                                                    })
+                                                    .when(spell2_icon_url.is_empty() || loader.get_cached_render_image(&spell2_icon_url).is_none(), |this| {
+                                                        this.child(
+                                                            div()
+                                                                .text_xs()
+                                                                .text_color(Theme::TEXT_MUTED)
+                                                                .child("F"),
+                                                        )
+                                                    }),
                                             ),
                                     ),
                             ),
@@ -485,6 +531,9 @@ impl CareerView {
                             .children(items.iter().enumerate().map(|(slot_idx, &item_id)| {
                                 let is_trinket = slot_idx == 6;
                                 let is_empty = item_id == 0;
+                                let item_url = item_urls.get(slot_idx).cloned();
+                                let item_img = item_url.as_deref().and_then(|u| loader.get_cached_render_image(u));
+
                                 div()
                                     .size(px(26.0))
                                     .rounded_md()
@@ -499,15 +548,25 @@ impl CareerView {
                                     } else {
                                         Theme::ITEM_SLOT_BORDER
                                     })
+                                    .overflow_hidden()
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .text_xs()
                                     .text_color(Theme::TEXT_MUTED)
-                                    .child(if is_empty {
-                                        "".to_string()
-                                    } else {
-                                        format!("{}", item_id % 100)
+                                    .when_some(item_img.clone(), |this, render_image| {
+                                        this.child(
+                                            img(render_image)
+                                                .size_full()
+                                                .object_fit(ObjectFit::Cover),
+                                        )
+                                    })
+                                    .when(item_img.is_none(), |this| {
+                                        this.child(if is_empty {
+                                            "".to_string()
+                                        } else {
+                                            format!("{}", item_id % 100)
+                                        })
                                     })
                             })),
                     )
