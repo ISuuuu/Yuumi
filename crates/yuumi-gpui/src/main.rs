@@ -30,7 +30,7 @@ use services::{ConnectionStatus, LiveLcuEvent, LiveLcuService};
 use theme::Theme;
 use tray::TrayManager;
 use views::career::{
-    CareerBarAction, CareerHeaderStats, CareerView, LootAction, LootModal,
+    CareerBarAction, CareerHeaderStats, CareerView, LootAction, LootModal, LootProgress,
     MasteryFilterAction,
 };
 use views::game_info::{GameInfoTeamTab, GameInfoView, GameInfoViewMode};
@@ -132,6 +132,12 @@ impl MainWindow {
 
         let stats = CareerHeaderStats::compute(&matches);
         let career_view = CareerView::new();
+        let tm_icons: Vec<String> = career_view
+            .recent_teammates
+            .iter()
+            .map(|t| t.icon.clone())
+            .collect();
+        prewarm_assets(tm_icons, cx);
         let career_mastery_focus = cx.focus_handle();
         let loot_value_focus = cx.focus_handle();
 
@@ -421,9 +427,32 @@ impl MainWindow {
                 self.sync_bench_overlay(cx);
                 cx.notify();
             }
-            // 占位：战利品写动作进度等新事件；穷尽匹配兼容分支，整合时由主进程
-            // 在此写入 career_view 进度面板并 cx.notify()（非动作接线，启动/自动流程均不触发写操作）
-            _ => {}
+            LiveLcuEvent::LootActionProgress(progress) => {
+                let mut state = self
+                    .career_view
+                    .loot_progress
+                    .take()
+                    .unwrap_or(LootProgress {
+                        current: 0,
+                        total: 0,
+                        success: 0,
+                        current_name: String::new(),
+                    });
+                state.current = progress.current.max(0) as usize;
+                state.total = progress.total.max(0) as usize;
+                state.current_name = progress.loot_name;
+                if progress.success {
+                    state.success += 1;
+                }
+                self.career_view.loot_progress = Some(state);
+                cx.notify();
+            }
+            LiveLcuEvent::RecentTeammatesLoaded(teammates) => {
+                let icon_paths: Vec<String> = teammates.iter().map(|t| t.icon.clone()).collect();
+                prewarm_assets(icon_paths, cx);
+                self.career_view.recent_teammates = teammates;
+                cx.notify();
+            }
         }
     }
 
@@ -626,7 +655,11 @@ impl MainWindow {
         match action {
             LootAction::ToggleDropdown(kind) => {
                 let slot = &mut self.career_view.loot_dropdown;
-                *slot = if *slot == Some(kind) { None } else { Some(kind) };
+                *slot = if *slot == Some(kind) {
+                    None
+                } else {
+                    Some(kind)
+                };
             }
             LootAction::CloseDropdown => self.career_view.loot_dropdown = None,
             LootAction::SetType(value) => {

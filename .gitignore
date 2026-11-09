@@ -23,7 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
-# Tauri
+# Tauri & Rust
+target/
+**/target/
 src-tauri/target/
 crates/**/target/
 

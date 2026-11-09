@@ -28,6 +28,7 @@ use yuumi_core::parsers::loot_actions::{
 use yuumi_core::parsers::mastery::ChampionMasteryItem;
 use yuumi_core::parsers::match_parser::{fetch_match_history, MatchDisplay};
 use yuumi_core::parsers::summoner::{fetch_current_summoner, SummonerInfo};
+use yuumi_core::parsers::teammates::{fetch_recent_teammates, RecentTeammate};
 
 use crate::services::agent_runtime::{AgentRuntime, BpAgentEvent, MatchAgentEvent};
 
@@ -62,6 +63,8 @@ pub enum LiveLcuEvent {
     LootSummaryLoaded(EssenceBalances, Vec<LootInventoryItem>),
     /// 战利品写动作的单条进度（由 run_loot_action 逐条广播）
     LootActionProgress(LootActionProgress),
+    /// 最近队友聚合完成（近期最多 20 场同队队友列表）
+    RecentTeammatesLoaded(Vec<RecentTeammate>),
     /// 本人排位数据（单排 / 灵活等队列段位）
     RankedStatsLoaded(RankedStats),
     /// 10 人对局信息开始拉取（前端置加载态）
@@ -428,9 +431,29 @@ impl LiveLcuService {
                     log::info!("[LiveLcu] 成功拉取当前召唤师战绩: count={}", matches.len());
                     // 同步缓存本人近期战绩，供宿命对局判定复用
                     *this_matches.recent_matches.write().await = matches.clone();
+
+                    let game_ids: Vec<u64> = matches.iter().map(|m| m.game_id).collect();
                     let _ = this_matches
                         .event_tx
                         .send(LiveLcuEvent::MatchHistoryLoaded(matches));
+
+                    // 异步聚合近 20 场同队队友数据
+                    let c_tm = c_matches.clone();
+                    let puuid_tm = puuid_clone.clone();
+                    let tx_tm = this_matches.event_tx.clone();
+                    tokio::spawn(async move {
+                        let tagged_map = std::collections::HashMap::new();
+                        match fetch_recent_teammates(&c_tm, &game_ids, &puuid_tm, &tagged_map).await
+                        {
+                            Ok(teammates) => {
+                                log::info!("[LiveLcu] 成功聚合最近队友: count={}", teammates.len());
+                                let _ = tx_tm.send(LiveLcuEvent::RecentTeammatesLoaded(teammates));
+                            }
+                            Err(e) => {
+                                log::warn!("[LiveLcu] 聚合最近队友失败: {}", e);
+                            }
+                        }
+                    });
                 }
                 Err(e) => {
                     log::error!("[LiveLcu] 拉取当前召唤师战绩失败: {}", e);
