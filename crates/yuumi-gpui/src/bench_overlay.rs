@@ -95,6 +95,10 @@ pub struct BenchOverlayView {
     pending_champion: Option<i32>,
     /// 最近一次操作反馈
     status: Option<SharedString>,
+    /// 窗口边界变化监听句柄
+    _bounds_subscription: Option<Subscription>,
+    /// 坐标保存防抖任务
+    _save_task: Option<Task<()>>,
 }
 
 impl BenchOverlayView {
@@ -108,7 +112,23 @@ impl BenchOverlayView {
             rerolls_remaining: 0,
             pending_champion: None,
             status: None,
+            _bounds_subscription: None,
+            _save_task: None,
         }
+    }
+
+    /// 绑定窗口监听，拖动窗口停止后防抖持久化最终坐标
+    pub fn bind_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self._bounds_subscription = Some(cx.observe_window_bounds(window, |this, window, cx| {
+            if let WindowBounds::Windowed(bounds) = window.window_bounds() {
+                this._save_task = Some(cx.spawn(async move |_this, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(300))
+                        .await;
+                    save_origin(bounds.origin);
+                }));
+            }
+        }));
     }
 
     /// 用最新选人会话刷新小窗数据
@@ -290,18 +310,14 @@ impl BenchOverlayView {
         .detach();
     }
 
-    /// 空白区域按下：交给 Win32 原生拖拽，松手后持久化最终坐标
-    fn begin_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// 空白区域按下：交给 Win32 异步启动原生拖拽（坐标由 bind_window 注册的 bounds observer 防抖持久化）
+    fn begin_drag(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(hwnd) = platform::find_window_by_title(BENCH_WINDOW_TITLE) else {
             log::warn!("[BenchOverlay] 未找到小窗 HWND，跳过拖拽");
             return;
         };
 
         platform::begin_window_drag(hwnd);
-
-        if let WindowBounds::Windowed(bounds) = window.window_bounds() {
-            save_origin(bounds.origin);
-        }
         cx.notify();
     }
 

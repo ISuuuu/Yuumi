@@ -8,8 +8,8 @@ use windows::Win32::Foundation::{
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowExW, FindWindowW, GetWindowLongW, SendMessageW, SetForegroundWindow, SetWindowLongW,
-    SetWindowPos, ShowWindow, GWL_EXSTYLE, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
+    FindWindowExW, FindWindowW, GetWindowLongW, PostMessageW, SetForegroundWindow,
+    SetWindowLongW, SetWindowPos, ShowWindow, GWL_EXSTYLE, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
     SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_MINIMIZE,
     SW_RESTORE, WM_NCLBUTTONDOWN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
@@ -132,12 +132,13 @@ pub fn minimize_window(hwnd: HWND) {
 
 /// 以 Win32 原生方式启动窗口拖拽（等价于按住系统标题栏拖动）
 ///
-/// `SendMessageW(WM_NCLBUTTONDOWN)` 内部进入系统模态拖拽循环，鼠标释放后才返回，
-/// 调用方可在返回后读取窗口的新坐标并持久化。
+/// 使用 PostMessageW 异步投递到消息队列，避免在 GPUI 事件回调（如 on_mouse_down）
+/// 同步持有 AppCell 借用时同步调用 SendMessageW 进入系统模态拖拽循环，
+/// 从而彻底防止借用冲突（"RefCell already borrowed"）。
 pub fn begin_window_drag(hwnd: HWND) {
     unsafe {
         let _ = ReleaseCapture();
-        SendMessageW(
+        let _ = PostMessageW(
             hwnd,
             WM_NCLBUTTONDOWN,
             WPARAM(HTCAPTION as usize),

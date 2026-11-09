@@ -5,7 +5,6 @@
 
 use crate::assets::logo_image;
 use crate::components::icon::icon;
-use crate::platform;
 use crate::theme::Theme;
 use gpui::prelude::*;
 use gpui::*;
@@ -77,22 +76,10 @@ impl TitleBar {
             .bg(Theme::TITLEBAR_BG)
             .border_b_1()
             .border_color(Theme::CARD_BORDER)
-            // 整条标题栏即拖拽区；双击切换最大化，按钮自身会阻止冒泡
-            .on_mouse_down(
-                MouseButton::Left,
-                move |ev: &MouseDownEvent, window, app| {
-                    app.stop_propagation();
-                    if ev.click_count >= 2 {
-                        window.zoom_window();
-                        return;
-                    }
-                    if let Some(hwnd) = platform::find_main_window_hwnd() {
-                        platform::begin_window_drag(hwnd);
-                    } else {
-                        window.start_window_move();
-                    }
-                },
-            )
+            // 原生托管拖拽区：利用 GPUI 的 WindowControlArea::Drag
+            // Windows 底层 hit test 命中 HTCAPTION，由系统原生处理平滑拖拽、Aero Snap 与双击最大化/还原，
+            // 彻底避免在 GPUI 事件回调持有 AppCell 借用时同步调用 SendMessageW 造成 "RefCell already borrowed" 冲突。
+            .window_control_area(WindowControlArea::Drag)
             .child(
                 div()
                     .flex()
@@ -102,6 +89,7 @@ impl TitleBar {
                         el.child(
                             div()
                                 .id("titlebar-back")
+                                .occlude()
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -162,6 +150,7 @@ impl TitleBar {
                     .child(
                         div()
                             .id("btn-minimize")
+                            .occlude()
                             .flex()
                             .items_center()
                             .justify_center()
@@ -179,6 +168,7 @@ impl TitleBar {
                     .child(
                         div()
                             .id("btn-maximize")
+                            .occlude()
                             .flex()
                             .items_center()
                             .justify_center()
@@ -204,6 +194,7 @@ impl TitleBar {
                     .child(
                         div()
                             .id("btn-close")
+                            .occlude()
                             .flex()
                             .items_center()
                             .justify_center()

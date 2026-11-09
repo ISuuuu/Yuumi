@@ -522,9 +522,10 @@ impl MainWindow {
             ..Default::default()
         };
 
-        let new_handle = cx.open_window(window_options, move |_window, cx| {
+        let new_handle = cx.open_window(window_options, move |window, cx| {
             cx.new(move |cx| {
                 let mut view = BenchOverlayView::new(service);
+                view.bind_window(window, cx);
                 if let Some(session) = &session {
                     view.apply_session(session, assets.as_deref(), cx);
                 }
