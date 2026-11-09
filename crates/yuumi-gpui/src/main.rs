@@ -2329,6 +2329,8 @@ impl Render for MainWindow {
                                 let view_tab_cb = view_entity.clone();
                                 let view_career_cb = view_entity.clone();
                                 let view_search_cb = view_entity.clone();
+                                let view_load_demo = view_entity.clone();
+                                let view_exit_demo = view_entity.clone();
                                 el.overflow_hidden().h_full().child(GameInfoView::render(
                                     self.game_info.as_deref(),
                                     self.current_phase.as_str(),
@@ -2369,6 +2371,16 @@ impl Render for MainWindow {
                                                 _ => name,
                                             };
                                             this.navigate_to_search(&query, None, cx);
+                                        });
+                                    },
+                                    move |_event, _window, app| {
+                                        view_load_demo.update(app, |this, cx| {
+                                            this.load_game_info_demo(cx);
+                                        });
+                                    },
+                                    move |_event, _window, app| {
+                                        view_exit_demo.update(app, |this, cx| {
+                                            this.exit_game_info_demo(cx);
                                         });
                                     },
                                     window.viewport_size().width,

@@ -74,7 +74,7 @@ impl GameInfoView {
 
     /// 渲染 10 人对局信息总看板
     #[allow(clippy::too_many_arguments)]
-    pub fn render<F1, F2, F3, F4>(
+    pub fn render<F1, F2, F3, F4, F5, F6>(
         data: Option<&LiveGameInfo>,
         _phase: &str,
         is_loading: bool,
@@ -85,6 +85,8 @@ impl GameInfoView {
         on_change_tab: F2,
         on_player_career: F3,
         on_player_search: F4,
+        on_load_demo: F5,
+        on_exit_demo: F6,
         window_width: Pixels,
     ) -> gpui::AnyElement
     where
@@ -92,10 +94,18 @@ impl GameInfoView {
         F2: Fn(GameInfoTeamTab, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F3: Fn(Option<String>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F4: Fn(String, Option<String>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
+        F5: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
+        F6: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
     {
-        // G01 状态机：离线 > TFT > 读取中 > 等待中 > 正常内容
-        if !connected {
-            return Self::render_offline_state();
+        // 若当前无对局数据：未连接 / 读取中 / 等待中（均支持一键进入离线/演示预览）
+        if data.is_none() {
+            if !connected {
+                return Self::render_offline_state(on_load_demo);
+            }
+            if is_loading {
+                return Self::render_tip_container("⏳", "正在读取对局玩家信息…", Some(on_load_demo));
+            }
+            return Self::render_tip_container("⏳", "对局暂未开始，等待对局中…", Some(on_load_demo));
         }
 
         if let Some(info) = data {
@@ -103,16 +113,12 @@ impl GameInfoView {
                 || info.queue_name.contains("云顶")
                 || info.queue_name.contains("TFT");
             if is_tft {
-                return Self::render_tip_container("♟️", "云顶之弈对局中，对局信息页面不显示数据");
+                return Self::render_tip_container("♟️", "云顶之弈对局中，对局信息页面不显示数据", None as Option<F5>);
             }
         }
 
-        if data.is_none() && is_loading {
-            return Self::render_tip_container("⏳", "正在读取对局玩家信息…");
-        }
-
         let Some(info) = data else {
-            return Self::render_tip_container("⏳", "对局暂未开始，等待对局中…");
+            return Self::render_tip_container("⏳", "对局暂未开始，等待对局中…", Some(on_load_demo));
         };
 
         // 对局队伍划分
@@ -143,6 +149,7 @@ impl GameInfoView {
                     on_change_tab,
                     on_player_career,
                     on_player_search,
+                    on_exit_demo,
                     window_width,
                 ),
                 GameInfoViewMode::AllMatches => Self::render_all_matches_view(
@@ -154,6 +161,7 @@ impl GameInfoView {
                     on_change_mode,
                     on_change_tab,
                     on_player_search,
+                    on_exit_demo,
                 ),
             })
             .into_any_element()
@@ -161,7 +169,7 @@ impl GameInfoView {
 
     /// 模式 1：按队伍模式 (左侧 250px 双页签+玩家详情大卡片纵排 + 右侧工具栏与 5 列竖向战绩流)
     #[allow(clippy::too_many_arguments)]
-    fn render_by_team_view<F1, F2, F3, F4>(
+    fn render_by_team_view<F1, F2, F3, F4, F6>(
         info: &LiveGameInfo,
         ally_team: &[GameInfoPlayer],
         enemy_team: &[GameInfoPlayer],
@@ -172,6 +180,7 @@ impl GameInfoView {
         on_change_tab: F2,
         on_player_career: F3,
         on_player_search: F4,
+        on_exit_demo: F6,
         window_width: Pixels,
     ) -> gpui::AnyElement
     where
@@ -179,6 +188,7 @@ impl GameInfoView {
         F2: Fn(GameInfoTeamTab, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F3: Fn(Option<String>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F4: Fn(String, Option<String>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
+        F6: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
     {
         let is_ally_tab = active_tab == GameInfoTeamTab::Ally;
         let current_team = if is_ally_tab { ally_team } else { enemy_team };
@@ -345,6 +355,7 @@ impl GameInfoView {
                 active_tab,
                 on_change_mode,
                 on_change_tab,
+                on_exit_demo,
             ))
             // 五等宽战绩列：各自独立滚动 (G03, G10)
             .child(div().flex_1().min_h_0().flex().flex_row().children(
@@ -385,7 +396,7 @@ impl GameInfoView {
 
     /// 模式 2：全部战绩模式 (全屏单面板，顶部工具条 + 10 等宽列横排，左 5 友方，右 5 敌方)
     #[allow(clippy::too_many_arguments)]
-    fn render_all_matches_view<F1, F2, F4>(
+    fn render_all_matches_view<F1, F2, F4, F6>(
         info: &LiveGameInfo,
         ally_team: &[GameInfoPlayer],
         enemy_team: &[GameInfoPlayer],
@@ -394,11 +405,13 @@ impl GameInfoView {
         on_change_mode: F1,
         on_change_tab: F2,
         on_player_search: F4,
+        on_exit_demo: F6,
     ) -> gpui::AnyElement
     where
         F1: Fn(GameInfoViewMode, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F2: Fn(GameInfoTeamTab, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F4: Fn(String, Option<String>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
+        F6: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
     {
         let ally_accent = if user_is_red {
             Theme::RED_SIDE_ACCENT
@@ -431,6 +444,7 @@ impl GameInfoView {
                 GameInfoTeamTab::Ally,
                 on_change_mode,
                 on_change_tab,
+                on_exit_demo,
             ))
             // 战绩列横排：十列紧凑模式走 compact 分支 (G04, G07, G10)
             .child(
@@ -471,8 +485,8 @@ impl GameInfoView {
 
     /// 顶部工具栏 (G05, G11)
     #[allow(clippy::too_many_arguments)]
-    fn render_toolbar<F1, F2>(
-        _info: &LiveGameInfo,
+    fn render_toolbar<F1, F2, F3>(
+        info: &LiveGameInfo,
         ally_team: &[GameInfoPlayer],
         enemy_team: &[GameInfoPlayer],
         user_is_red: bool,
@@ -481,16 +495,65 @@ impl GameInfoView {
         active_tab: GameInfoTeamTab,
         on_change_mode: F1,
         on_change_tab: F2,
+        on_exit_demo: F3,
     ) -> gpui::AnyElement
     where
         F1: Fn(GameInfoViewMode, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F2: Fn(GameInfoTeamTab, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
+        F3: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
     {
         let ally_is_red = user_is_red;
         let enemy_is_red = !user_is_red;
 
         let ally_groups = get_premade_groups(ally_team);
         let enemy_groups = get_premade_groups(enemy_team);
+
+        let make_demo_badge = {
+            let on_exit_demo = on_exit_demo.clone();
+            move || {
+                if info.is_demo {
+                    Some(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .px(px(6.0))
+                                    .py(px(2.0))
+                                    .rounded_md()
+                                    .bg(Theme::ACCENT_LIGHT)
+                                    .border_1()
+                                    .border_color(Theme::ACCENT_PRIMARY.opacity(0.3))
+                                    .text_size(px(11.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(Theme::ACCENT_PRIMARY)
+                                    .child("演示预览模式"),
+                            )
+                            .child(
+                                div()
+                                    .px(px(8.0))
+                                    .py(px(2.0))
+                                    .rounded_md()
+                                    .bg(Theme::CARD_BG)
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER)
+                                    .hover(|this| {
+                                        this.bg(Theme::HOVER_BG)
+                                            .border_color(Theme::TEXT_MUTED)
+                                    })
+                                    .cursor_pointer()
+                                    .on_mouse_down(MouseButton::Left, on_exit_demo.clone())
+                                    .text_size(px(11.0))
+                                    .text_color(Theme::TEXT_SECONDARY)
+                                    .child("退出预览"),
+                            ),
+                    )
+                } else {
+                    None
+                }
+            }
+        };
 
         // 10 列视图且敌方已公开：左右对称 50% 阵营与组队信息 (G05)
         if view_mode == GameInfoViewMode::AllMatches && is_revealed {
@@ -553,6 +616,7 @@ impl GameInfoView {
                             false,
                             None,
                         ))
+                        .children(make_demo_badge())
                         .child(render_view_segmented_control(view_mode, on_change_mode)),
                 )
                 .into_any_element();
@@ -628,8 +692,15 @@ impl GameInfoView {
                         )
                     }),
             )
-            // 模式切换器
-            .child(render_view_segmented_control(view_mode, on_change_mode))
+            // 模式切换器与预览控制
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .children(make_demo_badge())
+                    .child(render_view_segmented_control(view_mode, on_change_mode)),
+            )
             .into_any_element()
     }
 
@@ -1598,7 +1669,10 @@ impl GameInfoView {
     }
 
     /// 离线空态 (LcuOfflineState, G01)
-    fn render_offline_state() -> gpui::AnyElement {
+    fn render_offline_state<F>(on_load_demo: F) -> gpui::AnyElement
+    where
+        F: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+    {
         div()
             .size_full()
             .flex()
@@ -1622,11 +1696,39 @@ impl GameInfoView {
                     .text_color(Theme::TEXT_MUTED)
                     .child("启动客户端并登录后会自动检测 LCU 进程，无需手动操作。"),
             )
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .px(px(18.0))
+                    .py(px(7.0))
+                    .rounded_lg()
+                    .bg(Theme::ACCENT_PRIMARY)
+                    .hover(|this| this.opacity(0.85))
+                    .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, on_load_demo)
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .text_size(px(13.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(gpui::white())
+                            .child("预览对局信息"),
+                    ),
+            )
             .into_any_element()
     }
 
     /// 统一提示框 (G01)
-    fn render_tip_container(icon_emoji: &'static str, tip_text: &'static str) -> gpui::AnyElement {
+    fn render_tip_container<F>(
+        icon_emoji: &'static str,
+        tip_text: &'static str,
+        on_load_demo: Option<F>,
+    ) -> gpui::AnyElement
+    where
+        F: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+    {
         div()
             .size_full()
             .flex()
@@ -1643,6 +1745,29 @@ impl GameInfoView {
                     .text_color(Theme::TEXT_MUTED)
                     .child(tip_text),
             )
+            .when_some(on_load_demo, |el, load_demo| {
+                el.child(
+                    div()
+                        .mt(px(8.0))
+                        .px(px(18.0))
+                        .py(px(7.0))
+                        .rounded_lg()
+                        .bg(Theme::ACCENT_PRIMARY)
+                        .hover(|this| this.opacity(0.85))
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, load_demo)
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(gpui::white())
+                                .child("预览对局信息"),
+                        ),
+                )
+            })
             .into_any_element()
     }
 }
