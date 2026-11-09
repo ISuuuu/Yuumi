@@ -51,10 +51,13 @@ impl TitleBar {
     ///
     /// - `show_back`：历史栈非空时展示返回键（对照 Vue 的 `pageHistory.length > 0`）
     /// - `phase`：连接态下的真实游戏阶段，`None` 表示不展示阶段徽章
+    /// - `map_side`：阵营信息（例如 "蓝方" / "红方"），有值时追加显示
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         show_back: bool,
         phase: Option<&'static str>,
+        map_side: Option<&str>,
         window: &mut Window,
         on_back: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_minimize: impl Fn(&mut Window, &mut App) + 'static + Clone,
@@ -65,6 +68,14 @@ impl TitleBar {
         let min_cb = on_minimize;
         let max_window = window.is_maximized();
         let close_cb = on_close;
+
+        let phase_badge = phase.map(|p| {
+            if let Some(side) = map_side.filter(|s| !s.is_empty()) {
+                format!("{} - {}", p, side)
+            } else {
+                p.to_string()
+            }
+        });
 
         div()
             .flex()
@@ -126,7 +137,7 @@ impl TitleBar {
                                     .text_color(Theme::TEXT_PRIMARY)
                                     .child(title),
                             )
-                            .when_some(phase, |el, label| {
+                            .when_some(phase_badge, |el, label| {
                                 el.child(
                                     div()
                                         .ml(px(6.0))
