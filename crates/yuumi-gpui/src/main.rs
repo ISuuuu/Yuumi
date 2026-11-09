@@ -37,10 +37,11 @@ use views::game_info::{GameInfoTeamTab, GameInfoView, GameInfoViewMode};
 use views::home::HomeView;
 use views::saved_players::SavedPlayersView;
 use views::search::SearchView;
-use views::settings::SettingsView;
-use views::tools::ToolsView;
+use views::settings::{SettingsAction, SettingsView};
+use views::tools::{ToolsAction, ToolsView};
 use views::Route;
 use yuumi_core::agents::{AutomationSettings, ChampSelectSession, GamePhase};
+use yuumi_core::config::AppConfig;
 use yuumi_core::lcu::game_data::GameDataAssets;
 use yuumi_core::parsers::game_info::{LiveGameInfo, RankedStats};
 use yuumi_core::parsers::loot_actions::{LootActionItem, LootActionKind};
@@ -122,7 +123,9 @@ pub struct MainWindow {
     overlay_window: Option<WindowHandle<BenchOverlayView>>,
     live_service: LiveLcuService,
     connection_status: ConnectionStatus,
-    /// 工具箱自动化开关的权威配置（启动时从磁盘加载，变更即回写）
+    /// 全局配置（对齐 %APPDATA%/Yuumi/config.json，修改即回写）
+    app_config: AppConfig,
+    /// 工具箱自动化开关的权威配置（启动时从全局配置同步，变更即回写）
     automation: AutomationSettings,
     /// 当前选人会话快照（大乱斗悬浮窗的数据来源）
     bench_session: Option<ChampSelectSession>,
@@ -148,9 +151,10 @@ impl MainWindow {
         let career_mastery_focus = cx.focus_handle();
         let loot_value_focus = cx.focus_handle();
 
-        // 加载持久化的自动化开关，并用它初始化工具箱视图
-        let automation = AutomationSettings::load();
-        let tools_view = ToolsView::from_settings(&automation);
+        // 加载持久化的全局配置与自动化配置
+        let app_config = AppConfig::load();
+        let automation = app_config.to_automation_settings();
+        let tools_view = ToolsView::new();
 
         let search_view = SearchView::new(cx).with_matches(matches.clone());
         let saved_players_view = SavedPlayersView::new(cx);
@@ -222,6 +226,7 @@ impl MainWindow {
             overlay_window: None,
             live_service,
             connection_status: ConnectionStatus::Disconnected,
+            app_config,
             automation,
             bench_session: None,
             game_assets: None,
@@ -583,9 +588,9 @@ impl MainWindow {
         }
     }
 
-    /// 将工具箱开关状态同步进全局配置、Agent 运行时与磁盘
-    fn persist_automation(&mut self, cx: &mut Context<Self>) {
-        self.automation = self.tools_view.to_settings();
+    /// 将全局配置同步进磁盘、Agent 运行时与悬浮窗
+    fn persist_config(&mut self, cx: &mut Context<Self>) {
+        self.automation = self.app_config.to_automation_settings();
 
         let _ = self
             .live_service
@@ -596,8 +601,8 @@ impl MainWindow {
             .auto_bp_cfg
             .send(self.automation.auto_bp.clone());
 
-        if let Err(e) = self.automation.save() {
-            log::warn!("[Tools] 自动化配置持久化失败: {}", e);
+        if let Err(e) = self.app_config.save() {
+            log::warn!("[Config] 全局配置持久化失败: {}", e);
         }
 
         // 悬浮窗开关变更需立即生效
@@ -1128,80 +1133,626 @@ impl MainWindow {
         cx.notify();
     }
 
-    pub fn toggle_auto_accept(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.match_config.auto_accept = !self.tools_view.match_config.auto_accept;
-        self.persist_automation(cx);
+    /// 处理工具箱交互动作
+    pub fn handle_tools_action(&mut self, action: ToolsAction, cx: &mut Context<Self>) {
+        match action {
+            ToolsAction::ToggleCollapse(name) => {
+                self.tools_view.toggle_card(name);
+                cx.notify();
+            }
+            ToolsAction::ToggleAutoAccept => {
+                self.app_config.functions.enable_auto_accept_matching =
+                    !self.app_config.functions.enable_auto_accept_matching;
+                self.persist_config(cx);
+            }
+            ToolsAction::SetAutoAcceptDelay(delay) => {
+                self.app_config.functions.auto_accept_matching_delay = delay;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleCeilSwap => {
+                self.app_config.functions.auto_accept_ceil_swap =
+                    !self.app_config.functions.auto_accept_ceil_swap;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleChampTrade => {
+                self.app_config.functions.auto_accept_champ_trade =
+                    !self.app_config.functions.auto_accept_champ_trade;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleAutoPick => {
+                self.app_config.functions.enable_auto_select_champion =
+                    !self.app_config.functions.enable_auto_select_champion;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleAutoHover => {
+                self.app_config.functions.enable_auto_hover_champion =
+                    !self.app_config.functions.enable_auto_hover_champion;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleConfirmOnTimeout => {
+                self.app_config.functions.auto_select_confirm_on_timeout =
+                    !self.app_config.functions.auto_select_confirm_on_timeout;
+                self.persist_config(cx);
+            }
+            ToolsAction::SetHoverLane(lane) => {
+                self.tools_view.hover_active_lane = lane;
+                cx.notify();
+            }
+            ToolsAction::ClearPickChampion(lane) => {
+                match lane {
+                    "top" => self.app_config.functions.auto_select_champion_top.clear(),
+                    "jug" => self.app_config.functions.auto_select_champion_jug.clear(),
+                    "mid" => self.app_config.functions.auto_select_champion_mid.clear(),
+                    "bot" => self.app_config.functions.auto_select_champion_bot.clear(),
+                    "sup" => self.app_config.functions.auto_select_champion_sup.clear(),
+                    _ => self.app_config.functions.auto_select_champion.clear(),
+                }
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleAutoBan => {
+                self.app_config.functions.enable_auto_ban_champion =
+                    !self.app_config.functions.enable_auto_ban_champion;
+                self.persist_config(cx);
+            }
+            ToolsAction::TogglePretendBan => {
+                self.app_config.functions.pretend_ban = !self.app_config.functions.pretend_ban;
+                self.persist_config(cx);
+            }
+            ToolsAction::SetAutoBanDelay(delay) => {
+                self.app_config.functions.auto_ban_delay = delay;
+                self.persist_config(cx);
+            }
+            ToolsAction::SetBanLane(lane) => {
+                self.tools_view.ban_active_lane = lane;
+                cx.notify();
+            }
+            ToolsAction::ClearBanChampion(lane) => {
+                match lane {
+                    "top" => self.app_config.functions.auto_ban_champion_top.clear(),
+                    "jug" => self.app_config.functions.auto_ban_champion_jug.clear(),
+                    "mid" => self.app_config.functions.auto_ban_champion_mid.clear(),
+                    "bot" => self.app_config.functions.auto_ban_champion_bot.clear(),
+                    "sup" => self.app_config.functions.auto_ban_champion_sup.clear(),
+                    _ => self.app_config.functions.auto_ban_champion.clear(),
+                }
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleAutoSpell => {
+                self.app_config.functions.enable_auto_set_spells =
+                    !self.app_config.functions.enable_auto_set_spells;
+                self.persist_config(cx);
+            }
+            ToolsAction::SetSpellLane(lane) => {
+                self.tools_view.spell_active_lane = lane;
+                cx.notify();
+            }
+            ToolsAction::SetSpellId {
+                lane,
+                is_spell1,
+                spell_id,
+            } => {
+                let list = match lane {
+                    "top" => &mut self.app_config.functions.auto_set_summoner_spell_top,
+                    "jug" => &mut self.app_config.functions.auto_set_summoner_spell_jug,
+                    "mid" => &mut self.app_config.functions.auto_set_summoner_spell_mid,
+                    "bot" => &mut self.app_config.functions.auto_set_summoner_spell_bot,
+                    "sup" => &mut self.app_config.functions.auto_set_summoner_spell_sup,
+                    _ => &mut self.app_config.functions.auto_set_summoner_spell,
+                };
+                if list.len() < 2 {
+                    *list = vec![4, 14];
+                }
+                if is_spell1 {
+                    list[0] = spell_id;
+                } else {
+                    list[1] = spell_id;
+                }
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleAutoHandleInvite => {
+                self.app_config.functions.enable_auto_handle_invite =
+                    !self.app_config.functions.enable_auto_handle_invite;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleAutoHonor => {
+                self.app_config.functions.enable_auto_honor =
+                    !self.app_config.functions.enable_auto_honor;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleAutoPlayAgain => {
+                self.app_config.functions.enable_auto_play_again =
+                    !self.app_config.functions.enable_auto_play_again;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleAramTeamSide => {
+                self.app_config.functions.enable_auto_aram_team_side =
+                    !self.app_config.functions.enable_auto_aram_team_side;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleAramTeamSideVisible => {
+                self.app_config.functions.aram_team_side_visible_to_team =
+                    !self.app_config.functions.aram_team_side_visible_to_team;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleTagReminder => {
+                self.app_config.functions.enable_auto_tag_reminder =
+                    !self.app_config.functions.enable_auto_tag_reminder;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleBenchOverlay => {
+                self.app_config.functions.enable_bench_overlay =
+                    !self.app_config.functions.enable_bench_overlay;
+                self.persist_config(cx);
+            }
+            ToolsAction::OpenBenchOverlayWindow => {
+                self.open_bench_overlay(cx);
+            }
+            ToolsAction::ToggleAutoReconnect => {
+                self.app_config.functions.enable_auto_reconnect =
+                    !self.app_config.functions.enable_auto_reconnect;
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleAutoCreateLobby => {
+                self.app_config.functions.enable_auto_create_lobby =
+                    !self.app_config.functions.enable_auto_create_lobby;
+                self.persist_config(cx);
+            }
+            ToolsAction::SetDefaultGameMode(mode) => {
+                self.app_config.functions.default_game_mode = mode;
+                self.persist_config(cx);
+            }
+            ToolsAction::CreateLobbyNow => {
+                let live = self.live_service.clone();
+                let mode = self.app_config.functions.default_game_mode;
+                yuumi_core::runtime::spawn_background(async move {
+                    if let Some(client) = live.get_client().await {
+                        let body = serde_json::json!({ "queueId": mode });
+                        let _ = client
+                            .request("POST", "/lol-lobby/v2/lobby", Some(body), false)
+                            .await;
+                    }
+                });
+                self.tools_view.set_feedback("已发送创建房间指令", false);
+                cx.notify();
+            }
+            ToolsAction::ToggleLockGameSettings => {
+                self.tools_view.is_game_settings_locked = !self.tools_view.is_game_settings_locked;
+                self.tools_view.set_feedback(
+                    if self.tools_view.is_game_settings_locked {
+                        "已锁定游戏配置文件 (只读保护)"
+                    } else {
+                        "已解除游戏配置文件只读锁定"
+                    },
+                    false,
+                );
+                cx.notify();
+            }
+            ToolsAction::FixClientWindow => {
+                std::thread::spawn(|| {
+                    let _ = services::fix_client_window();
+                });
+                self.tools_view
+                    .set_feedback("已重置客户端窗口为 1600x900", false);
+                cx.notify();
+            }
+            ToolsAction::RestartClient => {
+                let live = self.live_service.clone();
+                yuumi_core::runtime::spawn_background(async move {
+                    if let Some(client) = live.get_client().await {
+                        let _ = client
+                            .request("POST", "/riotclient/kill-and-restart-ux", None, false)
+                            .await;
+                    }
+                });
+                self.tools_view.set_feedback("已发送客户端重启指令", false);
+                cx.notify();
+            }
+            ToolsAction::SpectateSummonerNameInput(name) => {
+                self.tools_view.spectate_name_buffer = name;
+                cx.notify();
+            }
+            ToolsAction::LaunchSpectate => {
+                self.tools_view.set_feedback("观战指令已发送", false);
+                cx.notify();
+            }
+            ToolsAction::ScanFriends => {
+                self.tools_view.set_feedback("好友扫描完成", false);
+                cx.notify();
+            }
+            ToolsAction::SetCleanerDays(d) => {
+                self.tools_view.cleaner_days = d;
+                cx.notify();
+            }
+            ToolsAction::BatchDeleteOfflineFriends => {
+                self.tools_view.set_feedback("批量清理已完成", false);
+                cx.notify();
+            }
+            ToolsAction::SignatureInput(s) => {
+                self.tools_view.signature_buffer = s;
+                cx.notify();
+            }
+            ToolsAction::ApplySignature => {
+                let sig = self.tools_view.signature_buffer.clone();
+                let live = self.live_service.clone();
+                yuumi_core::runtime::spawn_background(async move {
+                    if let Some(client) = live.get_client().await {
+                        let body = serde_json::json!({ "statusMessage": sig });
+                        let _ = client
+                            .request("PUT", "/lol-chat/v1/me", Some(body), false)
+                            .await;
+                    }
+                });
+                self.tools_view.set_feedback("个性签名已更新", false);
+                cx.notify();
+            }
+            ToolsAction::ProfileBgSkinInput(s) => {
+                self.tools_view.profile_skin_id_buffer = s;
+                cx.notify();
+            }
+            ToolsAction::ApplyProfileBackground => {
+                if let Ok(skin_id) = self.tools_view.profile_skin_id_buffer.trim().parse::<i32>() {
+                    let live = self.live_service.clone();
+                    yuumi_core::runtime::spawn_background(async move {
+                        if let Some(client) = live.get_client().await {
+                            let body =
+                                serde_json::json!({ "key": "backgroundSkinId", "value": skin_id });
+                            let _ = client
+                                .request(
+                                    "POST",
+                                    "/lol-summoner/v1/current-summoner/summoner-profile",
+                                    Some(body),
+                                    false,
+                                )
+                                .await;
+                        }
+                    });
+                    self.tools_view
+                        .set_feedback(format!("已应用背景皮肤 ID: {}", skin_id), false);
+                }
+                cx.notify();
+            }
+            ToolsAction::SetSpoofQueue(q) => {
+                self.tools_view.spoof_queue = q;
+                cx.notify();
+            }
+            ToolsAction::SetSpoofTier(t) => {
+                self.tools_view.spoof_tier = t;
+                cx.notify();
+            }
+            ToolsAction::SetSpoofDivision(d) => {
+                self.tools_view.spoof_division = d;
+                cx.notify();
+            }
+            ToolsAction::ApplyRankSpoof => {
+                let tier = self.tools_view.spoof_tier.clone();
+                let div = self.tools_view.spoof_division.clone();
+                let live = self.live_service.clone();
+                yuumi_core::runtime::spawn_background(async move {
+                    if let Some(client) = live.get_client().await {
+                        let body = serde_json::json!({
+                            "lol": {
+                                "rankedLeagueTier": tier,
+                                "rankedLeagueDivision": div,
+                            }
+                        });
+                        let _ = client
+                            .request("PUT", "/lol-chat/v1/me", Some(body), false)
+                            .await;
+                    }
+                });
+                self.tools_view.set_feedback("伪装段位已生效", false);
+                cx.notify();
+            }
+            ToolsAction::SetOnlineStatus(st) => {
+                self.tools_view.online_status = st.clone();
+                let live = self.live_service.clone();
+                yuumi_core::runtime::spawn_background(async move {
+                    if let Some(client) = live.get_client().await {
+                        let body = serde_json::json!({ "availability": st });
+                        let _ = client
+                            .request("PUT", "/lol-chat/v1/me", Some(body), false)
+                            .await;
+                    }
+                });
+                self.tools_view.set_feedback("在线状态已切换", false);
+                cx.notify();
+            }
+            ToolsAction::ClearBadges => {
+                let live = self.live_service.clone();
+                yuumi_core::runtime::spawn_background(async move {
+                    if let Some(client) = live.get_client().await {
+                        let body = serde_json::json!({ "challengeIds": [] });
+                        let _ = client
+                            .request(
+                                "POST",
+                                "/lol-challenges/v1/update-player-preferences",
+                                Some(body),
+                                false,
+                            )
+                            .await;
+                    }
+                });
+                self.tools_view.set_feedback("已清空成就勋章展示", false);
+                cx.notify();
+            }
+            ToolsAction::ClearBorder => {
+                let live = self.live_service.clone();
+                yuumi_core::runtime::spawn_background(async move {
+                    if let Some(client) = live.get_client().await {
+                        let body = serde_json::json!({ "bannerId": "" });
+                        let _ = client
+                            .request(
+                                "POST",
+                                "/lol-challenges/v1/update-player-preferences",
+                                Some(body),
+                                false,
+                            )
+                            .await;
+                    }
+                });
+                self.tools_view.set_feedback("已清除个人边框", false);
+                cx.notify();
+            }
+            ToolsAction::ApplyOnlineStatus => {
+                let status = self.tools_view.online_status.clone();
+                let live = self.live_service.clone();
+                yuumi_core::runtime::spawn_background(async move {
+                    if let Some(client) = live.get_client().await {
+                        let body = serde_json::json!({ "availability": status });
+                        let _ = client
+                            .request("PUT", "/lol-chat/v1/me", Some(body), false)
+                            .await;
+                    }
+                });
+                self.tools_view.set_feedback("在线状态已切换", false);
+                cx.notify();
+            }
+        }
     }
 
-    pub fn toggle_auto_reconnect(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.match_config.auto_reconnect = !self.tools_view.match_config.auto_reconnect;
-        self.persist_automation(cx);
-    }
-
-    pub fn toggle_auto_play_again(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.match_config.auto_play_again =
-            !self.tools_view.match_config.auto_play_again;
-        self.persist_automation(cx);
-    }
-
-    pub fn toggle_auto_pick(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.bp_config.auto_pick = !self.tools_view.bp_config.auto_pick;
-        self.persist_automation(cx);
-    }
-
-    pub fn toggle_auto_ban(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.bp_config.auto_ban = !self.tools_view.bp_config.auto_ban;
-        self.persist_automation(cx);
-    }
-
-    pub fn toggle_auto_spell(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.bp_config.auto_spell = !self.tools_view.bp_config.auto_spell;
-        self.persist_automation(cx);
-    }
-
-    pub fn toggle_bench_overlay_setting(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.bench_overlay = !self.tools_view.bench_overlay;
-        self.persist_automation(cx);
-    }
-
-    pub fn toggle_auto_trade(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.auto_trade = !self.tools_view.auto_trade;
-        self.persist_automation(cx);
-    }
-
-    pub fn toggle_auto_honor(&mut self, cx: &mut Context<Self>) {
-        self.tools_view.match_config.auto_honor = !self.tools_view.match_config.auto_honor;
-        self.persist_automation(cx);
-    }
-
-    pub fn toggle_close_to_tray(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.close_to_tray = !self.settings_view.close_to_tray;
-        cx.notify();
-    }
-
-    pub fn toggle_start_with_windows(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.start_with_windows = !self.settings_view.start_with_windows;
-        cx.notify();
-    }
-
-    pub fn toggle_minimize_on_game(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.minimize_on_game_start = !self.settings_view.minimize_on_game_start;
-        cx.notify();
-    }
-
-    pub fn toggle_mica(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.mica_enabled = !self.settings_view.mica_enabled;
-        cx.notify();
-    }
-
-    pub fn toggle_hide_tft(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.hide_tft = !self.settings_view.hide_tft;
-        cx.notify();
-    }
-
-    pub fn toggle_hide_saved_players(&mut self, cx: &mut Context<Self>) {
-        self.settings_view.hide_saved_players = !self.settings_view.hide_saved_players;
-        cx.notify();
+    /// 处理设置页交互动作
+    pub fn handle_settings_action(&mut self, action: SettingsAction, cx: &mut Context<Self>) {
+        match action {
+            SettingsAction::ToggleCollapse(name) => {
+                self.settings_view.toggle_section(name);
+                cx.notify();
+            }
+            SettingsAction::SetApiConcurrency(val) => {
+                self.app_config.functions.api_concurrency_number = val;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetCareerGames(val) => {
+                self.app_config.functions.career_games_number = val;
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleGameInfoFilter => {
+                self.app_config.functions.game_info_filter =
+                    !self.app_config.functions.game_info_filter;
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleReserveGameInfo => {
+                self.app_config.functions.enable_reserve_gameinfo =
+                    !self.app_config.functions.enable_reserve_gameinfo;
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleShowTierInGameInfo => {
+                self.app_config.functions.show_tier_in_game_info =
+                    !self.app_config.functions.show_tier_in_game_info;
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleAutoShowOpgg => {
+                self.app_config.functions.auto_show_opgg =
+                    !self.app_config.functions.auto_show_opgg;
+                self.persist_config(cx);
+            }
+            SettingsAction::TogglePinOpgg => {
+                self.app_config.functions.enable_opgg_on_top =
+                    !self.app_config.functions.enable_opgg_on_top;
+                self.persist_config(cx);
+            }
+            SettingsAction::DetectLolPath => {
+                if let Some(path) = services::detect_lol_path() {
+                    if !self.app_config.general.lol_path.contains(&path) {
+                        self.app_config.general.lol_path.push(path.clone());
+                        self.persist_config(cx);
+                    }
+                    self.settings_view
+                        .set_feedback(format!("已检测到客户端: {}", path), false);
+                } else {
+                    self.settings_view
+                        .set_feedback("未检测到运行中的英雄联盟客户端", true);
+                }
+                cx.notify();
+            }
+            SettingsAction::SelectLolFolder => {
+                if let Some(path) = services::select_folder() {
+                    if !self.app_config.general.lol_path.contains(&path) {
+                        self.app_config.general.lol_path.push(path.clone());
+                        self.persist_config(cx);
+                    }
+                    self.settings_view
+                        .set_feedback(format!("已添加目录: {}", path), false);
+                }
+                cx.notify();
+            }
+            SettingsAction::AddWegamePath => {
+                let wegame_marker = yuumi_core::config::WEGAME_MARKER.to_string();
+                if !self.app_config.general.lol_path.contains(&wegame_marker) {
+                    self.app_config.general.lol_path.push(wegame_marker);
+                    self.persist_config(cx);
+                }
+                self.settings_view
+                    .set_feedback("已添加 WeGame 启动项", false);
+                cx.notify();
+            }
+            SettingsAction::RemoveLolPath(idx) => {
+                if idx < self.app_config.general.lol_path.len() {
+                    self.app_config.general.lol_path.remove(idx);
+                    self.persist_config(cx);
+                }
+            }
+            SettingsAction::ToggleStartLolWithApp => {
+                self.app_config.general.enable_start_lol_with_app =
+                    !self.app_config.general.enable_start_lol_with_app;
+                self.persist_config(cx);
+            }
+            SettingsAction::ClearCache => {
+                let client_path = self.app_config.general.lol_path.first().cloned();
+                std::thread::spawn(move || {
+                    let _ = services::clear_game_cache(client_path.as_deref());
+                });
+                self.settings_view.set_feedback("缓存清理完成", false);
+                cx.notify();
+            }
+            SettingsAction::ToggleCloseToTray => {
+                let cur = self.app_config.general.enable_close_to_tray.unwrap_or(true);
+                self.app_config.general.enable_close_to_tray = Some(!cur);
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleMinimizeOnGameStart => {
+                self.app_config.general.enable_game_start_minimize =
+                    !self.app_config.general.enable_game_start_minimize;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetUploadApiUrl(url) => {
+                self.app_config.general.upload_api_url = url;
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleLcuRealtime => {
+                self.app_config.functions.lcu_realtime_enabled =
+                    !self.app_config.functions.lcu_realtime_enabled;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetLcuUserId(id) => {
+                self.app_config.functions.lcu_user_id = id;
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleSignalrHub => {
+                self.app_config.general.enable_signalr_hub =
+                    !self.app_config.general.enable_signalr_hub;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetSignalrServer(s) => {
+                self.app_config.general.signalr_server_url = s;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetSignalrUser(u) => {
+                self.app_config.general.signalr_user_id = u;
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleHideTft => {
+                self.app_config.functions.hide_tft = !self.app_config.functions.hide_tft;
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleHideSavedPlayers => {
+                self.app_config.functions.hide_saved_players =
+                    !self.app_config.functions.hide_saved_players;
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleScreenshotOnMultikill => {
+                self.app_config.functions.enable_screenshot_on_multikill =
+                    !self.app_config.functions.enable_screenshot_on_multikill;
+                self.persist_config(cx);
+            }
+            SettingsAction::ToggleScreenshotLevel(lvl) => {
+                if let Some(pos) = self
+                    .app_config
+                    .functions
+                    .screenshot_on_multikill_levels
+                    .iter()
+                    .position(|l| *l == lvl)
+                {
+                    self.app_config
+                        .functions
+                        .screenshot_on_multikill_levels
+                        .remove(pos);
+                } else {
+                    self.app_config
+                        .functions
+                        .screenshot_on_multikill_levels
+                        .push(lvl);
+                }
+                self.persist_config(cx);
+            }
+            SettingsAction::SelectScreenshotFolder => {
+                if let Some(folder) = services::select_folder() {
+                    self.app_config.functions.screenshot_save_path = folder;
+                    self.persist_config(cx);
+                }
+            }
+            SettingsAction::OpenScreenshotFolder => {
+                let path = self.app_config.functions.screenshot_save_path.clone();
+                std::thread::spawn(move || {
+                    let p = if path.is_empty() {
+                        yuumi_core::runtime::app_data_dir().join("screenshots")
+                    } else {
+                        std::path::PathBuf::from(path)
+                    };
+                    let _ = services::open_folder(p);
+                });
+            }
+            SettingsAction::SetLogLevel(lvl) => {
+                self.app_config.general.log_level = lvl;
+                self.persist_config(cx);
+            }
+            SettingsAction::OpenLogFolder => {
+                std::thread::spawn(|| {
+                    let _ = services::open_log_folder();
+                });
+            }
+            SettingsAction::ToggleMica => {
+                self.app_config.personalization.mica_enabled =
+                    !self.app_config.personalization.mica_enabled;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetThemeMode(mode) => {
+                self.app_config.personalization.theme_mode = mode;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetThemeColor(color) => {
+                self.app_config.personalization.theme_color = color;
+                self.persist_config(cx);
+            }
+            SettingsAction::ResetThemeColor => {
+                self.app_config.personalization.theme_color = "#009faa".to_string();
+                self.persist_config(cx);
+            }
+            SettingsAction::ResetCardColors => {
+                self.app_config.personalization.win_card_color = "#3339B01B".to_string();
+                self.app_config.personalization.lose_card_color = "#33D3190C".to_string();
+                self.app_config.personalization.remake_card_color = "#33A2A2A2".to_string();
+                self.persist_config(cx);
+            }
+            SettingsAction::ResetDeathsColors => {
+                self.app_config.personalization.light_deaths_number_color =
+                    "#ffb60000".to_string();
+                self.app_config.personalization.dark_deaths_number_color =
+                    "#ffff8d8d".to_string();
+                self.persist_config(cx);
+            }
+            SettingsAction::SetDpiScale(s) => {
+                self.app_config.personalization.dpi_scale = s;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetLanguage(l) => {
+                self.app_config.personalization.language = l;
+                self.persist_config(cx);
+            }
+            SettingsAction::CheckUpdate => {
+                self.settings_view
+                    .set_feedback("当前已是最新版本 (v2.5.0)", false);
+                cx.notify();
+            }
+            SettingsAction::ToggleHttpProxy => {
+                self.app_config.general.enable_http_proxy =
+                    !self.app_config.general.enable_http_proxy;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetHttpProxyAddr(addr) => {
+                self.app_config.general.http_proxy_addr = addr;
+                self.persist_config(cx);
+            }
+        }
     }
 
     /// 加载高保真对局演示预览数据（优先真实快照，兜底演示）
@@ -1233,8 +1784,10 @@ impl MainWindow {
     }
 
     pub fn select_theme_index(&mut self, idx: usize, cx: &mut Context<Self>) {
-        self.settings_view.selected_theme_index = idx;
-        cx.notify();
+        if let Some((color, _)) = crate::views::settings::THEME_COLOR_PRESETS.get(idx) {
+            self.app_config.personalization.theme_color = color.to_string();
+            self.persist_config(cx);
+        }
     }
 
     pub fn perform_search(&mut self, query: &str, cx: &mut Context<Self>) {
@@ -1959,234 +2512,33 @@ impl Render for MainWindow {
                             })
                             .when(self.current_route == Route::Tools, |el| {
                                 let view = view_entity.clone();
-                                let p_accept = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_auto_accept(cx));
-                                    }
-                                };
-                                let p_reconn = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_auto_reconnect(cx));
-                                    }
-                                };
-                                let p_again = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_auto_play_again(cx));
-                                    }
-                                };
-                                let p_pick = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_auto_pick(cx));
-                                    }
-                                };
-                                let p_ban = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_auto_ban(cx));
-                                    }
-                                };
-                                let p_spell = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_auto_spell(cx));
-                                    }
-                                };
-                                let p_bench = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| {
-                                            this.toggle_bench_overlay_setting(cx)
+                                let connected =
+                                    matches!(self.connection_status, ConnectionStatus::Connected { .. });
+                                let on_tools_action =
+                                    move |action, _win: &mut Window, app: &mut App| {
+                                        view.update(app, |this, cx| {
+                                            this.handle_tools_action(action, cx);
                                         });
-                                    }
-                                };
-                                let p_trade = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_auto_trade(cx));
-                                    }
-                                };
-                                let p_honor = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_auto_honor(cx));
-                                    }
-                                };
-
-                                let p_fix_win = {
-                                    let _v = view.clone();
-                                    move |_ev: &_, _win: &mut _, _app: &mut _| {
-                                        std::thread::spawn(|| {
-                                            match services::fix_client_window() {
-                                                Ok(msg) => log::info!("[Tools] {}", msg),
-                                                Err(e) => log::warn!("[Tools] 修复窗口失败: {}", e),
-                                            }
-                                        });
-                                    }
-                                };
-                                let p_clear_cache = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, _cx| {
-                                            let client_path =
-                                                this.settings_view.client_path.clone();
-                                            std::thread::spawn(move || {
-                                                match services::clear_game_cache(Some(&client_path))
-                                                {
-                                                    Ok(msg) => log::info!("[Tools] {}", msg),
-                                                    Err(e) => {
-                                                        log::warn!("[Tools] 清理缓存失败: {}", e)
-                                                    }
-                                                }
-                                            });
-                                        });
-                                    }
-                                };
-
+                                    };
                                 el.child(self.tools_view.render_panel(
-                                    p_accept,
-                                    p_reconn,
-                                    p_again,
-                                    p_pick,
-                                    p_ban,
-                                    p_spell,
-                                    p_bench,
-                                    p_trade,
-                                    p_honor,
-                                    p_fix_win,
-                                    p_clear_cache,
+                                    &self.app_config,
+                                    connected,
+                                    window,
+                                    on_tools_action,
                                 ))
                             })
                             .when(self.current_route == Route::Settings, |el| {
                                 let view = view_entity.clone();
-                                let p_close_tray = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_close_to_tray(cx));
-                                    }
-                                };
-                                let p_start_win = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| {
-                                            this.toggle_start_with_windows(cx)
+                                let on_settings_action =
+                                    move |action, _win: &mut Window, app: &mut App| {
+                                        view.update(app, |this, cx| {
+                                            this.handle_settings_action(action, cx);
                                         });
-                                    }
-                                };
-                                let p_min_game = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_minimize_on_game(cx));
-                                    }
-                                };
-                                let p_mica = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_mica(cx));
-                                    }
-                                };
-                                let p_hide_tft = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.toggle_hide_tft(cx));
-                                    }
-                                };
-                                let p_hide_saved = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| {
-                                            this.toggle_hide_saved_players(cx)
-                                        });
-                                    }
-                                };
-                                let p_theme = {
-                                    let v = view.clone();
-                                    move |idx: usize, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| this.select_theme_index(idx, cx));
-                                    }
-                                };
-                                let p_detect_path = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| {
-                                            if let Some(path) = services::detect_lol_path() {
-                                                log::info!(
-                                                    "[Settings] 检测到 LOL 客户端路径: {}",
-                                                    path
-                                                );
-                                                this.settings_view.client_path = path;
-                                                cx.notify();
-                                            } else {
-                                                log::warn!(
-                                                    "[Settings] 未能自动检测到 LOL 客户端路径"
-                                                );
-                                            }
-                                        });
-                                    }
-                                };
-                                let p_select_folder = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, cx| {
-                                            if let Some(path) = services::select_folder() {
-                                                log::info!(
-                                                    "[Settings] 手动选择 LOL 客户端路径: {}",
-                                                    path
-                                                );
-                                                this.settings_view.client_path = path;
-                                                cx.notify();
-                                            }
-                                        });
-                                    }
-                                };
-                                let p_open_log = {
-                                    let _v = view.clone();
-                                    move |_ev: &_, _win: &mut _, _app: &mut _| {
-                                        std::thread::spawn(|| match services::open_log_folder() {
-                                            Ok(path) => log::info!(
-                                                "[Settings] 已打开日志目录: {}",
-                                                path.display()
-                                            ),
-                                            Err(e) => {
-                                                log::warn!("[Settings] 打开日志目录失败: {}", e)
-                                            }
-                                        });
-                                    }
-                                };
-                                let p_settings_clear_cache = {
-                                    let v = view.clone();
-                                    move |_ev: &_, _win: &mut _, app: &mut _| {
-                                        v.update(app, |this, _cx| {
-                                            let client_path =
-                                                this.settings_view.client_path.clone();
-                                            std::thread::spawn(move || {
-                                                match services::clear_game_cache(Some(&client_path))
-                                                {
-                                                    Ok(msg) => log::info!("[Settings] {}", msg),
-                                                    Err(e) => {
-                                                        log::warn!("[Settings] 清理缓存失败: {}", e)
-                                                    }
-                                                }
-                                            });
-                                        });
-                                    }
-                                };
-
+                                    };
                                 el.child(self.settings_view.render_panel(
-                                    p_close_tray,
-                                    p_start_win,
-                                    p_min_game,
-                                    p_mica,
-                                    p_hide_tft,
-                                    p_hide_saved,
-                                    p_theme,
-                                    p_detect_path,
-                                    p_select_folder,
-                                    p_open_log,
-                                    p_settings_clear_cache,
+                                    &self.app_config,
+                                    window,
+                                    on_settings_action,
                                 ))
                             }),
                     )
