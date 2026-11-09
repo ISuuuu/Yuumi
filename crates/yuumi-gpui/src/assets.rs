@@ -37,6 +37,8 @@ impl AssetSource for Assets {
             "icons/tft.svg" => Some(include_bytes!("../assets/icons/tft.svg")),
             "icons/opgg.svg" => Some(include_bytes!("../assets/icons/opgg.svg")),
             "icons/drag.svg" => Some(include_bytes!("../assets/icons/drag.svg")),
+            "icons/cs.svg" => Some(include_bytes!("../assets/icons/cs.svg")),
+            "icons/gold.svg" => Some(include_bytes!("../assets/icons/gold.svg")),
             _ => None,
         };
         Ok(bytes.map(Cow::Borrowed))

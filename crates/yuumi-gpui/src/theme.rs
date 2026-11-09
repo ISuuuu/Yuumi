@@ -45,6 +45,10 @@ impl Theme {
     pub const ACCENT_PRIMARY: Hsla = const_hsla(0.5108, 1.0000, 0.3333, 1.0); // --primary-color → #009faa
     pub const ACCENT_HOVER: Hsla = const_hsla(0.4888, 1.0000, 0.3510, 1.0); // --primary-color-hover → #00b3a7
     pub const ACCENT_LIGHT: Hsla = const_hsla(0.5108, 1.0000, 0.3333, 0.15); // --primary-color-alpha-15
+    /// 极浅品牌底（对应 --primary-color-alpha-10，用于页签激活态）
+    pub const ACCENT_ALPHA_10: Hsla = const_hsla(0.5108, 1.0000, 0.3333, 0.10);
+    /// 品牌描边（对应 --primary-color-alpha-20）
+    pub const ACCENT_ALPHA_20: Hsla = const_hsla(0.5108, 1.0000, 0.3333, 0.20);
     /// 兼容旧实现的极光强调色，已收敛到品牌青的亮阶，避免霓虹偏色
     pub const AURORA_CYAN: Hsla = const_hsla(0.5102, 1.0000, 0.3843, 1.0); // #00b8c4
     pub const AURORA_BLUE: Hsla = const_hsla(0.5512, 0.9320, 0.5961, 1.0); // #38bdf8
