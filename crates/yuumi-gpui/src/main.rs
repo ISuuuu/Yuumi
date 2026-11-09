@@ -553,8 +553,8 @@ impl MainWindow {
                     y: px(140.0),
                 }),
                 size: Size {
-                    width: px(452.0),
-                    height: px(268.0),
+                    width: px(550.0),
+                    height: px(70.0),
                 },
             })),
             // 无系统装饰，仅保留标题供 Win32 定位到 HWND（置顶 / 工具窗样式）

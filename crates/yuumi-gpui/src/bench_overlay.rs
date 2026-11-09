@@ -6,6 +6,7 @@
 //! 生命周期：仅在极地大乱斗（及同族板凳席队列）选人期间由主窗口显示，选人结束自动隐藏。
 
 use crate::asset_loader::global_asset_loader;
+use crate::components::icon::icon;
 use crate::components::lcu_image::LcuImage;
 use crate::platform;
 use crate::services::LiveLcuService;
@@ -323,6 +324,7 @@ impl BenchOverlayView {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let queue_label: SharedString = match self.queue_id {
             450 => "极地大乱斗".into(),
@@ -419,13 +421,6 @@ impl BenchOverlayView {
             )
     }
 
-    fn render_section_label(text: &'static str) -> impl IntoElement {
-        div()
-            .text_size(px(9.0))
-            .text_color(Theme::TEXT_MUTED)
-            .child(text)
-    }
-
     fn render_slot(&self, slot: &BenchSlot, cx: &mut Context<Self>) -> impl IntoElement {
         let champion_id = slot.champion_id;
         let is_pending = self.pending_champion == Some(champion_id);
@@ -446,31 +441,21 @@ impl BenchOverlayView {
                 .into(),
                 champion_id as u64,
             ))
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(1.0))
-            .opacity(if is_pending { 0.55 } else { 1.0 })
+            .relative()
+            .size(px(44.0))
+            .rounded(px(8.0))
+            .overflow_hidden()
+            .border_2()
+            .border_color(border_color)
+            .opacity(if is_pending { 0.4 } else { 1.0 })
             .when(!is_pending, |this| {
-                this.cursor_pointer().hover(|s| s.opacity(0.85))
+                this.cursor_pointer()
+                    .hover(|s| s.border_color(Theme::AURORA_CYAN))
             })
             .child(
                 LcuImage::new(champion_icon_path(champion_id))
-                    .size(px(38.0))
-                    .border_color(border_color)
+                    .size(px(44.0))
                     .placeholder(slot.name.clone()),
-            )
-            .child(
-                div()
-                    .max_w(px(46.0))
-                    .overflow_hidden()
-                    .text_size(px(8.0))
-                    .text_color(if highlight {
-                        Theme::AURORA_CYAN
-                    } else {
-                        Theme::TEXT_SECONDARY
-                    })
-                    .child(slot.name.clone()),
             )
             .when(!is_pending, |this| {
                 this.on_mouse_down(
@@ -487,84 +472,169 @@ impl BenchOverlayView {
 impl Render for BenchOverlayView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let bench = self.bench.clone();
-        let team = self.team.clone();
         let status = self.status.clone();
-        let header = self.render_header(cx);
-        let bench_slots: Vec<_> = bench
-            .iter()
-            .map(|slot| self.render_slot(slot, cx))
-            .collect();
+        let rerolls = self.rerolls_remaining;
+        let is_pending = self.pending_champion.is_some();
 
         div()
             .id("bench-overlay-root")
             .size_full()
+            .relative()
             .flex()
-            .flex_col()
-            .gap_1()
-            .bg(rgba(0x0f172af2)) // 游戏内深色半透底色
+            .flex_row()
+            .items_center()
+            .bg(rgba(0x0f172af2)) // 深色半透水晶极光底色
             .border_1()
-            .border_color(Theme::AURORA_CYAN.opacity(0.55))
-            .rounded_xl()
-            .p_3()
-            .shadow_lg()
-            // 空白区域按下可拖拽移动（英雄槽位与按钮内部阻止冒泡）
+            .border_color(Theme::CARD_BORDER)
+            .rounded(px(12.0))
+            .px(px(8.0))
+            .py(px(5.0))
+            .shadow_md()
+            .overflow_hidden()
+            // 浮窗空白区域按下启动 Win32 原生拖拽
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _ev, window, cx| {
                     this.begin_drag(window, cx);
                 }),
             )
-            .child(header)
-            .child(Self::render_section_label("板凳席（点击换取）"))
+            // 1. 左侧拖动手柄 (宽 20px)
             .child(
                 div()
+                    .id("bench-drag-handle")
+                    .w(px(20.0))
+                    .h_full()
                     .flex()
-                    .flex_wrap()
                     .items_center()
-                    .gap_2()
-                    .min_h(px(56.0))
+                    .justify_center()
+                    .cursor_move()
+                    .opacity(0.55)
+                    .hover(|s| s.opacity(1.0).text_color(rgb(0xffffff)))
+                    .child(icon("icons/drag.svg", 16.0, Theme::TEXT_MUTED))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _ev, window, cx| {
+                            cx.stop_propagation();
+                            this.begin_drag(window, cx);
+                        }),
+                    ),
+            )
+            // 2. 中间板凳英雄列表 (水平单行 flex-1)
+            .child(
+                div()
+                    .id("bench-champions-list")
+                    .flex_1()
+                    .h_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(6.0))
+                    .overflow_x_hidden()
                     .when(bench.is_empty(), |this| {
                         this.child(
                             div()
-                                .text_size(px(10.0))
+                                .text_size(px(12.0))
                                 .text_color(Theme::TEXT_MUTED)
-                                .child("暂无板凳席英雄"),
+                                .child("板凳席空空如也"),
                         )
                     })
-                    .children(bench_slots),
+                    .children(bench.iter().map(|slot| self.render_slot(slot, cx))),
             )
-            .child(Self::render_section_label("本方已拥有"))
+            // 3. 右侧操作区 (紧凑摇号/换回 + 关闭)
             .child(
                 div()
                     .flex()
+                    .flex_row()
                     .items_center()
-                    .gap_2()
-                    .when(team.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .text_size(px(10.0))
-                                .text_color(Theme::TEXT_MUTED)
-                                .child("暂无已选英雄"),
-                        )
-                    })
-                    .children(team.iter().map(|slot| {
-                        div().flex().flex_col().items_center().gap(px(1.0)).child(
-                            LcuImage::new(champion_icon_path(slot.champion_id))
-                                .size(px(26.0))
-                                .border_color(if slot.is_mine {
-                                    Theme::AURORA_CYAN
-                                } else {
-                                    Theme::CARD_BORDER
-                                })
-                                .placeholder(slot.name.clone()),
-                        )
-                    })),
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .id("bench-reroll")
+                            .flex()
+                            .items_center()
+                            .h(px(24.0))
+                            .px(px(6.0))
+                            .rounded(px(4.0))
+                            .bg(rgba(0xffffff18))
+                            .hover(|s| s.bg(rgba(0x00f5d433)))
+                            .cursor_pointer()
+                            .text_size(px(10.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(0xffffff))
+                            .when(is_pending, |s| s.opacity(0.5))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _ev, _window, cx| {
+                                    cx.stop_propagation();
+                                    this.reroll(cx);
+                                }),
+                            )
+                            .child(if rerolls > 0 {
+                                format!("摇号 {}", rerolls)
+                            } else {
+                                "摇号".to_string()
+                            }),
+                    )
+                    .child(
+                        div()
+                            .id("bench-reroll-restore")
+                            .flex()
+                            .items_center()
+                            .h(px(24.0))
+                            .px(px(6.0))
+                            .rounded(px(4.0))
+                            .bg(rgba(0x00f5d426))
+                            .hover(|s| s.bg(rgba(0x00f5d44d)))
+                            .cursor_pointer()
+                            .text_size(px(10.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(Theme::AURORA_CYAN)
+                            .when(is_pending, |s| s.opacity(0.5))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _ev, _window, cx| {
+                                    cx.stop_propagation();
+                                    this.reroll_and_restore(cx);
+                                }),
+                            )
+                            .child("换回"),
+                    )
+                    .child(
+                        div()
+                            .id("bench-close-btn")
+                            .size(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .opacity(0.55)
+                            .hover(|s| s.opacity(1.0).text_color(Theme::LOSS_BAR))
+                            .text_color(Theme::TEXT_MUTED)
+                            .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                |_ev, window, _app| {
+                                    window.remove_window();
+                                },
+                            ),
+                    ),
             )
+            // 4. 底部迷你悬浮提示小药丸
             .when_some(status, |this, text| {
                 this.child(
                     div()
-                        .text_size(px(9.0))
-                        .text_color(Theme::AURORA_CYAN)
+                        .absolute()
+                        .bottom(px(3.0))
+                        .left(px(180.0))
+                        .px(px(8.0))
+                        .py(px(1.0))
+                        .rounded(px(8.0))
+                        .bg(rgba(0x000000bf))
+                        .text_size(px(10.0))
+                        .text_color(rgb(0xffffff))
                         .child(text),
                 )
             })
