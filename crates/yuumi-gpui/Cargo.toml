@@ -4,6 +4,15 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
+# 开发构建默认 opt-level=0 时，gpui 的布局/绘制（taffy layout + paint）极慢：
+# 对局信息页一次整页重绘要 330ms，拖动窗口起始那一次重绘就是肉眼可见的卡顿。
+# 这里让依赖（gpui/taffy 等）以 opt-level=2 编译，本 crate 保持 0，增量编译仍只需 ~10s。
+[profile.dev]
+opt-level = 0
+
+[profile.dev.package."*"]
+opt-level = 2
+
 [build-dependencies]
 embed-resource = "3"
 
