@@ -421,6 +421,9 @@ impl MainWindow {
                 self.sync_bench_overlay(cx);
                 cx.notify();
             }
+            // 占位：战利品写动作进度等新事件；穷尽匹配兼容分支，整合时由主进程
+            // 在此写入 career_view 进度面板并 cx.notify()（非动作接线，启动/自动流程均不触发写操作）
+            _ => {}
         }
     }
 
