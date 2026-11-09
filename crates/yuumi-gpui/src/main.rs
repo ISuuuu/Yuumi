@@ -42,7 +42,9 @@ use views::tools::ToolsView;
 use views::Route;
 use yuumi_core::agents::{AutomationSettings, ChampSelectSession, GamePhase};
 use yuumi_core::lcu::game_data::GameDataAssets;
-use yuumi_core::parsers::game_info::LiveGameInfo;
+use yuumi_core::parsers::game_info::{LiveGameInfo, RankedStats};
+use yuumi_core::parsers::loot_actions::{LootActionItem, LootActionKind};
+use yuumi_core::parsers::summoner::SummonerInfo;
 
 /// 主窗口 Win32 标题（与标题栏显示的应用名保持一致，对照 Vue `tauri.conf.json` 的 `title`）
 pub const MAIN_WINDOW_TITLE: &str = components::titlebar::APP_NAME;
@@ -92,6 +94,10 @@ pub struct MainWindow {
     matches: Vec<MatchItem>,
     stats: CareerHeaderStats,
     career_view: CareerView,
+    own_summoner: Option<SummonerInfo>,
+    own_matches: Vec<MatchItem>,
+    own_ranked: Option<RankedStats>,
+    own_stats: CareerHeaderStats,
     /// 当前 10 人对局信息快照（由 LiveLcuService 实时推送，退回大厅后保留最后一次）
     game_info: Option<Arc<LiveGameInfo>>,
     /// 是否正在并发拉取 10 人数据
@@ -183,14 +189,21 @@ impl MainWindow {
         .detach();
 
         // 启动即保持空态，真实战绩到达后由事件统一预热资源并重绘
+        let own_matches = matches.clone();
+        let own_stats = stats.clone();
+
         Self {
             titlebar: TitleBar::new(components::titlebar::APP_NAME),
             matches,
             stats,
             career_view,
+            own_summoner: None,
+            own_matches,
+            own_ranked: None,
+            own_stats,
             game_info: None,
             game_info_loading: false,
-            game_info_view_mode: GameInfoViewMode::ByTeam,
+            game_info_view_mode: GameInfoViewMode::AllMatches,
             game_info_active_tab: GameInfoTeamTab::Ally,
             current_phase: "None".to_string(),
             tools_view,
@@ -218,7 +231,10 @@ impl MainWindow {
             LiveLcuEvent::ConnectionChanged(status) => {
                 if let ConnectionStatus::Connected { summoner, .. } = &status {
                     if let Some(s) = summoner.as_ref() {
-                        self.career_view.summoner = Some(s.clone());
+                        self.own_summoner = Some(s.clone());
+                        if !self.career_view.is_viewing_other {
+                            self.career_view.summoner = Some(s.clone());
+                        }
                         self.saved_players_view
                             .set_self_puuid(Some(s.puuid.clone()));
                         // 资料卡头像也要预热，否则 LcuImage 只显示占位文字
@@ -268,7 +284,11 @@ impl MainWindow {
                 asset_paths.dedup();
                 prewarm_assets(asset_paths, cx);
 
-                self.matches = items;
+                if !self.career_view.is_viewing_other {
+                    self.own_matches = items.clone();
+                    self.own_stats = self.stats.clone();
+                    self.matches = items;
+                }
                 cx.notify();
             }
             LiveLcuEvent::RankedStatsLoaded(stats) => {
@@ -276,7 +296,10 @@ impl MainWindow {
                     "[MainWindow] 接收到真实排位数据: 队列数={}",
                     stats.queue_map.len()
                 );
-                self.career_view.ranked = Some(stats);
+                if !self.career_view.is_viewing_other {
+                    self.own_ranked = Some(stats.clone());
+                    self.career_view.ranked = Some(stats);
+                }
                 cx.notify();
             }
             LiveLcuEvent::ChampionMasteryLoaded(mut masteries) => {
@@ -522,10 +545,9 @@ impl MainWindow {
             ..Default::default()
         };
 
-        let new_handle = cx.open_window(window_options, move |window, cx| {
+        let new_handle = cx.open_window(window_options, move |_window, cx| {
             cx.new(move |cx| {
                 let mut view = BenchOverlayView::new(service);
-                view.bind_window(window, cx);
                 if let Some(session) = &session {
                     view.apply_session(session, assets.as_deref(), cx);
                 }
@@ -701,26 +723,83 @@ impl MainWindow {
                 self.career_view.loot_selected = ids;
             }
             LootAction::ClearSelection => self.career_view.loot_selected.clear(),
-            // A.5 弹窗壳：以下四个分支只改本地 UI 状态，不调用任何 LCU 写接口
             LootAction::OpenQuantity(modal) => {
-                // 数量弹窗打开；+/− 按钮再次派发本变体即为数量刷新
                 self.career_view.loot_modal = Some(modal);
             }
             LootAction::OpenConfirm(modal) => {
                 self.career_view.loot_modal = Some(modal);
             }
-            LootAction::Confirm => {
-                // 数量弹窗确认：把选择数量记入本地状态；确认弹窗则仅关闭
-                let quantity = match &self.career_view.loot_modal {
-                    Some(LootModal::Quantity { quantity, .. }) => Some(*quantity),
-                    _ => None,
-                };
-                if let Some(q) = quantity {
-                    self.career_view.loot_last_quantity = q;
-                }
+            LootAction::Confirm(modal) => {
                 self.career_view.loot_modal = None;
+                let live = self.live_service.clone();
+                match modal {
+                    LootModal::Quantity {
+                        recipe_name,
+                        ingredients,
+                        quantity,
+                        action,
+                        ..
+                    } => {
+                        let item = LootActionItem {
+                            recipe_name,
+                            ingredients,
+                            count: quantity,
+                            ..Default::default()
+                        };
+                        let kind = match action {
+                            views::career::LootQuantityAction::Open => LootActionKind::Open,
+                            views::career::LootQuantityAction::Craft => LootActionKind::Open,
+                        };
+                        yuumi_core::runtime::spawn_background(async move {
+                            let _ = live.run_loot_action(kind, vec![item]).await;
+                            live.refresh_career_data().await;
+                        });
+                    }
+                    LootModal::Confirm { action_kind, .. } => {
+                        let selected_ids = self.career_view.loot_selected.clone();
+                        self.career_view.loot_selected.clear();
+
+                        let items: Vec<LootActionItem> = if action_kind
+                            == LootActionKind::SmartOpenAll
+                        {
+                            self.career_view
+                                .loot_items
+                                .iter()
+                                .filter(|i| i.is_openable)
+                                .map(|i| LootActionItem {
+                                    loot_id: i.loot_id.clone(),
+                                    name: i.name.clone(),
+                                    count: i.count,
+                                    recipe_name: format!("{}_open", i.loot_id),
+                                    ingredients: vec![i.loot_id.clone()],
+                                    ..Default::default()
+                                })
+                                .collect()
+                        } else {
+                            self.career_view
+                                .loot_items
+                                .iter()
+                                .filter(|i| selected_ids.contains(&i.loot_id))
+                                .map(|i| LootActionItem {
+                                    loot_id: i.loot_id.clone(),
+                                    name: i.item_desc.clone(),
+                                    count: i.count,
+                                    recipe_name: i.upgrade_recipe_name.clone().unwrap_or_default(),
+                                    ingredients: vec![i.loot_id.clone()],
+                                    ..Default::default()
+                                })
+                                .collect()
+                        };
+
+                        yuumi_core::runtime::spawn_background(async move {
+                            let _ = live.run_loot_action(action_kind, items).await;
+                            live.refresh_career_data().await;
+                        });
+                    }
+                }
             }
             LootAction::CloseModal => self.career_view.loot_modal = None,
+            LootAction::CloseProgress => self.career_view.loot_progress = None,
         }
         cx.notify();
     }
@@ -755,8 +834,121 @@ impl MainWindow {
             None => return,
         };
 
-        self.perform_search(&name, cx);
+        self.navigate_to_search(&name, None, cx);
+    }
+
+    /// 跳转到战绩查询并定位指定对局（对照 Vue `goToMatchDetail`）
+    pub fn navigate_to_search(
+        &mut self,
+        query: &str,
+        target_game_id: Option<u64>,
+        cx: &mut Context<Self>,
+    ) {
+        self.perform_search_with_target(query, target_game_id, cx);
         self.switch_route(Route::Search, cx);
+    }
+
+    /// 进入查看他人生涯模式
+    pub fn view_other_career(
+        &mut self,
+        puuid: String,
+        name: String,
+        _icon: String,
+        cx: &mut Context<Self>,
+    ) {
+        let (game_name, tag_line) = if let Some((g, t)) = name.split_once('#') {
+            (g.to_string(), Some(t.to_string()))
+        } else {
+            (name.clone(), None)
+        };
+
+        let other_summoner = SummonerInfo {
+            puuid: puuid.clone(),
+            display_name: Some(name.clone()),
+            game_name: Some(game_name),
+            tag_line,
+            summoner_level: Some(0),
+            profile_icon_id: Some(29),
+            privacy: None,
+            percent_complete_for_next_level: Some(0),
+            account_id: None,
+            summoner_id: None,
+            xp_since_last_level: None,
+            xp_until_next_level: None,
+        };
+
+        self.career_view.is_viewing_other = true;
+        self.career_view.active_tab = views::career::CareerTab::Matches;
+        self.career_view.summoner = Some(other_summoner);
+        self.career_view.ranked = None;
+        self.matches.clear();
+        self.stats = CareerHeaderStats::compute(&[]);
+        cx.notify();
+
+        let live = self.live_service.clone();
+        let target_name = name.clone();
+        cx.spawn(async move |entity, cx| {
+            if let Some(client) = live.get_client().await {
+                let assets_opt = live.get_game_data_assets().await;
+                if let Ok(real_s) =
+                    yuumi_core::parsers::summoner::fetch_summoner_by_name(&client, &target_name)
+                        .await
+                {
+                    let _ = entity.update(cx, |this, cx| {
+                        if this.career_view.is_viewing_other {
+                            this.career_view.summoner = Some(real_s);
+                            cx.notify();
+                        }
+                    });
+                }
+                if let Ok(stats) =
+                    yuumi_core::parsers::game_info::fetch_ranked_stats(&client, &puuid).await
+                {
+                    let _ = entity.update(cx, |this, cx| {
+                        if this.career_view.is_viewing_other {
+                            this.career_view.ranked = Some(stats);
+                            cx.notify();
+                        }
+                    });
+                }
+                if let Some(assets) = assets_opt {
+                    if let Ok(matches) = yuumi_core::parsers::match_parser::fetch_match_history(
+                        &client,
+                        &puuid,
+                        Some(0),
+                        Some(19),
+                        &assets,
+                    )
+                    .await
+                    {
+                        let items: Vec<MatchItem> =
+                            matches.into_iter().map(MatchItem::new).collect();
+                        let _ = entity.update(cx, |this, cx| {
+                            if this.career_view.is_viewing_other {
+                                this.stats = CareerHeaderStats::compute(&items);
+                                this.matches = items;
+                                cx.notify();
+                            }
+                        });
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// 返回我的生涯模式并恢复本人数据
+    pub fn back_to_my_career(&mut self, cx: &mut Context<Self>) {
+        self.career_view.is_viewing_other = false;
+        self.career_view.active_tab = views::career::CareerTab::Matches;
+        if let Some(own) = self.own_summoner.clone() {
+            self.career_view.summoner = Some(own);
+        }
+        self.matches = self.own_matches.clone();
+        self.stats = self.own_stats.clone();
+        self.career_view.ranked = self.own_ranked.clone();
+        self.refresh_career(cx);
+        cx.notify();
     }
 
     pub fn switch_route(&mut self, route: Route, cx: &mut Context<Self>) {
@@ -1041,6 +1233,15 @@ impl MainWindow {
     }
 
     pub fn perform_search(&mut self, query: &str, cx: &mut Context<Self>) {
+        self.perform_search_with_target(query, None, cx);
+    }
+
+    pub fn perform_search_with_target(
+        &mut self,
+        query: &str,
+        target_game_id: Option<u64>,
+        cx: &mut Context<Self>,
+    ) {
         let trimmed = query.trim().to_string();
         if trimmed.is_empty() {
             return;
@@ -1048,6 +1249,9 @@ impl MainWindow {
 
         self.search_view.set_search_query(&trimmed);
         self.search_view.set_searching(true);
+        if let Some(gid) = target_game_id {
+            self.search_view.selected_game_id = Some(gid);
+        }
         cx.notify();
 
         let live_service = self.live_service.clone();
@@ -1087,15 +1291,25 @@ impl MainWindow {
                         Ok(matches) => {
                             let items: Vec<MatchItem> =
                                 matches.into_iter().map(MatchItem::new).collect();
-                            let first_game_id = items.first().map(|m| m.display.game_id);
+                            let selected_game_id = target_game_id
+                                .filter(|tgid| items.iter().any(|m| m.display.game_id == *tgid))
+                                .or_else(|| items.first().map(|m| m.display.game_id));
 
                             let _ = entity.update(cx, |this, cx| {
-                                this.search_view.set_search_results(full_name, items);
+                                this.search_view.set_search_results(
+                                    full_name,
+                                    summoner.puuid.clone(),
+                                    summoner.summoner_id.unwrap_or(0),
+                                    items,
+                                );
+                                if let Some(gid) = selected_game_id {
+                                    this.search_view.selected_game_id = Some(gid);
+                                }
                                 cx.notify();
                             });
 
-                            // 3. 异步拉取首场详情填入 details_cache
-                            if let Some(gid) = first_game_id {
+                            // 3. 异步拉取详情填入 details_cache
+                            if let Some(gid) = selected_game_id {
                                 if let Ok(detail) =
                                     yuumi_core::parsers::match_detail::fetch_game_detail(
                                         &client, gid, &assets,
@@ -1137,6 +1351,8 @@ impl MainWindow {
             return;
         }
 
+        self.search_view.select_request_id += 1;
+        let req_id = self.search_view.select_request_id;
         self.search_view.selected_game_id = Some(game_id);
         self.search_view.is_loading_detail = true;
         cx.notify();
@@ -1152,22 +1368,72 @@ impl MainWindow {
                         .await
                 {
                     let _ = entity.update(cx, |this, cx| {
-                        this.search_view.insert_game_detail(game_id, detail);
-                        this.search_view.is_loading_detail = false;
-                        cx.notify();
+                        if this.search_view.select_request_id == req_id {
+                            this.search_view.insert_game_detail(game_id, detail);
+                            this.search_view.is_loading_detail = false;
+                            cx.notify();
+                        }
                     });
                     return;
                 }
             }
 
             let _ = entity.update(cx, |this, cx| {
-                // 拉取失败时保持空态，不再用其它对局详情冒充当前对局
-                log::warn!("[MainWindow] 对局详情拉取失败: game_id={}", game_id);
-                this.search_view.is_loading_detail = false;
-                cx.notify();
+                if this.search_view.select_request_id == req_id {
+                    log::warn!("[MainWindow] 对局详情拉取失败: game_id={}", game_id);
+                    this.search_view.is_loading_detail = false;
+                    cx.notify();
+                }
             });
         })
         .detach();
+    }
+
+    /// 复制指定 Game ID 并短暂展示反馈
+    pub fn copy_search_game_id(&mut self, game_id: u64, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(game_id.to_string()));
+        self.search_view.copied_feedback = Some(game_id);
+        cx.notify();
+
+        cx.spawn(async move |entity, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(1500))
+                .await;
+            let _ = entity.update(cx, |this, cx| {
+                if this.search_view.copied_feedback == Some(game_id) {
+                    this.search_view.copied_feedback = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// 战绩查询翻到上一页并自动定位当页首局详情
+    pub fn handle_search_prev_page(&mut self, cx: &mut Context<Self>) {
+        if self.search_view.current_page > 1 {
+            self.search_view.current_page -= 1;
+            let (paged, _, _) = self.search_view.paged_filtered_matches();
+            if let Some(first) = paged.first() {
+                let gid = first.display.game_id;
+                self.load_match_detail(gid, cx);
+            }
+            cx.notify();
+        }
+    }
+
+    /// 战绩查询翻到下一页并自动定位当页首局详情
+    pub fn handle_search_next_page(&mut self, cx: &mut Context<Self>) {
+        let (_, _, has_more) = self.search_view.paged_filtered_matches();
+        if has_more {
+            self.search_view.current_page += 1;
+            let (paged, _, _) = self.search_view.paged_filtered_matches();
+            if let Some(first) = paged.first() {
+                let gid = first.display.game_id;
+                self.load_match_detail(gid, cx);
+            }
+            cx.notify();
+        }
     }
 }
 
@@ -1239,7 +1505,7 @@ impl Render for MainWindow {
                             }
                         },
                     ))
-                    // 右侧主视口：首页与路人集自行撑满（路人集采用吸顶Header+内部独立平滑滚动），其余路由沿用统一外层滚动
+                    // 右侧主视口：首页、路人集、生涯、对局信息、查询各自内部独立滚动，仅 Tools 与 Settings 启用全局外层滚动
                     .child(
                         div()
                             .id("main-scroll-view")
@@ -1248,8 +1514,7 @@ impl Render for MainWindow {
                             .min_w(px(0.0))
                             .track_scroll(&self.main_scroll_handle)
                             .when(
-                                self.current_route != Route::Home
-                                    && self.current_route != Route::SavedPlayers,
+                                matches!(self.current_route, Route::Tools | Route::Settings),
                                 |el| el.overflow_y_scroll(),
                             )
                             .when(self.current_route == Route::Home, |el| {
@@ -1257,17 +1522,24 @@ impl Render for MainWindow {
                             })
                             .when(self.current_route == Route::Career, |el| {
                                 let view = view_entity.clone();
-                                let view_matches = view_entity.clone();
+                                let view_select = view_entity.clone();
                                 let view_refresh = view_entity.clone();
                                 let view_copy = view_entity.clone();
                                 let view_history = view_entity.clone();
+                                let view_back = view_entity.clone();
+                                let view_teammate = view_entity.clone();
                                 let view_query = view_entity.clone();
                                 let view_filter = view_entity.clone();
                                 let view_bar = view_entity.clone();
                                 let view_loot = view_entity.clone();
+                                let is_connected = matches!(
+                                    self.connection_status,
+                                    ConnectionStatus::Connected { .. }
+                                );
                                 el.child(self.career_view.render(
                                     &self.matches,
                                     stats,
+                                    is_connected,
                                     move |target_tab, _window, app| {
                                         view.update(app, |this, cx| {
                                             this.career_view.active_tab = target_tab;
@@ -1275,9 +1547,19 @@ impl Render for MainWindow {
                                             cx.notify();
                                         });
                                     },
-                                    move |clicked_idx, _window, app| {
-                                        view_matches.update(app, |this, cx| {
-                                            this.toggle_card_expanded(clicked_idx, cx);
+                                    move |game_id, _window, app| {
+                                        view_select.update(app, |this, cx| {
+                                            let summoner_name = this
+                                                .career_view
+                                                .summoner
+                                                .as_ref()
+                                                .map(|s| s.full_name())
+                                                .unwrap_or_default();
+                                            this.navigate_to_search(
+                                                &summoner_name,
+                                                Some(game_id),
+                                                cx,
+                                            );
                                         });
                                     },
                                     move |_window, app| {
@@ -1291,6 +1573,23 @@ impl Render for MainWindow {
                                     move |_window, app| {
                                         view_history
                                             .update(app, |this, cx| this.open_own_history(cx));
+                                    },
+                                    move |_window, app| {
+                                        view_back.update(app, |this, cx| {
+                                            this.back_to_my_career(cx);
+                                        });
+                                    },
+                                    move |tm, _window, app| {
+                                        view_teammate.update(app, |this, cx| {
+                                            this.career_view.popup = None;
+                                            if !tm.puuid.is_empty() {
+                                                this.view_other_career(
+                                                    tm.puuid, tm.name, tm.icon, cx,
+                                                );
+                                            } else {
+                                                this.navigate_to_search(&tm.name, None, cx);
+                                            }
+                                        });
                                     },
                                     &self.career_mastery_focus,
                                     self.career_mastery_focus.is_focused(window),
@@ -1306,7 +1605,12 @@ impl Render for MainWindow {
                                     },
                                     move |action: CareerBarAction, _window, app| {
                                         view_bar.update(app, |this, cx| {
-                                            this.apply_career_bar_action(action, cx)
+                                            if let CareerBarAction::SelectQueue(_) = &action {
+                                                this.career_view
+                                                    .matches_scroll_handle
+                                                    .set_offset(Point::default());
+                                            }
+                                            this.apply_career_bar_action(action, cx);
                                         });
                                     },
                                     &self.loot_value_focus,
@@ -1325,27 +1629,17 @@ impl Render for MainWindow {
                                 );
                                 let view_mode = self.game_info_view_mode;
                                 let active_tab = self.game_info_active_tab;
-                                let view_load_demo = view_entity.clone();
-                                let view_exit_demo = view_entity.clone();
                                 let view_mode_cb = view_entity.clone();
                                 let view_tab_cb = view_entity.clone();
-                                el.px_3().py_2().child(GameInfoView::render(
+                                let view_career_cb = view_entity.clone();
+                                let view_search_cb = view_entity.clone();
+                                el.overflow_hidden().h_full().child(GameInfoView::render(
                                     self.game_info.as_deref(),
                                     self.current_phase.as_str(),
                                     self.game_info_loading,
                                     connected,
                                     view_mode,
                                     active_tab,
-                                    move |_event, _window, app| {
-                                        view_load_demo.update(app, |this, cx| {
-                                            this.load_game_info_demo(cx);
-                                        });
-                                    },
-                                    move |_event, _window, app| {
-                                        view_exit_demo.update(app, |this, cx| {
-                                            this.exit_game_info_demo(cx);
-                                        });
-                                    },
                                     move |mode, _window, app| {
                                         view_mode_cb.update(app, |this, cx| {
                                             this.switch_game_info_view_mode(mode, cx);
@@ -1356,11 +1650,45 @@ impl Render for MainWindow {
                                             this.switch_game_info_team_tab(tab, cx);
                                         });
                                     },
+                                    move |puuid, _window, app| {
+                                        view_career_cb.update(app, |this, cx| {
+                                            if let Some(p) = puuid {
+                                                this.view_other_career(
+                                                    p,
+                                                    String::new(),
+                                                    String::new(),
+                                                    cx,
+                                                );
+                                            } else {
+                                                this.back_to_my_career(cx);
+                                            }
+                                        });
+                                    },
+                                    move |name, tag, _window, app| {
+                                        view_search_cb.update(app, |this, cx| {
+                                            let query = match tag {
+                                                Some(t) if !t.is_empty() => {
+                                                    format!("{}#{}", name, t)
+                                                }
+                                                _ => name,
+                                            };
+                                            this.navigate_to_search(&query, None, cx);
+                                        });
+                                    },
+                                    window.viewport_size().width,
                                 ))
                             })
                             .when(self.current_route == Route::Search, |el| {
                                 let view = view_entity.clone();
                                 let view_sq = view.clone();
+                                let view_del_hist = view.clone();
+                                let view_prev = view.clone();
+                                let view_next = view.clone();
+                                let view_career = view.clone();
+                                let view_upload = view.clone();
+                                let view_copy = view.clone();
+                                let view_player = view.clone();
+
                                 let on_select_match = {
                                     let v = view.clone();
                                     move |game_id: u64, _win: &mut Window, app: &mut App| {
@@ -1374,6 +1702,13 @@ impl Render for MainWindow {
                                     move |qid: Option<i32>, _win: &mut Window, app: &mut App| {
                                         v.update(app, |this, cx| {
                                             this.search_view.active_queue_filter = qid;
+                                            this.search_view.current_page = 1;
+                                            let (paged, _, _) =
+                                                this.search_view.paged_filtered_matches();
+                                            if let Some(first) = paged.first() {
+                                                let gid = first.display.game_id;
+                                                this.load_match_detail(gid, cx);
+                                            }
                                             cx.notify();
                                         });
                                     }
@@ -1396,7 +1731,14 @@ impl Render for MainWindow {
                                         });
                                     }
                                 };
-                                el.child(self.search_view.render(
+
+                                let connected = matches!(
+                                    self.connection_status,
+                                    ConnectionStatus::Connected { .. }
+                                );
+
+                                el.overflow_hidden().h_full().child(self.search_view.render(
+                                    connected,
                                     on_select_match,
                                     on_filter_queue,
                                     on_search,
@@ -1405,6 +1747,75 @@ impl Render for MainWindow {
                                     move |open, _window, app| {
                                         view_sq.update(app, |this, cx| {
                                             this.set_search_queue_menu(open, cx)
+                                        });
+                                    },
+                                    move |entry, _window, app| {
+                                        let e = entry.to_string();
+                                        view_del_hist.update(app, |this, cx| {
+                                            this.search_view.remove_from_history(&e);
+                                            cx.notify();
+                                        });
+                                    },
+                                    move |_window, app| {
+                                        view_prev.update(app, |this, cx| {
+                                            this.handle_search_prev_page(cx);
+                                        });
+                                    },
+                                    move |_window, app| {
+                                        view_next.update(app, |this, cx| {
+                                            this.handle_search_next_page(cx);
+                                        });
+                                    },
+                                    move |_window, app| {
+                                        view_career.update(app, |this, cx| {
+                                            let current_target =
+                                                this.search_view.current_summoner_puuid.clone();
+                                            let self_puuid =
+                                                this.own_summoner.as_ref().map(|s| s.puuid.clone());
+                                            if let Some(target) = current_target {
+                                                if Some(&target) != self_puuid.as_ref() {
+                                                    let name = this
+                                                        .search_view
+                                                        .current_summoner_name
+                                                        .clone()
+                                                        .unwrap_or_default();
+                                                    this.view_other_career(
+                                                        target,
+                                                        name,
+                                                        String::new(),
+                                                        cx,
+                                                    );
+                                                    return;
+                                                }
+                                            }
+                                            this.back_to_my_career(cx);
+                                        });
+                                    },
+                                    move |val, _window, app| {
+                                        view_upload.update(app, |this, cx| {
+                                            this.search_view.upload_enabled = val;
+                                            cx.notify();
+                                        });
+                                    },
+                                    move |game_id, _window, app| {
+                                        view_copy.update(app, |this, cx| {
+                                            this.copy_search_game_id(game_id, cx);
+                                        });
+                                    },
+                                    move |puuid, summoner_id, name, _window, app| {
+                                        view_player.update(app, |this, cx| {
+                                            if !puuid.is_empty()
+                                                && puuid != "00000000-0000-0000-0000-000000000000"
+                                            {
+                                                this.view_other_career(
+                                                    puuid,
+                                                    name,
+                                                    String::new(),
+                                                    cx,
+                                                );
+                                            } else if summoner_id > 0 {
+                                                this.perform_search(&name, cx);
+                                            }
                                         });
                                     },
                                 ))

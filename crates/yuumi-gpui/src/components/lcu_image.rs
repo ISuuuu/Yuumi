@@ -73,6 +73,7 @@ impl LcuImage {
     }
 
     /// 装备槽位预设
+    #[allow(dead_code)]
     pub fn item_slot(mut self) -> Self {
         self.shape = LcuImageShape::ItemSlot;
         self

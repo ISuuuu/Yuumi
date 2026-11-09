@@ -2,6 +2,7 @@ use crate::theme::Theme;
 use gpui::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum BadgeVariant {
     Default,
     Primary,

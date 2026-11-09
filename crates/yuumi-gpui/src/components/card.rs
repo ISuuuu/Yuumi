@@ -40,6 +40,16 @@ impl Card {
         self
     }
 
+    pub fn w_full(mut self) -> Self {
+        self.element = self.element.w_full();
+        self
+    }
+
+    pub fn min_h(mut self, h: Pixels) -> Self {
+        self.element = self.element.min_h(h);
+        self
+    }
+
     pub fn overflow_hidden(mut self) -> Self {
         self.element = self.element.overflow_hidden();
         self

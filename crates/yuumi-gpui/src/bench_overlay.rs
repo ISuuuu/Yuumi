@@ -42,6 +42,7 @@ pub fn load_saved_origin() -> Option<Point<Pixels>> {
     })
 }
 
+#[allow(dead_code)]
 fn save_origin(origin: Point<Pixels>) {
     let path = layout_path();
     if let Some(parent) = path.parent() {
@@ -118,6 +119,7 @@ impl BenchOverlayView {
     }
 
     /// 绑定窗口监听，拖动窗口停止后防抖持久化最终坐标
+    #[allow(dead_code)]
     pub fn bind_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self._bounds_subscription = Some(cx.observe_window_bounds(window, |this, window, cx| {
             if let WindowBounds::Windowed(bounds) = window.window_bounds() {

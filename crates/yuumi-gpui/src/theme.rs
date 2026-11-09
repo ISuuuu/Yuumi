@@ -74,6 +74,12 @@ impl Theme {
     pub const TEXT_SECONDARY: Hsla = const_hsla(0.5980, 0.1932, 0.3451, 1.0); // #475569
     pub const TEXT_MUTED: Hsla = const_hsla(0.5983, 0.1632, 0.4686, 1.0); // #64748b
     pub const TEXT_ACCENT: Hsla = const_hsla(0.5108, 1.0000, 0.3333, 1.0);
+    pub const TEXT_ON_PRIMARY: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 1.0); // 纯白 #ffffff
+    pub const DEATH_RED: Hsla = const_hsla(350.0 / 360.0, 0.85, 0.55, 1.0); // --death-color → #f43f5e
+
+    // ── 骨架屏与搜索历史标签 ──
+    pub const SKELETON_BG: Hsla = const_hsla(0.0000, 0.0000, 0.0000, 0.04);
+    pub const SKELETON_BORDER: Hsla = const_hsla(0.0000, 0.0000, 0.0000, 0.06);
 
     // ── 徽章与标签 ──
     pub const BADGE_BG: Hsla = const_hsla(0.0000, 0.0000, 0.0000, 0.05); // --hover-bg-strong 派生的浅标签底
@@ -114,21 +120,39 @@ impl Theme {
 }
 
 // 兼容别名与全局快捷常量
+#[allow(dead_code)]
 pub const BG_MAIN: Hsla = Theme::BG_APP;
+#[allow(dead_code)]
 pub const BG_CARD: Hsla = Theme::CARD_BG;
+#[allow(dead_code)]
 pub const BG_CARD_HOVER: Hsla = Theme::CARD_BG_HOVER;
+#[allow(dead_code)]
 pub const BG_ELEVATED: Hsla = Theme::CARD_BG_HOVER;
+#[allow(dead_code)]
 pub const BG_INPUT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 0.95); // --popover-bg 近似
+#[allow(dead_code)]
 pub const PRIMARY: Hsla = Theme::ACCENT_PRIMARY;
+#[allow(dead_code)]
 pub const TEXT_PRIMARY: Hsla = Theme::TEXT_PRIMARY;
+#[allow(dead_code)]
 pub const TEXT_SECONDARY: Hsla = Theme::TEXT_SECONDARY;
+#[allow(dead_code)]
 pub const TEXT_MUTED: Hsla = Theme::TEXT_MUTED;
+#[allow(dead_code)]
 pub const TEXT_ON_PRIMARY: Hsla = const_hsla(0.0, 0.0, 1.0, 1.0);
+#[allow(dead_code)]
 pub const BORDER_SECONDARY: Hsla = Theme::CARD_BORDER;
+#[allow(dead_code)]
 pub const WIN_PRIMARY: Hsla = Theme::WIN_BAR;
+#[allow(dead_code)]
 pub const WIN_MUTED: Hsla = Theme::WIN_BG;
+#[allow(dead_code)]
 pub const WIN_BORDER: Hsla = Theme::WIN_BORDER;
+#[allow(dead_code)]
 pub const LOSS_PRIMARY: Hsla = Theme::LOSS_BAR;
+#[allow(dead_code)]
 pub const LOSS_MUTED: Hsla = Theme::LOSS_BG;
+#[allow(dead_code)]
 pub const PRIMARY_MUTED: Hsla = Theme::ACCENT_LIGHT;
+#[allow(dead_code)]
 pub const GOLD: Hsla = Theme::GOLD;

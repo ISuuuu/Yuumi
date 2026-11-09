@@ -8,8 +8,8 @@ use windows::Win32::Foundation::{
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowExW, FindWindowW, GetWindowLongW, PostMessageW, SetForegroundWindow,
-    SetWindowLongW, SetWindowPos, ShowWindow, GWL_EXSTYLE, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
+    FindWindowExW, FindWindowW, GetWindowLongW, PostMessageW, SetForegroundWindow, SetWindowLongW,
+    SetWindowPos, ShowWindow, GWL_EXSTYLE, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
     SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_MINIMIZE,
     SW_RESTORE, WM_NCLBUTTONDOWN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };

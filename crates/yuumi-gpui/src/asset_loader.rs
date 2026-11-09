@@ -70,6 +70,56 @@ impl AssetLoader {
         Ok(Arc::new(render_img))
     }
 
+    pub fn get_builtin_image_bytes(path: &str) -> Option<&'static [u8]> {
+        let p = path.trim_start_matches('/');
+        match p {
+            "images/kills.png" => Some(include_bytes!("../../../public/images/kills.png")),
+            "images/tower-100.png" => Some(include_bytes!("../../../public/images/tower-100.png")),
+            "images/tower-200.png" => Some(include_bytes!("../../../public/images/tower-200.png")),
+            "images/inhibitor-100.png" => {
+                Some(include_bytes!("../../../public/images/inhibitor-100.png"))
+            }
+            "images/inhibitor-200.png" => {
+                Some(include_bytes!("../../../public/images/inhibitor-200.png"))
+            }
+            "images/baron-100.png" => Some(include_bytes!("../../../public/images/baron-100.png")),
+            "images/baron-200.png" => Some(include_bytes!("../../../public/images/baron-200.png")),
+            "images/dragon-100.png" => {
+                Some(include_bytes!("../../../public/images/dragon-100.png"))
+            }
+            "images/dragon-200.png" => {
+                Some(include_bytes!("../../../public/images/dragon-200.png"))
+            }
+            "images/herald-100.png" => {
+                Some(include_bytes!("../../../public/images/herald-100.png"))
+            }
+            "images/herald-200.png" => {
+                Some(include_bytes!("../../../public/images/herald-200.png"))
+            }
+            "images/sr-victory.png" => {
+                Some(include_bytes!("../../../public/images/sr-victory.png"))
+            }
+            "images/sr-defeat.png" => Some(include_bytes!("../../../public/images/sr-defeat.png")),
+            "images/ha-victory.png" => {
+                Some(include_bytes!("../../../public/images/ha-victory.png"))
+            }
+            "images/ha-defeat.png" => Some(include_bytes!("../../../public/images/ha-defeat.png")),
+            "images/arena-victory.png" => {
+                Some(include_bytes!("../../../public/images/arena-victory.png"))
+            }
+            "images/arena-defeat.png" => {
+                Some(include_bytes!("../../../public/images/arena-defeat.png"))
+            }
+            "images/other-victory.png" => {
+                Some(include_bytes!("../../../public/images/other-victory.png"))
+            }
+            "images/other-defeat.png" => {
+                Some(include_bytes!("../../../public/images/other-defeat.png"))
+            }
+            _ => None,
+        }
+    }
+
     /// 同步纯内存快速查询已解码缓存（0 阻塞 UI 主线程，绝不在渲染主线程执行磁盘 I/O 或图像解码）
     pub fn get_cached_render_image(&self, path: &str) -> Option<Arc<RenderImage>> {
         let trimmed = path.trim();
@@ -81,6 +131,16 @@ impl AssetLoader {
         if let Ok(lock) = self.decoded_cache.read() {
             if let Some(img) = lock.get(trimmed) {
                 return Some(img.clone());
+            }
+        }
+
+        // 内置静态图片在未命中内存缓存时做同步快速解码并写入
+        if let Some(builtin) = Self::get_builtin_image_bytes(trimmed) {
+            if let Ok(img) = Self::decode_bytes_to_render_image(builtin) {
+                if let Ok(mut lock) = self.decoded_cache.write() {
+                    lock.insert(trimmed.to_string(), img.clone());
+                }
+                return Some(img);
             }
         }
 
@@ -98,7 +158,9 @@ impl AssetLoader {
             return Ok(cached);
         }
 
-        let bytes = if let Some(raw) = self.core_cache.try_read_disk_cache(trimmed) {
+        let bytes = if let Some(builtin) = Self::get_builtin_image_bytes(trimmed) {
+            builtin.to_vec()
+        } else if let Some(raw) = self.core_cache.try_read_disk_cache(trimmed) {
             raw
         } else {
             self.core_cache.fetch_asset_bytes(trimmed).await?

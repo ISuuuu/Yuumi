@@ -10,14 +10,12 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use yuumi_core::parsers::game_info::{rank_tier_label, RankedQueueEntry, RankedStats};
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
+use yuumi_core::parsers::loot_actions::LootActionKind;
 use yuumi_core::parsers::mastery::ChampionMasteryItem;
 use yuumi_core::parsers::summoner::SummonerInfo;
 use yuumi_core::parsers::teammates::RecentTeammate;
 
 /// 生成一段圆弧的描边路径（角度以正右方为 0°，顺时针为正）
-///
-/// GPUI 的 `PathBuilder::stroke` 只有直线与贝塞尔，圆弧按 64 段折线逼近；
-/// 104px 环上每段弦高误差小于 0.1px，视觉上等价于真弧。
 fn arc_path(
     center: Point<Pixels>,
     radius: f32,
@@ -42,7 +40,7 @@ fn arc_path(
     builder.build().ok()
 }
 
-/// 排位表单元格：按权重等分整行宽度
+/// 排位表单元格
 fn ranked_cell(
     value: String,
     width: f32,
@@ -74,16 +72,16 @@ fn ranked_row(label: &str, entry: Option<&RankedQueueEntry>) -> [String; 9] {
     } else if entry.is_provisional {
         "定级中".to_string()
     } else {
-        "未定级".to_string()
+        "--".to_string()
     };
 
     [
         label.to_string(),
         total.to_string(),
         if total == 0 {
-            "—".to_string()
+            "--".to_string()
         } else {
-            format!("{:.1}%", entry.win_rate())
+            format!("{:.0}%", entry.win_rate())
         },
         entry.wins.to_string(),
         entry.losses.to_string(),
@@ -91,7 +89,7 @@ fn ranked_row(label: &str, entry: Option<&RankedQueueEntry>) -> [String; 9] {
         if entry.is_placed() {
             entry.league_points.to_string()
         } else {
-            "—".to_string()
+            "0".to_string()
         },
         rank_label_or_dash(&entry.highest_tier, &entry.highest_division),
         rank_label_or_dash(
@@ -101,11 +99,11 @@ fn ranked_row(label: &str, entry: Option<&RankedQueueEntry>) -> [String; 9] {
     ]
 }
 
-/// 段位标签，未定级时返回破折号（用于「赛季最高」「上赛季结算」列）
+/// 段位标签，未定级时返回破折号
 fn rank_label_or_dash(tier: &str, division: &str) -> String {
     let label = rank_tier_label(tier, division);
-    if label == "未定级" {
-        "—".to_string()
+    if label == "未定级" || tier.is_empty() || tier == "NONE" {
+        "--".to_string()
     } else {
         label
     }
@@ -125,7 +123,7 @@ fn bar_stat(label: &'static str, value: String, value_color: Hsla) -> impl IntoE
         )
         .child(
             div()
-                .text_size(px(14.0))
+                .text_size(px(13.5))
                 .font_weight(FontWeight::BOLD)
                 .text_color(value_color)
                 .child(value),
@@ -147,21 +145,46 @@ fn format_num(val: i64) -> String {
     result
 }
 
+fn format_local_time(ts_ms: i64) -> String {
+    if ts_ms <= 0 {
+        return String::new();
+    }
+    let millis = if ts_ms < 10_000_000_000 {
+        ts_ms * 1000
+    } else {
+        ts_ms
+    };
+    chrono::DateTime::from_timestamp_millis(millis)
+        .map(|dt| {
+            let local: chrono::DateTime<chrono::Local> = dt.into();
+            local.format("%m-%d %H:%M").to_string()
+        })
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CareerTab {
     Matches,
-    Mastery,
     Loot,
+    Mastery,
 }
 
-/// 近期统计横条右侧的浮层
+impl CareerTab {
+    pub fn label(&self) -> &'static str {
+        match self {
+            CareerTab::Matches => "生涯战绩",
+            CareerTab::Loot => "战利品",
+            CareerTab::Mastery => "英雄熟练度",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CareerPopup {
     QueueMenu,
     Teammates,
 }
 
-/// 生涯页队列下拉选项（对照 Vue MatchHistoryTab.vue 的 QUEUE_OPTIONS）
 #[derive(Debug, Clone, Copy)]
 pub struct QueueOption {
     pub label: &'static str,
@@ -174,22 +197,6 @@ pub const QUEUE_OPTIONS: [QueueOption; 7] = [
         id: None,
     },
     QueueOption {
-        label: "单双排位",
-        id: Some(420),
-    },
-    QueueOption {
-        label: "灵活排位",
-        id: Some(440),
-    },
-    QueueOption {
-        label: "匹配模式",
-        id: Some(430),
-    },
-    QueueOption {
-        label: "极地大乱斗",
-        id: Some(450),
-    },
-    QueueOption {
         label: "海克斯大乱斗",
         id: Some(2400),
     },
@@ -197,9 +204,24 @@ pub const QUEUE_OPTIONS: [QueueOption; 7] = [
         label: "经典海斗",
         id: Some(2450),
     },
+    QueueOption {
+        label: "极地大乱斗",
+        id: Some(450),
+    },
+    QueueOption {
+        label: "匹配模式",
+        id: Some(430),
+    },
+    QueueOption {
+        label: "单双排位",
+        id: Some(420),
+    },
+    QueueOption {
+        label: "灵活排位",
+        id: Some(440),
+    },
 ];
 
-/// 横条动作
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CareerBarAction {
     TogglePopup(CareerPopup),
@@ -207,7 +229,6 @@ pub enum CareerBarAction {
     SelectQueue(Option<i32>),
 }
 
-/// 熟练度宝箱状态筛选（对照 Vue `chestFilterOptions`）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChestFilter {
     All,
@@ -221,8 +242,8 @@ impl ChestFilter {
     pub fn label(&self) -> &'static str {
         match self {
             Self::All => "全部宝箱状态",
-            Self::Eligible => "可获取宝箱",
-            Self::Granted => "已获取宝箱",
+            Self::Eligible => "可获取宝箱 📦",
+            Self::Granted => "已获取宝箱 🎁",
         }
     }
 
@@ -235,7 +256,6 @@ impl ChestFilter {
     }
 }
 
-/// 熟练度等级区间筛选（对照 Vue `levelFilterOptions`）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LevelFilter {
     All,
@@ -257,10 +277,10 @@ impl LevelFilter {
     pub fn label(&self) -> &'static str {
         match self {
             Self::All => "全部等级",
-            Self::Lv10Plus => "Lv.10+",
-            Self::Lv7To9 => "Lv.7-9",
-            Self::Lv4To6 => "Lv.4-6",
-            Self::Lv1To3 => "Lv.1-3",
+            Self::Lv10Plus => "Lv. 10 及以上",
+            Self::Lv7To9 => "Lv. 7 - 9",
+            Self::Lv4To6 => "Lv. 4 - 6",
+            Self::Lv1To3 => "Lv. 1 - 3",
         }
     }
 
@@ -275,7 +295,6 @@ impl LevelFilter {
     }
 }
 
-/// 熟练度排序字段（对照 Vue `sortOptions`）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MasterySort {
     Points,
@@ -292,12 +311,11 @@ impl MasterySort {
             Self::Points => "熟练度分数",
             Self::Level => "熟练度等级",
             Self::Milestone => "赛段里程碑",
-            Self::LastPlay => "最近对局",
+            Self::LastPlay => "最近对局时间",
         }
     }
 }
 
-/// 熟练度筛选行里的三个 n-select（Vue ChampionMasteryTab.vue:235/242/252）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MasteryDropdown {
     Chest,
@@ -305,7 +323,6 @@ pub enum MasteryDropdown {
     Sort,
 }
 
-/// 熟练度筛选行触发的单一动作
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MasteryFilterAction {
     Chest(ChestFilter),
@@ -316,9 +333,6 @@ pub enum MasteryFilterAction {
     CloseDropdown,
 }
 
-// ═════════ 战利品页签：筛选 / 多选状态与动作（纯前端 UI 骨架） ═════════
-
-/// 库存筛选栏四个下拉的标识，同一时刻只展开一个
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LootDropdown {
     Type,
@@ -327,7 +341,6 @@ pub enum LootDropdown {
     Operator,
 }
 
-/// 类型筛选（对照 Vue filterType 的 8 项）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LootTypeFilter {
     All,
@@ -365,7 +378,6 @@ impl LootTypeFilter {
         }
     }
 
-    /// 与 `loot_category` 结果比对用的分类键
     pub fn key(&self) -> &'static str {
         match self {
             Self::All => "ALL",
@@ -380,7 +392,6 @@ impl LootTypeFilter {
     }
 }
 
-/// 拥有状态筛选（对照 Vue filterOwned 的 3 项）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LootOwnedFilter {
     All,
@@ -400,7 +411,6 @@ impl LootOwnedFilter {
     }
 }
 
-/// 价值基准筛选（对照 Vue filterValueType 的 2 项）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LootValueBasis {
     Disenchant,
@@ -418,7 +428,6 @@ impl LootValueBasis {
     }
 }
 
-/// 价值比较符筛选（对照 Vue filterOperator 的 3 项）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LootOperator {
     Le,
@@ -431,14 +440,13 @@ impl LootOperator {
 
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Le => "≤ 小于等于",
-            Self::Ge => "≥ 大于等于",
-            Self::Eq => "= 等于",
+            Self::Le => "小于等于 (<=)",
+            Self::Ge => "大于等于 (>=)",
+            Self::Eq => "等于 (=)",
         }
     }
 }
 
-/// 数量弹窗的来源动作：材料卡「开启 / 合成」
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LootQuantityAction {
     Open,
@@ -454,28 +462,31 @@ impl LootQuantityAction {
     }
 }
 
-/// 战利品页弹窗壳：仅承载本地 UI 状态，确认后不触发任何 LCU 写接口
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LootModal {
-    /// 数量弹窗：材料名 / 持有数量 / 数量选择
     Quantity {
         loot_id: String,
         name: String,
         owned: i32,
         quantity: i32,
+        need_key: bool,
+        key_count: i32,
+        key_name: Option<String>,
+        tile_path: Option<String>,
         action: LootQuantityAction,
+        recipe_name: String,
+        ingredients: Vec<String>,
     },
-    /// 确认弹窗：动作名 / 已选 N 项 / 预计获得精粹
     Confirm {
-        action: String,
+        action_kind: LootActionKind,
+        title: String,
+        message: String,
         selected: usize,
         gain_blue: i64,
         gain_orange: i64,
     },
 }
 
-/// 批量动作进度面板：current/total、成功数、当前条目名，纯本地状态，
-/// 待服务层逐条回调时推进
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LootProgress {
     pub current: usize,
@@ -484,11 +495,6 @@ pub struct LootProgress {
     pub current_name: String,
 }
 
-/// 战利品页签的纯前端动作
-///
-/// 开启、全部开启、分解、重铸、升级解锁均为 LCU 写操作，按钮统一做禁用态并标注
-/// 「服务层待接」；待 `LiveLcuService` 接入后在此枚举补写动作变体并在
-/// `MainWindow::apply_loot_action` 中调用服务层。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LootAction {
     ToggleDropdown(LootDropdown),
@@ -502,26 +508,14 @@ pub enum LootAction {
     ToggleSelect(String),
     SelectAllFiltered,
     ClearSelection,
-    /// 打开数量弹窗；+/− 按钮携带更新后的数量再次派发本变体以刷新弹窗
     OpenQuantity(LootModal),
-    /// 打开批量动作确认弹窗
     OpenConfirm(LootModal),
-    /// 确认：仅关闭弹窗并更新本地 UI 状态（不调用 LCU 写接口）
-    Confirm,
-    /// 取消：关闭弹窗
+    Confirm(LootModal),
     CloseModal,
+    CloseProgress,
 }
 
-impl CareerTab {
-    pub fn label(&self) -> &'static str {
-        match self {
-            CareerTab::Matches => "生涯战绩",
-            CareerTab::Loot => "战利品",
-            CareerTab::Mastery => "英雄熟练度",
-        }
-    }
-}
-
+#[derive(Debug, Clone)]
 pub struct CareerHeaderStats {
     pub total_games: usize,
     pub wins: usize,
@@ -584,43 +578,34 @@ impl CareerHeaderStats {
 pub struct CareerView {
     pub active_tab: CareerTab,
     pub summoner: Option<SummonerInfo>,
-    /// 复制 Riot ID 后的短暂反馈态
+    pub is_viewing_other: bool,
     pub copied: bool,
-    /// 本人排位数据（单排 / 灵活）
     pub ranked: Option<RankedStats>,
     pub mastery_list: Vec<ChampionMasteryItem>,
-    /// 熟练度页签的筛选与排序状态
     pub mastery_query: String,
     pub mastery_chest: ChestFilter,
     pub mastery_level: LevelFilter,
     pub mastery_sort: MasterySort,
     pub mastery_sort_desc: bool,
-    /// 熟练度筛选行当前展开的下拉
     pub mastery_dropdown: Option<MasteryDropdown>,
-    /// 近期统计横条：队列筛选（None = 全部）与当前浮层
     pub selected_queue: Option<i32>,
     pub popup: Option<CareerPopup>,
-    /// 最近队友列表（头像、名称、场次、胜率）
     pub recent_teammates: Vec<RecentTeammate>,
     pub essences: EssenceBalances,
     pub loot_items: Vec<LootInventoryItem>,
-    /// 战利品页：四个筛选值
     pub loot_filter_type: LootTypeFilter,
     pub loot_filter_owned: LootOwnedFilter,
     pub loot_filter_value_basis: LootValueBasis,
     pub loot_filter_operator: LootOperator,
-    /// 战利品页：价值范围数值输入文本
     pub loot_value_input: String,
-    /// 战利品页：当前展开的筛选下拉
     pub loot_dropdown: Option<LootDropdown>,
-    /// 战利品页：多选碎片网格已选中的 loot_id
     pub loot_selected: Vec<String>,
-    /// 战利品页 A.5：当前弹窗壳（数量 / 确认），纯本地状态
     pub loot_modal: Option<LootModal>,
-    /// 战利品页 A.5：批量动作进度面板，纯本地状态（服务层后续推进）
     pub loot_progress: Option<LootProgress>,
-    /// 数量弹窗确认后记录的本地数量，供服务层接入后读取
     pub loot_last_quantity: i32,
+    pub matches_scroll_handle: ScrollHandle,
+    pub loot_scroll_handle: ScrollHandle,
+    pub mastery_scroll_handle: ScrollHandle,
 }
 
 impl Default for CareerView {
@@ -628,9 +613,10 @@ impl Default for CareerView {
         Self {
             active_tab: CareerTab::Matches,
             summoner: None,
+            is_viewing_other: false,
             copied: false,
             ranked: None,
-            mastery_list: Self::mock_masteries(),
+            mastery_list: Vec::new(),
             mastery_query: String::new(),
             mastery_chest: ChestFilter::All,
             mastery_level: LevelFilter::All,
@@ -639,14 +625,10 @@ impl Default for CareerView {
             mastery_dropdown: None,
             selected_queue: None,
             popup: None,
-            recent_teammates: Self::mock_teammates(),
-            essences: EssenceBalances {
-                blue_essence: 32680,
-                orange_essence: 8450,
-                mythic_essence: 165,
-            },
-            loot_items: Self::mock_loots(),
-            loot_filter_type: LootTypeFilter::All,
+            recent_teammates: Vec::new(),
+            essences: EssenceBalances::default(),
+            loot_items: Vec::new(),
+            loot_filter_type: LootTypeFilter::Champion,
             loot_filter_owned: LootOwnedFilter::All,
             loot_filter_value_basis: LootValueBasis::Disenchant,
             loot_filter_operator: LootOperator::Le,
@@ -656,6 +638,9 @@ impl Default for CareerView {
             loot_modal: None,
             loot_progress: None,
             loot_last_quantity: 1,
+            matches_scroll_handle: ScrollHandle::new(),
+            loot_scroll_handle: ScrollHandle::new(),
+            mastery_scroll_handle: ScrollHandle::new(),
         }
     }
 }
@@ -665,154 +650,6 @@ impl CareerView {
         Self::default()
     }
 
-    fn mock_teammates() -> Vec<RecentTeammate> {
-        vec![
-            RecentTeammate {
-                name: "不屈之枪#CN1".to_string(),
-                puuid: "mock-mate-1".to_string(),
-                icon: "/lol-game-data/assets/v1/profile-icons/588.jpg".to_string(),
-                total: 5,
-                wins: 4,
-                losses: 1,
-                last_play_time: 1700000000000,
-                tag: Some("大腿".to_string()),
-            },
-            RecentTeammate {
-                name: "暮光星灵#CN1".to_string(),
-                puuid: "mock-mate-2".to_string(),
-                icon: "/lol-game-data/assets/v1/profile-icons/516.jpg".to_string(),
-                total: 3,
-                wins: 1,
-                losses: 2,
-                last_play_time: 1699900000000,
-                tag: None,
-            },
-        ]
-    }
-
-    fn mock_masteries() -> Vec<ChampionMasteryItem> {
-        vec![
-            ChampionMasteryItem {
-                champion_id: 350,
-                champion_name: "悠米".to_string(),
-                champion_title: "魔法猫咪".to_string(),
-                champion_icon_url: "/lol-game-data/assets/v1/champion-icons/350.png".to_string(),
-                champion_level: 10,
-                champion_points: 352400,
-                champion_points_since_last_level: 52400,
-                champion_points_until_next_level: 100000,
-                champion_season_milestone: 4,
-                milestone_grades: vec!["S+".into(), "S".into(), "S-".into()],
-                chest_granted: true,
-                eligible_for_chest: false,
-                last_play_time: 1700000000,
-            },
-            ChampionMasteryItem {
-                champion_id: 157,
-                champion_name: "亚索".to_string(),
-                champion_title: "疾风剑豪".to_string(),
-                champion_icon_url: "/lol-game-data/assets/v1/champion-icons/157.png".to_string(),
-                champion_level: 7,
-                champion_points: 218900,
-                champion_points_since_last_level: 18900,
-                champion_points_until_next_level: 80000,
-                champion_season_milestone: 2,
-                milestone_grades: vec!["S".into()],
-                chest_granted: false,
-                eligible_for_chest: true,
-                last_play_time: 1699900000,
-            },
-            ChampionMasteryItem {
-                champion_id: 103,
-                champion_name: "阿狸".to_string(),
-                champion_title: "九尾妖狐".to_string(),
-                champion_icon_url: "/lol-game-data/assets/v1/champion-icons/103.png".to_string(),
-                champion_level: 6,
-                champion_points: 125600,
-                champion_points_since_last_level: 5600,
-                champion_points_until_next_level: 40000,
-                champion_season_milestone: 1,
-                milestone_grades: vec!["A+".into()],
-                chest_granted: false,
-                eligible_for_chest: true,
-                last_play_time: 1699800000,
-            },
-            ChampionMasteryItem {
-                champion_id: 222,
-                champion_name: "金克丝".to_string(),
-                champion_title: "暴走萝莉".to_string(),
-                champion_icon_url: "/lol-game-data/assets/v1/champion-icons/222.png".to_string(),
-                champion_level: 5,
-                champion_points: 84300,
-                champion_points_since_last_level: 4300,
-                champion_points_until_next_level: 21600,
-                champion_season_milestone: 1,
-                milestone_grades: vec!["S-".into()],
-                chest_granted: true,
-                eligible_for_chest: false,
-                last_play_time: 1699500000,
-            },
-        ]
-    }
-
-    fn mock_loots() -> Vec<LootInventoryItem> {
-        vec![
-            LootInventoryItem {
-                loot_id: "CHEST_hextech".to_string(),
-                name: "海克斯科技宝箱".to_string(),
-                item_desc: "开启获得随机皮肤碎片、英雄碎片或精粹".to_string(),
-                loot_type: "CHEST".to_string(),
-                count: 3,
-                value: 0,
-                disenchant_value: 0,
-                tile_path: None,
-                is_openable: true,
-                ..Default::default()
-            },
-            LootInventoryItem {
-                loot_id: "CHEST_masterwork".to_string(),
-                name: "杰作宝箱".to_string(),
-                item_desc: "开启必定获得高品质皮肤碎片或神话精萃".to_string(),
-                loot_type: "CHEST".to_string(),
-                count: 2,
-                value: 0,
-                disenchant_value: 0,
-                tile_path: None,
-                is_openable: true,
-                ..Default::default()
-            },
-            LootInventoryItem {
-                loot_id: "CHAMPION_RENTAL_350".to_string(),
-                name: "魔法猫咪 悠米 碎片".to_string(),
-                item_desc: "可升级为永久英雄或分解为蓝色精粹".to_string(),
-                loot_type: "CHAMPION_RENTAL".to_string(),
-                count: 2,
-                value: 6300,
-                disenchant_value: 1260,
-                tile_path: None,
-                is_openable: false,
-                ..Default::default()
-            },
-            LootInventoryItem {
-                loot_id: "SKIN_RENTAL_157001".to_string(),
-                name: "西部牛仔 亚索 皮肤碎片".to_string(),
-                item_desc: "可使用橙色精粹升级或分解为橙色精粹".to_string(),
-                loot_type: "SKIN_RENTAL".to_string(),
-                count: 1,
-                value: 6900,
-                disenchant_value: 1050,
-                tile_path: None,
-                is_openable: false,
-                ..Default::default()
-            },
-        ]
-    }
-
-    /// 当前筛选条件下的碎片库存（过滤 + 按 disenchant_value 升序）
-    ///
-    /// 对照 Vue `filteredInventory`：类型 / 拥有状态 / 价值基准 / 比较符 + 数值。
-    /// 「全部」类型复用 Vue 的排除规则（货币、完整钥匙、宝箱不进碎片网格）；
-    /// 拥有状态沿用 `item_status` 原值，服务层补齐 owned 修正后无需改动此处。
     pub fn filtered_loot(&self) -> Vec<&LootInventoryItem> {
         let threshold = self.loot_value_input.trim().parse::<i64>().ok();
         let mut list: Vec<&LootInventoryItem> = self
@@ -823,7 +660,6 @@ impl CareerView {
                 let id = item.loot_id.to_uppercase();
                 let ty = item.loot_type.to_uppercase();
 
-                // 类型筛选
                 let type_ok = match self.loot_filter_type {
                     LootTypeFilter::All => {
                         !(cat == "CURRENCY"
@@ -843,7 +679,6 @@ impl CareerView {
                     return false;
                 }
 
-                // 拥有状态筛选
                 let owned = item.item_status.eq_ignore_ascii_case("OWNED");
                 let owned_ok = match self.loot_filter_owned {
                     LootOwnedFilter::All => true,
@@ -854,7 +689,6 @@ impl CareerView {
                     return false;
                 }
 
-                // 价值范围筛选（数值为空表示不限）
                 if let Some(t) = threshold {
                     let cmp = match self.loot_filter_value_basis {
                         LootValueBasis::Disenchant => item.disenchant_value as i64,
@@ -876,19 +710,43 @@ impl CareerView {
         list
     }
 
-    /// 渲染整个生涯页面
-    ///
-    /// 版面顺序对照 Vue `Career.vue`：居中限宽内容列 → 资料卡 → 卡外页签 → 当前页签内容。
+    pub fn render_offline_state() -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .py(px(96.0))
+            .px(px(32.0))
+            .child(
+                div()
+                    .text_size(px(48.0))
+                    .line_height(px(48.0))
+                    .mb(px(16.0))
+                    .child("🎮"),
+            )
+            .child(
+                div()
+                    .text_size(px(15.0))
+                    .line_height(px(24.0))
+                    .text_color(Theme::TEXT_MUTED)
+                    .child("请先启动英雄联盟客户端"),
+            )
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         matches: &[MatchItem],
         stats: &CareerHeaderStats,
+        is_connected: bool,
         on_tab_change: impl Fn(CareerTab, &mut Window, &mut App) + 'static + Clone,
-        on_toggle_match: impl Fn(usize, &mut Window, &mut App) + 'static + Clone,
+        on_select_match: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
         on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_copy_name: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_history: impl Fn(&mut Window, &mut App) + 'static + Clone,
+        on_back_to_me: impl Fn(&mut Window, &mut App) + 'static + Clone,
+        on_click_teammate: impl Fn(RecentTeammate, &mut Window, &mut App) + 'static + Clone,
         mastery_focus: &FocusHandle,
         mastery_search_focused: bool,
         on_mastery_query: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
@@ -898,56 +756,92 @@ impl CareerView {
         loot_value_focused: bool,
         on_loot_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
+        if !is_connected {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(Self::render_offline_state())
+                .into_any_element();
+        }
+
+        if self.summoner.is_none() {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .text_size(px(14.0))
+                        .text_color(Theme::TEXT_MUTED)
+                        .child("正在加载召唤师资料..."),
+                )
+                .into_any_element();
+        }
+
         let active_tab = self.active_tab;
-        // 战利品页两个面板的刷新与资料卡 / 熟练度共用 on_refresh，先克隆一份供 Loot 分支使用
+        let is_viewing_other = self.is_viewing_other;
         let loot_refresh = on_refresh.clone();
 
         div()
-            .w_full()
-            .px(px(24.0))
-            .py(px(16.0))
+            .size_full()
+            .overflow_hidden()
             .flex()
             .flex_col()
             .items_center()
+            .px(px(24.0))
+            .pt(px(16.0))
             .child(
                 div()
                     .w_full()
                     .max_w(px(1000.0))
+                    .h_full()
                     .flex()
                     .flex_col()
-                    // 顶部召唤师资料卡（三段式）
+                    .min_h_0()
+                    .overflow_hidden()
                     .child(self.render_summoner_header(
                         on_refresh.clone(),
                         on_copy_name,
                         on_history,
+                        on_back_to_me,
                     ))
-                    // 卡外侧栏页签
-                    .child(self.render_tabs(on_tab_change))
-                    // 主体内容区域（根据当前 Sub-Tab 切换）
+                    .when(!is_viewing_other, |this| {
+                        this.child(self.render_tabs(on_tab_change))
+                    })
                     .child(
                         div()
                             .w_full()
-                            .grid()
-                            .grid_cols(1)
-                            .pt(px(16.0))
-                            .when(active_tab == CareerTab::Matches, |this| {
-                                this.child(self.render_matches_tab(
-                                    matches,
-                                    stats,
-                                    on_toggle_match,
-                                    on_career_bar,
-                                ))
-                            })
-                            .when(active_tab == CareerTab::Mastery, |this| {
-                                this.child(self.render_mastery_tab(
-                                    mastery_focus,
-                                    mastery_search_focused,
-                                    on_mastery_query,
-                                    on_mastery_filter,
-                                    on_refresh,
-                                ))
-                            })
-                            .when(active_tab == CareerTab::Loot, |this| {
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .when(
+                                active_tab == CareerTab::Matches || is_viewing_other,
+                                |this| {
+                                    this.child(self.render_matches_tab(
+                                        matches,
+                                        stats,
+                                        on_select_match,
+                                        on_career_bar,
+                                        on_click_teammate,
+                                    ))
+                                },
+                            )
+                            .when(
+                                active_tab == CareerTab::Mastery && !is_viewing_other,
+                                |this| {
+                                    this.child(self.render_mastery_tab(
+                                        mastery_focus,
+                                        mastery_search_focused,
+                                        on_mastery_query,
+                                        on_mastery_filter,
+                                        on_refresh,
+                                    ))
+                                },
+                            )
+                            .when(active_tab == CareerTab::Loot && !is_viewing_other, |this| {
                                 this.child(self.render_loot_tab(
                                     loot_refresh,
                                     loot_value_focus,
@@ -957,14 +851,15 @@ impl CareerView {
                             }),
                     ),
             )
+            .into_any_element()
     }
 
-    /// 渲染资料卡：左侧弹性留空 / 中间资料组 / 右侧动作，保证资料组始终居中
     fn render_summoner_header(
         &self,
         on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_copy_name: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_history: impl Fn(&mut Window, &mut App) + 'static + Clone,
+        on_back_to_me: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let game_name = self
             .summoner
@@ -991,8 +886,7 @@ impl CareerView {
             .summoner
             .as_ref()
             .and_then(|s| s.percent_complete_for_next_level)
-            .unwrap_or(0)
-            .min(100);
+            .unwrap_or(0);
         let icon_path = self
             .summoner
             .as_ref()
@@ -1004,6 +898,7 @@ impl CareerView {
             .and_then(|s| s.privacy.as_deref())
             .is_some_and(|p| p.eq_ignore_ascii_case("PRIVATE"));
         let copied = self.copied;
+        let is_viewing_other = self.is_viewing_other;
 
         div()
             .w_full()
@@ -1012,13 +907,13 @@ impl CareerView {
             .border_color(Theme::CARD_BORDER)
             .rounded_xl()
             .px(px(24.0))
-            .py(px(24.0))
+            .py(px(20.0))
             .shadow_sm()
             .flex()
             .items_center()
-            // 左：弹性留空（与右侧等宽，使中间资料组以卡片中心线居中）
+            .mb(px(14.0))
+            .flex_none()
             .child(div().flex_1())
-            // 中：头像进度环 + 昵称 / TagLine 资料组
             .child(
                 div()
                     .flex_none()
@@ -1074,7 +969,7 @@ impl CareerView {
                                                 .text_size(px(12.0))
                                                 .font_weight(FontWeight::SEMIBOLD)
                                                 .text_color(Theme::WIN_TEXT)
-                                                .child("已复制"),
+                                                .child("✓ 已复制"),
                                         )
                                     }),
                             )
@@ -1088,7 +983,6 @@ impl CareerView {
                             }),
                     ),
             )
-            // 右：竖排动作按钮（刷新 → 历史战绩）
             .child(
                 div()
                     .flex_1()
@@ -1096,12 +990,19 @@ impl CareerView {
                     .flex_col()
                     .items_end()
                     .gap(px(8.0))
+                    .when(is_viewing_other, |this| {
+                        this.child(Self::action_button_styled(
+                            "返回我的生涯",
+                            Theme::ACCENT_PRIMARY,
+                            Theme::ACCENT_LIGHT,
+                            on_back_to_me,
+                        ))
+                    })
                     .child(Self::action_button("刷新", on_refresh))
                     .child(Self::action_button("历史战绩", on_history)),
             )
     }
 
-    /// 头像等级进度环：104×104，300° 弧、缺口朝下，等级贴在环下缘
     fn render_level_ring(icon_path: String, level: u32, progress: u32) -> impl IntoElement {
         div()
             .relative()
@@ -1162,7 +1063,6 @@ impl CareerView {
             )
     }
 
-    /// 资料卡右侧的竖排动作按钮
     fn action_button(
         label: &'static str,
         on_click: impl Fn(&mut Window, &mut App) + 'static,
@@ -1186,7 +1086,28 @@ impl CareerView {
             .child(label)
     }
 
-    /// 卡外页签行：左对齐，顺序为 生涯战绩 → 战利品 → 英雄熟练度
+    fn action_button_styled(
+        label: &'static str,
+        border_color: Hsla,
+        bg_color: Hsla,
+        on_click: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> impl IntoElement {
+        div()
+            .px(px(16.0))
+            .py(px(6.0))
+            .rounded_md()
+            .border_1()
+            .border_color(border_color)
+            .bg(bg_color)
+            .text_size(px(13.0))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(Theme::ACCENT_PRIMARY)
+            .cursor_pointer()
+            .hover(|s| s.bg(Theme::HOVER_BG_STRONG))
+            .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
+            .child(label)
+    }
+
     fn render_tabs(
         &self,
         on_tab_change: impl Fn(CareerTab, &mut Window, &mut App) + 'static + Clone,
@@ -1195,11 +1116,12 @@ impl CareerView {
             .w_full()
             .flex()
             .items_center()
-            .gap_2()
-            .mt(px(12.0))
+            .gap(px(8.0))
+            .mb(px(14.0))
             .pb(px(8.0))
             .border_b_1()
             .border_color(Theme::CARD_BORDER)
+            .flex_none()
             .children(
                 [CareerTab::Matches, CareerTab::Loot, CareerTab::Mastery]
                     .into_iter()
@@ -1242,15 +1164,14 @@ impl CareerView {
             )
     }
 
-    /// Tab 1: 对局历史与战绩概览
     fn render_matches_tab(
         &self,
         matches: &[MatchItem],
         stats: &CareerHeaderStats,
-        on_toggle_match: impl Fn(usize, &mut Window, &mut App) + 'static + Clone,
+        on_select_match: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
         on_career_bar: impl Fn(CareerBarAction, &mut Window, &mut App) + 'static + Clone,
+        on_click_teammate: impl Fn(RecentTeammate, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
-        // 队列筛选只作用于战绩列表，统计横条仍基于全量（对照 Vue filteredMatches）
         let shown: Vec<&MatchItem> = matches
             .iter()
             .filter(|m| {
@@ -1260,51 +1181,65 @@ impl CareerView {
             .collect();
         let is_empty = shown.is_empty();
 
-        // 单列 grid：子项由网格轨道拉伸到整行宽度
-        // （GPUI 里 `w_full` 在非定宽父级下会退化为 auto，故整页统一用 grid 轨道传递宽度）
         div()
-            .min_w(px(0.0))
-            .grid()
-            .grid_cols(1)
-            .gap_4()
-            // 排位表（单排 / 灵活）
+            .size_full()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .overflow_hidden()
             .child(self.render_ranked_card())
-            // 近期统计横条
-            .child(self.render_recent_bar(matches, stats, on_career_bar))
-            // 紧凑战绩列表或空态引导
-            .child(if is_empty {
+            .child(self.render_recent_bar(matches, stats, on_career_bar, on_click_teammate))
+            .child(
                 div()
-                    .bg(Theme::CARD_BG)
-                    .border_1()
-                    .border_color(Theme::CARD_BORDER)
-                    .rounded_xl()
-                    .p_8()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap_2()
-                    .child(
+                    .id("career-scroll-area")
+                    .w_full()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.matches_scroll_handle)
+                    .mt(px(12.0))
+                    .child(if is_empty {
                         div()
-                            .text_base()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(Theme::TEXT_PRIMARY)
-                            .child("暂无近期的对局历史记录"),
-                    )
-                    .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(
-                        "请在英雄联盟客户端完成对局，或点击资料卡右侧的「刷新」拉取最新战绩",
-                    ))
-            } else {
-                div().flex().flex_col().gap_2().children(
-                    shown
-                        .into_iter()
-                        .enumerate()
-                        .map(|(idx, m)| Self::render_match_card(m, idx, on_toggle_match.clone())),
-                )
-            })
+                            .bg(Theme::CARD_BG)
+                            .border_1()
+                            .border_color(Theme::CARD_BORDER)
+                            .rounded_xl()
+                            .p_8()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_base()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .child("暂无近期的对局历史记录"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(Theme::TEXT_MUTED)
+                                    .child("请在英雄联盟客户端完成对局，或点击资料卡右侧的「刷新」拉取最新战绩"),
+                            )
+                            .into_any_element()
+                    } else {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(10.0))
+                            .pb(px(24.0))
+                            .children(
+                                shown
+                                    .into_iter()
+                                    .map(|m| Self::render_match_card(m, on_select_match.clone())),
+                            )
+                            .into_any_element()
+                    }),
+            )
     }
 
-    /// 排位表：类型 → 总场次 → 胜率 → 胜场 → 负场 → 段位 → 胜点 → 赛季最高 → 上赛季结算
     fn render_ranked_card(&self) -> impl IntoElement {
         const COLUMNS: [(&str, f32); 9] = [
             ("类型", 96.0),
@@ -1320,13 +1255,15 @@ impl CareerView {
 
         let rows: Vec<[String; 9]> = match self.ranked.as_ref() {
             Some(stats) => vec![
-                ranked_row("单排", stats.queue_map.get("RANKED_SOLO_5x5")),
-                ranked_row("灵活", stats.queue_map.get("RANKED_FLEX_SR")),
+                ranked_row("单双排位", stats.queue_map.get("RANKED_SOLO_5x5")),
+                ranked_row("灵活排位", stats.queue_map.get("RANKED_FLEX_SR")),
             ],
-            None => Vec::new(),
+            None => vec![ranked_row("单双排位", None), ranked_row("灵活排位", None)],
         };
 
         div()
+            .w_full()
+            .flex_none()
             .bg(Theme::CARD_BG)
             .border_1()
             .border_color(Theme::CARD_BORDER)
@@ -1344,15 +1281,6 @@ impl CareerView {
                         ranked_cell(label.to_string(), *weight, Theme::TEXT_MUTED, 11.5, false)
                     })),
             )
-            .when(rows.is_empty(), |this| {
-                this.child(
-                    div()
-                        .py(px(10.0))
-                        .text_size(px(12.5))
-                        .text_color(Theme::TEXT_MUTED)
-                        .child("排位数据读取中…"),
-                )
-            })
             .children(rows.into_iter().enumerate().map(|(idx, values)| {
                 let mut row = div()
                     .flex()
@@ -1374,16 +1302,15 @@ impl CareerView {
             }))
     }
 
-    /// 近期统计横条：局数 / 胜负 / KDA + 常玩位置 + 近期英雄头像
-    /// 近期统计横条：局数/胜负/KDA + 常玩位置 + 近期英雄，右侧为队列下拉与最近队友
     fn render_recent_bar(
         &self,
         matches: &[MatchItem],
         stats: &CareerHeaderStats,
         on_bar: impl Fn(CareerBarAction, &mut Window, &mut App) + 'static + Clone,
+        on_click_teammate: impl Fn(RecentTeammate, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
-        let positions = top_positions(matches, 3);
-        let champions = top_champions(matches, 5);
+        let positions = top_positions(matches, 2);
+        let champions = top_champions(matches, 6);
         let queue_label = QUEUE_OPTIONS
             .iter()
             .find(|o| o.id == self.selected_queue)
@@ -1391,16 +1318,19 @@ impl CareerView {
             .unwrap_or("全部");
 
         div()
+            .w_full()
+            .flex_none()
             .relative()
             .bg(Theme::CARD_BG)
             .border_1()
             .border_color(Theme::CARD_BORDER)
             .rounded_xl()
             .px(px(16.0))
-            .py(px(12.0))
+            .py(px(10.0))
+            .mt(px(12.0))
             .flex()
             .items_center()
-            .gap(px(18.0))
+            .gap(px(16.0))
             .child(bar_stat(
                 "近期对局",
                 format!("{} 场", stats.total_games),
@@ -1459,19 +1389,53 @@ impl CareerView {
                                 .child("暂无英雄数据"),
                         )
                     })
-                    .children(champions.into_iter().map(|(name, icon_url, _count)| {
+                    .children(champions.into_iter().map(|(name, icon_url, count)| {
                         div()
                             .id(SharedString::from(format!("recent-champ-{}", name)))
+                            .relative()
+                            .size(px(28.0))
                             .child(
                                 LcuImage::new(icon_url)
-                                    .size(px(26.0))
+                                    .size(px(28.0))
                                     .shape(LcuImageShape::Circle)
                                     .placeholder("英"),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .bottom(px(-2.0))
+                                    .right(px(-2.0))
+                                    .px(px(3.0))
+                                    .rounded_full()
+                                    .bg(Theme::CARD_BG)
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER)
+                                    .text_size(px(9.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .child(count.to_string()),
                             )
                     })),
             )
             .child(div().flex_1())
-            // 触发器 1：队列下拉
+            // 动作 1：最近队友（在队列下拉之前）
+            .child({
+                let on_toggle = on_bar.clone();
+                dropdown_trigger(
+                    "career-teammates-trigger",
+                    "最近队友".to_string(),
+                    self.popup == Some(CareerPopup::Teammates),
+                    self.render_teammates_menu(on_click_teammate),
+                    move |win, app| {
+                        on_toggle(
+                            CareerBarAction::TogglePopup(CareerPopup::Teammates),
+                            win,
+                            app,
+                        )
+                    },
+                )
+            })
+            // 动作 2：队列下拉（最右侧）
             .child({
                 let on_toggle = on_bar.clone();
                 let items = QUEUE_OPTIONS.into_iter().map(|option| {
@@ -1496,27 +1460,561 @@ impl CareerView {
                     },
                 )
             })
-            // 触发器 2：最近队友下拉
-            .child({
-                let on_toggle = on_bar.clone();
-                dropdown_trigger(
-                    "career-teammates-trigger",
-                    "最近队友".to_string(),
-                    self.popup == Some(CareerPopup::Teammates),
-                    self.render_teammates_menu(),
-                    move |win, app| {
-                        on_toggle(
-                            CareerBarAction::TogglePopup(CareerPopup::Teammates),
-                            win,
-                            app,
-                        )
-                    },
-                )
+    }
+
+    fn render_teammates_menu(
+        &self,
+        on_click_teammate: impl Fn(RecentTeammate, &mut Window, &mut App) + 'static + Clone,
+    ) -> impl IntoElement {
+        let empty = self.recent_teammates.is_empty();
+        div()
+            .id("teammates-menu-scroll")
+            .w(px(420.0))
+            .max_h(px(400.0))
+            .rounded(px(12.0))
+            .p(px(12.0))
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .pb(px(4.0))
+                    .border_b_1()
+                    .border_color(Theme::CARD_BORDER)
+                    .child(
+                        div()
+                            .text_size(px(13.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(Theme::TEXT_PRIMARY)
+                            .child("最近队友"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("近 20 场同队数据"),
+                    ),
+            )
+            .child(if empty {
+                div()
+                    .py(px(24.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(12.0))
+                    .text_color(Theme::TEXT_MUTED)
+                    .child("暂无最近队友数据")
+                    .into_any_element()
+            } else {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.0))
+                    .children(self.recent_teammates.iter().map(|tm| {
+                        let tm_clone = tm.clone();
+                        let click_cb = on_click_teammate.clone();
+                        let time_str = format_local_time(tm.last_play_time as i64);
+
+                        div()
+                            .p(px(8.0))
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(Theme::CARD_BORDER)
+                            .bg(Theme::CARD_BG)
+                            .hover(|s| s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY))
+                            .cursor_pointer()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                click_cb(tm_clone.clone(), win, app);
+                            })
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(10.0))
+                                    .child(
+                                        LcuImage::new(tm.icon.clone())
+                                            .size(px(36.0))
+                                            .shape(LcuImageShape::Circle)
+                                            .placeholder("友".to_string()),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap(px(2.0))
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap_1()
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(12.5))
+                                                            .font_weight(FontWeight::SEMIBOLD)
+                                                            .text_color(Theme::TEXT_PRIMARY)
+                                                            .child(tm.name.clone()),
+                                                    )
+                                                    .when_some(tm.tag.as_ref(), |this, tag| {
+                                                        this.child(
+                                                            div()
+                                                                .px(px(4.0))
+                                                                .py(px(1.0))
+                                                                .rounded_sm()
+                                                                .bg(Theme::BADGE_BG)
+                                                                .text_size(px(10.0))
+                                                                .text_color(Theme::ACCENT_PRIMARY)
+                                                                .child(tag.clone()),
+                                                        )
+                                                    }),
+                                            )
+                                            .when(!time_str.is_empty(), |this| {
+                                                this.child(
+                                                    div()
+                                                        .text_size(px(10.5))
+                                                        .text_color(Theme::TEXT_MUTED)
+                                                        .child(time_str),
+                                                )
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .text_size(px(11.5))
+                                    .child(
+                                        div()
+                                            .text_color(Theme::TEXT_MUTED)
+                                            .child(format!("总: {}", tm.total)),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::WIN_TEXT)
+                                            .child(format!("胜: {}", tm.wins)),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::LOSS_TEXT)
+                                            .child(format!("负: {}", tm.losses)),
+                                    ),
+                            )
+                    }))
+                    .into_any_element()
             })
     }
 
-    /// Tab 2: 英雄熟练度与里程碑网格
-    /// Tab 2: 英雄熟练度（四张统计卡 → 筛选行 → 四列网格）
+    pub fn render_match_card(
+        m: &MatchItem,
+        on_select: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
+    ) -> impl IntoElement {
+        let (bg_color, border_color, win_text_color, win_label) = if m.display.remake {
+            (
+                Theme::REMAKE_BG,
+                Theme::REMAKE_BORDER,
+                Theme::REMAKE_TEXT,
+                "重开",
+            )
+        } else if m.display.win {
+            (Theme::WIN_BG, Theme::WIN_BORDER, Theme::WIN_TEXT, "胜利")
+        } else {
+            (Theme::LOSS_BG, Theme::LOSS_BORDER, Theme::LOSS_TEXT, "失败")
+        };
+
+        let champion_name = m.display.name.clone();
+        let champion_icon_url = m.display.champion_icon_url.clone();
+        let spell1_icon_url = m.display.spell1_icon_url.clone();
+        let spell2_icon_url = m.display.spell2_icon_url.clone();
+        let rune_icon_url = m.display.rune_icon_url.clone();
+        let queue_name = m.display.map.clone();
+        let duration_str = m.display.duration.clone();
+        let time_str = m.display.short_time.clone();
+        let kda_ratio = m.display.kda.clone();
+        let cs_str = m.display.cs.to_string();
+        let gold_str = format_num(m.display.gold as i64);
+        let pos_str = position_to_zh(m.display.position.as_deref());
+        let item_urls = m.display.item_icon_urls.clone();
+        let champ_level = m.display.champ_level;
+        let kills = m.display.kills;
+        let deaths = m.display.deaths;
+        let assists = m.display.assists;
+        let game_id = m.display.game_id;
+        let queue_id = m.display.queue_id;
+
+        let kda_val = kda_ratio.parse::<f32>().unwrap_or(0.0);
+        let kda_color = if kda_val >= 5.0 {
+            hsla(330.0 / 360.0, 0.80, 0.50, 1.0)
+        } else if kda_val >= 3.0 {
+            hsla(217.0 / 360.0, 0.90, 0.55, 1.0)
+        } else {
+            Theme::TEXT_MUTED
+        };
+
+        let select_cb = on_select.clone();
+
+        div()
+            .w_full()
+            .h(px(82.0))
+            .flex_none()
+            .rounded(px(10.0))
+            .border_1()
+            .border_color(border_color)
+            .bg(bg_color)
+            .px(px(20.0))
+            .py(px(14.0))
+            .shadow_sm()
+            .hover(|s| s.shadow_md())
+            .cursor_pointer()
+            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                select_cb(game_id, win, app);
+            })
+            .flex()
+            .items_center()
+            // 1. 英雄面板 (头像、等级、技能、符文)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .min_w(px(100.0))
+                    .child(
+                        div()
+                            .relative()
+                            .size(px(52.0))
+                            .child(
+                                LcuImage::new(champion_icon_url)
+                                    .size(px(52.0))
+                                    .shape(LcuImageShape::Circle)
+                                    .placeholder(champion_name),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .bottom(px(-2.0))
+                                    .right(px(-2.0))
+                                    .size(px(18.0))
+                                    .rounded_full()
+                                    .bg(Theme::CARD_BG)
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_size(px(11.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .child(champ_level.to_string()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(3.0))
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.0))
+                                    .child(
+                                        div()
+                                            .size(px(22.0))
+                                            .rounded(px(3.0))
+                                            .border_1()
+                                            .border_color(Theme::CARD_BORDER)
+                                            .overflow_hidden()
+                                            .child(
+                                                LcuImage::new(spell1_icon_url)
+                                                    .size(px(22.0))
+                                                    .placeholder("D"),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .size(px(22.0))
+                                            .rounded(px(3.0))
+                                            .border_1()
+                                            .border_color(Theme::CARD_BORDER)
+                                            .overflow_hidden()
+                                            .child(
+                                                LcuImage::new(spell2_icon_url)
+                                                    .size(px(22.0))
+                                                    .placeholder("F"),
+                                            ),
+                                    ),
+                            )
+                            .when(queue_id != 2400 && queue_id != 2450, |this| {
+                                this.child(
+                                    div()
+                                        .size(px(22.0))
+                                        .rounded_full()
+                                        .border_1()
+                                        .border_color(Theme::CARD_BORDER)
+                                        .overflow_hidden()
+                                        .child(
+                                            LcuImage::new(rune_icon_url)
+                                                .size(px(22.0))
+                                                .shape(LcuImageShape::Circle)
+                                                .placeholder("符"),
+                                        ),
+                                )
+                            }),
+                    ),
+            )
+            // 2. 胜负面板 (胜负、位置、模式、时长)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .min_w(px(90.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .text_size(px(16.0))
+                                    .font_weight(FontWeight::EXTRA_BOLD)
+                                    .text_color(win_text_color)
+                                    .child(win_label),
+                            )
+                            .when(pos_str != "全能", |this| {
+                                this.child(
+                                    div()
+                                        .px(px(4.0))
+                                        .py(px(1.0))
+                                        .rounded_sm()
+                                        .bg(Theme::BADGE_BG)
+                                        .text_size(px(10.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(Theme::TEXT_SECONDARY)
+                                        .child(pos_str),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(1.0))
+                            .mt(px(2.0))
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .text_color(Theme::TEXT_MUTED)
+                                    .child(queue_name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(Theme::TEXT_MUTED)
+                                    .child(duration_str),
+                            ),
+                    ),
+            )
+            // 3. KDA 面板 (杀/死/助 + 倍率)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .min_w(px(105.0))
+                    .child(
+                        div().text_size(px(16.0)).child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .child(kills.to_string()),
+                                )
+                                .child(div().text_color(Theme::TEXT_MUTED).child("/"))
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(Theme::LOSS_TEXT)
+                                        .child(deaths.to_string()),
+                                )
+                                .child(div().text_color(Theme::TEXT_MUTED).child("/"))
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .child(assists.to_string()),
+                                ),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .mt(px(2.0))
+                            .text_size(px(13.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(kda_color)
+                            .child(format!("{} KDA", kda_ratio)),
+                    ),
+            )
+            // 4. 补刀面板 (靠左)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .min_w(px(44.0))
+                    .mr(px(6.0))
+                    .child(
+                        div()
+                            .text_size(px(13.0))
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("🗡️"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(13.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(Theme::TEXT_MUTED)
+                            .child(cs_str),
+                    ),
+            )
+            // 5. 装备面板 (6件常规装备 + 独立饰品 + 海克斯强化)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .min_w(px(0.0))
+                    .when(
+                        (queue_id == 2400 || queue_id == 2450)
+                            && !m.display.augment_icon_urls.is_empty(),
+                        |this| {
+                            this.child(div().flex().gap(px(2.0)).mr(px(4.0)).children(
+                                m.display.augment_icon_urls.iter().map(|url| {
+                                    div()
+                                        .size(px(22.0))
+                                        .rounded(px(4.0))
+                                        .border_1()
+                                        .border_color(rgba(0xa855f772))
+                                        .bg(rgba(0x9333ea1e))
+                                        .overflow_hidden()
+                                        .child(
+                                            LcuImage::new(url.clone())
+                                                .size(px(22.0))
+                                                .placeholder("海"),
+                                        )
+                                }),
+                            ))
+                        },
+                    )
+                    .child(div().flex().gap(px(2.0)).children((0..6).map(|idx| {
+                        let url = item_urls.get(idx).cloned().unwrap_or_default();
+                        div()
+                            .size(px(28.0))
+                            .rounded(px(4.0))
+                            .bg(Theme::HOVER_BG)
+                            .border_1()
+                            .border_color(Theme::CARD_BORDER)
+                            .overflow_hidden()
+                            .when(!url.is_empty(), |this| {
+                                this.child(LcuImage::new(url).size(px(28.0)).placeholder(""))
+                            })
+                    })))
+                    .child(
+                        div()
+                            .size(px(28.0))
+                            .rounded(px(4.0))
+                            .bg(rgba(0xf59e0b0d))
+                            .border_1()
+                            .border_color(rgba(0xf59e0b4c))
+                            .ml(px(2.0))
+                            .overflow_hidden()
+                            .when_some(
+                                item_urls.get(6).cloned().filter(|u| !u.is_empty()),
+                                |this, url| {
+                                    this.child(LcuImage::new(url).size(px(28.0)).placeholder("眼"))
+                                },
+                            ),
+                    ),
+            )
+            // 6. 金币面板 (固定右侧，ml_auto)
+            .child(
+                div()
+                    .ml_auto()
+                    .mr(px(24.0))
+                    .min_w(px(62.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(13.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(Theme::TEXT_MUTED)
+                            .child(gold_str),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(14.0))
+                            .text_color(Theme::GOLD)
+                            .child("🪙"),
+                    ),
+            )
+            // 7. 时间面板 (地图与日期时间)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_end()
+                    .min_w(px(80.0))
+                    .flex_shrink_0()
+                    .whitespace_nowrap()
+                    .text_size(px(13.0))
+                    .text_color(Theme::TEXT_MUTED)
+                    .child(div().child(queue_name))
+                    .child(div().mt(px(4.0)).child(time_str)),
+            )
+            // 8. 回放按钮 (点击阻止卡片事件冒泡)
+            .child(
+                div()
+                    .ml(px(14.0))
+                    .flex_shrink_0()
+                    .on_mouse_down(MouseButton::Left, |_ev, _, _| {})
+                    .child(
+                        div()
+                            .size(px(30.0))
+                            .rounded_md()
+                            .border_1()
+                            .border_color(Theme::CARD_BORDER)
+                            .bg(Theme::CARD_BG)
+                            .hover(|s| s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
+                            .child(
+                                div()
+                                    .text_size(px(14.0))
+                                    .text_color(Theme::TEXT_MUTED)
+                                    .child("📹"),
+                            ),
+                    ),
+            )
+    }
+
     fn render_mastery_tab(
         &self,
         focus: &FocusHandle,
@@ -1539,7 +2037,6 @@ impl CareerView {
                 .then(a.champion_points.cmp(&b.champion_points))
         });
 
-        // 筛选与排序（对照 Vue `filteredMasteryList`）
         let query = self.mastery_query.trim().to_lowercase();
         let mut list: Vec<&ChampionMasteryItem> = self
             .mastery_list
@@ -1577,59 +2074,64 @@ impl CareerView {
         });
 
         div()
-            .min_w(px(0.0))
-            .grid()
-            .grid_cols(1)
-            .gap_4()
-            // 四张统计卡
+            .size_full()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .overflow_hidden()
             .child(
                 div()
+                    .w_full()
+                    .flex_none()
                     .grid()
                     .grid_cols(4)
                     .gap_3()
                     .child(mastery_stat(
                         "熟练英雄总数",
                         format!("{} 位", total_champs),
-                        "已记录熟练度的英雄".to_string(),
+                        "累计拥有熟练度记录".to_string(),
                         Theme::TEXT_PRIMARY,
                     ))
                     .child(mastery_stat(
                         "熟练度总分",
                         format!("{} 分", format_num(total_points)),
-                        "全部英雄累计".to_string(),
-                        Theme::ACCENT_PRIMARY,
+                        "全英雄点数总和".to_string(),
+                        Theme::WIN_TEXT,
                     ))
                     .child(mastery_stat(
                         "最高等级英雄",
-                        top.map(|m| format!("Lv.{} {}", m.champion_level, m.champion_name))
+                        top.map(|m| format!("{} Lv.{}", m.champion_name, m.champion_level))
                             .unwrap_or_else(|| "--".to_string()),
                         top.map(|m| format!("{} 分", format_num(m.champion_points)))
                             .unwrap_or_default(),
-                        Theme::AURORA_BLUE,
+                        Theme::ACCENT_PRIMARY,
                     ))
                     .child(mastery_stat(
                         "里程碑宝箱",
-                        format!("已获取 {}", granted),
-                        format!("另有 {} 个可获取", eligible),
-                        crate::theme::GOLD,
+                        format!("{} / +{} 可得", granted, eligible),
+                        "本赛段里程碑宝箱追踪".to_string(),
+                        Theme::GOLD,
                     )),
             )
-            // 筛选行：左 搜索 / 宝箱 / 等级，右 排序 / 升降序 / 刷新
             .child(
                 div()
+                    .w_full()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .p(px(8.0))
+                    .px(px(12.0))
+                    .rounded_xl()
                     .bg(Theme::CARD_BG)
                     .border_1()
                     .border_color(Theme::CARD_BORDER)
-                    .rounded_xl()
-                    .p_3()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
+                    .mt(px(12.0))
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .flex_wrap()
                             .gap_2()
                             .child({
                                 let cb = on_query.clone();
@@ -1637,12 +2139,13 @@ impl CareerView {
                                 text_field(
                                     "mastery-search",
                                     &self.mastery_query,
-                                    "搜索英雄名 / ID",
-                                    px(200.0),
+                                    "搜索英雄名称...",
+                                    px(180.0),
                                     focus,
                                     search_focused,
                                     TextFieldOptions {
                                         max_chars: Some(24),
+                                        leading_icon: Some("icons/search.svg"),
                                         ..Default::default()
                                     },
                                     move |text, win, app| cb(text, win, app),
@@ -1650,7 +2153,6 @@ impl CareerView {
                                     |_text, _win, _app| {},
                                 )
                             })
-                            // 宝箱状态 n-select
                             .child({
                                 let cb = on_filter.clone();
                                 let items = ChestFilter::ALL.into_iter().map(|value| {
@@ -1667,7 +2169,7 @@ impl CareerView {
                                     "mastery-chest-select",
                                     self.mastery_chest.label().to_string(),
                                     self.mastery_dropdown == Some(MasteryDropdown::Chest),
-                                    dropdown_menu(150.0, items),
+                                    dropdown_menu(130.0, items),
                                     move |win, app| {
                                         cb(
                                             MasteryFilterAction::ToggleDropdown(
@@ -1679,7 +2181,6 @@ impl CareerView {
                                     },
                                 )
                             })
-                            // 等级 n-select
                             .child({
                                 let cb = on_filter.clone();
                                 let items = LevelFilter::ALL.into_iter().map(|value| {
@@ -1713,12 +2214,11 @@ impl CareerView {
                         div()
                             .flex()
                             .items_center()
-                            .flex_wrap()
                             .gap_2()
-                            .child(div().flex_1())
                             .child(
                                 div()
                                     .text_size(px(12.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(Theme::TEXT_MUTED)
                                     .child("排序:"),
                             )
@@ -1738,7 +2238,7 @@ impl CareerView {
                                     "mastery-sort-select",
                                     self.mastery_sort.label().to_string(),
                                     self.mastery_dropdown == Some(MasteryDropdown::Sort),
-                                    dropdown_menu(140.0, items),
+                                    dropdown_menu(130.0, items),
                                     move |win, app| {
                                         cb(
                                             MasteryFilterAction::ToggleDropdown(
@@ -1752,76 +2252,103 @@ impl CareerView {
                             })
                             .child({
                                 let cb = on_filter.clone();
-                                filter_chip(
-                                    if self.mastery_sort_desc {
-                                        "降序 ↓"
-                                    } else {
-                                        "升序 ↑"
-                                    },
-                                    false,
-                                    move |win, app| {
-                                        cb(MasteryFilterAction::ToggleSortDir, win, app)
-                                    },
-                                )
-                            })
-                            .child({
+                                let desc = self.mastery_sort_desc;
                                 div()
-                                    .px(px(10.0))
-                                    .py(px(5.0))
+                                    .size(px(28.0))
                                     .rounded_md()
                                     .border_1()
                                     .border_color(Theme::CARD_BORDER)
                                     .bg(Theme::CARD_BG)
-                                    .text_size(px(12.0))
-                                    .text_color(Theme::TEXT_SECONDARY)
-                                    .cursor_pointer()
-                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        on_refresh(win, app)
+                                    .hover(|s| {
+                                        s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY)
                                     })
-                                    .child("刷新")
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .cursor_pointer()
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        cb(MasteryFilterAction::ToggleSortDir, win, app)
+                                    })
+                                    .child(
+                                        div()
+                                            .text_size(px(13.0))
+                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .child(if desc { "↓" } else { "↑" }),
+                                    )
+                            })
+                            .child({
+                                let cb = on_refresh.clone();
+                                div()
+                                    .size(px(28.0))
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER)
+                                    .bg(Theme::CARD_BG)
+                                    .hover(|s| {
+                                        s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY)
+                                    })
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .cursor_pointer()
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        cb(win, app)
+                                    })
+                                    .child(
+                                        div()
+                                            .text_size(px(14.0))
+                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .child("↻"),
+                                    )
                             }),
                     ),
             )
-            // 英雄卡片网格（默认四列）
-            .child(if list.is_empty() {
+            .child(
                 div()
-                    .bg(Theme::CARD_BG)
-                    .border_1()
-                    .border_color(Theme::CARD_BORDER)
-                    .rounded_xl()
-                    .p_8()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_2()
-                    .child(
+                    .id("mastery-scroll-area")
+                    .w_full()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.mastery_scroll_handle)
+                    .mt(px(12.0))
+                    .child(if list.is_empty() {
                         div()
-                            .text_base()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(Theme::TEXT_PRIMARY)
-                            .child("没有符合条件的英雄"),
-                    )
-                    .child(
+                            .bg(Theme::CARD_BG)
+                            .border_1()
+                            .border_color(Theme::CARD_BORDER)
+                            .rounded_xl()
+                            .p_8()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_base()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .child("未找到匹配的英雄"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(Theme::TEXT_MUTED)
+                                    .child("尝试清除搜索条件或刷新客户端数据"),
+                            )
+                            .into_any_element()
+                    } else {
                         div()
-                            .text_xs()
-                            .text_color(Theme::TEXT_MUTED)
-                            .child("请调整搜索词、宝箱状态或等级筛选"),
-                    )
-            } else {
-                div()
-                    .grid()
-                    .grid_cols(4)
-                    .gap_3()
-                    .children(list.into_iter().map(mastery_card))
-            })
+                            .grid()
+                            .grid_cols(4)
+                            .gap_3()
+                            .pb(px(24.0))
+                            .children(list.into_iter().map(mastery_card))
+                            .into_any_element()
+                    }),
+            )
     }
 
-    /// Tab 3: 战利品页签 UI 骨架
-    ///
-    /// 对照 Vue `LootManagerTab.vue` 的 A.1-A.4 控件树：
-    /// 材料面板 → 库存面板（筛选栏 + 多选碎片网格 + 批量条）。
-    /// 所有 LCU 写操作按钮均为禁用态并标注「服务层待接」，仅筛选 / 多选是纯前端交互。
     fn render_loot_tab(
         &self,
         on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
@@ -1829,7 +2356,6 @@ impl CareerView {
         value_focused: bool,
         on_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
-        // 钥匙计数：库存中 MATERIAL_key / MATERIAL_key_premium 的 count 之和
         let key_count: i32 = self
             .loot_items
             .iter()
@@ -1837,15 +2363,12 @@ impl CareerView {
             .map(|i| i.count)
             .sum();
 
-        // 材料卡：is_openable 条目
         let materials: Vec<&LootInventoryItem> =
             self.loot_items.iter().filter(|i| i.is_openable).collect();
 
-        // 当前筛选后的碎片库存（已按 disenchant_value 升序）
         let filtered = self.filtered_loot();
         let has_filtered = !filtered.is_empty();
 
-        // 预计精粹：蓝色来自 CHAMPION，其余橙色，按 disenchant_value × count 累加
         let mut gain_blue: i64 = 0;
         let mut gain_orange: i64 = 0;
         for id in &self.loot_selected {
@@ -1859,7 +2382,6 @@ impl CareerView {
             }
         }
 
-        // 批量条三个写按钮的规则（设计稿 A.4）：无 isOpening / 连接态字段，按选择集降级计算
         let has_selection = !self.loot_selected.is_empty();
         let selected_items: Vec<&LootInventoryItem> = self
             .loot_items
@@ -1897,31 +2419,34 @@ impl CareerView {
         };
 
         div()
-            // w_full 在非定宽父级会塌陷，根容器与分区统一用 grid 单列撑满
-            .grid()
-            .grid_cols(1)
-            .gap_4()
-            // A.5 弹窗浮层以本容器为绝对定位基准
+            .id("loot-tab-scroll")
+            .size_full()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(&self.loot_scroll_handle)
             .relative()
-            // ═════════ 段一：材料面板（A.1）═════════
+            .gap_4()
+            .pb(px(24.0))
+            // 区块一：可开启战利品（材料）
             .child(
                 div()
-                    .grid()
-                    .grid_cols(1)
-                    .gap(px(12.0))
+                    .w_full()
+                    .flex_none()
                     .p(px(16.0))
                     .rounded_xl()
                     .bg(Theme::CARD_BG)
                     .border_1()
                     .border_color(Theme::CARD_BORDER)
-                    // 头部：标题 / 刷新（复用 on_refresh）/ 钥匙计数 / 全部开启（禁用待接）
+                    .flex()
+                    .flex_col()
+                    .gap_3()
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .justify_between()
-                            .flex_wrap()
-                            .gap_2()
                             .child(
                                 div()
                                     .flex()
@@ -1932,133 +2457,255 @@ impl CareerView {
                                             .text_size(px(16.0))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(Theme::TEXT_PRIMARY)
-                                            .child("战利品开启"),
+                                            .child("📦 可开启战利品"),
                                     )
                                     .child(Self::action_button("刷新", on_refresh.clone()))
-                                    .child(
-                                        div()
-                                            .px(px(10.0))
-                                            .py(px(4.0))
-                                            .rounded_md()
-                                            .bg(Theme::BADGE_BG)
-                                            .text_size(px(12.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::GOLD)
-                                            .child(format!("钥匙 x{}", key_count)),
-                                    ),
+                                    .when(!materials.is_empty(), |this| {
+                                        this.child(
+                                            div()
+                                                .px(px(8.0))
+                                                .py(px(3.0))
+                                                .rounded_md()
+                                                .bg(Theme::BADGE_BG)
+                                                .text_size(px(12.0))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(Theme::GOLD)
+                                                .child(format!("🔑 x{}", key_count)),
+                                        )
+                                    }),
                             )
-                            .child(loot_pending_button(
-                                "全部开启".to_string(),
-                                if key_count > 0 {
-                                    "规则就绪"
-                                } else {
-                                    "钥匙不足"
-                                },
-                            )),
-                    )
-                    // 材料卡网格：is_openable 条目，显示 name / x count / 开启（禁用待接）
-                    .child(if materials.is_empty() {
-                        div()
-                            .py(px(24.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_size(px(12.0))
-                            .text_color(Theme::TEXT_MUTED)
-                            .child("点击刷新以加载可开启战利品")
-                    } else {
-                        div()
-                            .grid()
-                            .grid_cols(4)
-                            .gap_3()
-                            .children(materials.into_iter().map(|item| {
-                                // 材料卡「开启 / 合成」仅弹出数量弹窗壳，不触发 LCU 写接口
-                                let open_cb = on_action.clone();
-                                let quantity_modal = LootModal::Quantity {
-                                    loot_id: item.loot_id.clone(),
-                                    name: item.name.clone(),
-                                    owned: item.count,
-                                    quantity: 1,
-                                    action: LootQuantityAction::Open,
+                            .when(!materials.is_empty(), |this| {
+                                let action_cb = on_action.clone();
+                                let total_keys = key_count;
+                                let can_smart_open = total_keys > 0;
+                                let confirm_modal = LootModal::Confirm {
+                                    action_kind: LootActionKind::SmartOpenAll,
+                                    title: "一键开启全部战利品".to_string(),
+                                    message: format!(
+                                        "将自动开启所有拥有钥匙的宝箱与法球，当前可用钥匙 x{}。",
+                                        total_keys
+                                    ),
+                                    selected: materials.len(),
+                                    gain_blue: 0,
+                                    gain_orange: 0,
                                 };
-                                div()
-                                    .p_3()
-                                    .rounded_lg()
-                                    .bg(Theme::CARD_BG)
-                                    .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .grid()
-                                            .grid_cols(1)
-                                            .gap(px(4.0))
-                                            .child(
-                                                div()
-                                                    .text_size(px(12.5))
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::TEXT_PRIMARY)
-                                                    .child(item.name.clone()),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_size(px(11.0))
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::ACCENT_PRIMARY)
-                                                    .child(format!("x{}", item.count)),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .px(px(10.0))
-                                            .py(px(5.0))
-                                            .rounded_md()
-                                            .border_1()
-                                            .border_color(Theme::ACCENT_PRIMARY)
-                                            .bg(Theme::ACCENT_LIGHT)
-                                            .text_size(px(12.0))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(Theme::ACCENT_PRIMARY)
-                                            .cursor_pointer()
-                                            .on_mouse_down(
+                                this.child(
+                                    div()
+                                        .px(px(14.0))
+                                        .py(px(6.0))
+                                        .rounded_md()
+                                        .border_1()
+                                        .border_color(if can_smart_open {
+                                            Theme::ACCENT_PRIMARY
+                                        } else {
+                                            Theme::CARD_BORDER
+                                        })
+                                        .bg(if can_smart_open {
+                                            Theme::ACCENT_LIGHT
+                                        } else {
+                                            Theme::BADGE_BG
+                                        })
+                                        .text_size(px(13.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(if can_smart_open {
+                                            Theme::ACCENT_PRIMARY
+                                        } else {
+                                            Theme::TEXT_MUTED
+                                        })
+                                        .when(can_smart_open, |el| {
+                                            el.cursor_pointer().on_mouse_down(
                                                 MouseButton::Left,
                                                 move |_ev, win, app| {
-                                                    open_cb(
-                                                        LootAction::OpenQuantity(
-                                                            quantity_modal.clone(),
+                                                    action_cb(
+                                                        LootAction::OpenConfirm(
+                                                            confirm_modal.clone(),
                                                         ),
                                                         win,
                                                         app,
                                                     )
                                                 },
                                             )
-                                            .child("开启 / 合成"),
+                                        })
+                                        .child("一键开启全部"),
+                                )
+                            }),
+                    )
+                    .child(if materials.is_empty() {
+                        div()
+                            .py(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(px(12.5))
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("点击刷新以加载可开启战利品")
+                            .into_any_element()
+                    } else {
+                        div()
+                            .grid()
+                            .grid_cols(4)
+                            .gap_3()
+                            .children(materials.into_iter().map(|item| {
+                                let action_cb = on_action.clone();
+                                let is_frag = item.loot_id == "MATERIAL_key_fragment";
+                                let need_key = item.loot_id.starts_with("CHEST_")
+                                    && !item.loot_id.contains("masterwork");
+                                let quantity_modal = LootModal::Quantity {
+                                    loot_id: item.loot_id.clone(),
+                                    name: item.name.clone(),
+                                    owned: item.count,
+                                    quantity: 1,
+                                    need_key,
+                                    key_count,
+                                    key_name: Some("符文熔炉钥匙".to_string()),
+                                    tile_path: item.tile_path.clone(),
+                                    action: if is_frag {
+                                        LootQuantityAction::Craft
+                                    } else {
+                                        LootQuantityAction::Open
+                                    },
+                                    recipe_name: if is_frag {
+                                        "MATERIAL_key_fragment_forge".to_string()
+                                    } else {
+                                        format!("{}_open", item.loot_id)
+                                    },
+                                    ingredients: vec![item.loot_id.clone()],
+                                };
+
+                                div()
+                                    .p_3()
+                                    .rounded_lg()
+                                    .bg(Theme::CARD_BG)
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER)
+                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                LcuImage::new(
+                                                    item.tile_path.clone().unwrap_or_default(),
+                                                )
+                                                .size(px(40.0))
+                                                .shape(LcuImageShape::Rounded)
+                                                .placeholder("箱"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap(px(2.0))
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(12.5))
+                                                            .font_weight(FontWeight::BOLD)
+                                                            .text_color(Theme::TEXT_PRIMARY)
+                                                            .child(item.name.clone()),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(11.0))
+                                                            .font_weight(FontWeight::SEMIBOLD)
+                                                            .text_color(Theme::ACCENT_PRIMARY)
+                                                            .child(format!("x{}", item.count)),
+                                                    ),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .items_end()
+                                            .gap(px(4.0))
+                                            .child(
+                                                div()
+                                                    .px(px(6.0))
+                                                    .py(px(1.0))
+                                                    .rounded_sm()
+                                                    .bg(if is_frag {
+                                                        rgba(0x10b9811e)
+                                                    } else if need_key {
+                                                        rgba(0xd977061e)
+                                                    } else {
+                                                        rgba(0x2563eb1e)
+                                                    })
+                                                    .text_size(px(10.0))
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(if is_frag {
+                                                        Theme::WIN_TEXT
+                                                    } else if need_key {
+                                                        Theme::GOLD
+                                                    } else {
+                                                        Theme::ACCENT_PRIMARY
+                                                    })
+                                                    .child(if is_frag {
+                                                        "3合1合成"
+                                                    } else if need_key {
+                                                        "需要钥匙"
+                                                    } else {
+                                                        "无需钥匙"
+                                                    }),
+                                            )
+                                            .child(
+                                                div()
+                                                    .px(px(10.0))
+                                                    .py(px(3.0))
+                                                    .rounded_md()
+                                                    .border_1()
+                                                    .border_color(Theme::ACCENT_PRIMARY)
+                                                    .bg(Theme::ACCENT_LIGHT)
+                                                    .text_size(px(11.5))
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(Theme::ACCENT_PRIMARY)
+                                                    .cursor_pointer()
+                                                    .hover(|s| s.bg(Theme::HOVER_BG_STRONG))
+                                                    .on_mouse_down(
+                                                        MouseButton::Left,
+                                                        move |_ev, win, app| {
+                                                            action_cb(
+                                                                LootAction::OpenQuantity(
+                                                                    quantity_modal.clone(),
+                                                                ),
+                                                                win,
+                                                                app,
+                                                            )
+                                                        },
+                                                    )
+                                                    .child(if is_frag {
+                                                        "合成"
+                                                    } else {
+                                                        "开启"
+                                                    }),
+                                            ),
                                     )
                             }))
+                            .into_any_element()
                     }),
             )
-            // ═════════ 段二：库存面板（A.2 筛选栏 / A.3 网格 / A.4 批量条）═════════
+            // 区块二：碎片库存管理
             .child(
                 div()
-                    .grid()
-                    .grid_cols(1)
-                    .gap(px(12.0))
+                    .w_full()
+                    .flex_none()
                     .p(px(16.0))
                     .rounded_xl()
                     .bg(Theme::CARD_BG)
                     .border_1()
                     .border_color(Theme::CARD_BORDER)
-                    // 头部：标题 / 刷新 / 右侧蓝橙精粹余额
+                    .flex()
+                    .flex_col()
+                    .gap_3()
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .justify_between()
-                            .flex_wrap()
-                            .gap_2()
                             .child(
                                 div()
                                     .flex()
@@ -2069,7 +2716,7 @@ impl CareerView {
                                             .text_size(px(16.0))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(Theme::TEXT_PRIMARY)
-                                            .child("碎片库存管理"),
+                                            .child("💎 碎片库存管理"),
                                     )
                                     .child(Self::action_button("刷新", on_refresh)),
                             )
@@ -2077,8 +2724,8 @@ impl CareerView {
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap_4()
-                                    .px(px(12.0))
+                                    .gap_3()
+                                    .px(px(10.0))
                                     .py(px(4.0))
                                     .rounded_full()
                                     .bg(Theme::BADGE_BG)
@@ -2088,9 +2735,9 @@ impl CareerView {
                                         div()
                                             .text_size(px(12.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(0x2563eb))
+                                            .text_color(Theme::ACCENT_PRIMARY)
                                             .child(format!(
-                                                "蓝色精粹 {}",
+                                                "🔵 {}",
                                                 format_num(self.essences.blue_essence as i64)
                                             )),
                                     )
@@ -2098,28 +2745,27 @@ impl CareerView {
                                         div()
                                             .text_size(px(12.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(0xd97706))
+                                            .text_color(Theme::GOLD)
                                             .child(format!(
-                                                "橙色精粹 {}",
+                                                "🟠 {}",
                                                 format_num(self.essences.orange_essence as i64)
                                             )),
                                     ),
                             ),
                     )
-                    // 筛选栏：类型 → 拥有状态 → 价值基准 → 比较符 + 数值输入
+                    // 水平筛选栏（碎片类型 120px、拥有状态 110px、价值基准 120px、比较符 115px、数值 125px）
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .flex_wrap()
-                            .gap(px(12.0))
-                            .p(px(12.0))
+                            .gap_3()
+                            .p(px(10.0))
                             .rounded_lg()
                             .bg(Theme::HOVER_BG)
                             .border_1()
                             .border_color(Theme::CARD_BORDER)
-                            // ① 类型（8 项）
-                            .child(loot_filter_label("类型"))
+                            .child(loot_filter_label("碎片类型"))
                             .child({
                                 let cb = on_action.clone();
                                 let items = LootTypeFilter::ALL.into_iter().map(|value| {
@@ -2136,13 +2782,12 @@ impl CareerView {
                                     "loot-type-select",
                                     self.loot_filter_type.label().to_string(),
                                     self.loot_dropdown == Some(LootDropdown::Type),
-                                    dropdown_menu(140.0, items),
+                                    dropdown_menu(120.0, items),
                                     move |win, app| {
                                         cb(LootAction::ToggleDropdown(LootDropdown::Type), win, app)
                                     },
                                 )
                             })
-                            // ② 拥有状态（3 项）
                             .child(loot_filter_label("拥有状态"))
                             .child({
                                 let cb = on_action.clone();
@@ -2160,7 +2805,7 @@ impl CareerView {
                                     "loot-owned-select",
                                     self.loot_filter_owned.label().to_string(),
                                     self.loot_dropdown == Some(LootDropdown::Owned),
-                                    dropdown_menu(120.0, items),
+                                    dropdown_menu(110.0, items),
                                     move |win, app| {
                                         cb(
                                             LootAction::ToggleDropdown(LootDropdown::Owned),
@@ -2170,7 +2815,6 @@ impl CareerView {
                                     },
                                 )
                             })
-                            // ③ 价值基准（2 项）
                             .child(loot_filter_label("价值基准"))
                             .child({
                                 let cb = on_action.clone();
@@ -2198,7 +2842,6 @@ impl CareerView {
                                     },
                                 )
                             })
-                            // ④ 价值范围：比较符（3 项）+ 数值输入（text_field + FocusHandle）
                             .child(loot_filter_label("价值"))
                             .child({
                                 let cb = on_action.clone();
@@ -2216,7 +2859,7 @@ impl CareerView {
                                     "loot-operator-select",
                                     self.loot_filter_operator.label().to_string(),
                                     self.loot_dropdown == Some(LootDropdown::Operator),
-                                    dropdown_menu(140.0, items),
+                                    dropdown_menu(115.0, items),
                                     move |win, app| {
                                         cb(
                                             LootAction::ToggleDropdown(LootDropdown::Operator),
@@ -2233,7 +2876,7 @@ impl CareerView {
                                     "loot-value-input",
                                     &self.loot_value_input,
                                     "不限",
-                                    px(90.0),
+                                    px(125.0),
                                     value_focus,
                                     value_focused,
                                     TextFieldOptions {
@@ -2248,16 +2891,17 @@ impl CareerView {
                                 )
                             }),
                     )
-                    // 可多选碎片网格（A.3）
+                    // 碎片网格
                     .child(if filtered.is_empty() {
                         div()
                             .py(px(32.0))
                             .flex()
                             .items_center()
                             .justify_center()
-                            .text_size(px(12.0))
+                            .text_size(px(12.5))
                             .text_color(Theme::TEXT_MUTED)
-                            .child("没有符合条件的碎片")
+                            .child("暂无符合筛选条件的碎片")
+                            .into_any_element()
                     } else {
                         div()
                             .grid()
@@ -2270,9 +2914,9 @@ impl CareerView {
                                 let cat = loot_category(item);
                                 let owned = item.item_status.eq_ignore_ascii_case("OWNED");
                                 let essence_color = if cat == "CHAMPION" {
-                                    rgb(0x2563eb)
+                                    Theme::ACCENT_PRIMARY
                                 } else {
-                                    rgb(0xd97706)
+                                    Theme::GOLD
                                 };
                                 div()
                                     .relative()
@@ -2294,7 +2938,6 @@ impl CareerView {
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         cb(LootAction::ToggleSelect(id.clone()), win, app)
                                     })
-                                    // 选中角标
                                     .when(selected, |this| {
                                         this.child(
                                             div()
@@ -2309,77 +2952,143 @@ impl CareerView {
                                                 .justify_center()
                                                 .text_size(px(11.0))
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(rgb(0xffffff))
-                                                .child("✔"),
+                                                .text_color(hsla(0.0, 0.0, 1.0, 1.0))
+                                                .child("✓"),
                                         )
                                     })
                                     .child(
                                         div()
-                                            .grid()
-                                            .grid_cols(1)
-                                            .gap(px(6.0))
+                                            .flex()
+                                            .gap_2()
                                             .child(
-                                                div()
-                                                    .text_size(px(12.0))
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::TEXT_PRIMARY)
-                                                    .child(item.item_desc.clone()),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_size(px(11.0))
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::ACCENT_PRIMARY)
-                                                    .child(format!("x{}", item.count)),
+                                                LcuImage::new(
+                                                    item.tile_path.clone().unwrap_or_default(),
+                                                )
+                                                .size(px(44.0))
+                                                .shape(LcuImageShape::Rounded)
+                                                .placeholder("碎"),
                                             )
                                             .child(
                                                 div()
                                                     .flex()
-                                                    .items_center()
-                                                    .flex_wrap()
-                                                    .gap(px(6.0))
-                                                    // 拥有徽章
+                                                    .flex_col()
+                                                    .justify_between()
+                                                    .min_w(px(0.0))
+                                                    .flex_1()
                                                     .child(
                                                         div()
-                                                            .px(px(6.0))
-                                                            .py(px(1.0))
-                                                            .rounded_md()
-                                                            .bg(Theme::BADGE_BG)
-                                                            .text_size(px(10.0))
-                                                            .font_weight(FontWeight::BOLD)
-                                                            .text_color(if owned {
-                                                                Theme::WIN_TEXT
-                                                            } else {
-                                                                Theme::TEXT_MUTED
-                                                            })
-                                                            .child(if owned {
-                                                                "已拥有"
-                                                            } else {
-                                                                "未拥有"
-                                                            }),
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_between()
+                                                            .child(
+                                                                div()
+                                                                    .text_size(px(12.0))
+                                                                    .font_weight(FontWeight::BOLD)
+                                                                    .text_color(Theme::TEXT_PRIMARY)
+                                                                    .overflow_hidden()
+                                                                    .whitespace_nowrap()
+                                                                    .child(item.item_desc.clone()),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_size(px(11.0))
+                                                                    .font_weight(
+                                                                        FontWeight::SEMIBOLD,
+                                                                    )
+                                                                    .text_color(
+                                                                        Theme::ACCENT_PRIMARY,
+                                                                    )
+                                                                    .child(format!(
+                                                                        "x{}",
+                                                                        item.count
+                                                                    )),
+                                                            ),
                                                     )
-                                                    // 精粹值：CHAMPION 蓝、其余橙
                                                     .child(
                                                         div()
-                                                            .text_size(px(11.0))
-                                                            .font_weight(FontWeight::BOLD)
-                                                            .text_color(essence_color)
-                                                            .child(format!(
-                                                                "{} {}",
-                                                                if cat == "CHAMPION" {
-                                                                    "蓝"
-                                                                } else {
-                                                                    "橙"
-                                                                },
-                                                                item.disenchant_value
-                                                            )),
+                                                            .flex()
+                                                            .items_center()
+                                                            .gap(px(6.0))
+                                                            .child(
+                                                                div()
+                                                                    .px(px(6.0))
+                                                                    .py(px(1.0))
+                                                                    .rounded_sm()
+                                                                    .bg(Theme::BADGE_BG)
+                                                                    .text_size(px(10.0))
+                                                                    .font_weight(
+                                                                        FontWeight::SEMIBOLD,
+                                                                    )
+                                                                    .text_color(if owned {
+                                                                        Theme::WIN_TEXT
+                                                                    } else {
+                                                                        Theme::TEXT_MUTED
+                                                                    })
+                                                                    .child(if owned {
+                                                                        "已拥有"
+                                                                    } else {
+                                                                        "未拥有"
+                                                                    }),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_size(px(11.0))
+                                                                    .font_weight(FontWeight::BOLD)
+                                                                    .text_color(essence_color)
+                                                                    .child(format!(
+                                                                        "{} {}",
+                                                                        if cat == "CHAMPION" {
+                                                                            "🔵"
+                                                                        } else {
+                                                                            "🟠"
+                                                                        },
+                                                                        item.disenchant_value
+                                                                    )),
+                                                            ),
                                                     ),
                                             ),
                                     )
                             }))
+                            .into_any_element()
                     })
-                    // 批量条（A.4），仅在有筛选结果时出现
+                    // 底部浮动批量操作栏
                     .when(has_filtered, |this| {
+                        let action_cb = on_action.clone();
+                        let selected_count = self.loot_selected.len();
+                        let confirm_disenchant = LootModal::Confirm {
+                            action_kind: LootActionKind::Disenchant,
+                            title: "批量分解确认".to_string(),
+                            message: format!(
+                                "确定要分解选中的 {} 项战利品碎片吗？",
+                                selected_count
+                            ),
+                            selected: selected_count,
+                            gain_blue,
+                            gain_orange,
+                        };
+                        let confirm_reroll = LootModal::Confirm {
+                            action_kind: LootActionKind::Reroll,
+                            title: "重铸确认".to_string(),
+                            message: format!(
+                                "确定要重铸选中的 {} 项碎片吗？（每 3 个碎片合成 1 个永久物品）",
+                                selected_count
+                            ),
+                            selected: selected_count,
+                            gain_blue: 0,
+                            gain_orange: 0,
+                        };
+                        let confirm_upgrade = LootModal::Confirm {
+                            action_kind: LootActionKind::Upgrade,
+                            title: "批量升级 / 解锁确认".to_string(),
+                            message: format!(
+                                "确定要升级 / 解锁选中的 {} 项战利品吗？",
+                                selected_count
+                            ),
+                            selected: selected_count,
+                            gain_blue: 0,
+                            gain_orange: 0,
+                        };
+
                         this.child(
                             div()
                                 .flex()
@@ -2387,49 +3096,40 @@ impl CareerView {
                                 .justify_between()
                                 .flex_wrap()
                                 .gap_3()
-                                .p(px(12.0))
+                                .p(px(10.0))
                                 .rounded_lg()
                                 .bg(Theme::CARD_BG_HOVER)
                                 .border_1()
                                 .border_color(Theme::CARD_BORDER)
-                                // 左：全选当前筛选 / 清空 / 已选 N
                                 .child(
                                     div()
                                         .flex()
                                         .items_center()
                                         .gap_2()
                                         .child({
-                                            let cb = on_action.clone();
-                                            Self::action_button(
-                                                "全选当前筛选",
-                                                move |win, app| {
-                                                    cb(LootAction::SelectAllFiltered, win, app)
-                                                },
-                                            )
+                                            let cb = action_cb.clone();
+                                            Self::action_button("全选", move |win, app| {
+                                                cb(LootAction::SelectAllFiltered, win, app)
+                                            })
                                         })
                                         .child({
-                                            let cb = on_action.clone();
+                                            let cb = action_cb.clone();
                                             Self::action_button("清空", move |win, app| {
                                                 cb(LootAction::ClearSelection, win, app)
                                             })
                                         })
                                         .child(
                                             div()
-                                                .text_size(px(12.0))
-                                                .font_weight(FontWeight::BOLD)
+                                                .text_size(px(12.5))
+                                                .font_weight(FontWeight::SEMIBOLD)
                                                 .text_color(Theme::TEXT_PRIMARY)
-                                                .child(format!(
-                                                    "已选 {}",
-                                                    self.loot_selected.len()
-                                                )),
+                                                .child(format!("已选 {} 项", selected_count)),
                                         ),
                                 )
-                                // 右：预计精粹 + 三个写按钮（禁用待接）
                                 .child(
                                     div()
                                         .flex()
                                         .items_center()
-                                        .flex_wrap()
                                         .gap_2()
                                         .when(has_selection, |this| {
                                             this.child(
@@ -2447,9 +3147,9 @@ impl CareerView {
                                                         div()
                                                             .text_size(px(12.0))
                                                             .font_weight(FontWeight::BOLD)
-                                                            .text_color(rgb(0x2563eb))
+                                                            .text_color(Theme::ACCENT_PRIMARY)
                                                             .child(format!(
-                                                                "蓝 {}",
+                                                                "🔵 +{}",
                                                                 format_num(gain_blue)
                                                             )),
                                                     )
@@ -2457,90 +3157,667 @@ impl CareerView {
                                                         div()
                                                             .text_size(px(12.0))
                                                             .font_weight(FontWeight::BOLD)
-                                                            .text_color(rgb(0xd97706))
+                                                            .text_color(Theme::GOLD)
                                                             .child(format!(
-                                                                "橙 {}",
+                                                                "🟠 +{}",
                                                                 format_num(gain_orange)
                                                             )),
                                                     ),
                                             )
                                         })
-                                        .child(loot_pending_button(
-                                            "分解".to_string(),
-                                            if has_selection {
-                                                "规则就绪"
-                                            } else {
-                                                "需先选择"
-                                            },
-                                        ))
-                                        .child(loot_pending_button(
-                                            "重铸".to_string(),
-                                            if can_reroll {
-                                                "规则就绪"
-                                            } else {
-                                                "需可重铸碎片"
-                                            },
-                                        ))
-                                        .child(loot_pending_button(
-                                            upgrade_label.clone(),
-                                            if can_upgrade {
-                                                "规则就绪"
-                                            } else {
-                                                "需可升级碎片"
-                                            },
-                                        )),
+                                        .child({
+                                            let cb = action_cb.clone();
+                                            let modal = confirm_disenchant.clone();
+                                            div()
+                                                .px(px(12.0))
+                                                .py(px(5.0))
+                                                .rounded_md()
+                                                .border_1()
+                                                .border_color(if has_selection {
+                                                    Theme::ACCENT_PRIMARY
+                                                } else {
+                                                    Theme::CARD_BORDER
+                                                })
+                                                .bg(if has_selection {
+                                                    Theme::ACCENT_LIGHT
+                                                } else {
+                                                    Theme::BADGE_BG
+                                                })
+                                                .text_size(px(12.5))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(if has_selection {
+                                                    Theme::ACCENT_PRIMARY
+                                                } else {
+                                                    Theme::TEXT_MUTED
+                                                })
+                                                .when(has_selection, |el| {
+                                                    el.cursor_pointer().on_mouse_down(
+                                                        MouseButton::Left,
+                                                        move |_ev, win, app| {
+                                                            cb(
+                                                                LootAction::OpenConfirm(
+                                                                    modal.clone(),
+                                                                ),
+                                                                win,
+                                                                app,
+                                                            )
+                                                        },
+                                                    )
+                                                })
+                                                .child("分解")
+                                        })
+                                        .child({
+                                            let cb = action_cb.clone();
+                                            let modal = confirm_reroll.clone();
+                                            div()
+                                                .px(px(12.0))
+                                                .py(px(5.0))
+                                                .rounded_md()
+                                                .border_1()
+                                                .border_color(if can_reroll {
+                                                    Theme::ACCENT_PRIMARY
+                                                } else {
+                                                    Theme::CARD_BORDER
+                                                })
+                                                .bg(if can_reroll {
+                                                    Theme::ACCENT_LIGHT
+                                                } else {
+                                                    Theme::BADGE_BG
+                                                })
+                                                .text_size(px(12.5))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(if can_reroll {
+                                                    Theme::ACCENT_PRIMARY
+                                                } else {
+                                                    Theme::TEXT_MUTED
+                                                })
+                                                .when(can_reroll, |el| {
+                                                    el.cursor_pointer().on_mouse_down(
+                                                        MouseButton::Left,
+                                                        move |_ev, win, app| {
+                                                            cb(
+                                                                LootAction::OpenConfirm(
+                                                                    modal.clone(),
+                                                                ),
+                                                                win,
+                                                                app,
+                                                            )
+                                                        },
+                                                    )
+                                                })
+                                                .child("重铸")
+                                        })
+                                        .child({
+                                            let cb = action_cb.clone();
+                                            let modal = confirm_upgrade.clone();
+                                            div()
+                                                .px(px(12.0))
+                                                .py(px(5.0))
+                                                .rounded_md()
+                                                .border_1()
+                                                .border_color(if can_upgrade {
+                                                    Theme::ACCENT_PRIMARY
+                                                } else {
+                                                    Theme::CARD_BORDER
+                                                })
+                                                .bg(if can_upgrade {
+                                                    Theme::ACCENT_LIGHT
+                                                } else {
+                                                    Theme::BADGE_BG
+                                                })
+                                                .text_size(px(12.5))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(if can_upgrade {
+                                                    Theme::ACCENT_PRIMARY
+                                                } else {
+                                                    Theme::TEXT_MUTED
+                                                })
+                                                .when(can_upgrade, |el| {
+                                                    el.cursor_pointer().on_mouse_down(
+                                                        MouseButton::Left,
+                                                        move |_ev, win, app| {
+                                                            cb(
+                                                                LootAction::OpenConfirm(
+                                                                    modal.clone(),
+                                                                ),
+                                                                win,
+                                                                app,
+                                                            )
+                                                        },
+                                                    )
+                                                })
+                                                .child(upgrade_label)
+                                        }),
                                 ),
                         )
                     }),
             )
-            // ═════════ A.5 弹窗壳：deferred 浮层盖在面板之上，不占布局、不用 on_mouse_down_out ═════════
             .children(self.loot_modal.as_ref().map(|modal| {
                 deferred(
                     div()
                         .absolute()
-                        .top(px(72.0))
-                        .left(px(24.0))
-                        .id("loot-modal-layer")
+                        .inset_0()
+                        .bg(rgba(0x00000080))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .id("loot-modal-overlay")
                         .occlude()
                         .child(Self::render_loot_modal(modal, on_action.clone())),
                 )
-                .with_priority(2)
+                .with_priority(10)
             }))
             .children(self.loot_progress.as_ref().map(|progress| {
                 deferred(
                     div()
                         .absolute()
-                        .top(px(72.0))
-                        .left(px(460.0))
-                        .id("loot-progress-layer")
+                        .inset_0()
+                        .bg(rgba(0x00000080))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .id("loot-progress-overlay")
                         .occlude()
-                        .child(Self::render_loot_progress(progress)),
+                        .child(Self::render_loot_progress(progress, on_action.clone())),
                 )
-                .with_priority(2)
+                .with_priority(10)
             }))
     }
 
-    /// A.5 数量 / 确认弹窗壳：纯 UI，按钮只派发本地动作，不调用 LCU 写接口
     fn render_loot_modal(
         modal: &LootModal,
         on_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let cancel_cb = on_action.clone();
         let confirm_cb = on_action.clone();
+        let modal_clone = modal.clone();
 
-        let card = div()
-            // 固定宽度，避免非定宽父级下 w_full 塌陷
+        match modal {
+            LootModal::Quantity {
+                loot_id,
+                name,
+                owned,
+                quantity,
+                need_key,
+                key_count,
+                tile_path,
+                action,
+                recipe_name,
+                ingredients,
+                key_name,
+            } => {
+                let max_qty = if *need_key {
+                    (*owned).min(*key_count).max(0)
+                } else {
+                    (*owned).max(0)
+                };
+                let minus_modal = LootModal::Quantity {
+                    loot_id: loot_id.clone(),
+                    name: name.clone(),
+                    owned: *owned,
+                    quantity: (*quantity - 1).max(1),
+                    need_key: *need_key,
+                    key_count: *key_count,
+                    key_name: key_name.clone(),
+                    tile_path: tile_path.clone(),
+                    action: *action,
+                    recipe_name: recipe_name.clone(),
+                    ingredients: ingredients.clone(),
+                };
+                let plus_modal = LootModal::Quantity {
+                    loot_id: loot_id.clone(),
+                    name: name.clone(),
+                    owned: *owned,
+                    quantity: (*quantity + 1).min(max_qty.max(1)),
+                    need_key: *need_key,
+                    key_count: *key_count,
+                    key_name: key_name.clone(),
+                    tile_path: tile_path.clone(),
+                    action: *action,
+                    recipe_name: recipe_name.clone(),
+                    ingredients: ingredients.clone(),
+                };
+                let minus_cb = on_action.clone();
+                let plus_cb = on_action.clone();
+                let is_insufficient = max_qty <= 0;
+
+                div()
+                    .w(px(440.0))
+                    .bg(Theme::CARD_BG)
+                    .border_1()
+                    .border_color(Theme::CARD_BORDER)
+                    .rounded_xl()
+                    .p(px(20.0))
+                    .shadow_lg()
+                    .flex()
+                    .flex_col()
+                    .gap(px(14.0))
+                    .on_mouse_down(MouseButton::Left, |_ev, _, _| {})
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_size(px(15.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .child(format!("{} - {}", action.label(), name)),
+                            )
+                            .child({
+                                let close_cb = cancel_cb.clone();
+                                div()
+                                    .size(px(24.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(Theme::HOVER_BG))
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        close_cb(LootAction::CloseModal, win, app)
+                                    })
+                                    .child("✕")
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .p(px(10.0))
+                            .rounded_lg()
+                            .bg(Theme::HOVER_BG)
+                            .child(
+                                LcuImage::new(tile_path.clone().unwrap_or_default())
+                                    .size(px(48.0))
+                                    .shape(LcuImageShape::Rounded)
+                                    .placeholder("宝"),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(13.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .child(name.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.0))
+                                            .text_color(Theme::TEXT_MUTED)
+                                            .child(format!("持有数量: x{}", owned)),
+                                    ),
+                            ),
+                    )
+                    .when(*need_key, |this| {
+                        this.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .text_size(px(12.5))
+                                .child(div().text_color(Theme::TEXT_MUTED).child("所需钥匙:"))
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(Theme::GOLD)
+                                        .child(format!("x{} (持有: {})", quantity, key_count)),
+                                ),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .child(if *action == LootQuantityAction::Craft {
+                                        "合成次数:"
+                                    } else {
+                                        "开启数量:"
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .size(px(28.0))
+                                            .rounded_md()
+                                            .border_1()
+                                            .border_color(Theme::CARD_BORDER)
+                                            .bg(Theme::CARD_BG)
+                                            .hover(|s| s.bg(Theme::HOVER_BG))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .cursor_pointer()
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                move |_ev, win, app| {
+                                                    minus_cb(
+                                                        LootAction::OpenQuantity(
+                                                            minus_modal.clone(),
+                                                        ),
+                                                        win,
+                                                        app,
+                                                    )
+                                                },
+                                            )
+                                            .child("−"),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(40.0))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .text_size(px(14.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .child(quantity.to_string()),
+                                    )
+                                    .child(
+                                        div()
+                                            .size(px(28.0))
+                                            .rounded_md()
+                                            .border_1()
+                                            .border_color(Theme::CARD_BORDER)
+                                            .bg(Theme::CARD_BG)
+                                            .hover(|s| s.bg(Theme::HOVER_BG))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .cursor_pointer()
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                move |_ev, win, app| {
+                                                    plus_cb(
+                                                        LootAction::OpenQuantity(
+                                                            plus_modal.clone(),
+                                                        ),
+                                                        win,
+                                                        app,
+                                                    )
+                                                },
+                                            )
+                                            .child("+"),
+                                    ),
+                            ),
+                    )
+                    .when(is_insufficient, |this| {
+                        this.child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(Theme::LOSS_TEXT)
+                                .child(if *need_key {
+                                    "钥匙不足，无法开启"
+                                } else {
+                                    "碎片数量不足"
+                                }),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_end()
+                            .gap_2()
+                            .mt(px(4.0))
+                            .child(
+                                div()
+                                    .px(px(16.0))
+                                    .py(px(6.0))
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER)
+                                    .bg(Theme::CARD_BG)
+                                    .text_size(px(13.0))
+                                    .cursor_pointer()
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        cancel_cb(LootAction::CloseModal, win, app)
+                                    })
+                                    .child("取消"),
+                            )
+                            .child(
+                                div()
+                                    .px(px(16.0))
+                                    .py(px(6.0))
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(if is_insufficient {
+                                        Theme::CARD_BORDER
+                                    } else {
+                                        Theme::ACCENT_PRIMARY
+                                    })
+                                    .bg(if is_insufficient {
+                                        Theme::BADGE_BG
+                                    } else {
+                                        Theme::ACCENT_PRIMARY
+                                    })
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(if is_insufficient {
+                                        Theme::TEXT_MUTED
+                                    } else {
+                                        hsla(0.0, 0.0, 1.0, 1.0)
+                                    })
+                                    .when(!is_insufficient, |el| {
+                                        el.cursor_pointer().on_mouse_down(
+                                            MouseButton::Left,
+                                            move |_ev, win, app| {
+                                                confirm_cb(
+                                                    LootAction::Confirm(modal_clone.clone()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
+                                    })
+                                    .child(if *action == LootQuantityAction::Craft {
+                                        format!("开始合成 ({})", quantity)
+                                    } else {
+                                        format!("开始开启 ({})", quantity)
+                                    }),
+                            ),
+                    )
+            }
+            LootModal::Confirm {
+                title,
+                message,
+                selected,
+                gain_blue,
+                gain_orange,
+                ..
+            } => div()
+                .w(px(440.0))
+                .bg(Theme::CARD_BG)
+                .border_1()
+                .border_color(Theme::CARD_BORDER)
+                .rounded_xl()
+                .p(px(20.0))
+                .shadow_lg()
+                .flex()
+                .flex_col()
+                .gap(px(14.0))
+                .on_mouse_down(MouseButton::Left, |_ev, _, _| {})
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .text_size(px(15.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(Theme::TEXT_PRIMARY)
+                                .child(title.clone()),
+                        )
+                        .child({
+                            let close_cb = cancel_cb.clone();
+                            div()
+                                .size(px(24.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_md()
+                                .cursor_pointer()
+                                .hover(|s| s.bg(Theme::HOVER_BG))
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    close_cb(LootAction::CloseModal, win, app)
+                                })
+                                .child("✕")
+                        }),
+                )
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .line_height(px(20.0))
+                        .text_color(Theme::TEXT_PRIMARY)
+                        .child(message.clone()),
+                )
+                .when(*gain_blue > 0 || *gain_orange > 0, |this| {
+                    this.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(6.0))
+                            .p(px(10.0))
+                            .rounded_lg()
+                            .bg(Theme::HOVER_BG)
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .text_size(px(12.5))
+                                    .child(div().text_color(Theme::TEXT_MUTED).child("已选项目:"))
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .child(format!("{} 项", selected)),
+                                    ),
+                            )
+                            .when(*gain_blue > 0, |el| {
+                                el.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .text_size(px(12.5))
+                                        .child(
+                                            div()
+                                                .text_color(Theme::TEXT_MUTED)
+                                                .child("预计获得蓝色精粹:"),
+                                        )
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(Theme::ACCENT_PRIMARY)
+                                                .child(format!("+{}", format_num(*gain_blue))),
+                                        ),
+                                )
+                            })
+                            .when(*gain_orange > 0, |el| {
+                                el.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .text_size(px(12.5))
+                                        .child(
+                                            div()
+                                                .text_color(Theme::TEXT_MUTED)
+                                                .child("预计获得橙色精粹:"),
+                                        )
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(Theme::GOLD)
+                                                .child(format!("+{}", format_num(*gain_orange))),
+                                        ),
+                                )
+                            }),
+                    )
+                })
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_end()
+                        .gap_2()
+                        .mt(px(4.0))
+                        .child(
+                            div()
+                                .px(px(16.0))
+                                .py(px(6.0))
+                                .rounded_md()
+                                .border_1()
+                                .border_color(Theme::CARD_BORDER)
+                                .bg(Theme::CARD_BG)
+                                .text_size(px(13.0))
+                                .cursor_pointer()
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    cancel_cb(LootAction::CloseModal, win, app)
+                                })
+                                .child("取消"),
+                        )
+                        .child(
+                            div()
+                                .px(px(16.0))
+                                .py(px(6.0))
+                                .rounded_md()
+                                .bg(Theme::ACCENT_PRIMARY)
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(hsla(0.0, 0.0, 1.0, 1.0))
+                                .cursor_pointer()
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    confirm_cb(LootAction::Confirm(modal_clone.clone()), win, app)
+                                })
+                                .child("确认执行"),
+                        ),
+                ),
+        }
+    }
+
+    fn render_loot_progress(
+        progress: &LootProgress,
+        on_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
+    ) -> impl IntoElement {
+        let is_done = progress.current >= progress.total;
+        let pct = if progress.total == 0 {
+            0.0
+        } else {
+            (progress.current as f32 / progress.total as f32).clamp(0.0, 1.0)
+        };
+        let close_cb = on_action.clone();
+
+        div()
             .w(px(420.0))
-            .grid()
-            .grid_cols(1)
-            .gap(px(12.0))
-            .p(px(20.0))
-            .rounded_xl()
+            .bg(Theme::CARD_BG)
             .border_1()
-            .border_color(Theme::ACCENT_PRIMARY)
-            .bg(Theme::CARD_BG_HOVER)
-            .shadow_md()
-            // 弹窗标识：明确这是纯 UI 壳
+            .border_color(Theme::CARD_BORDER)
+            .rounded_xl()
+            .p(px(20.0))
+            .shadow_lg()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .on_mouse_down(MouseButton::Left, |_ev, _, _| {})
             .child(
                 div()
                     .flex()
@@ -2551,249 +3828,43 @@ impl CareerView {
                             .text_size(px(15.0))
                             .font_weight(FontWeight::BOLD)
                             .text_color(Theme::TEXT_PRIMARY)
-                            .child("弹窗预览 · 纯 UI"),
+                            .child(if is_done {
+                                "战利品处理完成"
+                            } else {
+                                "正在处理战利品..."
+                            }),
                     )
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(Theme::TEXT_MUTED)
-                            .child("服务层待接"),
-                    ),
-            );
-
-        let body = match modal {
-            LootModal::Quantity {
-                loot_id,
-                name,
-                owned,
-                quantity,
-                action,
-            } => {
-                let max_qty = (*owned).max(1);
-                // +/− 通过携带更新后的数量再次派发 OpenQuantity 来刷新本地弹窗状态
-                let minus_modal = LootModal::Quantity {
-                    loot_id: loot_id.clone(),
-                    name: name.clone(),
-                    owned: *owned,
-                    quantity: (*quantity - 1).max(1),
-                    action: *action,
-                };
-                let plus_modal = LootModal::Quantity {
-                    loot_id: loot_id.clone(),
-                    name: name.clone(),
-                    owned: *owned,
-                    quantity: (*quantity + 1).min(max_qty),
-                    action: *action,
-                };
-                let minus_cb = on_action.clone();
-                let plus_cb = on_action.clone();
-                card.child(
-                    div()
-                        .text_size(px(13.0))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::ACCENT_PRIMARY)
-                        .child(format!("{}数量选择", action.label())),
-                )
-                .child(
-                    div()
-                        .grid()
-                        .grid_cols(1)
-                        .gap(px(6.0))
-                        .child(
+                    .when(is_done, |this| {
+                        let cb = close_cb.clone();
+                        this.child(
                             div()
-                                .text_size(px(13.0))
-                                .text_color(Theme::TEXT_PRIMARY)
-                                .child(name.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(12.0))
-                                .text_color(Theme::TEXT_MUTED)
-                                .child(format!("持有数量 x{}", owned)),
-                        ),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_3()
-                        .child(
-                            div()
-                                .size(px(28.0))
+                                .size(px(24.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
                                 .rounded_md()
-                                .border_1()
-                                .border_color(Theme::CARD_BORDER)
-                                .bg(Theme::BADGE_BG)
-                                .flex()
-                                .items_center()
-                                .justify_center()
                                 .cursor_pointer()
+                                .hover(|s| s.bg(Theme::HOVER_BG))
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    minus_cb(
-                                        LootAction::OpenQuantity(minus_modal.clone()),
-                                        win,
-                                        app,
-                                    )
+                                    cb(LootAction::CloseProgress, win, app)
                                 })
-                                .child("−"),
+                                .child("✕"),
                         )
-                        .child(
-                            div()
-                                .w(px(48.0))
-                                .text_size(px(14.0))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(format!("{}", quantity)),
-                        )
-                        .child(
-                            div()
-                                .size(px(28.0))
-                                .rounded_md()
-                                .border_1()
-                                .border_color(Theme::CARD_BORDER)
-                                .bg(Theme::BADGE_BG)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .cursor_pointer()
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    plus_cb(LootAction::OpenQuantity(plus_modal.clone()), win, app)
-                                })
-                                .child("+"),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(11.0))
-                                .text_color(Theme::TEXT_MUTED)
-                                .child(format!("最多 {}", max_qty)),
-                        ),
-                )
-            }
-            LootModal::Confirm {
-                action,
-                selected,
-                gain_blue,
-                gain_orange,
-            } => card
-                .child(
-                    div()
-                        .text_size(px(14.0))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_PRIMARY)
-                        .child(format!("确认{}？", action)),
-                )
-                .child(
-                    div()
-                        .grid()
-                        .grid_cols(1)
-                        .gap(px(6.0))
-                        .child(
-                            div()
-                                .text_size(px(12.5))
-                                .text_color(Theme::TEXT_PRIMARY)
-                                .child(format!("已选 {} 项", selected)),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(12.5))
-                                .text_color(Theme::TEXT_MUTED)
-                                .child(format!(
-                                    "预计获得精粹：蓝 {} / 橙 {}",
-                                    format_num(*gain_blue),
-                                    format_num(*gain_orange)
-                                )),
-                        ),
-                ),
-        };
-
-        // 公共底部：取消 / 确认，均只改本地 UI 状态
-        body.child(
-            div()
-                .flex()
-                .items_center()
-                .justify_end()
-                .gap_2()
-                .child(loot_modal_button(
-                    "取消",
-                    false,
-                    LootAction::CloseModal,
-                    cancel_cb,
-                ))
-                .child(loot_modal_button(
-                    "确认",
-                    true,
-                    LootAction::Confirm,
-                    confirm_cb,
-                )),
-        )
-    }
-
-    /// A.5 进度面板：current/total、成功数、当前条目名与百分比条，纯本地状态
-    fn render_loot_progress(progress: &LootProgress) -> impl IntoElement {
-        let pct = if progress.total == 0 {
-            0.0
-        } else {
-            (progress.current as f32 / progress.total as f32).clamp(0.0, 1.0)
-        };
-        div()
-            // 固定宽度，避免 w_full 塌陷
-            .w(px(420.0))
-            .grid()
-            .grid_cols(1)
-            .gap(px(10.0))
-            .p(px(20.0))
-            .rounded_xl()
-            .border_1()
-            .border_color(Theme::ACCENT_PRIMARY)
-            .bg(Theme::CARD_BG_HOVER)
-            .shadow_md()
-            .child(
-                div()
-                    .text_size(px(14.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(Theme::TEXT_PRIMARY)
-                    .child("批量进度 · 纯本地状态"),
+                    }),
             )
             .child(
                 div()
                     .text_size(px(12.5))
                     .text_color(Theme::TEXT_MUTED)
-                    .child(format!("当前条目：{}", progress.current_name)),
+                    .child(format!("当前条目: {}", progress.current_name)),
             )
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(Theme::TEXT_PRIMARY)
-                            .child(format!("{}/{}", progress.current, progress.total)),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(Theme::WIN_TEXT)
-                            .child(format!("成功 {} 项", progress.success)),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(12.0))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::ACCENT_PRIMARY)
-                            .child(format!("{:.0}%", pct * 100.0)),
-                    ),
-            )
-            .child(
-                div()
-                    .w(px(380.0))
+                    .w_full()
                     .h(px(8.0))
                     .rounded_full()
                     .bg(Theme::BADGE_BG)
+                    .overflow_hidden()
                     .child(
                         div()
                             .w(px(380.0 * pct))
@@ -2802,464 +3873,54 @@ impl CareerView {
                             .bg(Theme::ACCENT_PRIMARY),
                     ),
             )
-    }
-
-    /// 渲染顶部统计面板（兼容原有 Matches 列表内部调用）
-    /// 渲染单条紧凑战绩卡片（112px 黄金行高）
-    pub fn render_match_card(
-        m: &MatchItem,
-        idx: usize,
-        on_toggle: impl Fn(usize, &mut Window, &mut App) + 'static + Clone,
-    ) -> impl IntoElement {
-        let toggle_cb = on_toggle.clone();
-
-        let (bg_color, border_color, bar_color, win_text_color, win_label) = if m.display.remake {
-            (
-                Theme::REMAKE_BG,
-                Theme::REMAKE_BORDER,
-                Theme::REMAKE_BAR,
-                Theme::REMAKE_TEXT,
-                "重开",
-            )
-        } else if m.display.win {
-            (
-                Theme::WIN_BG,
-                Theme::WIN_BORDER,
-                Theme::WIN_BAR,
-                Theme::WIN_TEXT,
-                "胜利",
-            )
-        } else {
-            (
-                Theme::LOSS_BG,
-                Theme::LOSS_BORDER,
-                Theme::LOSS_BAR,
-                Theme::LOSS_TEXT,
-                "失败",
-            )
-        };
-
-        let champion_name = m.display.name.clone();
-        let champion_icon_url = m.display.champion_icon_url.clone();
-        let spell1_icon_url = m.display.spell1_icon_url.clone();
-        let spell2_icon_url = m.display.spell2_icon_url.clone();
-        let queue_name = m.display.map.clone();
-        let duration_str = m.display.duration.clone();
-        let time_str = m.display.short_time.clone();
-        let kda_ratio = m.display.kda.clone();
-        let cs_str = format!("{} 刀", m.display.cs);
-        let gold_str = format!("{:.1}k", m.display.gold as f32 / 1000.0);
-        let damage_str = format!("{:.1}k", m.display.total_damage as f32 / 1000.0);
-        let pos_str = position_to_zh(m.display.position.as_deref());
-        let mut items = [0i32; 7];
-        for (i, &it) in m.display.item_ids.iter().take(7).enumerate() {
-            items[i] = it;
-        }
-        let item_urls = m.display.item_icon_urls.clone();
-        let is_expanded = m.expanded;
-        let champ_level = m.display.champ_level;
-        let kills = m.display.kills;
-        let deaths = m.display.deaths;
-        let assists = m.display.assists;
-        let game_id = m.display.game_id;
-        let detail_line = format!(
-            "对局编号: {} · 输出 {:.1}k · 治疗 {:.1}k · 补刀 {} · 金币 {:.1}k",
-            game_id,
-            m.display.total_damage as f32 / 1000.0,
-            m.display.total_heal as f32 / 1000.0,
-            m.display.cs,
-            m.display.gold as f32 / 1000.0
-        );
-        let augment_line = if m.display.augment_names.is_empty() {
-            None
-        } else {
-            Some(format!(
-                "海克斯强化: {}",
-                m.display.augment_names.join(" · ")
-            ))
-        };
-
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .rounded_xl()
-            .border_1()
-            .border_color(border_color)
-            .bg(bg_color)
-            .shadow_sm()
-            .overflow_hidden()
             .child(
                 div()
-                    .h(px(112.0))
-                    .w_full()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .pr_4()
-                    .cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, move |_ev, window, cx| {
-                        toggle_cb(idx, window, cx);
-                    })
-                    // 1. 左侧胜负竖条与英雄模块
+                    .text_size(px(12.0))
                     .child(
                         div()
-                            .h_full()
-                            .flex()
-                            .items_center()
-                            .child(div().w(px(4.0)).h_full().bg(bar_color))
-                            .child(
-                                div()
-                                    .px_3()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(
-                                        div()
-                                            .relative()
-                                            .size(px(52.0))
-                                            .rounded_lg()
-                                            .border_1()
-                                            .border_color(border_color)
-                                            .overflow_hidden()
-                                            .child(
-                                                LcuImage::new(champion_icon_url)
-                                                    .size(px(52.0))
-                                                    .shape(crate::components::lcu_image::LcuImageShape::Rounded)
-                                                    .placeholder(champion_name),
-                                            )
-                                            .child(
-                                                div()
-                                                    .absolute()
-                                                    .bottom(px(1.0))
-                                                    .right(px(1.0))
-                                                    .px_1()
-                                                    .rounded_sm()
-                                                    .bg(rgba(0x000000bb))
-                                                    .text_xs()
-                                                    .text_color(rgb(0xffffff))
-                                                    .child(format!("{}", champ_level)),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_col()
-                                            .gap(px(2.0))
-                                            .child(
-                                                LcuImage::new(spell1_icon_url)
-                                                    .size(px(22.0))
-                                                    .shape(crate::components::lcu_image::LcuImageShape::Rounded)
-                                                    .placeholder("D"),
-                                            )
-                                            .child(
-                                                LcuImage::new(spell2_icon_url)
-                                                    .size(px(22.0))
-                                                    .shape(crate::components::lcu_image::LcuImageShape::Rounded)
-                                                    .placeholder("F"),
-                                            ),
-                                    ),
-                            ),
+                            .text_color(Theme::TEXT_PRIMARY)
+                            .child(format!("{}/{}", progress.current, progress.total)),
                     )
-                    // 2. 模式、胜负与对局时间
                     .child(
                         div()
-                            .flex()
-                            .flex_col()
-                            .w(px(120.0))
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child(queue_name),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(win_text_color)
-                                            .child(win_label),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(Theme::TEXT_SECONDARY)
-                                            .child(duration_str),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .child(format!("{} · {}", time_str, pos_str)),
-                            ),
+                            .text_color(Theme::WIN_TEXT)
+                            .child(format!("成功 {} 项", progress.success)),
                     )
-                    // 3. KDA 与评级
                     .child(
                         div()
-                            .flex()
-                            .flex_col()
-                            .w(px(130.0))
-                            .items_start()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_base()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child(format!("{} / {} / {}", kills, deaths, assists)),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(Theme::TEXT_SECONDARY)
-                                    .child(kda_ratio),
-                            ),
-                    )
-                    // 4. 补刀、经济与输出
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .w(px(110.0))
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child(cs_str),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .child(format!("金币 {}", gold_str)),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .child(format!("输出 {}", damage_str)),
-                            ),
-                    )
-                    // 5. 装备网格（6 装备 + 1 饰品）
-                    .child(div().flex().items_center().gap(px(4.0)).children(
-                        items.iter().enumerate().map(|(slot_idx, &item_id)| {
-                            let is_trinket = slot_idx == 6;
-                            let is_empty = item_id == 0;
-                            let item_url = item_urls.get(slot_idx).cloned().unwrap_or_default();
-
-                            LcuImage::new(item_url)
-                                .size(px(26.0))
-                                .item_slot()
-                                .border_color(if is_trinket {
-                                    Theme::AURORA_CYAN
-                                } else {
-                                    Theme::ITEM_SLOT_BORDER
-                                })
-                                .placeholder(if is_empty {
-                                    "".to_string()
-                                } else {
-                                    format!("{}", item_id % 100)
-                                })
-                        }),
-                    ))
-                    // 6. 右侧展开按钮
-                    .child(
-                        div()
-                            .p_2()
-                            .rounded_md()
-                            .hover(|s| s.bg(rgba(0x00000010)))
-                            .text_sm()
-                            .text_color(Theme::TEXT_SECONDARY)
-                            .child(if is_expanded { "▲" } else { "▼" }),
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(Theme::ACCENT_PRIMARY)
+                            .child(format!("{:.0}%", pct * 100.0)),
                     ),
             )
-            // 展开态详情抽屉
-            .when(is_expanded, |this| {
+            .when(is_done, |this| {
+                let cb = close_cb.clone();
                 this.child(
                     div()
                         .w_full()
-                        .p_3()
-                        .border_t_1()
-                        .border_color(border_color)
-                        .bg(Theme::CARD_BG)
+                        .mt(px(8.0))
+                        .py(px(7.0))
+                        .rounded_md()
+                        .bg(Theme::ACCENT_PRIMARY)
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(hsla(0.0, 0.0, 1.0, 1.0))
                         .flex()
                         .items_center()
-                        .justify_between()
-                        .text_xs()
-                        .text_color(Theme::TEXT_SECONDARY)
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(div().child(detail_line))
-                                .when_some(augment_line, |this, text| {
-                                    this.child(div().text_color(Theme::TEXT_MUTED).child(text))
-                                }),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .px_2()
-                                        .py_1()
-                                        .rounded_md()
-                                        .bg(Theme::BADGE_BG)
-                                        .cursor_pointer()
-                                        .child("下载回放"),
-                                )
-                                .child(
-                                    div()
-                                        .px_2()
-                                        .py_1()
-                                        .rounded_md()
-                                        .bg(Theme::ACCENT_LIGHT)
-                                        .text_color(Theme::ACCENT_PRIMARY)
-                                        .cursor_pointer()
-                                        .child("查看完整图表"),
-                                ),
-                        ),
+                        .justify_center()
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                            cb(LootAction::CloseProgress, win, app)
+                        })
+                        .child("确定"),
                 )
-            })
-    }
-
-    /// 最近队友下拉菜单：展示近 20 场共同对局的队友列表（头像、名称、场次、胜率）
-    fn render_teammates_menu(&self) -> impl IntoElement {
-        let empty = self.recent_teammates.is_empty();
-        div()
-            .w(px(320.0))
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(13.0))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
-                            .child("最近队友"),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(Theme::TEXT_MUTED)
-                            .child("近 20 场同队数据"),
-                    ),
-            )
-            .child(if empty {
-                div()
-                    .py(px(16.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(12.0))
-                    .text_color(Theme::TEXT_MUTED)
-                    .child("暂无最近队友数据")
-                    .into_any_element()
-            } else {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .children(self.recent_teammates.iter().map(|tm| {
-                        let win_rate = tm.win_rate();
-                        let rate_color = if win_rate >= 50 {
-                            Theme::WIN_TEXT
-                        } else {
-                            Theme::LOSS_TEXT
-                        };
-
-                        div()
-                            .p(px(6.0))
-                            .rounded_md()
-                            .hover(|s| s.bg(Theme::HOVER_BG))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap_2()
-                            // 左侧：头像 + 名字 + (可选 Tag 徽章)
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        LcuImage::new(tm.icon.clone())
-                                            .size(px(28.0))
-                                            .shape(LcuImageShape::Circle)
-                                            .placeholder("?".to_string()),
-                                    )
-                                    .child(
-                                        div().flex().flex_col().gap(px(1.0)).child(
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .gap_1()
-                                                .child(
-                                                    div()
-                                                        .text_size(px(12.0))
-                                                        .font_weight(FontWeight::SEMIBOLD)
-                                                        .text_color(Theme::TEXT_PRIMARY)
-                                                        .child(tm.name.clone()),
-                                                )
-                                                .when_some(tm.tag.as_ref(), |this, tag| {
-                                                    this.child(
-                                                        div()
-                                                            .px(px(4.0))
-                                                            .py(px(1.0))
-                                                            .rounded_sm()
-                                                            .bg(Theme::BADGE_BG)
-                                                            .text_size(px(10.0))
-                                                            .text_color(Theme::ACCENT_PRIMARY)
-                                                            .child(tag.clone()),
-                                                    )
-                                                }),
-                                        ),
-                                    ),
-                            )
-                            // 右侧：场次与胜率统计
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .items_end()
-                                    .gap(px(1.0))
-                                    .child(
-                                        div()
-                                            .text_size(px(11.5))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
-                                            .child(format!("{} 场", tm.total)),
-                                    )
-                                    .child(div().text_size(px(10.5)).text_color(rate_color).child(
-                                        format!("{}% ({}胜{}负)", win_rate, tm.wins, tm.losses),
-                                    )),
-                            )
-                    }))
-                    .into_any_element()
             })
     }
 }
 
-/// 熟练度统计卡
 fn mastery_stat(
     label: &'static str,
     value: String,
@@ -3275,10 +3936,16 @@ fn mastery_stat(
         .flex()
         .flex_col()
         .gap_1()
-        .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(label))
         .child(
             div()
-                .text_lg()
+                .text_size(px(11.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(Theme::TEXT_MUTED)
+                .child(label),
+        )
+        .child(
+            div()
+                .text_size(px(16.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(value_color)
                 .whitespace_nowrap()
@@ -3287,7 +3954,7 @@ fn mastery_stat(
         )
         .child(
             div()
-                .text_xs()
+                .text_size(px(11.0))
                 .text_color(Theme::TEXT_MUTED)
                 .whitespace_nowrap()
                 .overflow_hidden()
@@ -3295,46 +3962,193 @@ fn mastery_stat(
         )
 }
 
-/// 筛选行的小分段按钮
-fn filter_chip(
-    label: &'static str,
-    active: bool,
-    on_click: impl Fn(&mut Window, &mut App) + 'static,
-) -> impl IntoElement {
+fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
+    let since = m.champion_points_since_last_level.max(0);
+    let until = m.champion_points_until_next_level.max(0);
+    let pct = if until <= 0 {
+        100.0
+    } else {
+        (since as f32 / (since + until) as f32 * 100.0).clamp(0.0, 100.0)
+    };
+
+    let is_eligible = m.eligible_for_chest && !m.chest_granted;
+
     div()
-        .px(px(10.0))
-        .py(px(5.0))
-        .rounded_md()
+        .p_3()
+        .rounded_xl()
+        .bg(Theme::CARD_BG)
         .border_1()
-        .border_color(if active {
-            Theme::SIDEBAR_ACTIVE_BORDER
+        .border_color(if is_eligible {
+            Theme::AURORA_CYAN
         } else {
             Theme::CARD_BORDER
         })
-        .bg(if active {
-            Theme::ACCENT_LIGHT
-        } else {
-            Theme::CARD_BG
-        })
-        .text_size(px(12.0))
-        .font_weight(if active {
-            FontWeight::BOLD
-        } else {
-            FontWeight::NORMAL
-        })
-        .text_color(if active {
-            Theme::ACCENT_PRIMARY
-        } else {
-            Theme::TEXT_MUTED
-        })
-        .cursor_pointer()
         .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
-        .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
-        .child(label)
+        .flex()
+        .flex_col()
+        .gap_2()
+        // 头部：头像 + 等级 / 名字 + 点数
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(
+                    div()
+                        .relative()
+                        .size(px(44.0))
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(Theme::CARD_BORDER)
+                        .overflow_hidden()
+                        .flex_none()
+                        .child(
+                            LcuImage::new(m.champion_icon_url.clone())
+                                .size(px(44.0))
+                                .shape(LcuImageShape::Rounded)
+                                .placeholder(format!("{}", m.champion_id)),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .bottom(px(-2.0))
+                                .right(px(-2.0))
+                                .px(px(4.0))
+                                .py(px(0.5))
+                                .rounded_sm()
+                                .bg(if m.champion_level >= 10 {
+                                    rgba(0x2563ebdd)
+                                } else {
+                                    rgba(0x000000bb)
+                                })
+                                .text_size(px(10.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(hsla(0.0, 0.0, 1.0, 1.0))
+                                .child(format!("{}", m.champion_level)),
+                        ),
+                )
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_size(px(13.5))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(Theme::TEXT_PRIMARY)
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .child(m.champion_name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.5))
+                                .text_color(Theme::TEXT_MUTED)
+                                .child(format!("{} 分", format_num(m.champion_points))),
+                        ),
+                ),
+        )
+        // 进度条
+        .child(
+            div()
+                .w_full()
+                .h(px(6.0))
+                .rounded_full()
+                .bg(Theme::BADGE_BG)
+                .overflow_hidden()
+                .child(
+                    div()
+                        .h_full()
+                        .w(px(217.0 * pct / 100.0))
+                        .rounded_full()
+                        .bg(Theme::ACCENT_PRIMARY),
+                ),
+        )
+        // 进度说明
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .text_size(px(11.0))
+                .child(
+                    div()
+                        .text_color(Theme::TEXT_MUTED)
+                        .child(format!("{:.0}%", pct)),
+                )
+                .child(div().text_color(Theme::TEXT_MUTED).child(if until <= 0 {
+                    "已满级".to_string()
+                } else {
+                    format!("距下一级还需 {}", format_num(until))
+                })),
+        )
+        // 里程碑与宝箱
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .pt_1()
+                .border_t_1()
+                .border_color(Theme::CARD_BORDER)
+                .text_size(px(11.0))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_color(Theme::TEXT_SECONDARY)
+                                .child(format!("里程碑 {}", m.champion_season_milestone)),
+                        )
+                        .when(!m.milestone_grades.is_empty(), |this| {
+                            this.child(div().flex().gap(px(2.0)).children(
+                                m.milestone_grades.iter().take(2).map(|g| {
+                                    div()
+                                        .px(px(3.0))
+                                        .rounded_sm()
+                                        .bg(Theme::BADGE_BG)
+                                        .text_size(px(9.5))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(Theme::ACCENT_PRIMARY)
+                                        .child(g.clone())
+                                }),
+                            ))
+                        }),
+                )
+                .child(
+                    div()
+                        .px_2()
+                        .py(px(1.0))
+                        .rounded_md()
+                        .bg(if m.chest_granted {
+                            Theme::WIN_BG
+                        } else if m.eligible_for_chest {
+                            Theme::ACCENT_LIGHT
+                        } else {
+                            Theme::BADGE_BG
+                        })
+                        .text_color(if m.chest_granted {
+                            Theme::WIN_TEXT
+                        } else if m.eligible_for_chest {
+                            Theme::AURORA_CYAN
+                        } else {
+                            Theme::TEXT_MUTED
+                        })
+                        .child(if m.chest_granted {
+                            "已获宝箱 🎁"
+                        } else if m.eligible_for_chest {
+                            "可获宝箱 📦"
+                        } else {
+                            "未解锁"
+                        }),
+                ),
+        )
 }
 
-/// 由 `display_categories` 推导展示分类；字段为空时按 `loot_type` / `loot_id` 降级推断。
-/// 供类型筛选、卡片精粹颜色、批量规则使用（对齐 core 解析层的回退策略）。
 fn loot_category(item: &LootInventoryItem) -> &'static str {
     let raw = if item.display_categories.is_empty() {
         format!("{} {}", item.loot_type, item.loot_id)
@@ -3359,7 +4173,6 @@ fn loot_category(item: &LootInventoryItem) -> &'static str {
     }
 }
 
-/// 筛选栏的行内标签
 fn loot_filter_label(text: &'static str) -> impl IntoElement {
     div()
         .text_size(px(11.0))
@@ -3367,214 +4180,4 @@ fn loot_filter_label(text: &'static str) -> impl IntoElement {
         .text_color(Theme::TEXT_MUTED)
         .whitespace_nowrap()
         .child(text)
-}
-
-/// LCU 写操作按钮：统一禁用态（不接点击回调），并标注「服务层待接」。
-/// `hint` 为设计稿 A.4 禁用规则的计算结果，仅用于提示文案，按钮始终不可交互。
-fn loot_pending_button(label: String, hint: &'static str) -> impl IntoElement {
-    div()
-        .px(px(10.0))
-        .py(px(5.0))
-        .rounded_md()
-        .border_1()
-        .border_color(Theme::CARD_BORDER)
-        .bg(Theme::BADGE_BG)
-        .flex()
-        .items_center()
-        .gap(px(6.0))
-        .child(
-            div()
-                .text_size(px(12.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(Theme::TEXT_MUTED)
-                .child(label),
-        )
-        .child(
-            div()
-                .text_size(px(10.0))
-                .text_color(Theme::TEXT_MUTED)
-                .child(format!("服务层待接 · {}", hint)),
-        )
-}
-
-/// 弹窗底部按钮：primary 区分主/次动作，点击仅派发本地 LootAction
-fn loot_modal_button(
-    label: &'static str,
-    primary: bool,
-    action: LootAction,
-    on_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
-) -> impl IntoElement {
-    div()
-        .px(px(16.0))
-        .py(px(7.0))
-        .rounded_md()
-        .border_1()
-        .border_color(if primary {
-            Theme::ACCENT_PRIMARY
-        } else {
-            Theme::CARD_BORDER
-        })
-        .bg(if primary {
-            Theme::ACCENT_PRIMARY
-        } else {
-            Theme::BADGE_BG
-        })
-        .text_size(px(12.5))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(if primary {
-            hsla(0.0, 0.0, 1.0, 1.0)
-        } else {
-            Theme::TEXT_MUTED
-        })
-        .cursor_pointer()
-        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-            on_action(action.clone(), win, app)
-        })
-        .child(label)
-}
-
-/// 单个英雄熟练度卡：头像 + 等级 / 名 + 点数 / 进度条 + 下级所需点数 / 里程碑与宝箱
-fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
-    let since = m.champion_points_since_last_level.max(0);
-    let until = m.champion_points_until_next_level.max(0);
-    let pct = if until <= 0 {
-        100.0
-    } else {
-        (since as f32 / (since + until) as f32 * 100.0).clamp(0.0, 100.0)
-    };
-
-    div()
-        .p_3()
-        .rounded_xl()
-        .bg(Theme::CARD_BG)
-        .border_1()
-        .border_color(Theme::CARD_BORDER)
-        .hover(|s| s.border_color(Theme::AURORA_CYAN))
-        .flex()
-        .flex_col()
-        .gap_2()
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_3()
-                .child(
-                    div()
-                        .relative()
-                        .size(px(44.0))
-                        .rounded_lg()
-                        .border_1()
-                        .border_color(Theme::CARD_BORDER)
-                        .overflow_hidden()
-                        .flex_none()
-                        .child(
-                            LcuImage::new(m.champion_icon_url.clone())
-                                .size(px(44.0))
-                                .shape(LcuImageShape::Rounded)
-                                .placeholder(format!("{}", m.champion_id)),
-                        )
-                        .child(
-                            div()
-                                .absolute()
-                                .bottom_0()
-                                .right_0()
-                                .px_1()
-                                .rounded_tl_md()
-                                .bg(rgba(0x000000bb))
-                                .text_xs()
-                                .text_color(rgb(0xffffff))
-                                .child(format!("Lv.{}", m.champion_level)),
-                        ),
-                )
-                .child(
-                    div()
-                        .min_w(px(0.0))
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .child(m.champion_name.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(Theme::TEXT_MUTED)
-                                .child(format!("{} 点", format_num(m.champion_points))),
-                        ),
-                ),
-        )
-        .child(
-            div()
-                .w_full()
-                .h(px(6.0))
-                .rounded_full()
-                .bg(Theme::BADGE_BG)
-                .overflow_hidden()
-                .child(
-                    div()
-                        .h_full()
-                        .w(px(217.0 * pct / 100.0))
-                        .rounded_full()
-                        .bg(Theme::ACCENT_PRIMARY),
-                ),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .text_xs()
-                .child(
-                    div()
-                        .text_color(Theme::TEXT_SECONDARY)
-                        .child(format!("{:.0}%", pct)),
-                )
-                .child(div().text_color(Theme::TEXT_MUTED).child(if until <= 0 {
-                    "已达最高等级".to_string()
-                } else {
-                    format!("距下一级还需 {} 点", format_num(until))
-                })),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .pt_1()
-                .border_t_1()
-                .border_color(Theme::CARD_BORDER)
-                .text_xs()
-                .child(
-                    div()
-                        .text_color(Theme::TEXT_SECONDARY)
-                        .child(format!("赛段里程碑 {}", m.champion_season_milestone)),
-                )
-                .child(
-                    div()
-                        .px_2()
-                        .py(px(1.0))
-                        .rounded_md()
-                        .bg(if m.chest_granted {
-                            Theme::BADGE_BG
-                        } else {
-                            Theme::ACCENT_LIGHT
-                        })
-                        .text_color(if m.chest_granted {
-                            Theme::TEXT_MUTED
-                        } else {
-                            Theme::ACCENT_PRIMARY
-                        })
-                        .child(if m.chest_granted {
-                            "已获宝箱"
-                        } else {
-                            "可获宝箱"
-                        }),
-                ),
-        )
 }

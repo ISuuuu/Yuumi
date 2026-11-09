@@ -1,7 +1,7 @@
 //! 对接 yuumi-core 核心对局数据模型的视图适配层
 
 pub use yuumi_core::gameflow::match_stats::{compute_match_stats, MatchLike};
-pub use yuumi_core::parsers::match_detail::{GameDetail, GameDetailTeam};
+pub use yuumi_core::parsers::match_detail::{GameDetail, GameDetailPlayer, GameDetailTeam};
 pub use yuumi_core::parsers::match_parser::MatchDisplay;
 
 #[cfg(test)]
