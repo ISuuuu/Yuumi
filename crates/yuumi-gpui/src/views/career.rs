@@ -315,6 +315,202 @@ pub enum MasteryFilterAction {
     CloseDropdown,
 }
 
+// ═════════ 战利品页签：筛选 / 多选状态与动作（纯前端 UI 骨架） ═════════
+
+/// 库存筛选栏四个下拉的标识，同一时刻只展开一个
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LootDropdown {
+    Type,
+    Owned,
+    ValueBasis,
+    Operator,
+}
+
+/// 类型筛选（对照 Vue filterType 的 8 项）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LootTypeFilter {
+    All,
+    Champion,
+    Skin,
+    Emote,
+    WardSkin,
+    SummonerIcon,
+    Eternal,
+    Material,
+}
+
+impl LootTypeFilter {
+    pub const ALL: [Self; 8] = [
+        Self::All,
+        Self::Champion,
+        Self::Skin,
+        Self::Emote,
+        Self::WardSkin,
+        Self::SummonerIcon,
+        Self::Eternal,
+        Self::Material,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::All => "全部",
+            Self::Champion => "英雄",
+            Self::Skin => "皮肤",
+            Self::Emote => "表情",
+            Self::WardSkin => "守卫",
+            Self::SummonerIcon => "图标",
+            Self::Eternal => "永恒星碑",
+            Self::Material => "材料/宝箱",
+        }
+    }
+
+    /// 与 `loot_category` 结果比对用的分类键
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::All => "ALL",
+            Self::Champion => "CHAMPION",
+            Self::Skin => "SKIN",
+            Self::Emote => "EMOTE",
+            Self::WardSkin => "WARDSKIN",
+            Self::SummonerIcon => "SUMMONERICON",
+            Self::Eternal => "ETERNAL",
+            Self::Material => "MATERIAL",
+        }
+    }
+}
+
+/// 拥有状态筛选（对照 Vue filterOwned 的 3 项）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LootOwnedFilter {
+    All,
+    Owned,
+    NotOwned,
+}
+
+impl LootOwnedFilter {
+    pub const ALL: [Self; 3] = [Self::All, Self::Owned, Self::NotOwned];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::All => "全部状态",
+            Self::Owned => "已拥有",
+            Self::NotOwned => "未拥有",
+        }
+    }
+}
+
+/// 价值基准筛选（对照 Vue filterValueType 的 2 项）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LootValueBasis {
+    Disenchant,
+    Store,
+}
+
+impl LootValueBasis {
+    pub const ALL: [Self; 2] = [Self::Disenchant, Self::Store];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Disenchant => "分解价值",
+            Self::Store => "商店价值",
+        }
+    }
+}
+
+/// 价值比较符筛选（对照 Vue filterOperator 的 3 项）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LootOperator {
+    Le,
+    Ge,
+    Eq,
+}
+
+impl LootOperator {
+    pub const ALL: [Self; 3] = [Self::Le, Self::Ge, Self::Eq];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Le => "≤ 小于等于",
+            Self::Ge => "≥ 大于等于",
+            Self::Eq => "= 等于",
+        }
+    }
+}
+
+/// 数量弹窗的来源动作：材料卡「开启 / 合成」
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LootQuantityAction {
+    Open,
+    Craft,
+}
+
+impl LootQuantityAction {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Open => "开启",
+            Self::Craft => "合成",
+        }
+    }
+}
+
+/// 战利品页弹窗壳：仅承载本地 UI 状态，确认后不触发任何 LCU 写接口
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LootModal {
+    /// 数量弹窗：材料名 / 持有数量 / 数量选择
+    Quantity {
+        loot_id: String,
+        name: String,
+        owned: i32,
+        quantity: i32,
+        action: LootQuantityAction,
+    },
+    /// 确认弹窗：动作名 / 已选 N 项 / 预计获得精粹
+    Confirm {
+        action: String,
+        selected: usize,
+        gain_blue: i64,
+        gain_orange: i64,
+    },
+}
+
+/// 批量动作进度面板：current/total、成功数、当前条目名，纯本地状态，
+/// 待服务层逐条回调时推进
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LootProgress {
+    pub current: usize,
+    pub total: usize,
+    pub success: usize,
+    pub current_name: String,
+}
+
+/// 战利品页签的纯前端动作
+///
+/// 开启、全部开启、分解、重铸、升级解锁均为 LCU 写操作，按钮统一做禁用态并标注
+/// 「服务层待接」；待 `LiveLcuService` 接入后在此枚举补写动作变体并在
+/// `MainWindow::apply_loot_action` 中调用服务层。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LootAction {
+    ToggleDropdown(LootDropdown),
+    CloseDropdown,
+    SetType(LootTypeFilter),
+    SetOwned(LootOwnedFilter),
+    SetValueBasis(LootValueBasis),
+    SetOperator(LootOperator),
+    SetValueInput(String),
+    ClearValueInput,
+    ToggleSelect(String),
+    SelectAllFiltered,
+    ClearSelection,
+    /// 打开数量弹窗；+/− 按钮携带更新后的数量再次派发本变体以刷新弹窗
+    OpenQuantity(LootModal),
+    /// 打开批量动作确认弹窗
+    OpenConfirm(LootModal),
+    /// 确认：仅关闭弹窗并更新本地 UI 状态（不调用 LCU 写接口）
+    Confirm,
+    /// 取消：关闭弹窗
+    CloseModal,
+}
+
 impl CareerTab {
     pub fn label(&self) -> &'static str {
         match self {
@@ -405,6 +601,23 @@ pub struct CareerView {
     pub popup: Option<CareerPopup>,
     pub essences: EssenceBalances,
     pub loot_items: Vec<LootInventoryItem>,
+    /// 战利品页：四个筛选值
+    pub loot_filter_type: LootTypeFilter,
+    pub loot_filter_owned: LootOwnedFilter,
+    pub loot_filter_value_basis: LootValueBasis,
+    pub loot_filter_operator: LootOperator,
+    /// 战利品页：价值范围数值输入文本
+    pub loot_value_input: String,
+    /// 战利品页：当前展开的筛选下拉
+    pub loot_dropdown: Option<LootDropdown>,
+    /// 战利品页：多选碎片网格已选中的 loot_id
+    pub loot_selected: Vec<String>,
+    /// 战利品页 A.5：当前弹窗壳（数量 / 确认），纯本地状态
+    pub loot_modal: Option<LootModal>,
+    /// 战利品页 A.5：批量动作进度面板，纯本地状态（服务层后续推进）
+    pub loot_progress: Option<LootProgress>,
+    /// 数量弹窗确认后记录的本地数量，供服务层接入后读取
+    pub loot_last_quantity: i32,
 }
 
 impl Default for CareerView {
@@ -429,6 +642,16 @@ impl Default for CareerView {
                 mythic_essence: 165,
             },
             loot_items: Self::mock_loots(),
+            loot_filter_type: LootTypeFilter::All,
+            loot_filter_owned: LootOwnedFilter::All,
+            loot_filter_value_basis: LootValueBasis::Disenchant,
+            loot_filter_operator: LootOperator::Le,
+            loot_value_input: String::new(),
+            loot_dropdown: None,
+            loot_selected: Vec::new(),
+            loot_modal: None,
+            loot_progress: None,
+            loot_last_quantity: 1,
         }
     }
 }
@@ -556,6 +779,74 @@ impl CareerView {
         ]
     }
 
+    /// 当前筛选条件下的碎片库存（过滤 + 按 disenchant_value 升序）
+    ///
+    /// 对照 Vue `filteredInventory`：类型 / 拥有状态 / 价值基准 / 比较符 + 数值。
+    /// 「全部」类型复用 Vue 的排除规则（货币、完整钥匙、宝箱不进碎片网格）；
+    /// 拥有状态沿用 `item_status` 原值，服务层补齐 owned 修正后无需改动此处。
+    pub fn filtered_loot(&self) -> Vec<&LootInventoryItem> {
+        let threshold = self.loot_value_input.trim().parse::<i64>().ok();
+        let mut list: Vec<&LootInventoryItem> = self
+            .loot_items
+            .iter()
+            .filter(|item| {
+                let cat = loot_category(item);
+                let id = item.loot_id.to_uppercase();
+                let ty = item.loot_type.to_uppercase();
+
+                // 类型筛选
+                let type_ok = match self.loot_filter_type {
+                    LootTypeFilter::All => {
+                        !(cat == "CURRENCY"
+                            || id.starts_with("CURRENCY")
+                            || (id.starts_with("MATERIAL_KEY") && !id.contains("FRAGMENT"))
+                            || cat == "CHEST"
+                            || ty == "CHEST"
+                            || id.starts_with("CHEST_"))
+                    }
+                    LootTypeFilter::Eternal => cat == "ETERNAL" || ty.contains("STATSTONE"),
+                    LootTypeFilter::Material => {
+                        matches!(cat, "MATERIAL" | "CHEST" | "ORB" | "CURRENCY")
+                    }
+                    other => cat == other.key(),
+                };
+                if !type_ok {
+                    return false;
+                }
+
+                // 拥有状态筛选
+                let owned = item.item_status.eq_ignore_ascii_case("OWNED");
+                let owned_ok = match self.loot_filter_owned {
+                    LootOwnedFilter::All => true,
+                    LootOwnedFilter::Owned => owned,
+                    LootOwnedFilter::NotOwned => !owned,
+                };
+                if !owned_ok {
+                    return false;
+                }
+
+                // 价值范围筛选（数值为空表示不限）
+                if let Some(t) = threshold {
+                    let cmp = match self.loot_filter_value_basis {
+                        LootValueBasis::Disenchant => item.disenchant_value as i64,
+                        LootValueBasis::Store => item.value as i64,
+                    };
+                    let value_ok = match self.loot_filter_operator {
+                        LootOperator::Le => cmp <= t,
+                        LootOperator::Ge => cmp >= t,
+                        LootOperator::Eq => cmp == t,
+                    };
+                    if !value_ok {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
+        list.sort_by_key(|item| item.disenchant_value);
+        list
+    }
+
     /// 渲染整个生涯页面
     ///
     /// 版面顺序对照 Vue `Career.vue`：居中限宽内容列 → 资料卡 → 卡外页签 → 当前页签内容。
@@ -574,8 +865,13 @@ impl CareerView {
         on_mastery_query: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
         on_mastery_filter: impl Fn(MasteryFilterAction, &mut Window, &mut App) + 'static + Clone,
         on_career_bar: impl Fn(CareerBarAction, &mut Window, &mut App) + 'static + Clone,
+        loot_value_focus: &FocusHandle,
+        loot_value_focused: bool,
+        on_loot_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let active_tab = self.active_tab;
+        // 战利品页两个面板的刷新与资料卡 / 熟练度共用 on_refresh，先克隆一份供 Loot 分支使用
+        let loot_refresh = on_refresh.clone();
 
         div()
             .w_full()
@@ -623,7 +919,12 @@ impl CareerView {
                                 ))
                             })
                             .when(active_tab == CareerTab::Loot, |this| {
-                                this.child(self.render_loot_tab())
+                                this.child(self.render_loot_tab(
+                                    loot_refresh,
+                                    loot_value_focus,
+                                    loot_value_focused,
+                                    on_loot_action,
+                                ))
                             }),
                     ),
             )
@@ -1487,282 +1788,990 @@ impl CareerView {
             })
     }
 
-    /// Tab 3: 战利品管理与精粹资产网格
-    fn render_loot_tab(&self) -> impl IntoElement {
+    /// Tab 3: 战利品页签 UI 骨架
+    ///
+    /// 对照 Vue `LootManagerTab.vue` 的 A.1-A.4 控件树：
+    /// 材料面板 → 库存面板（筛选栏 + 多选碎片网格 + 批量条）。
+    /// 所有 LCU 写操作按钮均为禁用态并标注「服务层待接」，仅筛选 / 多选是纯前端交互。
+    fn render_loot_tab(
+        &self,
+        on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
+        value_focus: &FocusHandle,
+        value_focused: bool,
+        on_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
+    ) -> impl IntoElement {
+        // 钥匙计数：库存中 MATERIAL_key / MATERIAL_key_premium 的 count 之和
+        let key_count: i32 = self
+            .loot_items
+            .iter()
+            .filter(|i| i.loot_id == "MATERIAL_key" || i.loot_id == "MATERIAL_key_premium")
+            .map(|i| i.count)
+            .sum();
+
+        // 材料卡：is_openable 条目
+        let materials: Vec<&LootInventoryItem> =
+            self.loot_items.iter().filter(|i| i.is_openable).collect();
+
+        // 当前筛选后的碎片库存（已按 disenchant_value 升序）
+        let filtered = self.filtered_loot();
+        let has_filtered = !filtered.is_empty();
+
+        // 预计精粹：蓝色来自 CHAMPION，其余橙色，按 disenchant_value × count 累加
+        let mut gain_blue: i64 = 0;
+        let mut gain_orange: i64 = 0;
+        for id in &self.loot_selected {
+            if let Some(item) = self.loot_items.iter().find(|i| &i.loot_id == id) {
+                let gain = item.disenchant_value as i64 * item.count as i64;
+                if loot_category(item) == "CHAMPION" {
+                    gain_blue += gain;
+                } else {
+                    gain_orange += gain;
+                }
+            }
+        }
+
+        // 批量条三个写按钮的规则（设计稿 A.4）：无 isOpening / 连接态字段，按选择集降级计算
+        let has_selection = !self.loot_selected.is_empty();
+        let selected_items: Vec<&LootInventoryItem> = self
+            .loot_items
+            .iter()
+            .filter(|i| self.loot_selected.contains(&i.loot_id))
+            .collect();
+        let mut can_reroll = false;
+        let mut can_upgrade = false;
+        let mut has_upgrade_cost = false;
+        let mut has_unlock = false;
+        for item in &selected_items {
+            let cat = loot_category(item);
+            let excluded = matches!(cat, "MATERIAL" | "CHEST" | "ORB" | "CURRENCY");
+            let owned = item.item_status.eq_ignore_ascii_case("OWNED");
+            if !item.loot_type.to_uppercase().contains("STATSTONE") && !excluded {
+                can_reroll = true;
+            }
+            if !owned && !excluded {
+                can_upgrade = true;
+            }
+            if item.upgrade_essence_cost > 0 {
+                has_upgrade_cost = true;
+            } else {
+                has_unlock = true;
+            }
+        }
+        can_reroll &= has_selection;
+        can_upgrade &= has_selection;
+        let upgrade_label = if !has_selection || (has_upgrade_cost && has_unlock) {
+            "升级 / 解锁".to_string()
+        } else if has_unlock {
+            "解锁永久".to_string()
+        } else {
+            "升级永久".to_string()
+        };
+
         div()
-            .w_full()
-            .flex()
-            .flex_col()
+            // w_full 在非定宽父级会塌陷，根容器与分区统一用 grid 单列撑满
+            .grid()
+            .grid_cols(1)
             .gap_4()
-            // 顶部精粹资产卡片
+            // A.5 弹窗浮层以本容器为绝对定位基准
+            .relative()
+            // ═════════ 段一：材料面板（A.1）═════════
             .child(
                 div()
-                    .w_full()
-                    .p_4()
+                    .grid()
+                    .grid_cols(1)
+                    .gap(px(12.0))
+                    .p(px(16.0))
                     .rounded_xl()
                     .bg(Theme::CARD_BG)
                     .border_1()
                     .border_color(Theme::CARD_BORDER)
-                    .flex()
-                    .items_center()
-                    .justify_between()
+                    // 头部：标题 / 刷新（复用 on_refresh）/ 钥匙计数 / 全部开启（禁用待接）
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap_8()
-                            // 蓝色精粹
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(
-                                        div()
-                                            .size(px(36.0))
-                                            .rounded_lg()
-                                            .bg(rgba(0x00bbf922))
-                                            .border_1()
-                                            .border_color(Theme::AURORA_BLUE)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .text_sm()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::AURORA_BLUE)
-                                            .child("蓝"),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_col()
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(Theme::TEXT_MUTED)
-                                                    .child("蓝色精粹"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_lg()
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::TEXT_PRIMARY)
-                                                    .child(format_num(
-                                                        self.essences.blue_essence as i64,
-                                                    )),
-                                            ),
-                                    ),
-                            )
-                            // 橙色精粹
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(
-                                        div()
-                                            .size(px(36.0))
-                                            .rounded_lg()
-                                            .bg(rgba(0xff9e0022))
-                                            .border_1()
-                                            .border_color(rgb(0xff9e00))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .text_sm()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(0xff9e00))
-                                            .child("橙"),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_col()
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(Theme::TEXT_MUTED)
-                                                    .child("橙色精粹"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_lg()
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::TEXT_PRIMARY)
-                                                    .child(format_num(
-                                                        self.essences.orange_essence as i64,
-                                                    )),
-                                            ),
-                                    ),
-                            )
-                            // 神话精萃
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(
-                                        div()
-                                            .size(px(36.0))
-                                            .rounded_lg()
-                                            .bg(rgba(0x7209b722))
-                                            .border_1()
-                                            .border_color(rgb(0x7209b7))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .text_sm()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(0x7209b7))
-                                            .child("神"),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_col()
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(Theme::TEXT_MUTED)
-                                                    .child("神话精萃"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_lg()
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::TEXT_PRIMARY)
-                                                    .child(format_num(
-                                                        self.essences.mythic_essence as i64,
-                                                    )),
-                                            ),
-                                    ),
-                            ),
-                    )
-                    // 操作按钮组
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .px_4()
-                                    .py_2()
-                                    .rounded_lg()
-                                    .bg(Theme::ACCENT_LIGHT)
-                                    .border_1()
-                                    .border_color(Theme::AURORA_CYAN)
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::ACCENT_PRIMARY)
-                                    .cursor_pointer()
-                                    .child("一键智能开箱"),
-                            )
-                            .child(
-                                div()
-                                    .px_4()
-                                    .py_2()
-                                    .rounded_lg()
-                                    .bg(Theme::BADGE_BG)
-                                    .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(Theme::TEXT_SECONDARY)
-                                    .cursor_pointer()
-                                    .child("分解重复碎片"),
-                            ),
-                    ),
-            )
-            // 战利品网格展示（4 列）
-            .child(
-                div()
-                    .w_full()
-                    .grid()
-                    .grid_cols(4)
-                    .gap_3()
-                    .children(self.loot_items.iter().map(|item| {
-                        div()
-                            .p_3()
-                            .rounded_xl()
-                            .bg(Theme::CARD_BG)
-                            .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .hover(|s| s.border_color(Theme::AURORA_BLUE).bg(rgba(0xffffff88)))
-                            .flex()
-                            .flex_col()
+                            .justify_between()
+                            .flex_wrap()
                             .gap_2()
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
-                                    .justify_between()
+                                    .gap_3()
                                     .child(
                                         div()
-                                            .text_sm()
+                                            .text_size(px(16.0))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(Theme::TEXT_PRIMARY)
-                                            .child(item.name.clone()),
+                                            .child("战利品开启"),
+                                    )
+                                    .child(Self::action_button("刷新", on_refresh.clone()))
+                                    .child(
+                                        div()
+                                            .px(px(10.0))
+                                            .py(px(4.0))
+                                            .rounded_md()
+                                            .bg(Theme::BADGE_BG)
+                                            .text_size(px(12.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::GOLD)
+                                            .child(format!("钥匙 x{}", key_count)),
+                                    ),
+                            )
+                            .child(loot_pending_button(
+                                "全部开启".to_string(),
+                                if key_count > 0 {
+                                    "规则就绪"
+                                } else {
+                                    "钥匙不足"
+                                },
+                            )),
+                    )
+                    // 材料卡网格：is_openable 条目，显示 name / x count / 开启（禁用待接）
+                    .child(if materials.is_empty() {
+                        div()
+                            .py(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(px(12.0))
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("点击刷新以加载可开启战利品")
+                    } else {
+                        div()
+                            .grid()
+                            .grid_cols(4)
+                            .gap_3()
+                            .children(materials.into_iter().map(|item| {
+                                // 材料卡「开启 / 合成」仅弹出数量弹窗壳，不触发 LCU 写接口
+                                let open_cb = on_action.clone();
+                                let quantity_modal = LootModal::Quantity {
+                                    loot_id: item.loot_id.clone(),
+                                    name: item.name.clone(),
+                                    owned: item.count,
+                                    quantity: 1,
+                                    action: LootQuantityAction::Open,
+                                };
+                                div()
+                                    .p_3()
+                                    .rounded_lg()
+                                    .bg(Theme::CARD_BG)
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER)
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .grid()
+                                            .grid_cols(1)
+                                            .gap(px(4.0))
+                                            .child(
+                                                div()
+                                                    .text_size(px(12.5))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(Theme::TEXT_PRIMARY)
+                                                    .child(item.name.clone()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(11.0))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(Theme::ACCENT_PRIMARY)
+                                                    .child(format!("x{}", item.count)),
+                                            ),
                                     )
                                     .child(
                                         div()
-                                            .px_2()
-                                            .py(px(1.0))
+                                            .px(px(10.0))
+                                            .py(px(5.0))
                                             .rounded_md()
-                                            .bg(Theme::BADGE_BG)
-                                            .text_xs()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::AURORA_BLUE)
-                                            .child(format!("x{}", item.count)),
-                                    ),
-                            )
+                                            .border_1()
+                                            .border_color(Theme::ACCENT_PRIMARY)
+                                            .bg(Theme::ACCENT_LIGHT)
+                                            .text_size(px(12.0))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(Theme::ACCENT_PRIMARY)
+                                            .cursor_pointer()
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                move |_ev, win, app| {
+                                                    open_cb(
+                                                        LootAction::OpenQuantity(
+                                                            quantity_modal.clone(),
+                                                        ),
+                                                        win,
+                                                        app,
+                                                    )
+                                                },
+                                            )
+                                            .child("开启 / 合成"),
+                                    )
+                            }))
+                    }),
+            )
+            // ═════════ 段二：库存面板（A.2 筛选栏 / A.3 网格 / A.4 批量条）═════════
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(1)
+                    .gap(px(12.0))
+                    .p(px(16.0))
+                    .rounded_xl()
+                    .bg(Theme::CARD_BG)
+                    .border_1()
+                    .border_color(Theme::CARD_BORDER)
+                    // 头部：标题 / 刷新 / 右侧蓝橙精粹余额
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .flex_wrap()
+                            .gap_2()
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .child(item.item_desc.clone()),
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .child(
+                                        div()
+                                            .text_size(px(16.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .child("碎片库存管理"),
+                                    )
+                                    .child(Self::action_button("刷新", on_refresh)),
                             )
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
-                                    .justify_between()
-                                    .pt_2()
-                                    .border_t_1()
+                                    .gap_4()
+                                    .px(px(12.0))
+                                    .py(px(4.0))
+                                    .rounded_full()
+                                    .bg(Theme::BADGE_BG)
+                                    .border_1()
                                     .border_color(Theme::CARD_BORDER)
-                                    .child(div().text_xs().text_color(Theme::TEXT_SECONDARY).child(
-                                        if item.disenchant_value > 0 {
-                                            format!("分解: +{} 精粹", item.disenchant_value)
-                                        } else {
-                                            "不可分解".to_string()
-                                        },
-                                    ))
                                     .child(
                                         div()
-                                            .px_3()
-                                            .py_1()
-                                            .rounded_md()
-                                            .cursor_pointer()
-                                            .text_xs()
+                                            .text_size(px(12.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .bg(if item.is_openable {
-                                                Theme::ACCENT_LIGHT
-                                            } else {
-                                                Theme::BADGE_BG
-                                            })
-                                            .text_color(if item.is_openable {
-                                                Theme::ACCENT_PRIMARY
-                                            } else {
-                                                Theme::TEXT_SECONDARY
-                                            })
-                                            .child(if item.is_openable {
-                                                "开启"
-                                            } else {
-                                                "升级"
-                                            }),
+                                            .text_color(rgb(0x2563eb))
+                                            .child(format!(
+                                                "蓝色精粹 {}",
+                                                format_num(self.essences.blue_essence as i64)
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(rgb(0xd97706))
+                                            .child(format!(
+                                                "橙色精粹 {}",
+                                                format_num(self.essences.orange_essence as i64)
+                                            )),
                                     ),
-                            )
-                    })),
+                            ),
+                    )
+                    // 筛选栏：类型 → 拥有状态 → 价值基准 → 比较符 + 数值输入
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .flex_wrap()
+                            .gap(px(12.0))
+                            .p(px(12.0))
+                            .rounded_lg()
+                            .bg(Theme::HOVER_BG)
+                            .border_1()
+                            .border_color(Theme::CARD_BORDER)
+                            // ① 类型（8 项）
+                            .child(loot_filter_label("类型"))
+                            .child({
+                                let cb = on_action.clone();
+                                let items = LootTypeFilter::ALL.into_iter().map(|value| {
+                                    let item_cb = on_action.clone();
+                                    dropdown_item(
+                                        value.label(),
+                                        self.loot_filter_type == value,
+                                        move |win, app| {
+                                            item_cb(LootAction::SetType(value), win, app)
+                                        },
+                                    )
+                                });
+                                dropdown_trigger(
+                                    "loot-type-select",
+                                    self.loot_filter_type.label().to_string(),
+                                    self.loot_dropdown == Some(LootDropdown::Type),
+                                    dropdown_menu(140.0, items),
+                                    move |win, app| {
+                                        cb(LootAction::ToggleDropdown(LootDropdown::Type), win, app)
+                                    },
+                                )
+                            })
+                            // ② 拥有状态（3 项）
+                            .child(loot_filter_label("拥有状态"))
+                            .child({
+                                let cb = on_action.clone();
+                                let items = LootOwnedFilter::ALL.into_iter().map(|value| {
+                                    let item_cb = on_action.clone();
+                                    dropdown_item(
+                                        value.label(),
+                                        self.loot_filter_owned == value,
+                                        move |win, app| {
+                                            item_cb(LootAction::SetOwned(value), win, app)
+                                        },
+                                    )
+                                });
+                                dropdown_trigger(
+                                    "loot-owned-select",
+                                    self.loot_filter_owned.label().to_string(),
+                                    self.loot_dropdown == Some(LootDropdown::Owned),
+                                    dropdown_menu(120.0, items),
+                                    move |win, app| {
+                                        cb(
+                                            LootAction::ToggleDropdown(LootDropdown::Owned),
+                                            win,
+                                            app,
+                                        )
+                                    },
+                                )
+                            })
+                            // ③ 价值基准（2 项）
+                            .child(loot_filter_label("价值基准"))
+                            .child({
+                                let cb = on_action.clone();
+                                let items = LootValueBasis::ALL.into_iter().map(|value| {
+                                    let item_cb = on_action.clone();
+                                    dropdown_item(
+                                        value.label(),
+                                        self.loot_filter_value_basis == value,
+                                        move |win, app| {
+                                            item_cb(LootAction::SetValueBasis(value), win, app)
+                                        },
+                                    )
+                                });
+                                dropdown_trigger(
+                                    "loot-basis-select",
+                                    self.loot_filter_value_basis.label().to_string(),
+                                    self.loot_dropdown == Some(LootDropdown::ValueBasis),
+                                    dropdown_menu(120.0, items),
+                                    move |win, app| {
+                                        cb(
+                                            LootAction::ToggleDropdown(LootDropdown::ValueBasis),
+                                            win,
+                                            app,
+                                        )
+                                    },
+                                )
+                            })
+                            // ④ 价值范围：比较符（3 项）+ 数值输入（text_field + FocusHandle）
+                            .child(loot_filter_label("价值"))
+                            .child({
+                                let cb = on_action.clone();
+                                let items = LootOperator::ALL.into_iter().map(|value| {
+                                    let item_cb = on_action.clone();
+                                    dropdown_item(
+                                        value.label(),
+                                        self.loot_filter_operator == value,
+                                        move |win, app| {
+                                            item_cb(LootAction::SetOperator(value), win, app)
+                                        },
+                                    )
+                                });
+                                dropdown_trigger(
+                                    "loot-operator-select",
+                                    self.loot_filter_operator.label().to_string(),
+                                    self.loot_dropdown == Some(LootDropdown::Operator),
+                                    dropdown_menu(140.0, items),
+                                    move |win, app| {
+                                        cb(
+                                            LootAction::ToggleDropdown(LootDropdown::Operator),
+                                            win,
+                                            app,
+                                        )
+                                    },
+                                )
+                            })
+                            .child({
+                                let cb = on_action.clone();
+                                let clear_cb = on_action.clone();
+                                text_field(
+                                    "loot-value-input",
+                                    &self.loot_value_input,
+                                    "不限",
+                                    px(90.0),
+                                    value_focus,
+                                    value_focused,
+                                    TextFieldOptions {
+                                        max_chars: Some(9),
+                                        ..Default::default()
+                                    },
+                                    move |text, win, app| {
+                                        cb(LootAction::SetValueInput(text), win, app)
+                                    },
+                                    move |win, app| clear_cb(LootAction::ClearValueInput, win, app),
+                                    |_text, _win, _app| {},
+                                )
+                            }),
+                    )
+                    // 可多选碎片网格（A.3）
+                    .child(if filtered.is_empty() {
+                        div()
+                            .py(px(32.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(px(12.0))
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("没有符合条件的碎片")
+                    } else {
+                        div()
+                            .grid()
+                            .grid_cols(4)
+                            .gap_3()
+                            .children(filtered.into_iter().map(|item| {
+                                let selected = self.loot_selected.contains(&item.loot_id);
+                                let cb = on_action.clone();
+                                let id = item.loot_id.clone();
+                                let cat = loot_category(item);
+                                let owned = item.item_status.eq_ignore_ascii_case("OWNED");
+                                let essence_color = if cat == "CHAMPION" {
+                                    rgb(0x2563eb)
+                                } else {
+                                    rgb(0xd97706)
+                                };
+                                div()
+                                    .relative()
+                                    .p_3()
+                                    .rounded_lg()
+                                    .bg(if selected {
+                                        Theme::ACCENT_LIGHT
+                                    } else {
+                                        Theme::CARD_BG
+                                    })
+                                    .border_1()
+                                    .border_color(if selected {
+                                        Theme::ACCENT_PRIMARY
+                                    } else {
+                                        Theme::CARD_BORDER
+                                    })
+                                    .cursor_pointer()
+                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        cb(LootAction::ToggleSelect(id.clone()), win, app)
+                                    })
+                                    // 选中角标
+                                    .when(selected, |this| {
+                                        this.child(
+                                            div()
+                                                .absolute()
+                                                .top(px(-6.0))
+                                                .right(px(-6.0))
+                                                .size(px(18.0))
+                                                .rounded_full()
+                                                .bg(Theme::ACCENT_PRIMARY)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .text_size(px(11.0))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(rgb(0xffffff))
+                                                .child("✔"),
+                                        )
+                                    })
+                                    .child(
+                                        div()
+                                            .grid()
+                                            .grid_cols(1)
+                                            .gap(px(6.0))
+                                            .child(
+                                                div()
+                                                    .text_size(px(12.0))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(Theme::TEXT_PRIMARY)
+                                                    .child(item.item_desc.clone()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(11.0))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(Theme::ACCENT_PRIMARY)
+                                                    .child(format!("x{}", item.count)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .flex_wrap()
+                                                    .gap(px(6.0))
+                                                    // 拥有徽章
+                                                    .child(
+                                                        div()
+                                                            .px(px(6.0))
+                                                            .py(px(1.0))
+                                                            .rounded_md()
+                                                            .bg(Theme::BADGE_BG)
+                                                            .text_size(px(10.0))
+                                                            .font_weight(FontWeight::BOLD)
+                                                            .text_color(if owned {
+                                                                Theme::WIN_TEXT
+                                                            } else {
+                                                                Theme::TEXT_MUTED
+                                                            })
+                                                            .child(if owned {
+                                                                "已拥有"
+                                                            } else {
+                                                                "未拥有"
+                                                            }),
+                                                    )
+                                                    // 精粹值：CHAMPION 蓝、其余橙
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(11.0))
+                                                            .font_weight(FontWeight::BOLD)
+                                                            .text_color(essence_color)
+                                                            .child(format!(
+                                                                "{} {}",
+                                                                if cat == "CHAMPION" {
+                                                                    "蓝"
+                                                                } else {
+                                                                    "橙"
+                                                                },
+                                                                item.disenchant_value
+                                                            )),
+                                                    ),
+                                            ),
+                                    )
+                            }))
+                    })
+                    // 批量条（A.4），仅在有筛选结果时出现
+                    .when(has_filtered, |this| {
+                        this.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .flex_wrap()
+                                .gap_3()
+                                .p(px(12.0))
+                                .rounded_lg()
+                                .bg(Theme::CARD_BG_HOVER)
+                                .border_1()
+                                .border_color(Theme::CARD_BORDER)
+                                // 左：全选当前筛选 / 清空 / 已选 N
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child({
+                                            let cb = on_action.clone();
+                                            Self::action_button(
+                                                "全选当前筛选",
+                                                move |win, app| {
+                                                    cb(LootAction::SelectAllFiltered, win, app)
+                                                },
+                                            )
+                                        })
+                                        .child({
+                                            let cb = on_action.clone();
+                                            Self::action_button("清空", move |win, app| {
+                                                cb(LootAction::ClearSelection, win, app)
+                                            })
+                                        })
+                                        .child(
+                                            div()
+                                                .text_size(px(12.0))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .child(format!(
+                                                    "已选 {}",
+                                                    self.loot_selected.len()
+                                                )),
+                                        ),
+                                )
+                                // 右：预计精粹 + 三个写按钮（禁用待接）
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .flex_wrap()
+                                        .gap_2()
+                                        .when(has_selection, |this| {
+                                            this.child(
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(12.0))
+                                                            .text_color(Theme::TEXT_MUTED)
+                                                            .child("预计精粹"),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(12.0))
+                                                            .font_weight(FontWeight::BOLD)
+                                                            .text_color(rgb(0x2563eb))
+                                                            .child(format!(
+                                                                "蓝 {}",
+                                                                format_num(gain_blue)
+                                                            )),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(12.0))
+                                                            .font_weight(FontWeight::BOLD)
+                                                            .text_color(rgb(0xd97706))
+                                                            .child(format!(
+                                                                "橙 {}",
+                                                                format_num(gain_orange)
+                                                            )),
+                                                    ),
+                                            )
+                                        })
+                                        .child(loot_pending_button(
+                                            "分解".to_string(),
+                                            if has_selection {
+                                                "规则就绪"
+                                            } else {
+                                                "需先选择"
+                                            },
+                                        ))
+                                        .child(loot_pending_button(
+                                            "重铸".to_string(),
+                                            if can_reroll {
+                                                "规则就绪"
+                                            } else {
+                                                "需可重铸碎片"
+                                            },
+                                        ))
+                                        .child(loot_pending_button(
+                                            upgrade_label.clone(),
+                                            if can_upgrade {
+                                                "规则就绪"
+                                            } else {
+                                                "需可升级碎片"
+                                            },
+                                        )),
+                                ),
+                        )
+                    }),
+            )
+            // ═════════ A.5 弹窗壳：deferred 浮层盖在面板之上，不占布局、不用 on_mouse_down_out ═════════
+            .children(self.loot_modal.as_ref().map(|modal| {
+                deferred(
+                    div()
+                        .absolute()
+                        .top(px(72.0))
+                        .left(px(24.0))
+                        .id("loot-modal-layer")
+                        .occlude()
+                        .child(Self::render_loot_modal(modal, on_action.clone())),
+                )
+                .with_priority(2)
+            }))
+            .children(self.loot_progress.as_ref().map(|progress| {
+                deferred(
+                    div()
+                        .absolute()
+                        .top(px(72.0))
+                        .left(px(460.0))
+                        .id("loot-progress-layer")
+                        .occlude()
+                        .child(Self::render_loot_progress(progress)),
+                )
+                .with_priority(2)
+            }))
+    }
+
+    /// A.5 数量 / 确认弹窗壳：纯 UI，按钮只派发本地动作，不调用 LCU 写接口
+    fn render_loot_modal(
+        modal: &LootModal,
+        on_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
+    ) -> impl IntoElement {
+        let cancel_cb = on_action.clone();
+        let confirm_cb = on_action.clone();
+
+        let card = div()
+            // 固定宽度，避免非定宽父级下 w_full 塌陷
+            .w(px(420.0))
+            .grid()
+            .grid_cols(1)
+            .gap(px(12.0))
+            .p(px(20.0))
+            .rounded_xl()
+            .border_1()
+            .border_color(Theme::ACCENT_PRIMARY)
+            .bg(Theme::CARD_BG_HOVER)
+            .shadow_md()
+            // 弹窗标识：明确这是纯 UI 壳
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(15.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(Theme::TEXT_PRIMARY)
+                            .child("弹窗预览 · 纯 UI"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("服务层待接"),
+                    ),
+            );
+
+        let body = match modal {
+            LootModal::Quantity {
+                loot_id,
+                name,
+                owned,
+                quantity,
+                action,
+            } => {
+                let max_qty = (*owned).max(1);
+                // +/− 通过携带更新后的数量再次派发 OpenQuantity 来刷新本地弹窗状态
+                let minus_modal = LootModal::Quantity {
+                    loot_id: loot_id.clone(),
+                    name: name.clone(),
+                    owned: *owned,
+                    quantity: (*quantity - 1).max(1),
+                    action: *action,
+                };
+                let plus_modal = LootModal::Quantity {
+                    loot_id: loot_id.clone(),
+                    name: name.clone(),
+                    owned: *owned,
+                    quantity: (*quantity + 1).min(max_qty),
+                    action: *action,
+                };
+                let minus_cb = on_action.clone();
+                let plus_cb = on_action.clone();
+                card.child(
+                    div()
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(Theme::ACCENT_PRIMARY)
+                        .child(format!("{}数量选择", action.label())),
+                )
+                .child(
+                    div()
+                        .grid()
+                        .grid_cols(1)
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .text_size(px(13.0))
+                                .text_color(Theme::TEXT_PRIMARY)
+                                .child(name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(Theme::TEXT_MUTED)
+                                .child(format!("持有数量 x{}", owned)),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .child(
+                            div()
+                                .size(px(28.0))
+                                .rounded_md()
+                                .border_1()
+                                .border_color(Theme::CARD_BORDER)
+                                .bg(Theme::BADGE_BG)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_pointer()
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    minus_cb(
+                                        LootAction::OpenQuantity(minus_modal.clone()),
+                                        win,
+                                        app,
+                                    )
+                                })
+                                .child("−"),
+                        )
+                        .child(
+                            div()
+                                .w(px(48.0))
+                                .text_size(px(14.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(Theme::TEXT_PRIMARY)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(format!("{}", quantity)),
+                        )
+                        .child(
+                            div()
+                                .size(px(28.0))
+                                .rounded_md()
+                                .border_1()
+                                .border_color(Theme::CARD_BORDER)
+                                .bg(Theme::BADGE_BG)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_pointer()
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    plus_cb(LootAction::OpenQuantity(plus_modal.clone()), win, app)
+                                })
+                                .child("+"),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.0))
+                                .text_color(Theme::TEXT_MUTED)
+                                .child(format!("最多 {}", max_qty)),
+                        ),
+                )
+            }
+            LootModal::Confirm {
+                action,
+                selected,
+                gain_blue,
+                gain_orange,
+            } => card
+                .child(
+                    div()
+                        .text_size(px(14.0))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(Theme::TEXT_PRIMARY)
+                        .child(format!("确认{}？", action)),
+                )
+                .child(
+                    div()
+                        .grid()
+                        .grid_cols(1)
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .text_size(px(12.5))
+                                .text_color(Theme::TEXT_PRIMARY)
+                                .child(format!("已选 {} 项", selected)),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.5))
+                                .text_color(Theme::TEXT_MUTED)
+                                .child(format!(
+                                    "预计获得精粹：蓝 {} / 橙 {}",
+                                    format_num(*gain_blue),
+                                    format_num(*gain_orange)
+                                )),
+                        ),
+                ),
+        };
+
+        // 公共底部：取消 / 确认，均只改本地 UI 状态
+        body.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_end()
+                .gap_2()
+                .child(loot_modal_button(
+                    "取消",
+                    false,
+                    LootAction::CloseModal,
+                    cancel_cb,
+                ))
+                .child(loot_modal_button(
+                    "确认",
+                    true,
+                    LootAction::Confirm,
+                    confirm_cb,
+                )),
+        )
+    }
+
+    /// A.5 进度面板：current/total、成功数、当前条目名与百分比条，纯本地状态
+    fn render_loot_progress(progress: &LootProgress) -> impl IntoElement {
+        let pct = if progress.total == 0 {
+            0.0
+        } else {
+            (progress.current as f32 / progress.total as f32).clamp(0.0, 1.0)
+        };
+        div()
+            // 固定宽度，避免 w_full 塌陷
+            .w(px(420.0))
+            .grid()
+            .grid_cols(1)
+            .gap(px(10.0))
+            .p(px(20.0))
+            .rounded_xl()
+            .border_1()
+            .border_color(Theme::ACCENT_PRIMARY)
+            .bg(Theme::CARD_BG_HOVER)
+            .shadow_md()
+            .child(
+                div()
+                    .text_size(px(14.0))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(Theme::TEXT_PRIMARY)
+                    .child("批量进度 · 纯本地状态"),
+            )
+            .child(
+                div()
+                    .text_size(px(12.5))
+                    .text_color(Theme::TEXT_MUTED)
+                    .child(format!("当前条目：{}", progress.current_name)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(Theme::TEXT_PRIMARY)
+                            .child(format!("{}/{}", progress.current, progress.total)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(Theme::WIN_TEXT)
+                            .child(format!("成功 {} 项", progress.success)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(Theme::ACCENT_PRIMARY)
+                            .child(format!("{:.0}%", pct * 100.0)),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(380.0))
+                    .h(px(8.0))
+                    .rounded_full()
+                    .bg(Theme::BADGE_BG)
+                    .child(
+                        div()
+                            .w(px(380.0 * pct))
+                            .h(px(8.0))
+                            .rounded_full()
+                            .bg(Theme::ACCENT_PRIMARY),
+                    ),
             )
     }
 
@@ -2170,6 +3179,106 @@ fn filter_chip(
         .cursor_pointer()
         .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
         .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
+        .child(label)
+}
+
+/// 由 `display_categories` 推导展示分类；字段为空时按 `loot_type` / `loot_id` 降级推断。
+/// 供类型筛选、卡片精粹颜色、批量规则使用（对齐 core 解析层的回退策略）。
+fn loot_category(item: &LootInventoryItem) -> &'static str {
+    let raw = if item.display_categories.is_empty() {
+        format!("{} {}", item.loot_type, item.loot_id)
+    } else {
+        item.display_categories.clone()
+    };
+    let s = raw.to_uppercase();
+    if s.contains("STATSTONE") || s.contains("ETERNAL") {
+        "ETERNAL"
+    } else if s.contains("CHAMPION") {
+        "CHAMPION"
+    } else if s.contains("WARDSKIN") || s.contains("WARD") {
+        "WARDSKIN"
+    } else if s.contains("SKIN") {
+        "SKIN"
+    } else if s.contains("EMOTE") {
+        "EMOTE"
+    } else if s.contains("SUMMONERICON") || s.contains("ICON") {
+        "SUMMONERICON"
+    } else {
+        "MATERIAL"
+    }
+}
+
+/// 筛选栏的行内标签
+fn loot_filter_label(text: &'static str) -> impl IntoElement {
+    div()
+        .text_size(px(11.0))
+        .font_weight(FontWeight::BOLD)
+        .text_color(Theme::TEXT_MUTED)
+        .whitespace_nowrap()
+        .child(text)
+}
+
+/// LCU 写操作按钮：统一禁用态（不接点击回调），并标注「服务层待接」。
+/// `hint` 为设计稿 A.4 禁用规则的计算结果，仅用于提示文案，按钮始终不可交互。
+fn loot_pending_button(label: String, hint: &'static str) -> impl IntoElement {
+    div()
+        .px(px(10.0))
+        .py(px(5.0))
+        .rounded_md()
+        .border_1()
+        .border_color(Theme::CARD_BORDER)
+        .bg(Theme::BADGE_BG)
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(
+            div()
+                .text_size(px(12.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(Theme::TEXT_MUTED)
+                .child(label),
+        )
+        .child(
+            div()
+                .text_size(px(10.0))
+                .text_color(Theme::TEXT_MUTED)
+                .child(format!("服务层待接 · {}", hint)),
+        )
+}
+
+/// 弹窗底部按钮：primary 区分主/次动作，点击仅派发本地 LootAction
+fn loot_modal_button(
+    label: &'static str,
+    primary: bool,
+    action: LootAction,
+    on_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
+) -> impl IntoElement {
+    div()
+        .px(px(16.0))
+        .py(px(7.0))
+        .rounded_md()
+        .border_1()
+        .border_color(if primary {
+            Theme::ACCENT_PRIMARY
+        } else {
+            Theme::CARD_BORDER
+        })
+        .bg(if primary {
+            Theme::ACCENT_PRIMARY
+        } else {
+            Theme::BADGE_BG
+        })
+        .text_size(px(12.5))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(if primary {
+            hsla(0.0, 0.0, 1.0, 1.0)
+        } else {
+            Theme::TEXT_MUTED
+        })
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+            on_action(action.clone(), win, app)
+        })
         .child(label)
 }
 

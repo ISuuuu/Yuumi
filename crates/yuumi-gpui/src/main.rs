@@ -29,7 +29,10 @@ use match_model::MatchItem;
 use services::{ConnectionStatus, LiveLcuEvent, LiveLcuService};
 use theme::Theme;
 use tray::TrayManager;
-use views::career::{CareerBarAction, CareerHeaderStats, CareerView, MasteryFilterAction};
+use views::career::{
+    CareerBarAction, CareerHeaderStats, CareerView, LootAction, LootModal,
+    MasteryFilterAction,
+};
 use views::game_info::{GameInfoTeamTab, GameInfoView, GameInfoViewMode};
 use views::home::HomeView;
 use views::saved_players::SavedPlayersView;
@@ -84,6 +87,8 @@ pub struct MainWindow {
     titlebar: TitleBar,
     /// 生涯页英雄搜索框的焦点句柄（gpui 0.2 无内置输入元素）
     career_mastery_focus: FocusHandle,
+    /// 战利品页价值数值输入框的焦点句柄
+    loot_value_focus: FocusHandle,
     matches: Vec<MatchItem>,
     stats: CareerHeaderStats,
     career_view: CareerView,
@@ -128,6 +133,7 @@ impl MainWindow {
         let stats = CareerHeaderStats::compute(&matches);
         let career_view = CareerView::new();
         let career_mastery_focus = cx.focus_handle();
+        let loot_value_focus = cx.focus_handle();
 
         // 加载持久化的自动化开关，并用它初始化工具箱视图
         let automation = AutomationSettings::load();
@@ -186,6 +192,7 @@ impl MainWindow {
             saved_players_view,
             settings_view,
             career_mastery_focus,
+            loot_value_focus,
             current_route: Route::Home,
             sidebar_expanded: false,
             route_history: Vec::new(),
@@ -603,6 +610,80 @@ impl MainWindow {
                 };
             }
             MasteryFilterAction::CloseDropdown => self.career_view.mastery_dropdown = None,
+        }
+        cx.notify();
+    }
+
+    /// 应用战利品页签的筛选 / 多选 / 下拉动作
+    ///
+    /// 开启、全部开启、分解、重铸、升级解锁属于 LCU 写操作，按钮已做禁用态并标注
+    /// 「服务层待接」；待服务层就绪后在 `LootAction` 补写动作变体并在此调用
+    /// `LiveLcuService` 的写方法，完成后再 `refresh_career_data()` 回拉库存与余额。
+    pub fn apply_loot_action(&mut self, action: LootAction, cx: &mut Context<Self>) {
+        match action {
+            LootAction::ToggleDropdown(kind) => {
+                let slot = &mut self.career_view.loot_dropdown;
+                *slot = if *slot == Some(kind) { None } else { Some(kind) };
+            }
+            LootAction::CloseDropdown => self.career_view.loot_dropdown = None,
+            LootAction::SetType(value) => {
+                self.career_view.loot_filter_type = value;
+                self.career_view.loot_dropdown = None;
+                // 对照 Vue watch(filterType)：切换类型自动清空选择
+                self.career_view.loot_selected.clear();
+            }
+            LootAction::SetOwned(value) => {
+                self.career_view.loot_filter_owned = value;
+                self.career_view.loot_dropdown = None;
+            }
+            LootAction::SetValueBasis(value) => {
+                self.career_view.loot_filter_value_basis = value;
+                self.career_view.loot_dropdown = None;
+            }
+            LootAction::SetOperator(value) => {
+                self.career_view.loot_filter_operator = value;
+                self.career_view.loot_dropdown = None;
+            }
+            LootAction::SetValueInput(text) => self.career_view.loot_value_input = text,
+            LootAction::ClearValueInput => self.career_view.loot_value_input.clear(),
+            LootAction::ToggleSelect(id) => {
+                let selected = &mut self.career_view.loot_selected;
+                if let Some(pos) = selected.iter().position(|x| x == &id) {
+                    selected.remove(pos);
+                } else {
+                    selected.push(id);
+                }
+            }
+            LootAction::SelectAllFiltered => {
+                let ids: Vec<String> = self
+                    .career_view
+                    .filtered_loot()
+                    .into_iter()
+                    .map(|item| item.loot_id.clone())
+                    .collect();
+                self.career_view.loot_selected = ids;
+            }
+            LootAction::ClearSelection => self.career_view.loot_selected.clear(),
+            // A.5 弹窗壳：以下四个分支只改本地 UI 状态，不调用任何 LCU 写接口
+            LootAction::OpenQuantity(modal) => {
+                // 数量弹窗打开；+/− 按钮再次派发本变体即为数量刷新
+                self.career_view.loot_modal = Some(modal);
+            }
+            LootAction::OpenConfirm(modal) => {
+                self.career_view.loot_modal = Some(modal);
+            }
+            LootAction::Confirm => {
+                // 数量弹窗确认：把选择数量记入本地状态；确认弹窗则仅关闭
+                let quantity = match &self.career_view.loot_modal {
+                    Some(LootModal::Quantity { quantity, .. }) => Some(*quantity),
+                    _ => None,
+                };
+                if let Some(q) = quantity {
+                    self.career_view.loot_last_quantity = q;
+                }
+                self.career_view.loot_modal = None;
+            }
+            LootAction::CloseModal => self.career_view.loot_modal = None,
         }
         cx.notify();
     }
@@ -1146,6 +1227,7 @@ impl Render for MainWindow {
                                 let view_query = view_entity.clone();
                                 let view_filter = view_entity.clone();
                                 let view_bar = view_entity.clone();
+                                let view_loot = view_entity.clone();
                                 el.child(self.career_view.render(
                                     &self.matches,
                                     stats,
@@ -1188,6 +1270,13 @@ impl Render for MainWindow {
                                     move |action: CareerBarAction, _window, app| {
                                         view_bar.update(app, |this, cx| {
                                             this.apply_career_bar_action(action, cx)
+                                        });
+                                    },
+                                    &self.loot_value_focus,
+                                    self.loot_value_focus.is_focused(window),
+                                    move |action: LootAction, _window, app| {
+                                        view_loot.update(app, |this, cx| {
+                                            this.apply_loot_action(action, cx)
                                         });
                                     },
                                 ))
