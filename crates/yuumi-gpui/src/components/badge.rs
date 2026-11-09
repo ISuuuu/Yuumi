@@ -29,6 +29,7 @@ impl Badge {
         self
     }
 
+    #[allow(dead_code)]
     pub fn ghost(mut self) -> Self {
         self.variant = BadgeVariant::Ghost;
         self

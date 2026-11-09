@@ -116,6 +116,54 @@ impl AssetLoader {
             "images/other-defeat.png" => {
                 Some(include_bytes!("../../../public/images/other-defeat.png"))
             }
+            "assets/ranked-icons/iron.png" => {
+                Some(include_bytes!("../../../src/assets/ranked-icons/iron.png"))
+            }
+            "assets/ranked-icons/bronze.png" => Some(include_bytes!(
+                "../../../src/assets/ranked-icons/bronze.png"
+            )),
+            "assets/ranked-icons/silver.png" => Some(include_bytes!(
+                "../../../src/assets/ranked-icons/silver.png"
+            )),
+            "assets/ranked-icons/gold.png" => {
+                Some(include_bytes!("../../../src/assets/ranked-icons/gold.png"))
+            }
+            "assets/ranked-icons/platinum.png" => Some(include_bytes!(
+                "../../../src/assets/ranked-icons/platinum.png"
+            )),
+            "assets/ranked-icons/emerald.png" => Some(include_bytes!(
+                "../../../src/assets/ranked-icons/emerald.png"
+            )),
+            "assets/ranked-icons/diamond.png" => Some(include_bytes!(
+                "../../../src/assets/ranked-icons/diamond.png"
+            )),
+            "assets/ranked-icons/master.png" => Some(include_bytes!(
+                "../../../src/assets/ranked-icons/master.png"
+            )),
+            "assets/ranked-icons/grandmaster.png" => Some(include_bytes!(
+                "../../../src/assets/ranked-icons/grandmaster.png"
+            )),
+            "assets/ranked-icons/challenger.png" => Some(include_bytes!(
+                "../../../src/assets/ranked-icons/challenger.png"
+            )),
+            _ => None,
+        }
+    }
+
+    /// 获取段位图标的相对路径（可直接送给 LcuImage 渲染）
+    #[allow(dead_code)]
+    pub fn get_ranked_icon_path(tier: &str) -> Option<&'static str> {
+        match tier.trim().to_ascii_uppercase().as_str() {
+            "IRON" => Some("assets/ranked-icons/iron.png"),
+            "BRONZE" => Some("assets/ranked-icons/bronze.png"),
+            "SILVER" => Some("assets/ranked-icons/silver.png"),
+            "GOLD" => Some("assets/ranked-icons/gold.png"),
+            "PLATINUM" => Some("assets/ranked-icons/platinum.png"),
+            "EMERALD" => Some("assets/ranked-icons/emerald.png"),
+            "DIAMOND" => Some("assets/ranked-icons/diamond.png"),
+            "MASTER" => Some("assets/ranked-icons/master.png"),
+            "GRANDMASTER" => Some("assets/ranked-icons/grandmaster.png"),
+            "CHALLENGER" => Some("assets/ranked-icons/challenger.png"),
             _ => None,
         }
     }
