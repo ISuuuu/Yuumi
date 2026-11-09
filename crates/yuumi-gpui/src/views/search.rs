@@ -11,10 +11,12 @@
 
 use crate::components::card::Card;
 use crate::components::dropdown::{dropdown_item, dropdown_menu, dropdown_trigger};
+use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
 use crate::components::text_field::search_input_field;
 use crate::match_model::{GameDetail, GameDetailPlayer, GameDetailTeam, MatchItem};
 use crate::theme::Theme;
+use crate::views::career::format_local_month_day;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::collections::HashMap;
@@ -86,6 +88,50 @@ pub fn get_map_icon_url(map_id: u32, queue_id: i32, win: bool) -> &'static str {
     }
 }
 
+/// 格式化大整数为带逗号的千分位字符串 (对齐 Vue 原版 toLocaleString)
+pub fn format_num(val: i64) -> String {
+    let s = val.to_string();
+    let mut result = String::new();
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+    for (i, &ch) in chars.iter().enumerate() {
+        result.push(ch);
+        let rem = len - 1 - i;
+        if rem > 0 && rem.is_multiple_of(3) {
+            result.push(',');
+        }
+    }
+    result
+}
+
+/// 队列 ID 转中文模式名 (对齐 Vue 原版 getQueueName)
+pub fn queue_id_to_name(queue_id: i32, fallback_map: &str) -> String {
+    match queue_id {
+        400 => "征召模式".to_string(),
+        420 => "单双排位".to_string(),
+        430 => "匹配模式".to_string(),
+        440 => "灵活排位".to_string(),
+        450 => "极地大乱斗".to_string(),
+        2400 => "海克斯大乱斗".to_string(),
+        2450 => "经典海斗".to_string(),
+        900 => "无限火力".to_string(),
+        1010 => "随机无限火力".to_string(),
+        1020 => "克隆模式".to_string(),
+        1300 => "极限闪击".to_string(),
+        1700 | 1710 => "斗魂竞技场".to_string(),
+        4300 | 4310 => "经典模式".to_string(),
+        480 | 490 => "快速模式".to_string(),
+        0 => "自定义模式".to_string(),
+        _ => {
+            if !fallback_map.is_empty() {
+                fallback_map.to_string()
+            } else {
+                "自定义模式".to_string()
+            }
+        }
+    }
+}
+
 /// 战绩查询主视图模型
 pub struct SearchView {
     /// 搜索输入框文本
@@ -102,6 +148,8 @@ pub struct SearchView {
     pub selected_game_id: Option<u64>,
     /// 对局详情缓存 (game_id -> GameDetail)
     pub details_cache: HashMap<u64, GameDetail>,
+    /// 最近一次成功载入的详情，切换对局时用作占位，避免右侧先清空再重绘造成的闪烁
+    pub last_detail: Option<GameDetail>,
     /// 详情加载状态
     pub is_loading_detail: bool,
     /// 请求序号：防止快速点击不同对局时，旧请求结果回写新对局
@@ -148,6 +196,7 @@ impl SearchView {
             matches_per_page: 10,
             selected_game_id: None,
             details_cache: HashMap::new(),
+            last_detail: None,
             is_loading_detail: false,
             select_request_id: 0,
             is_searching: false,
@@ -244,6 +293,9 @@ impl SearchView {
 
     /// 添加单局详情缓存
     pub fn insert_game_detail(&mut self, game_id: u64, detail: GameDetail) {
+        // 记录最近一次成功载入的详情：切换对局时缓存尚未命中的这段窗口里，
+        // 继续沿用上一份内容渲染，避免右侧区域先空白再重绘的闪烁
+        self.last_detail = Some(detail.clone());
         self.details_cache.insert(game_id, detail);
     }
 
@@ -340,7 +392,10 @@ impl SearchView {
             .selected_game_id
             .or_else(|| paged_matches.first().map(|m| m.display.game_id));
 
-        let current_detail = selected_game_id.and_then(|id| self.details_cache.get(&id));
+        // 缓存未命中时沿用最近一次详情：切换对局的高频场景下，右栏保持内容连续而非先清空
+        let current_detail = selected_game_id
+            .and_then(|id| self.details_cache.get(&id))
+            .or(self.last_detail.as_ref());
 
         div()
             .id("search-view-root")
@@ -744,9 +799,11 @@ impl SearchView {
                     .flex()
                     .flex_col()
                     .gap(px(8.0))
-                    // 情况 A: 已有战绩卡片正常展现 (S07)
+                    // 情况 A: 已有战绩卡片正常展现 (S07: 10 张等高划分填满左栏，不足 10 张用透明 slot 保持同等高度)
                     .when(!paged_matches.is_empty(), |this| {
                         let select_cb = on_select_match.clone();
+                        let count = paged_matches.len();
+                        let remaining = 10usize.saturating_sub(count);
                         this.children(paged_matches.clone().into_iter().map(|item| {
                             let gid = item.display.game_id;
                             let is_selected = Some(gid) == selected_game_id;
@@ -755,7 +812,8 @@ impl SearchView {
 
                             div()
                                 .id(ElementId::NamedInteger("mini-card".into(), gid))
-                                .h(px(58.0))
+                                .flex_1()
+                                .min_h(px(58.0))
                                 .w_full()
                                 .rounded(px(8.0))
                                 .px_2p5()
@@ -765,7 +823,7 @@ impl SearchView {
                                 .border_1()
                                 .border_color(if is_selected {
                                     if win {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::WIN_TEXT
                                     } else {
                                         Theme::LOSS_BORDER
                                     }
@@ -787,7 +845,7 @@ impl SearchView {
                                 })
                                 .flex()
                                 .items_center()
-                                .gap(px(8.0))
+                                .gap(px(10.0))
                                 // 头像 36x36 (S07)
                                 .child(
                                     div()
@@ -803,7 +861,7 @@ impl SearchView {
                                                 .shape(LcuImageShape::Circle),
                                         ),
                                 )
-                                // 右侧上下两行信息
+                                // 右侧上下两行信息 (S07: 第一行模式名，第二行日期与KDA)
                                 .child(
                                     div()
                                         .flex_1()
@@ -814,22 +872,27 @@ impl SearchView {
                                         .h_full()
                                         .child(
                                             div()
-                                                .text_xs()
+                                                .text_size(px(12.5))
                                                 .font_weight(FontWeight::BOLD)
                                                 .text_color(Theme::TEXT_PRIMARY)
                                                 .overflow_hidden()
                                                 .whitespace_nowrap()
-                                                .child(item.display.name.clone()),
+                                                .child(queue_id_to_name(
+                                                    item.display.queue_id,
+                                                    &item.display.map,
+                                                )),
                                         )
                                         .child(
                                             div()
-                                                .text_xs()
+                                                .text_size(px(11.5))
                                                 .text_color(Theme::TEXT_MUTED)
                                                 .whitespace_nowrap()
                                                 .flex()
                                                 .items_center()
-                                                .gap_1()
-                                                .child(item.display.short_time.clone())
+                                                .gap(px(8.0))
+                                                .child(format_local_month_day(
+                                                    item.display.time_stamp as i64,
+                                                ))
                                                 .child(
                                                     div()
                                                         .flex()
@@ -851,6 +914,13 @@ impl SearchView {
                                                 ),
                                         ),
                                 )
+                        }))
+                        .children((0..remaining).map(|i| {
+                            div()
+                                .id(ElementId::NamedInteger("placeholder-card".into(), i as u64))
+                                .flex_1()
+                                .min_h(px(58.0))
+                                .w_full()
                         }))
                     })
                     // 情况 B: 已有召唤师但筛选后当前队列无局 (明确空态)
@@ -887,19 +957,24 @@ impl SearchView {
                             )
                         },
                     )
-                    // 情况 C: 初始未查询骨架卡片框 (S06: 10 张等高 58px 骨架卡框)
-                    .when(self.current_summoner_name.is_none(), |this| {
-                        this.children((0..10).map(|i| {
-                            div()
-                                .id(ElementId::NamedInteger("skeleton-card".into(), i as u64))
-                                .h(px(58.0))
-                                .w_full()
-                                .rounded(px(8.0))
-                                .bg(Theme::SKELETON_BG)
-                                .border_1()
-                                .border_color(Theme::SKELETON_BORDER)
-                        }))
-                    }),
+                    // 情况 C: 初始未查询骨架卡片框 (S06: 10 张等高骨架卡框填满容器)
+                    // 仅在没有可展示对局时占位，避免已有数据时骨架条与真实卡片并存
+                    .when(
+                        self.current_summoner_name.is_none() && paged_matches.is_empty(),
+                        |this| {
+                            this.children((0..10).map(|i| {
+                                div()
+                                    .id(ElementId::NamedInteger("skeleton-card".into(), i as u64))
+                                    .flex_1()
+                                    .min_h(px(58.0))
+                                    .w_full()
+                                    .rounded(px(8.0))
+                                    .bg(Theme::SKELETON_BG)
+                                    .border_1()
+                                    .border_color(Theme::SKELETON_BORDER)
+                            }))
+                        },
+                    ),
             )
             // 分页控制栏 (S06, S08: 独立于滚动列表之外)
             .child(
@@ -915,80 +990,77 @@ impl SearchView {
                     .items_center()
                     .justify_center()
                     .gap_3()
-                    .when(
-                        self.current_summoner_name.is_some() && total_count > 0,
-                        |this| {
-                            let can_prev = self.current_page > 1 && !is_loading_page;
-                            let can_next = has_more && !is_loading_page;
-                            let prev_cb = on_prev_page.clone();
-                            let next_cb = on_next_page.clone();
+                    // 分页条只依赖实际结果数：自动带出的战绩没有搜索词，同样需要翻页
+                    .when(total_count > 0, |this| {
+                        let can_prev = self.current_page > 1 && !is_loading_page;
+                        let can_next = has_more && !is_loading_page;
+                        let prev_cb = on_prev_page.clone();
+                        let next_cb = on_next_page.clone();
 
-                            this.child(
-                                div()
-                                    .id("btn-prev-page")
-                                    .size(px(26.0))
-                                    .rounded(px(4.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .cursor_pointer()
-                                    .when(can_prev, |s| {
-                                        s.hover(|h| h.bg(Theme::HOVER_BG)).on_mouse_down(
-                                            MouseButton::Left,
-                                            move |_ev, win, app| {
-                                                prev_cb(win, app);
-                                            },
-                                        )
-                                    })
-                                    .text_color(if can_prev {
-                                        Theme::TEXT_PRIMARY
-                                    } else {
-                                        Theme::TEXT_MUTED
-                                    })
-                                    .child("◀"),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child(if is_loading_page {
-                                        "⏳".to_string()
-                                    } else {
-                                        format!("{}", self.current_page)
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .id("btn-next-page")
-                                    .size(px(26.0))
-                                    .rounded(px(4.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .cursor_pointer()
-                                    .when(can_next, |s| {
-                                        s.hover(|h| h.bg(Theme::HOVER_BG)).on_mouse_down(
-                                            MouseButton::Left,
-                                            move |_ev, win, app| {
-                                                next_cb(win, app);
-                                            },
-                                        )
-                                    })
-                                    .text_color(if can_next {
-                                        Theme::TEXT_PRIMARY
-                                    } else {
-                                        Theme::TEXT_MUTED
-                                    })
-                                    .child("▶"),
-                            )
-                        },
-                    )
-                    // 未查询时的分页骨架框
-                    .when(
-                        self.current_summoner_name.is_none() || total_count == 0,
-                        |this| this.child(div().text_xs().text_color(Theme::TEXT_MUTED).child("—")),
-                    ),
+                        this.child(
+                            div()
+                                .id("btn-prev-page")
+                                .size(px(26.0))
+                                .rounded(px(4.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_pointer()
+                                .when(can_prev, |s| {
+                                    s.hover(|h| h.bg(Theme::HOVER_BG)).on_mouse_down(
+                                        MouseButton::Left,
+                                        move |_ev, win, app| {
+                                            prev_cb(win, app);
+                                        },
+                                    )
+                                })
+                                .text_color(if can_prev {
+                                    Theme::TEXT_PRIMARY
+                                } else {
+                                    Theme::TEXT_MUTED
+                                })
+                                .child("◀"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(Theme::TEXT_PRIMARY)
+                                .child(if is_loading_page {
+                                    "⏳".to_string()
+                                } else {
+                                    format!("{}", self.current_page)
+                                }),
+                        )
+                        .child(
+                            div()
+                                .id("btn-next-page")
+                                .size(px(26.0))
+                                .rounded(px(4.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_pointer()
+                                .when(can_next, |s| {
+                                    s.hover(|h| h.bg(Theme::HOVER_BG)).on_mouse_down(
+                                        MouseButton::Left,
+                                        move |_ev, win, app| {
+                                            next_cb(win, app);
+                                        },
+                                    )
+                                })
+                                .text_color(if can_next {
+                                    Theme::TEXT_PRIMARY
+                                } else {
+                                    Theme::TEXT_MUTED
+                                })
+                                .child("▶"),
+                        )
+                    })
+                    // 无结果时的占位
+                    .when(total_count == 0, |this| {
+                        this.child(div().text_xs().text_color(Theme::TEXT_MUTED).child("—"))
+                    }),
             )
     }
 
@@ -1002,6 +1074,8 @@ impl SearchView {
     ) -> impl IntoElement {
         let is_loading = self.is_loading_detail;
 
+        // 外层保留卡片容器：详情内容通常短于视口高度，卡片底能把剩余高度填满，
+        // 否则 Bannner 与队伍块下方会直接露出页面底色，看起来像「底部缺一块」
         Card::new().flex_1().overflow_hidden().child(match detail {
             Some(d) => div()
                 .id("match-detail-panel-content")
@@ -1009,6 +1083,7 @@ impl SearchView {
                 .flex_col()
                 .size_full()
                 .min_h(px(640.0))
+                .p(px(12.0))
                 .gap_3()
                 .overflow_y_scroll()
                 // 1. 头部大 Banner (S09)
@@ -1076,7 +1151,7 @@ impl SearchView {
                     .child(
                         div()
                             .size(px(54.0))
-                            .rounded(px(8.0))
+                            .rounded(px(6.0))
                             .overflow_hidden()
                             .border_1()
                             .border_color(Theme::CARD_BORDER)
@@ -1094,19 +1169,24 @@ impl SearchView {
                             .gap_1()
                             .child(
                                 div()
-                                    .text_lg()
-                                    .font_weight(FontWeight::BOLD)
+                                    .text_size(px(20.0))
+                                    .font_weight(FontWeight::EXTRA_BOLD)
                                     .text_color(if win {
                                         Theme::WIN_TEXT
                                     } else {
                                         Theme::LOSS_TEXT
                                     })
-                                    .child(if win { "胜利" } else { "败北" }),
+                                    .child(if win { "胜利" } else { "失败" }),
                             )
-                            .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(format!(
-                                "{} · {} · {} · {} · Game ID: {}",
-                                d.map_name, d.queue_name, d.duration, d.date, d.game_id
-                            ))),
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(Theme::TEXT_MUTED)
+                                    .child(format!(
+                                        "{} · {} · {} · {} · Game ID: {}",
+                                        d.map_name, d.queue_name, d.duration, d.date, d.game_id
+                                    )),
+                            ),
                     ),
             )
             // 右侧操作区：回放按钮与复制 Game ID 按钮 (S09)
@@ -1115,31 +1195,61 @@ impl SearchView {
                     .flex()
                     .items_center()
                     .gap_2()
-                    // 复制 Game ID 按钮 (30x30)
+                    // 回放按钮（对齐 Vue ReplayButton 的带文字样式）
                     .child(
                         div()
-                            .id("btn-copy-game-id")
+                            .id("btn-replay")
                             .h(px(30.0))
-                            .px_3()
+                            .px_2()
                             .rounded(px(6.0))
                             .bg(Theme::CARD_BG)
                             .border_1()
                             .border_color(Theme::CARD_BORDER)
-                            .hover(|s| s.bg(Theme::HOVER_BG))
+                            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                            .cursor_pointer()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(icon("icons/play.svg", 12.0, Theme::TEXT_MUTED))
+                            .child(
+                                div()
+                                    .text_size(px(12.2))
+                                    .text_color(Theme::TEXT_MUTED)
+                                    .child("回放"),
+                            ),
+                    )
+                    // 复制 Game ID 按钮 (30x30)
+                    .child(
+                        div()
+                            .id("btn-copy-game-id")
+                            .size(px(30.0))
+                            .rounded(px(6.0))
+                            .bg(Theme::CARD_BG)
+                            .border_1()
+                            .border_color(Theme::CARD_BORDER)
+                            .hover(|s| {
+                                s.bg(Theme::CARD_BG_HOVER)
+                                    .border_color(Theme::ACCENT_PRIMARY)
+                            })
                             .cursor_pointer()
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                 copy_cb(gid, win, app);
                             })
                             .flex()
                             .items_center()
-                            .gap_1()
-                            .child(div().text_xs().text_color(Theme::TEXT_PRIMARY).child(
-                                if copied {
-                                    "✓ 已复制"
-                                } else {
-                                    "📋 复制 ID"
-                                },
-                            )),
+                            .justify_center()
+                            .when(copied, |this| {
+                                this.child(
+                                    div()
+                                        .text_size(px(12.0))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(Theme::WIN_TEXT)
+                                        .child("✓"),
+                                )
+                            })
+                            .when(!copied, |this| {
+                                this.child(icon("icons/copy.svg", 14.0, Theme::TEXT_PRIMARY))
+                            }),
                     ),
             )
     }
@@ -1154,13 +1264,6 @@ impl SearchView {
         let win = team.win;
         let is_blue = team.team_id == 100;
         let is_aram_hex = queue_id == 2400 || queue_id == 2450;
-        let max_damage = team
-            .players
-            .iter()
-            .map(|p| p.damage)
-            .max()
-            .unwrap_or(1)
-            .max(1);
 
         div()
             .w_full()
@@ -1179,8 +1282,8 @@ impl SearchView {
             .child(
                 div()
                     .w_full()
-                    .px_3()
-                    .py_2()
+                    .px(px(16.0))
+                    .py(px(8.0))
                     .bg(if win { Theme::WIN_BG } else { Theme::LOSS_BG })
                     .border_b_1()
                     .border_color(if win {
@@ -1200,7 +1303,7 @@ impl SearchView {
                             // 胜负标签
                             .child(
                                 div()
-                                    .text_xs()
+                                    .text_size(px(13.6))
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(if win {
                                         Theme::WIN_TEXT
@@ -1214,9 +1317,9 @@ impl SearchView {
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap_2p5()
-                                    .text_xs()
-                                    .text_color(Theme::TEXT_SECONDARY)
+                                    .gap(px(10.0))
+                                    .text_size(px(12.8))
+                                    .text_color(Theme::TEXT_MUTED)
                                     .child(self.render_obj_icon("/images/kills.png", team.kills))
                                     .child(self.render_obj_icon(
                                         if is_blue {
@@ -1260,30 +1363,28 @@ impl SearchView {
                                     )),
                             ),
                     )
-                    // 右侧列头标签：装备、KDA、补刀、金币、伤害 (S10)
+                    // 右侧列头标签：装备、KDA、补刀、金币、伤害 (对齐 Vue 原版)
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap_4()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_size(px(11.5))
+                            .font_weight(FontWeight::BOLD)
                             .text_color(Theme::TEXT_MUTED)
-                            .child(div().w(px(210.0)).child("装备"))
-                            .child(div().w(px(80.0)).text_center().child("KDA"))
-                            .child(div().w(px(50.0)).text_center().child("补刀"))
-                            .child(div().w(px(60.0)).text_center().child("金币"))
-                            .child(div().w(px(90.0)).text_center().child("伤害")),
+                            .child(div().w(px(210.0)).text_center().child("装备"))
+                            .child(div().w(px(70.0)).text_center().child("KDA"))
+                            .child(div().w(px(42.0)).text_center().child("补刀"))
+                            .child(div().w(px(55.0)).text_right().child("金币"))
+                            .child(div().w(px(60.0)).text_right().child("伤害")),
                     ),
             )
             // 2. 玩家列表 (S11)
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .children(team.players.iter().map(|p| {
-                        self.render_player_row(p, is_aram_hex, max_damage, on_player_click.clone())
-                    })),
+                div().flex().flex_col().children(
+                    team.players.iter().map(|p| {
+                        self.render_player_row(p, win, is_aram_hex, on_player_click.clone())
+                    }),
+                ),
             )
     }
 
@@ -1295,7 +1396,7 @@ impl SearchView {
             .gap_1()
             .child(
                 LcuImage::new(icon_url.to_string())
-                    .size(px(14.0))
+                    .size(px(16.0))
                     .shape(LcuImageShape::ItemSlot),
             )
             .child(format!("{}", count))
@@ -1305,8 +1406,8 @@ impl SearchView {
     fn render_player_row(
         &self,
         p: &GameDetailPlayer,
+        win: bool,
         is_aram_hex: bool,
-        max_damage: i32,
         on_player_click: impl Fn(String, u64, String, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let is_self = self
@@ -1319,15 +1420,26 @@ impl SearchView {
         let puuid_val = p.puuid.clone();
         let sid_val = p.summoner_id;
         let name_val = p.name.clone();
+        let pure_name = p.name.split('#').next().unwrap_or(&p.name).to_string();
+
+        let self_highlight_color = if win {
+            Theme::WIN_TEXT
+        } else {
+            Theme::LOSS_TEXT
+        };
 
         div()
             .w_full()
-            .h(px(48.0))
-            .px(px(12.0))
+            .h(px(52.0))
+            .px(px(14.0))
             .border_b_1()
             .border_color(Theme::CARD_BORDER)
             .bg(if is_self {
-                Theme::HOVER_BG_STRONG
+                if win {
+                    Theme::WIN_BG
+                } else {
+                    Theme::LOSS_BG
+                }
             } else {
                 Theme::CARD_BG
             })
@@ -1340,210 +1452,287 @@ impl SearchView {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(10.0))
-                    // 头像与角标等级
+                    .gap(px(6.0))
+                    // 头像与角标等级 (width 96px, 对齐 Vue 原版)
                     .child(
                         div()
-                            .relative()
-                            .size(px(40.0))
-                            .rounded(px(20.0))
-                            .overflow_hidden()
-                            .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .child(
-                                LcuImage::new(p.champion_icon_url.clone())
-                                    .size(px(40.0))
-                                    .shape(LcuImageShape::Circle),
-                            )
-                            // 贴底等级角标
-                            .child(
-                                div()
-                                    .absolute()
-                                    .bottom_0()
-                                    .left_0()
-                                    .right_0()
-                                    .h(px(12.0))
-                                    .bg(hsla(0.0, 0.0, 0.0, 0.65))
-                                    .text_size(px(9.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_ON_PRIMARY)
-                                    .text_center()
-                                    .child(format!("{}", p.level)),
-                            ),
-                    )
-                    // 技能与符文 (S11)
-                    .child(
-                        div()
+                            .w(px(96.0))
+                            .flex_none()
                             .flex()
                             .items_center()
-                            .gap_1()
-                            // 两个 18x18 技能纵向排列
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .relative()
+                                    .size(px(40.0))
+                                    .flex_none()
+                                    .child(
+                                        LcuImage::new(p.champion_icon_url.clone())
+                                            .size(px(40.0))
+                                            .shape(LcuImageShape::Circle),
+                                    )
+                                    // 贴底等级角标 14x14
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .bottom(px(-2.0))
+                                            .right(px(-2.0))
+                                            .size(px(14.0))
+                                            .rounded_full()
+                                            .bg(Theme::TEXT_PRIMARY)
+                                            .border_1()
+                                            .border_color(Theme::CARD_BG)
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .text_size(px(9.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::CARD_BG)
+                                            .child(format!("{}", p.level)),
+                                    ),
+                            )
+                            // 技能与符文 (S11)
                             .child(
                                 div()
                                     .flex()
-                                    .flex_col()
-                                    .gap_0p5()
+                                    .items_center()
+                                    .gap(px(3.0))
+                                    // 两个 18x18 技能纵向排列
                                     .child(
-                                        LcuImage::new(p.spell1_icon_url.clone())
-                                            .size(px(18.0))
-                                            .shape(LcuImageShape::Rounded),
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap(px(2.0))
+                                            .child(
+                                                div()
+                                                    .size(px(18.0))
+                                                    .rounded(px(2.0))
+                                                    .border_1()
+                                                    .border_color(Theme::CARD_BORDER)
+                                                    .overflow_hidden()
+                                                    .child(
+                                                        LcuImage::new(p.spell1_icon_url.clone())
+                                                            .size(px(18.0)),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .size(px(18.0))
+                                                    .rounded(px(2.0))
+                                                    .border_1()
+                                                    .border_color(Theme::CARD_BORDER)
+                                                    .overflow_hidden()
+                                                    .child(
+                                                        LcuImage::new(p.spell2_icon_url.clone())
+                                                            .size(px(18.0)),
+                                                    ),
+                                            ),
                                     )
-                                    .child(
-                                        LcuImage::new(p.spell2_icon_url.clone())
-                                            .size(px(18.0))
-                                            .shape(LcuImageShape::Rounded),
-                                    ),
-                            )
-                            // 符文图标 (20x20，非海克斯队列展示)
-                            .when(!is_aram_hex && !p.rune_icon_url.is_empty(), |this| {
-                                this.child(
-                                    LcuImage::new(p.rune_icon_url.clone())
-                                        .size(px(20.0))
-                                        .shape(LcuImageShape::Circle),
-                                )
-                            }),
+                                    // 符文图标 (20x20，非海克斯队列展示)
+                                    .when(!is_aram_hex && !p.rune_icon_url.is_empty(), |this| {
+                                        this.child(
+                                            div()
+                                                .size(px(20.0))
+                                                .rounded_full()
+                                                .overflow_hidden()
+                                                .child(
+                                                    LcuImage::new(p.rune_icon_url.clone())
+                                                        .size(px(20.0))
+                                                        .shape(LcuImageShape::Circle),
+                                                ),
+                                        )
+                                    }),
+                            ),
                     )
-                    // 玩家昵称 (可点击，S04, S11)
+                    // 玩家昵称 (max-w 170px, 纯名字, 可点击跳转生涯)
                     .child(
                         div()
-                            .cursor_pointer()
-                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                click_cb(puuid_val.clone(), sid_val, name_val.clone(), win, app);
-                            })
-                            .text_xs()
-                            .font_weight(if is_self {
-                                FontWeight::BOLD
-                            } else {
-                                FontWeight::SEMIBOLD
-                            })
-                            .text_color(if is_self {
-                                Theme::ACCENT_PRIMARY
-                            } else {
-                                Theme::TEXT_PRIMARY
-                            })
-                            .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
-                            .child(p.name.clone()),
+                            .max_w(px(170.0))
+                            .min_w(px(0.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .cursor_pointer()
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        click_cb(
+                                            puuid_val.clone(),
+                                            sid_val,
+                                            name_val.clone(),
+                                            win,
+                                            app,
+                                        );
+                                    })
+                                    .text_size(px(12.8))
+                                    .font_weight(if is_self {
+                                        FontWeight::BOLD
+                                    } else {
+                                        FontWeight::SEMIBOLD
+                                    })
+                                    .text_color(if is_self {
+                                        self_highlight_color
+                                    } else {
+                                        Theme::TEXT_PRIMARY
+                                    })
+                                    .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .child(pure_name),
+                            ),
                     ),
             )
-            // 右半区：装备(6格+1饰品)+KDA+补刀+金币+伤害 (S11)
+            .child(div().flex_1())
+            // 右半区：装备(6格+1饰品)+KDA+补刀+金币+伤害 (严格对齐队头列宽)
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap_4()
-                    // 装备槽 (6格 + 1饰品槽，每个 24x24，S11)
+                    // 装备槽 (6格 + 1饰品槽，每个 28x28，S11)
                     .child(
                         div()
                             .w(px(210.0))
                             .flex()
                             .items_center()
-                            .gap_1()
+                            .justify_center()
+                            .gap(px(3.0))
                             // 6 格物品
-                            .child(div().flex().items_center().gap_0p5().children((0..6).map(
-                                |idx| {
-                                    let url =
-                                        p.item_icon_urls.get(idx).cloned().unwrap_or_default();
-                                    div()
-                                        .size(px(24.0))
-                                        .rounded(px(4.0))
-                                        .bg(Theme::ITEM_SLOT_BG)
-                                        .border_1()
-                                        .border_color(Theme::ITEM_SLOT_BORDER)
-                                        .overflow_hidden()
-                                        .when(!url.is_empty(), |this| {
-                                            this.child(
-                                                LcuImage::new(url)
-                                                    .size(px(24.0))
-                                                    .shape(LcuImageShape::ItemSlot),
-                                            )
-                                        })
-                                },
-                            )))
-                            // 1 格饰品
                             .child(
                                 div()
-                                    .size(px(24.0))
-                                    .rounded(px(12.0))
-                                    .bg(Theme::ITEM_SLOT_BG)
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(1.0))
+                                    .children((0..6).map(|idx| {
+                                        let url =
+                                            p.item_icon_urls.get(idx).cloned().unwrap_or_default();
+                                        div()
+                                            .size(px(28.0))
+                                            .rounded(px(3.0))
+                                            .bg(Theme::HOVER_BG)
+                                            .border_1()
+                                            .border_color(Theme::CARD_BORDER)
+                                            .overflow_hidden()
+                                            .when(!url.is_empty(), |this| {
+                                                this.child(
+                                                    LcuImage::new(url)
+                                                        .size(px(28.0))
+                                                        .shape(LcuImageShape::ItemSlot),
+                                                )
+                                            })
+                                    })),
+                            )
+                            // 1 格饰品 (28x28, 黄色边框)
+                            .child(
+                                div()
+                                    .size(px(28.0))
+                                    .rounded(px(3.0))
+                                    .bg(rgba(0xf59e0b0d))
                                     .border_1()
-                                    .border_color(Theme::ITEM_SLOT_BORDER)
+                                    .border_color(rgba(0xf59e0b4c))
                                     .overflow_hidden()
                                     .when(!p.ward_icon_url.is_empty(), |this| {
                                         this.child(
                                             LcuImage::new(p.ward_icon_url.clone())
-                                                .size(px(24.0))
-                                                .shape(LcuImageShape::Circle),
+                                                .size(px(28.0))
+                                                .shape(LcuImageShape::ItemSlot),
                                         )
                                     }),
                             ),
                     )
-                    // KDA (S11)
+                    // KDA (70px, 居中)
                     .child(
                         div()
-                            .w(px(80.0))
+                            .w(px(70.0))
                             .text_center()
-                            .text_xs()
+                            .text_size(px(12.8))
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(format!("{}/", p.kills))
                             .child(
                                 div()
-                                    .text_color(Theme::DEATH_RED)
+                                    .font_weight(if is_self {
+                                        FontWeight::BOLD
+                                    } else {
+                                        FontWeight::NORMAL
+                                    })
+                                    .text_color(if is_self {
+                                        self_highlight_color
+                                    } else {
+                                        Theme::TEXT_PRIMARY
+                                    })
+                                    .child(format!("{}/", p.kills)),
+                            )
+                            .child(
+                                div()
                                     .font_weight(FontWeight::BOLD)
+                                    .text_color(Theme::DEATH_RED)
                                     .child(format!("{}", p.deaths)),
                             )
-                            .child(format!("/{}", p.assists)),
+                            .child(
+                                div()
+                                    .font_weight(if is_self {
+                                        FontWeight::BOLD
+                                    } else {
+                                        FontWeight::NORMAL
+                                    })
+                                    .text_color(if is_self {
+                                        self_highlight_color
+                                    } else {
+                                        Theme::TEXT_PRIMARY
+                                    })
+                                    .child(format!("/{}", p.assists)),
+                            ),
                     )
-                    // 补刀 (S11)
+                    // 补刀 (42px, 居中)
                     .child(
                         div()
-                            .w(px(50.0))
+                            .w(px(42.0))
                             .text_center()
-                            .text_xs()
-                            .text_color(Theme::TEXT_SECONDARY)
+                            .text_size(px(12.8))
+                            .font_weight(if is_self {
+                                FontWeight::BOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .text_color(if is_self {
+                                self_highlight_color
+                            } else {
+                                Theme::TEXT_MUTED
+                            })
                             .child(format!("{}", p.cs)),
                     )
-                    // 金币 (S11)
+                    // 金币 (55px, 右对齐, 纯千分位格式化数字)
+                    .child(
+                        div()
+                            .w(px(55.0))
+                            .text_right()
+                            .text_size(px(12.8))
+                            .font_weight(if is_self {
+                                FontWeight::BOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .text_color(if is_self {
+                                self_highlight_color
+                            } else {
+                                Theme::TEXT_MUTED
+                            })
+                            .child(format_num(p.gold as i64)),
+                    )
+                    // 伤害 (60px, 右对齐, 纯千分位加粗数字)
                     .child(
                         div()
                             .w(px(60.0))
-                            .text_center()
-                            .text_xs()
-                            .text_color(Theme::GOLD)
-                            .child(format!("{:.1}k", p.gold as f32 / 1000.0)),
-                    )
-                    // 伤害柱状条与数值 (S11)
-                    .child(
-                        div()
-                            .w(px(90.0))
-                            .flex()
-                            .flex_col()
-                            .items_end()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child(format!("{}", p.damage)),
-                            )
-                            .child(
-                                div()
-                                    .h(px(4.0))
-                                    .w_full()
-                                    .rounded(px(2.0))
-                                    .bg(Theme::HOVER_BG_STRONG)
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .h_full()
-                                            .w(relative(
-                                                (p.damage as f32 / max_damage as f32)
-                                                    .clamp(0.0, 1.0),
-                                            ))
-                                            .bg(Theme::ACCENT_PRIMARY),
-                                    ),
-                            ),
+                            .text_right()
+                            .text_size(px(12.8))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(if is_self {
+                                self_highlight_color
+                            } else {
+                                Theme::TEXT_PRIMARY
+                            })
+                            .child(format_num(p.damage as i64)),
                     ),
             )
     }
