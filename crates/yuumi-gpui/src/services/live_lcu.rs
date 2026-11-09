@@ -22,6 +22,9 @@ use yuumi_core::parsers::game_info::{
     GameflowSessionSnapshot, LiveGameInfo, RankedStats,
 };
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
+use yuumi_core::parsers::loot_actions::{
+    self, LootActionItem, LootActionKind, LootActionProgress, MAX_LOOP_COUNT,
+};
 use yuumi_core::parsers::mastery::ChampionMasteryItem;
 use yuumi_core::parsers::match_parser::{fetch_match_history, MatchDisplay};
 use yuumi_core::parsers::summoner::{fetch_current_summoner, SummonerInfo};
@@ -57,6 +60,8 @@ pub enum LiveLcuEvent {
     MatchHistoryLoaded(Vec<MatchDisplay>),
     ChampionMasteryLoaded(Vec<ChampionMasteryItem>),
     LootSummaryLoaded(EssenceBalances, Vec<LootInventoryItem>),
+    /// 战利品写动作的单条进度（由 run_loot_action 逐条广播）
+    LootActionProgress(LootActionProgress),
     /// 本人排位数据（单排 / 灵活等队列段位）
     RankedStatsLoaded(RankedStats),
     /// 10 人对局信息开始拉取（前端置加载态）
@@ -493,6 +498,77 @@ impl LiveLcuService {
         log::info!("[LiveLcu] 召唤师生涯数据全部拉取完毕并派发完成");
     }
 
+    /// 战利品写动作统一入口（供 main.rs 在用户主动点击时调用）。
+    ///
+    /// 这里只提供入口：启动流程与任何自动流程都不会调用本方法，也不会在内部
+    /// 常驻后台任务。返回聚合后的逐条进度，并逐条广播
+    /// `LiveLcuEvent::LootActionProgress`，由 main.rs 消费后刷新进度面板。
+    pub async fn run_loot_action(
+        &self,
+        kind: LootActionKind,
+        items: Vec<LootActionItem>,
+    ) -> Result<Vec<LootActionProgress>, String> {
+        let client = self
+            .get_client()
+            .await
+            .ok_or_else(|| "英雄联盟客户端未连接".to_string())?;
+
+        let progress = match kind {
+            LootActionKind::Open => {
+                let first = items
+                    .first()
+                    .ok_or_else(|| "开启动作缺少条目".to_string())?;
+                loot_actions::batch_open_loots(
+                    &client,
+                    &first.recipe_name,
+                    &first.ingredients,
+                    first.count,
+                )
+                .await?
+            }
+            LootActionKind::SmartOpenAll => {
+                let batches: Vec<loot_actions::OpenBatchItem> = items
+                    .iter()
+                    .map(|i| loot_actions::OpenBatchItem {
+                        loot_id: i.loot_id.clone(),
+                        name: i.name.clone(),
+                        count: i.count,
+                        recipe_name: i.recipe_name.clone(),
+                        ingredients: i.ingredients.clone(),
+                    })
+                    .collect();
+                loot_actions::smart_open_all_loots(&client, &batches).await?
+            }
+            LootActionKind::Disenchant => {
+                let jobs = to_disenchant_items(&items);
+                loot_actions::disenchant_loot(&client, &jobs).await?
+            }
+            LootActionKind::Reroll => {
+                // 对照 Vue：每个条目按 count 展开为 loot_id，3 个一组重铸
+                let mut ids = Vec::new();
+                for item in &items {
+                    let n = item.count.clamp(0, MAX_LOOP_COUNT);
+                    for _ in 0..n {
+                        ids.push(item.loot_id.clone());
+                    }
+                }
+                loot_actions::reroll_loot(&client, &ids).await?
+            }
+            LootActionKind::Upgrade => {
+                let jobs = to_disenchant_items(&items);
+                loot_actions::upgrade_loot(&client, &jobs).await?
+            }
+        };
+
+        // 仅在用户主动调用本入口时才会执行；逐条广播进度事件
+        for p in &progress {
+            let _ = self
+                .event_tx
+                .send(LiveLcuEvent::LootActionProgress(p.clone()));
+        }
+        Ok(progress)
+    }
+
     /// 一键换取大乱斗板凳席英雄
     pub async fn swap_bench_champion(&self, champion_id: i32) -> Result<(), String> {
         let client = self
@@ -614,4 +690,16 @@ impl LiveLcuService {
         *self.game_info.write().await = Some(info.clone());
         let _ = self.event_tx.send(LiveLcuEvent::GameInfoUpdated(info));
     }
+}
+
+/// 把统一入口条目转换为分解 / 升级请求条目
+fn to_disenchant_items(items: &[LootActionItem]) -> Vec<loot_actions::DisenchantItem> {
+    items
+        .iter()
+        .map(|i| loot_actions::DisenchantItem {
+            loot_id: i.loot_id.clone(),
+            count: i.count,
+            upgrade_recipe_name: i.upgrade_recipe_name.clone(),
+        })
+        .collect()
 }
