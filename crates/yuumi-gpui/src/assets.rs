@@ -30,6 +30,7 @@ impl AssetSource for Assets {
             "icons/close.svg" => Some(include_bytes!("../assets/icons/close.svg")),
             "icons/copy.svg" => Some(include_bytes!("../assets/icons/copy.svg")),
             "icons/lock.svg" => Some(include_bytes!("../assets/icons/lock.svg")),
+            "icons/play.svg" => Some(include_bytes!("../assets/icons/play.svg")),
             _ => None,
         };
         Ok(bytes.map(Cow::Borrowed))

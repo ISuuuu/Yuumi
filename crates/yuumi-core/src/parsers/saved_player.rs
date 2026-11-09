@@ -38,6 +38,9 @@ pub struct SavedPlayer {
     pub encountered_count: u32,
     /// 上次同局时间戳 (毫秒)
     pub last_met_timestamp: i64,
+    /// 最近相遇对局队列类型 (如 "420", "430", "2400")
+    #[serde(default)]
+    pub last_queue_type: Option<String>,
     /// 是否置顶高亮
     pub is_pinned: bool,
     /// 用户备忘录 / 笔记
@@ -45,6 +48,32 @@ pub struct SavedPlayer {
     /// 相遇对局历史简讯
     #[serde(default)]
     pub encounter_history: Vec<EncounteredGameRecord>,
+}
+
+/// 导出带标记玩家的数据项（与 Vue/Tauri 版 tagged_players.json 完全兼容）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaggedPlayerExportDto {
+    pub puuid: String,
+    #[serde(default)]
+    pub self_puuid: String,
+    #[serde(default)]
+    pub region: String,
+    #[serde(default)]
+    pub rso_platform_id: String,
+    pub tag: Option<String>,
+    #[serde(default)]
+    pub summoner_name: String,
+    #[serde(default)]
+    pub profile_icon_id: i32,
+    #[serde(default)]
+    pub tag_line: Option<String>,
+    #[serde(default)]
+    pub champion_id: i32,
+    #[serde(default)]
+    pub update_at: i64,
+    #[serde(default)]
+    pub last_met_at: Option<i64>,
 }
 
 impl SavedPlayer {
@@ -63,6 +92,7 @@ impl SavedPlayer {
             profile_icon_id: 29,
             encountered_count: 1,
             last_met_timestamp: chrono::Utc::now().timestamp_millis(),
+            last_queue_type: None,
             is_pinned: false,
             notes: String::new(),
             encounter_history: Vec::new(),
@@ -143,6 +173,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
             profile_icon_id: 501,
             encountered_count: 7,
             last_met_timestamp: now - (2 * hour),
+            last_queue_type: Some("420".to_string()),
             is_pinned: true,
             notes: "中路极强对线压制力，支援速度极快，听其打点节奏走。".to_string(),
             encounter_history: vec![
@@ -178,6 +209,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
             profile_icon_id: 4208,
             encountered_count: 5,
             last_met_timestamp: now - (5 * hour),
+            last_queue_type: Some("420".to_string()),
             is_pinned: true,
             notes: "野区规划清晰，控龙率极高，反蹲极为及时。".to_string(),
             encounter_history: vec![
@@ -206,6 +238,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
             profile_icon_id: 742,
             encountered_count: 4,
             last_met_timestamp: now - day,
+            last_queue_type: Some("420".to_string()),
             is_pinned: false,
             notes: "劣势易红温点投降，拒绝配合团战打龙，建议静音避让。".to_string(),
             encounter_history: vec![
@@ -234,6 +267,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
             profile_icon_id: 588,
             encountered_count: 3,
             last_met_timestamp: now - (2 * day),
+            last_queue_type: Some("420".to_string()),
             is_pinned: false,
             notes: "开局死两次直接泉水挂机，发言恶劣，务必注意。".to_string(),
             encounter_history: vec![EncounteredGameRecord {
@@ -253,6 +287,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
             profile_icon_id: 4892,
             encountered_count: 6,
             last_met_timestamp: now - (3 * day),
+            last_queue_type: Some("450".to_string()),
             is_pinned: false,
             notes: "主玩软辅，视野得分极高，开麦报技能温柔且清晰。".to_string(),
             encounter_history: vec![
@@ -281,6 +316,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
             profile_icon_id: 3150,
             encountered_count: 2,
             last_met_timestamp: now - (5 * day),
+            last_queue_type: Some("420".to_string()),
             is_pinned: false,
             notes: "操作手法极其纯熟，走砍拉扯一流。".to_string(),
             encounter_history: vec![EncounteredGameRecord {
