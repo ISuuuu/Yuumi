@@ -12,6 +12,7 @@ use yuumi_core::parsers::game_info::{rank_tier_label, RankedQueueEntry, RankedSt
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
 use yuumi_core::parsers::mastery::ChampionMasteryItem;
 use yuumi_core::parsers::summoner::SummonerInfo;
+use yuumi_core::parsers::teammates::RecentTeammate;
 
 /// 生成一段圆弧的描边路径（角度以正右方为 0°，顺时针为正）
 ///
@@ -403,6 +404,8 @@ pub struct CareerView {
     /// 近期统计横条：队列筛选（None = 全部）与当前浮层
     pub selected_queue: Option<i32>,
     pub popup: Option<CareerPopup>,
+    /// 最近队友列表（头像、名称、场次、胜率）
+    pub recent_teammates: Vec<RecentTeammate>,
     pub essences: EssenceBalances,
     pub loot_items: Vec<LootInventoryItem>,
 }
@@ -423,6 +426,7 @@ impl Default for CareerView {
             mastery_dropdown: None,
             selected_queue: None,
             popup: None,
+            recent_teammates: Self::mock_teammates(),
             essences: EssenceBalances {
                 blue_essence: 32680,
                 orange_essence: 8450,
@@ -436,6 +440,31 @@ impl Default for CareerView {
 impl CareerView {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn mock_teammates() -> Vec<RecentTeammate> {
+        vec![
+            RecentTeammate {
+                name: "不屈之枪#CN1".to_string(),
+                puuid: "mock-mate-1".to_string(),
+                icon: "/lol-game-data/assets/v1/profile-icons/588.jpg".to_string(),
+                total: 5,
+                wins: 4,
+                losses: 1,
+                last_play_time: 1700000000000,
+                tag: Some("大腿".to_string()),
+            },
+            RecentTeammate {
+                name: "暮光星灵#CN1".to_string(),
+                puuid: "mock-mate-2".to_string(),
+                icon: "/lol-game-data/assets/v1/profile-icons/516.jpg".to_string(),
+                total: 3,
+                wins: 1,
+                losses: 2,
+                last_play_time: 1699900000000,
+                tag: None,
+            },
+        ]
     }
 
     fn mock_masteries() -> Vec<ChampionMasteryItem> {
@@ -1173,7 +1202,7 @@ impl CareerView {
                     "career-teammates-trigger",
                     "最近队友".to_string(),
                     self.popup == Some(CareerPopup::Teammates),
-                    teammates_placeholder(),
+                    self.render_teammates_menu(),
                     move |win, app| {
                         on_toggle(
                             CareerBarAction::TogglePopup(CareerPopup::Teammates),
@@ -2097,6 +2126,128 @@ impl CareerView {
                 )
             })
     }
+
+    /// 最近队友下拉菜单：展示近 20 场共同对局的队友列表（头像、名称、场次、胜率）
+    fn render_teammates_menu(&self) -> impl IntoElement {
+        let empty = self.recent_teammates.is_empty();
+        div()
+            .w(px(320.0))
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(13.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(Theme::TEXT_PRIMARY)
+                            .child("最近队友"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(Theme::TEXT_MUTED)
+                            .child("近 20 场同队数据"),
+                    ),
+            )
+            .child(if empty {
+                div()
+                    .py(px(16.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(12.0))
+                    .text_color(Theme::TEXT_MUTED)
+                    .child("暂无最近队友数据")
+                    .into_any_element()
+            } else {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .children(self.recent_teammates.iter().map(|tm| {
+                        let win_rate = tm.win_rate();
+                        let rate_color = if win_rate >= 50 {
+                            Theme::WIN_TEXT
+                        } else {
+                            Theme::LOSS_TEXT
+                        };
+
+                        div()
+                            .p(px(6.0))
+                            .rounded_md()
+                            .hover(|s| s.bg(Theme::HOVER_BG))
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            // 左侧：头像 + 名字 + (可选 Tag 徽章)
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        LcuImage::new(tm.icon.clone())
+                                            .size(px(28.0))
+                                            .shape(LcuImageShape::Circle)
+                                            .placeholder("?".to_string()),
+                                    )
+                                    .child(
+                                        div().flex().flex_col().gap(px(1.0)).child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_1()
+                                                .child(
+                                                    div()
+                                                        .text_size(px(12.0))
+                                                        .font_weight(FontWeight::SEMIBOLD)
+                                                        .text_color(Theme::TEXT_PRIMARY)
+                                                        .child(tm.name.clone()),
+                                                )
+                                                .when_some(tm.tag.as_ref(), |this, tag| {
+                                                    this.child(
+                                                        div()
+                                                            .px(px(4.0))
+                                                            .py(px(1.0))
+                                                            .rounded_sm()
+                                                            .bg(Theme::BADGE_BG)
+                                                            .text_size(px(10.0))
+                                                            .text_color(Theme::ACCENT_PRIMARY)
+                                                            .child(tag.clone()),
+                                                    )
+                                                }),
+                                        ),
+                                    ),
+                            )
+                            // 右侧：场次与胜率统计
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .items_end()
+                                    .gap(px(1.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(11.5))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .child(format!("{} 场", tm.total)),
+                                    )
+                                    .child(div().text_size(px(10.5)).text_color(rate_color).child(
+                                        format!("{}% ({}胜{}负)", win_rate, tm.wins, tm.losses),
+                                    )),
+                            )
+                    }))
+                    .into_any_element()
+            })
+    }
 }
 
 /// 熟练度统计卡
@@ -2316,28 +2467,5 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                             "可获宝箱"
                         }),
                 ),
-        )
-}
-
-/// 最近队友下拉：数据链路（对局详情批量聚合）未接通时的说明
-fn teammates_placeholder() -> impl IntoElement {
-    div()
-        .w(px(240.0))
-        .p_3()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .child(
-            div()
-                .text_size(px(13.0))
-                .font_weight(FontWeight::BOLD)
-                .text_color(Theme::TEXT_PRIMARY)
-                .child("最近队友"),
-        )
-        .child(
-            div()
-                .text_size(px(12.0))
-                .text_color(Theme::TEXT_MUTED)
-                .child("需要按对局详情批量聚合队友数据，GPUI 服务层尚未接通"),
         )
 }

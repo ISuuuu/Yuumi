@@ -127,6 +127,12 @@ impl MainWindow {
 
         let stats = CareerHeaderStats::compute(&matches);
         let career_view = CareerView::new();
+        let tm_icons: Vec<String> = career_view
+            .recent_teammates
+            .iter()
+            .map(|t| t.icon.clone())
+            .collect();
+        prewarm_assets(tm_icons, cx);
         let career_mastery_focus = cx.focus_handle();
 
         // 加载持久化的自动化开关，并用它初始化工具箱视图
@@ -412,6 +418,13 @@ impl MainWindow {
                     self.bench_session = None;
                 }
                 self.sync_bench_overlay(cx);
+                cx.notify();
+            }
+            LiveLcuEvent::RecentTeammatesLoaded(teammates) => {
+                let icon_paths: Vec<String> =
+                    teammates.iter().map(|t| t.icon.clone()).collect();
+                prewarm_assets(icon_paths, cx);
+                self.career_view.recent_teammates = teammates;
                 cx.notify();
             }
         }
