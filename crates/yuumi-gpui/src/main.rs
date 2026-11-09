@@ -23,6 +23,8 @@ mod tray;
 pub mod views;
 
 use bench_overlay::{load_saved_origin, BenchOverlayView};
+use components::notice_popup::notice_popup;
+use components::opgg_modal::{opgg_modal, OpggTab};
 use components::sidebar::Sidebar;
 use components::titlebar::{phase_label, TitleBar};
 use match_model::MatchItem;
@@ -133,6 +135,16 @@ pub struct MainWindow {
     game_assets: Option<Arc<GameDataAssets>>,
     /// 主视口全局滚动跟踪句柄（用于监听滚动到底部与回到顶部）
     main_scroll_handle: ScrollHandle,
+    /// 是否有版本更新（用于在侧栏设置图标显示红点）
+    has_update: bool,
+    /// 公告弹窗是否打开
+    notice_popup_open: bool,
+    /// OP.GG 辅助弹窗是否打开
+    opgg_modal_open: bool,
+    /// OP.GG 弹窗当前选中的页签
+    opgg_tab: OpggTab,
+    /// OP.GG 当前选中的位置
+    opgg_position: &'static str,
 }
 
 impl MainWindow {
@@ -231,6 +243,11 @@ impl MainWindow {
             bench_session: None,
             game_assets: None,
             main_scroll_handle: ScrollHandle::new(),
+            has_update: false,
+            notice_popup_open: false,
+            opgg_modal_open: false,
+            opgg_tab: OpggTab::TierList,
+            opgg_position: "MID",
         }
     }
 
@@ -586,6 +603,34 @@ impl MainWindow {
                 window.remove_window();
             });
         }
+    }
+
+    pub fn toggle_notice_popup(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.notice_popup_open = open;
+        cx.notify();
+    }
+
+    pub fn toggle_opgg_modal(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.opgg_modal_open = open;
+        cx.notify();
+    }
+
+    pub fn trigger_reconnect(&mut self, cx: &mut Context<Self>) {
+        log::info!("[MainWindow] 用户触发重新连接/修复流程");
+        let live = self.live_service.clone();
+        yuumi_core::runtime::spawn_background(async move {
+            if let Some(client) = live.get_client().await {
+                let _ = client
+                    .request(
+                        "POST",
+                        "/lol-gameflow/v1/session/request-lobby-phase",
+                        None,
+                        false,
+                    )
+                    .await;
+            }
+        });
+        cx.notify();
     }
 
     /// 将全局配置同步进磁盘、Agent 运行时与悬浮窗
@@ -2008,6 +2053,15 @@ impl Render for MainWindow {
         } else {
             None
         };
+        let map_side_label = if let Some(info) = &self.game_info {
+            match info.user_side {
+                Some(yuumi_core::gameflow::team_builder::MapSide::Blue) => Some("蓝方"),
+                Some(yuumi_core::gameflow::team_builder::MapSide::Red) => Some("红方"),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let show_back = !self.route_history.is_empty();
 
         div()
@@ -2020,6 +2074,7 @@ impl Render for MainWindow {
             .child(self.titlebar.render(
                 show_back,
                 phase,
+                map_side_label,
                 window,
                 {
                     let entity = view_entity.clone();
@@ -2030,8 +2085,18 @@ impl Render for MainWindow {
                 |w, _app| {
                     w.minimize_window();
                 },
-                |_w, app| {
-                    app.quit();
+                {
+                    let entity = view_entity.clone();
+                    move |w, app| {
+                        let close_to_tray = entity.update(app, |this, _cx| {
+                            this.app_config.general.enable_close_to_tray.unwrap_or(false)
+                        });
+                        if close_to_tray {
+                            w.minimize_window();
+                        } else {
+                            app.quit();
+                        }
+                    }
                 },
             ))
             // 2. 主体区域：64/210 导航侧栏 + 主路由视口
@@ -2045,7 +2110,10 @@ impl Render for MainWindow {
                     .child(Sidebar::render(
                         self.current_route,
                         self.sidebar_expanded,
+                        &self.app_config,
                         self.career_view.summoner.as_ref(),
+                        "",
+                        self.has_update,
                         {
                             let entity = view_entity.clone();
                             move |route, _window, app| {
@@ -2059,6 +2127,30 @@ impl Render for MainWindow {
                             move |_window, app| {
                                 entity.update(app, |this, cx| {
                                     this.toggle_sidebar(cx);
+                                });
+                            }
+                        },
+                        {
+                            let entity = view_entity.clone();
+                            move |_window, app| {
+                                entity.update(app, |this, cx| {
+                                    this.toggle_opgg_modal(true, cx);
+                                });
+                            }
+                        },
+                        {
+                            let entity = view_entity.clone();
+                            move |_window, app| {
+                                entity.update(app, |this, cx| {
+                                    this.trigger_reconnect(cx);
+                                });
+                            }
+                        },
+                        {
+                            let entity = view_entity.clone();
+                            move |_window, app| {
+                                entity.update(app, |this, cx| {
+                                    this.toggle_notice_popup(true, cx);
                                 });
                             }
                         },
@@ -2540,6 +2632,31 @@ impl Render for MainWindow {
                                     window,
                                     on_settings_action,
                                 ))
+                            })
+                            .when(self.current_route == Route::Tft, |el| {
+                                el.child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .size_full()
+                                        .items_center()
+                                        .justify_center()
+                                        .gap(px(12.0))
+                                        .child(div().text_size(px(40.0)).child("♟️"))
+                                        .child(
+                                            div()
+                                                .text_size(px(16.0))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .child("云顶之弈助手"),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(13.0))
+                                                .text_color(Theme::TEXT_MUTED)
+                                                .child("TFT 战绩、推荐阵容与海克斯分析模块接入准备中"),
+                                        ),
+                                )
                             }),
                     )
                     // 右下角回到顶部悬浮按钮
@@ -2595,6 +2712,58 @@ impl Render for MainWindow {
                         })
                     }),
             )
+            // 3. 右下角公告通知弹窗 (NoticePopup)
+            .when(self.notice_popup_open, |this| {
+                let v = view_entity.clone();
+                this.child(
+                    div()
+                        .absolute()
+                        .right(px(20.0))
+                        .bottom(px(20.0))
+                        .child(notice_popup(
+                            "版本更新与运行公告",
+                            "当前版本已完整复刻 Vue 纯白水晶极光界面，Direct3D 11 原生极速渲染，内存与启动性能优化完毕。",
+                            move |_win, app| {
+                                v.update(app, |this, cx| {
+                                    this.toggle_notice_popup(false, cx);
+                                });
+                            },
+                        )),
+                )
+            })
+            // 4. OP.GG 辅助数据弹窗 (OpggModal)
+            .child(opgg_modal(
+                self.opgg_modal_open,
+                self.opgg_tab,
+                self.opgg_position,
+                None,
+                {
+                    let v = view_entity.clone();
+                    move |tab, _win, app| {
+                        v.update(app, |this, cx| {
+                            this.opgg_tab = tab;
+                            cx.notify();
+                        });
+                    }
+                },
+                {
+                    let v = view_entity.clone();
+                    move |pos, _win, app| {
+                        v.update(app, |this, cx| {
+                            this.opgg_position = pos;
+                            cx.notify();
+                        });
+                    }
+                },
+                {
+                    let v = view_entity.clone();
+                    move |_win, app| {
+                        v.update(app, |this, cx| {
+                            this.toggle_opgg_modal(false, cx);
+                        });
+                    }
+                },
+            ))
     }
 }
 
