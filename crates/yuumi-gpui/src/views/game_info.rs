@@ -1483,24 +1483,30 @@ impl GameInfoView {
                     .into_any_element()
             }
         } else {
+            // 固定 10 个等分槽位：不足 10 局时用透明占位撑满，保证卡片高度始终与满 10 局的列一致，
+            // 同时 10 张卡片均分列表可用高度，刚好占满整列（不再在底部留白）。
+            let mut slots: Vec<gpui::AnyElement> = player
+                .matches
+                .iter()
+                .take(10)
+                .map(|m| Self::render_match_card(m, compact))
+                .collect();
+            let empty_slots = 10usize.saturating_sub(slots.len());
+            slots.extend((0..empty_slots).map(|_| div().flex_1().into_any_element()));
+
             let matches_list = div()
                 .id(ElementId::NamedInteger(
                     "col-matches-scroll".into(),
                     index as u64,
                 ))
                 .flex_1()
+                .min_h_0()
                 .overflow_y_scroll()
                 .p(if compact { px(3.0) } else { px(6.0) })
                 .flex()
                 .flex_col()
                 .gap(if compact { px(4.0) } else { px(6.0) })
-                .children(
-                    player
-                        .matches
-                        .iter()
-                        .take(10)
-                        .map(|m| Self::render_match_card(m, compact)),
-                );
+                .children(slots);
             matches_list.into_any_element()
         };
 
@@ -1543,7 +1549,10 @@ impl GameInfoView {
 
         div()
             .w_full()
-            .min_h(if compact { px(38.0) } else { px(44.0) })
+            // 与占位槽位一起按 10 等分撑满列表高度，卡片高度随列高自适应；
+            // 最小高度取内容实际所需，窗口过矮时改为列表滚动而不是卡片互相重叠
+            .flex_1()
+            .min_h(if compact { px(50.0) } else { px(58.0) })
             .p(if compact { px(3.0) } else { px(4.0) })
             .px(if compact { px(4.0) } else { px(7.0) })
             .rounded(if compact { px(6.0) } else { px(8.0) })
