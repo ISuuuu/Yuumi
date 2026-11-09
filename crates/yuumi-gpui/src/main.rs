@@ -108,6 +108,7 @@ pub struct MainWindow {
     game_info_active_tab: GameInfoTeamTab,
     /// 当前 gameflow 阶段
     current_phase: String,
+    home_view: HomeView,
     tools_view: ToolsView,
     search_view: SearchView,
     saved_players_view: SavedPlayersView,
@@ -154,6 +155,7 @@ impl MainWindow {
         let search_view = SearchView::new(cx).with_matches(matches.clone());
         let saved_players_view = SavedPlayersView::new(cx);
         let settings_view = SettingsView::new();
+        let home_view = HomeView::new();
         let tray = match TrayManager::new() {
             Ok(tray) => Some(tray),
             Err(e) => {
@@ -206,6 +208,7 @@ impl MainWindow {
             game_info_view_mode: GameInfoViewMode::AllMatches,
             game_info_active_tab: GameInfoTeamTab::Ally,
             current_phase: "None".to_string(),
+            home_view,
             tools_view,
             search_view,
             saved_players_view,
@@ -961,6 +964,8 @@ impl MainWindow {
             self.main_scroll_handle.set_offset(Point::default());
             if self.current_route == Route::SavedPlayers {
                 self.reload_saved_players(cx);
+            } else if self.current_route == Route::Home {
+                self.home_view.reload_paths();
             }
         }
         cx.notify();
@@ -1518,7 +1523,47 @@ impl Render for MainWindow {
                                 |el| el.overflow_y_scroll(),
                             )
                             .when(self.current_route == Route::Home, |el| {
-                                el.child(HomeView::render(&self.connection_status))
+                                let view_select = view_entity.clone();
+                                let view_launch = view_entity.clone();
+                                el.child(self.home_view.render(
+                                    &self.connection_status,
+                                    move |path, _win, app| {
+                                        view_select.update(app, |this, cx| {
+                                            this.home_view.selected_path = Some(path);
+                                            cx.notify();
+                                        });
+                                    },
+                                    move |_win, app| {
+                                        view_launch.update(app, |this, cx| {
+                                            let path = this.home_view.selected_path.clone();
+                                            let wegame = this.home_view.wegame_path.clone();
+                                            log::info!("[MainWindow] 用户点击启动客户端, path: {:?}", path);
+                                            let res = services::launch_lol_client(
+                                                path.as_deref(),
+                                                if wegame.is_empty() {
+                                                    None
+                                                } else {
+                                                    Some(&wegame)
+                                                },
+                                            );
+                                            match res {
+                                                Ok(_) => {
+                                                    log::info!("[MainWindow] 客户端启动调用成功");
+                                                    this.home_view.launch_message = Some((
+                                                        "正在启动英雄联盟客户端...".to_string(),
+                                                        false,
+                                                    ));
+                                                }
+                                                Err(e) => {
+                                                    log::warn!("[MainWindow] 客户端启动失败: {}", e);
+                                                    this.home_view.launch_message =
+                                                        Some((format!("启动失败: {}", e), true));
+                                                }
+                                            }
+                                            cx.notify();
+                                        });
+                                    },
+                                ))
                             })
                             .when(self.current_route == Route::Career, |el| {
                                 let view = view_entity.clone();
