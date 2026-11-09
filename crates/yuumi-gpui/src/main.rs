@@ -1,3 +1,6 @@
+// MSVC 链接器创建 .lib/.exp 时输出的 "正在创建库" 提示，非代码问题，静默处理
+#![allow(linker_messages)]
+
 use gpui::prelude::*;
 use gpui::{
     div, px, App, Application, Bounds, ClipboardItem, Context, FocusHandle, FontWeight,
@@ -280,6 +283,18 @@ impl MainWindow {
                 let items: Vec<MatchItem> = matches.into_iter().map(MatchItem::new).collect();
                 self.stats = CareerHeaderStats::compute(&items);
                 self.search_view.matches = items.clone();
+
+                // 未搜索场景下（进入战绩查询页自动带出的战绩）也要选中并载入首局详情，
+                // 否则右栏会一直停在「等待详情载入」的空态
+                let keep_selected = self
+                    .search_view
+                    .selected_game_id
+                    .filter(|id| items.iter().any(|m| m.display.game_id == *id));
+                if keep_selected.is_none() {
+                    if let Some(first_id) = items.first().map(|m| m.display.game_id) {
+                        self.load_match_detail(first_id, cx);
+                    }
+                }
 
                 // 异步预热战绩资源：路径必须与渲染同源
                 // （装备格渲染用 item_icon_urls，旧逻辑按 item_id 拼 /items/{id}.png 导致缓存永远不命中）
