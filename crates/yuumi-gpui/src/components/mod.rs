@@ -1,5 +1,6 @@
 pub mod badge;
 pub mod card;
+pub mod collapse_card;
 pub mod dropdown;
 pub mod icon;
 pub mod input;
