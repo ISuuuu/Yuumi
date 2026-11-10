@@ -151,27 +151,6 @@ pub const SPOOF_TIERS: [(&str, &str); 11] = [
 /// 段位伪装：小段位选项
 pub const SPOOF_DIVISIONS: [&str; 4] = ["I", "II", "III", "IV"];
 
-/// 模拟好友定义（用于好友清理）
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CleanerFriend {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub note: &'static str,
-    pub days: u32,
-    pub status: &'static str,
-}
-
-pub const MOCK_FRIENDS: &[CleanerFriend] = &[
-    CleanerFriend { id: "f1", name: "暴打红霸符#1234", note: "高中小伙伴", days: 215, status: "days180" },
-    CleanerFriend { id: "f2", name: "野区大镖客#CN1", note: "开黑队友", days: 382, status: "days360" },
-    CleanerFriend { id: "f3", name: "下路拴条狗都能赢#777", note: "", days: 98, status: "days90" },
-    CleanerFriend { id: "f4", name: "青铜守门员#0000", note: "小号", days: 450, status: "days360" },
-    CleanerFriend { id: "f5", name: "神秘玩家#9999", note: "", days: 0, status: "never" },
-    CleanerFriend { id: "f6", name: "影流之主本尊#888", note: "路人好友", days: 190, status: "days180" },
-    CleanerFriend { id: "f7", name: "快乐风男走中#666", note: "代练", days: 24, status: "all" },
-    CleanerFriend { id: "f8", name: "不愿透露姓名的ADC#111", note: "战绩隐藏号", days: 0, status: "hidden" },
-];
-
 /// 模拟挑战勋章定义（用于自定义装配弹窗）
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChallengeBadge {

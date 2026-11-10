@@ -3,13 +3,15 @@
 //! 包含直显卡片行、英雄选择器、技能选择器、带后缀按钮输入框、危险按钮、装配弹窗等。
 
 use crate::components::icon::icon;
+use crate::components::text_field::{text_field, TextFieldOptions};
 use crate::theme::Theme;
 use super::data::{
-    get_champion_name, get_spell_name, ChampionEntry,
-    CHAMPIONS, MOCK_BADGES, SUMMONER_SPELLS,
+    get_champion_name, get_spell_name, ChampionEntry, CHAMPIONS, SUMMONER_SPELLS,
 };
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use std::cell::OnceCell;
+use std::rc::Rc;
 
 /// 直显行在卡片组中的贴合位置
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -304,7 +306,10 @@ where
         )
 }
 
-/// 英雄选择器组件（收起态 Chips + 展开态搜索网格）
+/// [D06-b] 英雄候选上限（Vue ChampionPicker 语义：点选加入、达上限忽略、点已选移除）
+pub const PICKER_MAX_COUNT: usize = 5;
+
+/// 英雄选择器（兼容签名：bg_champ 等既有调用点；✕ / 收起 / 完成统一走 on_close）
 pub fn champion_picker<FClear, FOpen, FClose, FSelect, FRemove>(
     id: ElementId,
     selected_ids: &[i32],
@@ -322,6 +327,90 @@ where
     FClose: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
     FSelect: Fn(i32, &mut Window, &mut App) + 'static + Clone,
     FRemove: Fn(i32, &mut Window, &mut App) + 'static + Clone,
+{
+    let confirm = on_close.clone();
+    let cancel = on_close;
+    champion_picker_inner(
+        id,
+        selected_ids,
+        is_open,
+        search_query,
+        None,
+        |_q: String, _win: &mut Window, _app: &mut App| {},
+        on_clear,
+        on_open,
+        confirm,
+        cancel,
+        on_select,
+        on_remove,
+    )
+}
+
+/// [D06-a/c/d] 英雄选择器（带 IME 搜索输入、确认与取消分离），供选用/禁用卡片使用。
+#[allow(clippy::too_many_arguments)]
+pub fn champion_picker_searchable<FClear, FOpen, FConfirm, FCancel, FSelect, FRemove, FSearch>(
+    id: ElementId,
+    selected_ids: &[i32],
+    is_open: bool,
+    search_query: &str,
+    search_focus: Rc<OnceCell<FocusHandle>>,
+    on_search: FSearch,
+    on_clear: FClear,
+    on_open: FOpen,
+    on_confirm: FConfirm,
+    on_cancel: FCancel,
+    on_select: FSelect,
+    on_remove: FRemove,
+) -> impl IntoElement
+where
+    FClear: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
+    FOpen: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
+    FConfirm: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
+    FCancel: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
+    FSelect: Fn(i32, &mut Window, &mut App) + 'static + Clone,
+    FRemove: Fn(i32, &mut Window, &mut App) + 'static + Clone,
+    FSearch: Fn(String, &mut Window, &mut App) + 'static + Clone,
+{
+    champion_picker_inner(
+        id,
+        selected_ids,
+        is_open,
+        search_query,
+        Some(search_focus),
+        on_search,
+        on_clear,
+        on_open,
+        on_confirm,
+        on_cancel,
+        on_select,
+        on_remove,
+    )
+}
+
+/// 英雄选择器内部渲染：search_focus 为 Some 时展开真实文本输入框（复用 text_field，支持 IME）。
+#[allow(clippy::too_many_arguments)]
+fn champion_picker_inner<FClear, FOpen, FConfirm, FCancel, FSelect, FRemove, FSearch>(
+    id: ElementId,
+    selected_ids: &[i32],
+    is_open: bool,
+    search_query: &str,
+    search_focus: Option<Rc<OnceCell<FocusHandle>>>,
+    on_search: FSearch,
+    on_clear: FClear,
+    on_open: FOpen,
+    on_confirm: FConfirm,
+    on_cancel: FCancel,
+    on_select: FSelect,
+    on_remove: FRemove,
+) -> impl IntoElement
+where
+    FClear: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
+    FOpen: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
+    FConfirm: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
+    FCancel: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
+    FSelect: Fn(i32, &mut Window, &mut App) + 'static + Clone,
+    FRemove: Fn(i32, &mut Window, &mut App) + 'static + Clone,
+    FSearch: Fn(String, &mut Window, &mut App) + 'static + Clone,
 {
     let has_selected = !selected_ids.is_empty();
     let q = search_query.trim().to_lowercase();
@@ -341,7 +430,7 @@ where
         .collect();
 
     let open_click = on_open.clone();
-    let close_click = on_close.clone();
+    let cancel_click = on_cancel.clone();
 
     div()
         .id(id)
@@ -479,7 +568,7 @@ where
                                 .hover(|s| s.opacity(0.85))
                                 .on_mouse_down(MouseButton::Left, move |ev, win, app| {
                                     if is_open {
-                                        close_click(ev, win, app);
+                                        cancel_click(ev, win, app);
                                     } else {
                                         open_click(ev, win, app);
                                     }
@@ -490,7 +579,8 @@ where
         )
         // 2. 展开态选择面板
         .when(is_open, |this| {
-            let close_cb = on_close.clone();
+            let confirm_cb = on_confirm.clone();
+            let cancel_cb = on_cancel.clone();
             this.child(
                 div()
                     .w_full()
@@ -503,7 +593,7 @@ where
                     .flex()
                     .flex_col()
                     .gap(px(10.0))
-                    // 顶部标题与关闭
+                    // 顶部标题与关闭（✕ 为取消，回滚打开前配置）
                     .child(
                         div()
                             .flex()
@@ -514,7 +604,7 @@ where
                                     .text_size(px(12.5))
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(Theme::TEXT_PRIMARY)
-                                    .child("点选常用英雄 (单选替换)"),
+                                    .child(format!("点选常用英雄 (最多 {} 位)", PICKER_MAX_COUNT)),
                             )
                             .child(
                                 div()
@@ -522,10 +612,20 @@ where
                                     .text_color(Theme::TEXT_MUTED)
                                     .cursor_pointer()
                                     .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
-                                    .on_mouse_down(MouseButton::Left, close_cb.clone())
+                                    .on_mouse_down(MouseButton::Left, cancel_cb.clone())
                                     .child("✕"),
                             ),
                     )
+                    // [D06-a] 真实文本输入（IME / 粘贴 / 退格），写入视图层的搜索词
+                    .when_some(search_focus, |this, focus| {
+                        let on_change = on_search.clone();
+                        this.child(picker_search_field(
+                            "champ-picker-search",
+                            search_query,
+                            focus,
+                            on_change,
+                        ))
+                    })
                     // 英雄网格
                     .child(
                         div()
@@ -590,7 +690,7 @@ where
                                     })
                             })),
                     )
-                    // 底部确认
+                    // 底部确认（[D06-c] 完成才落盘）
                     .child(
                         div()
                             .flex()
@@ -603,7 +703,11 @@ where
                                 div()
                                     .text_size(px(11.5))
                                     .text_color(Theme::TEXT_MUTED)
-                                    .child(format!("已配置 {} 位英雄", selected_ids.len())),
+                                    .child(format!(
+                                        "已配置 {} / 上限 {} 位英雄",
+                                        selected_ids.len(),
+                                        PICKER_MAX_COUNT
+                                    )),
                             )
                             .child(
                                 div()
@@ -616,12 +720,76 @@ where
                                     .text_color(gpui::white())
                                     .cursor_pointer()
                                     .hover(|s| s.opacity(0.85))
-                                    .on_mouse_down(MouseButton::Left, close_cb)
+                                    .on_mouse_down(MouseButton::Left, confirm_cb)
                                     .child("完成"),
                             ),
                     ),
             )
         })
+}
+
+/// [D06-a] 选择器搜索输入框：复用 `text_field`（支持 IME 组合、退格、粘贴），
+/// 首次点击时惰性创建 FocusHandle（FocusHandle 只能由 App 创建）。
+fn picker_search_field(
+    id: &'static str,
+    text: &str,
+    focus_cell: Rc<OnceCell<FocusHandle>>,
+    on_change: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
+) -> AnyElement {
+    if let Some(handle) = focus_cell.get().cloned() {
+        let clear_cb = on_change.clone();
+        return div()
+            .w(px(240.0))
+            .child(text_field(
+                id,
+                text,
+                "搜索英雄名称 / 拼音 / ID…",
+                px(240.0),
+                &handle,
+                false,
+                TextFieldOptions {
+                    max_chars: Some(40),
+                    ..Default::default()
+                },
+                on_change,
+                move |win, app| clear_cb(String::new(), win, app),
+                |_text, _win, _app| {},
+            ))
+            .into_any_element();
+    }
+
+    let cell = focus_cell.clone();
+    div()
+        .id(id)
+        .w(px(240.0))
+        .h(px(30.0))
+        .rounded_lg()
+        .bg(Theme::CARD_BG)
+        .border_1()
+        .border_color(Theme::CARD_BORDER)
+        .px(px(10.0))
+        .flex()
+        .items_center()
+        .cursor_text()
+        .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+            let handle = cell.get_or_init(|| app.focus_handle()).clone();
+            window.focus(&handle);
+        })
+        .child(
+            div()
+                .text_size(px(12.5))
+                .text_color(if text.is_empty() {
+                    Theme::TEXT_MUTED
+                } else {
+                    Theme::TEXT_PRIMARY
+                })
+                .child(if text.is_empty() {
+                    "搜索英雄名称 / 拼音 / ID…".to_string()
+                } else {
+                    text.to_string()
+                }),
+        )
+        .into_any_element()
 }
 
 /// 召唤师技能选择器组件（D / F 两槽位卡片 + 展开网格面板）
@@ -878,9 +1046,15 @@ where
 }
 
 /// 称号与挑战勋章自定义装配弹窗（对齐 Vue `BadgesPreferencesCard.vue`）
+///
+/// D11：候选列表换成 `services::challenges` 读取的真实拥有称号/勋章，支持称号搜索、
+/// 勋章搜索、段位筛选、槽位移除、加载/错误/重试。选中态由 `render_panel` 传入的
+/// `selected_badges` / `selected_title` 决定；弹层会话状态由
+/// `personalization::badges_view_state()` 投影提供（调用点按工单边界不可修改）。
+/// 所有交互复用既有 4 个回调，`on_toggle_badge(String)` 以「前缀:值」承载弹层指令。
 pub fn badges_modal<FClose, FToggleBadge, FClear, FSave>(
     selected_badges: &[String],
-    _selected_title: &str,
+    selected_title: &str,
     on_close: FClose,
     on_toggle_badge: FToggleBadge,
     on_clear: FClear,
@@ -888,11 +1062,160 @@ pub fn badges_modal<FClose, FToggleBadge, FClear, FSave>(
 ) -> impl IntoElement
 where
     FClose: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
-    FToggleBadge: Fn(&'static str, &mut Window, &mut App) + 'static + Clone,
+    FToggleBadge: Fn(String, &mut Window, &mut App) + 'static + Clone,
     FClear: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
     FSave: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
 {
+    use crate::components::text_field::{text_field, TextFieldOptions};
+    use crate::views::tools::personalization::badges_view_state;
+    use std::cell::OnceCell;
+    use std::rc::Rc;
+
+    // gpui 0.2 的 FocusHandle 只能由 App 创建；渲染线程本地惰性持有两个搜索框焦点
+    thread_local! {
+        static BADGE_SEARCH_FOCUS: Rc<OnceCell<FocusHandle>> = Rc::new(OnceCell::new());
+        static TITLE_SEARCH_FOCUS: Rc<OnceCell<FocusHandle>> = Rc::new(OnceCell::new());
+    }
+
+    fn matches_tier(level: &str, filter: &str) -> bool {
+        let lvl = level.to_uppercase();
+        match filter {
+            "apex" => matches!(lvl.as_str(), "CHALLENGER" | "GRANDMASTER"),
+            "high" => matches!(lvl.as_str(), "MASTER" | "DIAMOND"),
+            "mid" => matches!(lvl.as_str(), "PLATINUM" | "EMERALD" | "GOLD"),
+            "low" => matches!(lvl.as_str(), "SILVER" | "BRONZE" | "IRON"),
+            _ => true,
+        }
+    }
+
+    fn level_label(level: &str) -> &'static str {
+        match level.to_uppercase().as_str() {
+            "CHALLENGER" => "王者",
+            "GRANDMASTER" => "宗师",
+            "MASTER" => "大师",
+            "DIAMOND" => "钻石",
+            "EMERALD" => "翡翠",
+            "PLATINUM" => "铂金",
+            "GOLD" => "黄金",
+            "SILVER" => "白银",
+            "BRONZE" => "黄铜",
+            "IRON" => "黑铁",
+            _ => "未定级",
+        }
+    }
+
+    let state = badges_view_state();
+    let loading = state.loading;
+    let error = state.error.clone();
+    let tier_filter = state.tier_filter.clone();
+    let badge_query = state.badge_search.trim().to_lowercase();
+    let title_query = state.title_search.trim().to_lowercase();
+
+    let filtered_badges: Vec<_> = state
+        .owned_badges
+        .iter()
+        .filter(|b| {
+            let text_ok = badge_query.is_empty()
+                || b.name.to_lowercase().contains(&badge_query)
+                || b.description.to_lowercase().contains(&badge_query);
+            text_ok && matches_tier(&b.level, &tier_filter)
+        })
+        .collect();
+    let filtered_titles: Vec<_> = state
+        .owned_titles
+        .iter()
+        .filter(|t| title_query.is_empty() || t.name.to_lowercase().contains(&title_query))
+        .collect();
+
+    let tier_filters: Vec<(&'static str, &'static str)> = vec![
+        ("all", "全部段位"),
+        ("apex", "王者/宗师"),
+        ("high", "大师/钻石"),
+        ("mid", "铂金/黄金"),
+        ("low", "白银及以下"),
+    ];
+
+    // 惰性创建焦点的搜索框闭包（对齐 spectate.rs 的 lazy_text_field 模式）
+    let on_cmd = on_toggle_badge.clone();
+    let render_search = move |id: &'static str,
+                              text: String,
+                              placeholder: &'static str,
+                              cmd: &'static str,
+                              focus_cell: Rc<OnceCell<FocusHandle>>|
+     -> AnyElement {
+        let send_change = on_cmd.clone();
+        let send_clear = on_cmd.clone();
+        if let Some(handle) = focus_cell.get().cloned() {
+            return div()
+                .w(px(190.0))
+                .child(text_field(
+                    id,
+                    &text,
+                    placeholder,
+                    px(190.0),
+                    &handle,
+                    false,
+                    TextFieldOptions {
+                        max_chars: Some(64),
+                        ..Default::default()
+                    },
+                    move |next, win, app| send_change(format!("{}:{}", cmd, next), win, app),
+                    move |win, app| send_clear(format!("{}:", cmd), win, app),
+                    move |_s, _win, _app| {},
+                ))
+                .into_any_element();
+        }
+        let cell = focus_cell.clone();
+        div()
+            .id(id)
+            .w(px(190.0))
+            .h(px(30.0))
+            .rounded_md()
+            .bg(Theme::CARD_BG)
+            .border_1()
+            .border_color(Theme::CARD_BORDER)
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .text_size(px(12.0))
+            .text_color(Theme::TEXT_MUTED)
+            .cursor_text()
+            .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+                let handle = cell.get_or_init(|| app.focus_handle()).clone();
+                window.focus(&handle);
+            })
+            .child(if text.is_empty() {
+                placeholder.to_string()
+            } else {
+                text
+            })
+            .into_any_element()
+    };
+
+    let badge_focus = BADGE_SEARCH_FOCUS.with(|c| c.clone());
+    let title_focus = TITLE_SEARCH_FOCUS.with(|c| c.clone());
+    let title_search_box = render_search(
+        "badges-title-search",
+        state.title_search.clone(),
+        "搜索拥有的称号…",
+        "titlesearch",
+        title_focus,
+    );
+    let badge_search_box = render_search(
+        "badges-badge-search",
+        state.badge_search.clone(),
+        "搜索勋章名称或说明…",
+        "search",
+        badge_focus,
+    );
+
     let close_cb = on_close.clone();
+    let cancel_cb = on_close.clone();
+    let retry_cb = on_toggle_badge.clone();
+    let filter_cb = on_toggle_badge.clone();
+    let title_cb = on_toggle_badge.clone();
+    let remove_cb = on_toggle_badge.clone();
+    let toggle_cb = on_toggle_badge.clone();
 
     deferred(
         div()
@@ -905,8 +1228,8 @@ where
             .justify_center()
             .child(
                 div()
-                    .w(px(540.0))
-                    .max_h(px(580.0))
+                    .w(px(640.0))
+                    .max_h(px(600.0))
                     .bg(rgb(0xffffff))
                     .rounded_xl()
                     .shadow_lg()
@@ -915,8 +1238,8 @@ where
                     .p(px(20.0))
                     .flex()
                     .flex_col()
-                    .gap(px(14.0))
-                    // 弹窗标题
+                    .gap(px(12.0))
+                    // 弹窗标题 + 关闭（取消，零写入）
                     .child(
                         div()
                             .flex()
@@ -942,176 +1265,367 @@ where
                                     .child("✕"),
                             ),
                     )
-                    // 称号区
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .text_size(px(12.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child("当前称号: 无可匹敌"),
-                            ),
-                    )
-                    // 3 个勋章槽位卡
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .text_size(px(12.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child(format!("挑战勋章槽位 ({}/3)", selected_badges.len())),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(10.0))
-                                    .children((0..3).map(|idx| {
-                                        let badge_id_opt = selected_badges.get(idx);
-                                        let badge_detail = badge_id_opt.and_then(|id| {
-                                            MOCK_BADGES.iter().find(|b| b.id == id.as_str())
-                                        });
-
-                                        div()
-                                            .flex_1()
-                                            .h(px(54.0))
-                                            .p(px(8.0))
-                                            .rounded_lg()
-                                            .border_1()
-                                            .border_color(if badge_detail.is_some() {
-                                                Theme::SIDEBAR_ACTIVE_BORDER
-                                            } else {
-                                                Theme::CARD_BORDER
-                                            })
-                                            .bg(if badge_detail.is_some() {
-                                                Theme::ACCENT_LIGHT
-                                            } else {
-                                                Theme::HOVER_BG
-                                            })
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .child(match badge_detail {
-                                                Some(b) => div()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .items_center()
-                                                    .child(
-                                                        div()
-                                                            .text_size(px(12.0))
-                                                            .font_weight(FontWeight::BOLD)
-                                                            .text_color(Theme::ACCENT_PRIMARY)
-                                                            .child(b.name),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_size(px(10.0))
-                                                            .text_color(Theme::TEXT_MUTED)
-                                                            .child("已佩戴"),
-                                                    ),
-                                                None => div()
-                                                    .text_size(px(11.5))
-                                                    .text_color(Theme::TEXT_MUTED)
-                                                    .child(format!("槽位 {}", idx + 1)),
-                                            })
-                                    })),
-                            ),
-                    )
-                    // 挑战勋章候选列表
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .child("点击可选勋章加入或卸下槽位:"),
-                            )
-                            .child(
-                                div()
-                                    .w_full()
-                                    .id("badges-modal-list-scroll")
-                                    .max_h(px(180.0))
-                                    .overflow_y_scroll()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(6.0))
-                                    .children(MOCK_BADGES.iter().map(|b| {
-                                        let is_equipped = selected_badges.iter().any(|id| id == b.id);
-                                        let bid = b.id;
-                                        let toggle_cb = on_toggle_badge.clone();
-
-                                        div()
-                                            .w_full()
-                                            .px(px(12.0))
-                                            .py(px(8.0))
-                                            .rounded_md()
-                                            .border_1()
-                                            .border_color(if is_equipped {
-                                                Theme::ACCENT_PRIMARY
-                                            } else {
-                                                Theme::CARD_BORDER
-                                            })
-                                            .bg(if is_equipped {
-                                                Theme::ACCENT_LIGHT
-                                            } else {
-                                                Theme::CARD_BG
-                                            })
-                                            .flex()
-                                            .items_center()
-                                            .justify_between()
-                                            .cursor_pointer()
-                                            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
-                                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                toggle_cb(bid, win, app)
-                                            })
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .gap(px(1.0))
-                                                    .child(
-                                                        div()
-                                                            .text_size(px(12.5))
-                                                            .font_weight(FontWeight::SEMIBOLD)
-                                                            .text_color(Theme::TEXT_PRIMARY)
-                                                            .child(b.name),
-                                                    )
-                                                    .child(
+                    // 加载态 / 错误态（含重试入口）
+                    .when(loading, |this| {
+                        this.child(
+                            div()
+                                .p(px(24.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_size(px(12.5))
+                                .text_color(Theme::TEXT_MUTED)
+                                .child("正在读取您的挑战与称号数据…"),
+                        )
+                    })
+                    .when_some(error, |this, err| {
+                        let act = retry_cb.clone();
+                        this.child(
+                            div()
+                                .p(px(10.0))
+                                .rounded_md()
+                                .bg(Theme::LOSS_BG)
+                                .border_1()
+                                .border_color(Theme::LOSS_BORDER)
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap(px(10.0))
+                                .child(
+                                    div()
+                                        .text_size(px(12.0))
+                                        .text_color(Theme::LOSS_TEXT)
+                                        .child(err.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .px(px(12.0))
+                                        .py(px(4.0))
+                                        .rounded_md()
+                                        .border_1()
+                                        .border_color(Theme::LOSS_BORDER)
+                                        .text_size(px(12.0))
+                                        .text_color(Theme::LOSS_TEXT)
+                                        .cursor_pointer()
+                                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                            act("retry".to_string(), win, app)
+                                        })
+                                        .child("重新加载"),
+                                ),
+                        )
+                    })
+                    // 称号区（真实拥有列表 + 搜索）
+                    .when(!loading, |this| {
+                        this.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(6.0))
+                                .child(
+                                    div()
+                                        .text_size(px(12.5))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .child(format!("佩戴称号（当前: {}）",
+                                            if selected_title.is_empty() { "无称号" } else { selected_title })),
+                                )
+                                .child(title_search_box)
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .id("badges-title-scroll")
+                                        .max_h(px(72.0))
+                                        .overflow_y_scroll()
+                                        .flex()
+                                        .flex_wrap()
+                                        .gap(px(6.0))
+                                        // 「（无称号）」
+                                        .child({
+                                            let act = title_cb.clone();
+                                            let active = selected_title.is_empty()
+                                                || selected_title == "0"
+                                                || selected_title == "-1";
+                                            div()
+                                                .px(px(10.0))
+                                                .py(px(4.0))
+                                                .rounded_md()
+                                                .border_1()
+                                                .border_color(if active {
+                                                    Theme::ACCENT_PRIMARY
+                                                } else {
+                                                    Theme::CARD_BORDER
+                                                })
+                                                .bg(if active {
+                                                    Theme::ACCENT_LIGHT
+                                                } else {
+                                                    Theme::HOVER_BG
+                                                })
+                                                .text_size(px(11.5))
+                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .cursor_pointer()
+                                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                    act("title:".to_string(), win, app)
+                                                })
+                                                .child("（无称号）")
+                                        })
+                                        .children(filtered_titles.into_iter().map(|t| {
+                                            let act = title_cb.clone();
+                                            let id = t.id.clone();
+                                            let active = selected_title == t.id;
+                                            div()
+                                                .px(px(10.0))
+                                                .py(px(4.0))
+                                                .rounded_md()
+                                                .border_1()
+                                                .border_color(if active {
+                                                    Theme::ACCENT_PRIMARY
+                                                } else {
+                                                    Theme::CARD_BORDER
+                                                })
+                                                .bg(if active {
+                                                    Theme::ACCENT_LIGHT
+                                                } else {
+                                                    Theme::HOVER_BG
+                                                })
+                                                .text_size(px(11.5))
+                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .cursor_pointer()
+                                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                    act(format!("title:{}", id), win, app)
+                                                })
+                                                .child(t.name.clone())
+                                        })),
+                                ),
+                        )
+                    })
+                    // 3 个勋章槽位（真实名称 + 可移除）
+                    .when(!loading, |this| {
+                        this.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(6.0))
+                                .child(
+                                    div()
+                                        .text_size(px(12.5))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .child(format!("已选挑战勋章 ({}/3)", selected_badges.len())),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(10.0))
+                                        .children((0..3).map(|idx| {
+                                            let bid_opt = selected_badges.get(idx);
+                                            let detail_name = bid_opt.and_then(|id| {
+                                                state
+                                                    .owned_badges
+                                                    .iter()
+                                                    .find(|b| b.id == *id)
+                                                    .map(|b| b.name.clone())
+                                            });
+                                            let act = remove_cb.clone();
+                                            let has = detail_name.is_some();
+                                            div()
+                                                .flex_1()
+                                                .h(px(50.0))
+                                                .p(px(8.0))
+                                                .rounded_lg()
+                                                .border_1()
+                                                .border_color(if has {
+                                                    Theme::SIDEBAR_ACTIVE_BORDER
+                                                } else {
+                                                    Theme::CARD_BORDER
+                                                })
+                                                .bg(if has {
+                                                    Theme::ACCENT_LIGHT
+                                                } else {
+                                                    Theme::HOVER_BG
+                                                })
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .gap(px(6.0))
+                                                .child(
+                                                    div()
+                                                        .text_size(px(11.5))
+                                                        .text_color(if has {
+                                                            Theme::ACCENT_PRIMARY
+                                                        } else {
+                                                            Theme::TEXT_MUTED
+                                                        })
+                                                        .child(match &detail_name {
+                                                            Some(n) => n.clone(),
+                                                            None => format!("槽位 {} (空)", idx + 1),
+                                                        }),
+                                                )
+                                                .when(has, |s| {
+                                                    s.child(
                                                         div()
                                                             .text_size(px(11.0))
                                                             .text_color(Theme::TEXT_MUTED)
-                                                            .child(b.desc),
-                                                    ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .px(px(8.0))
-                                                    .py(px(2.0))
-                                                    .rounded_md()
-                                                    .text_size(px(11.0))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(if is_equipped {
-                                                        Theme::ACCENT_PRIMARY
-                                                    } else {
-                                                        Theme::TEXT_MUTED
-                                                    })
-                                                    .child(if is_equipped { "已装备" } else { "装备" }),
-                                            )
-                                    })),
-                            ),
-                    )
-                    // 底部操作栏
+                                                            .cursor_pointer()
+                                                            .hover(|s| s.text_color(Theme::LOSS_TEXT))
+                                                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                                act(format!("remove:{}", idx), win, app)
+                                                            })
+                                                            .child("✕"),
+                                                    )
+                                                })
+                                        })),
+                                ),
+                        )
+                    })
+                    // 候选勋章库：搜索 + 段位筛选 + 真实列表
+                    .when(!loading, |this| {
+                        this.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(6.0))
+                                .child(
+                                    div()
+                                        .text_size(px(12.0))
+                                        .text_color(Theme::TEXT_MUTED)
+                                        .child(format!("候选勋章库（已获 {} 枚）", state.owned_badges.len())),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(8.0))
+                                        .child(badge_search_box)
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_wrap()
+                                                .gap(px(4.0))
+                                                .children(tier_filters.into_iter().map(|(val, label)| {
+                                                    let act = filter_cb.clone();
+                                                    let active = tier_filter == val;
+                                                    div()
+                                                        .px(px(8.0))
+                                                        .py(px(3.0))
+                                                        .rounded_md()
+                                                        .border_1()
+                                                        .border_color(if active {
+                                                            Theme::ACCENT_PRIMARY
+                                                        } else {
+                                                            Theme::CARD_BORDER
+                                                        })
+                                                        .bg(if active {
+                                                            Theme::ACCENT_LIGHT
+                                                        } else {
+                                                            Theme::CARD_BG
+                                                        })
+                                                        .text_size(px(11.0))
+                                                        .text_color(Theme::TEXT_SECONDARY)
+                                                        .cursor_pointer()
+                                                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                            act(format!("filter:{}", val), win, app)
+                                                        })
+                                                        .child(label)
+                                                })),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .id("badges-modal-list-scroll")
+                                        .max_h(px(180.0))
+                                        .overflow_y_scroll()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(6.0))
+                                        .children(filtered_badges.into_iter().map(|b| {
+                                            let is_equipped = selected_badges.iter().any(|id| id == &b.id);
+                                            let bid = b.id.clone();
+                                            let act = toggle_cb.clone();
+                                            let level = level_label(&b.level);
+
+                                            div()
+                                                .w_full()
+                                                .px(px(12.0))
+                                                .py(px(8.0))
+                                                .rounded_md()
+                                                .border_1()
+                                                .border_color(if is_equipped {
+                                                    Theme::ACCENT_PRIMARY
+                                                } else {
+                                                    Theme::CARD_BORDER
+                                                })
+                                                .bg(if is_equipped {
+                                                    Theme::ACCENT_LIGHT
+                                                } else {
+                                                    Theme::CARD_BG
+                                                })
+                                                .flex()
+                                                .items_center()
+                                                .justify_between()
+                                                .cursor_pointer()
+                                                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                    act(bid.clone(), win, app)
+                                                })
+                                                .child(
+                                                    div()
+                                                        .flex()
+                                                        .flex_col()
+                                                        .gap(px(1.0))
+                                                        .child(
+                                                            div()
+                                                                .text_size(px(12.5))
+                                                                .font_weight(FontWeight::SEMIBOLD)
+                                                                .text_color(Theme::TEXT_PRIMARY)
+                                                                .child(b.name.clone()),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .text_size(px(11.0))
+                                                                .text_color(Theme::TEXT_MUTED)
+                                                                .child(if b.description.is_empty() {
+                                                                    "暂无描述".to_string()
+                                                                } else {
+                                                                    b.description.clone()
+                                                                }),
+                                                        ),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(px(6.0))
+                                                        .child(
+                                                            div()
+                                                                .px(px(6.0))
+                                                                .py(px(2.0))
+                                                                .rounded_md()
+                                                                .text_size(px(10.5))
+                                                                .text_color(Theme::TEXT_MUTED)
+                                                                .child(level),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .px(px(8.0))
+                                                                .py(px(2.0))
+                                                                .rounded_md()
+                                                                .text_size(px(11.0))
+                                                                .font_weight(FontWeight::MEDIUM)
+                                                                .text_color(if is_equipped {
+                                                                    Theme::ACCENT_PRIMARY
+                                                                } else {
+                                                                    Theme::TEXT_MUTED
+                                                                })
+                                                                .child(if is_equipped { "已装备" } else { "装备" }),
+                                                        ),
+                                                )
+                                        })),
+                                ),
+                        )
+                    })
+                    // 底部操作栏：清空 / 取消（零写入）/ 保存
                     .child(
                         div()
                             .flex()
@@ -1137,17 +1651,38 @@ where
                             )
                             .child(
                                 div()
-                                    .px(px(18.0))
-                                    .py(px(6.0))
-                                    .rounded_md()
-                                    .bg(Theme::ACCENT_PRIMARY)
-                                    .text_size(px(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(gpui::white())
-                                    .cursor_pointer()
-                                    .hover(|s| s.opacity(0.85))
-                                    .on_mouse_down(MouseButton::Left, on_save)
-                                    .child("保存装配"),
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(
+                                        div()
+                                            .px(px(14.0))
+                                            .py(px(6.0))
+                                            .rounded_md()
+                                            .border_1()
+                                            .border_color(Theme::CARD_BORDER)
+                                            .bg(Theme::CARD_BG)
+                                            .text_size(px(12.0))
+                                            .text_color(Theme::TEXT_SECONDARY)
+                                            .cursor_pointer()
+                                            .hover(|s| s.bg(Theme::HOVER_BG))
+                                            .on_mouse_down(MouseButton::Left, cancel_cb)
+                                            .child("取消"),
+                                    )
+                                    .child(
+                                        div()
+                                            .px(px(18.0))
+                                            .py(px(6.0))
+                                            .rounded_md()
+                                            .bg(Theme::ACCENT_PRIMARY)
+                                            .text_size(px(12.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(gpui::white())
+                                            .cursor_pointer()
+                                            .hover(|s| s.opacity(0.85))
+                                            .on_mouse_down(MouseButton::Left, on_save)
+                                            .child("保存装配"),
+                                    ),
                             ),
                     ),
             ),

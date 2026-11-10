@@ -16,11 +16,31 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use yuumi_core::agents::ChampSelectSession;
 use yuumi_core::lcu::game_data::GameDataAssets;
 
 /// 悬浮窗坐标持久化文件名（位于应用数据目录）
 const OVERLAY_LAYOUT_FILE: &str = "bench-overlay.json";
+
+/// [D07-a] 本会话用户是否已主动隐藏板凳席悬浮窗。
+/// 置位后 WS 选人事件不再让主窗重建窗口；进入下一轮选人时由 live_lcu 分派点重置。
+static BENCH_USER_HIDDEN: AtomicBool = AtomicBool::new(false);
+
+/// [D07-a] 标记用户已隐藏（关闭按钮调用）。
+pub fn mark_bench_user_hidden() {
+    BENCH_USER_HIDDEN.store(true, Ordering::SeqCst);
+}
+
+/// [D07-a] 当前会话是否已被用户隐藏。
+pub fn bench_user_hidden() -> bool {
+    BENCH_USER_HIDDEN.load(Ordering::SeqCst)
+}
+
+/// [D07-a] 新一轮选人 / 用户主动打开时清除隐藏标志。
+pub fn reset_bench_user_hidden() {
+    BENCH_USER_HIDDEN.store(false, Ordering::SeqCst);
+}
 
 /// 悬浮窗左上角坐标
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -95,6 +115,8 @@ pub struct BenchOverlayView {
     rerolls_remaining: i32,
     /// 正在提交换人请求的英雄 ID（用于禁用重复点击）
     pending_champion: Option<i32>,
+    /// 摇号 / 摇号换回请求进行中，用于连点去重
+    pending_reroll: bool,
     /// 最近一次操作反馈
     status: Option<SharedString>,
     /// 窗口边界变化监听句柄
@@ -113,6 +135,7 @@ impl BenchOverlayView {
             queue_id: 0,
             rerolls_remaining: 0,
             pending_champion: None,
+            pending_reroll: false,
             status: None,
             _bounds_subscription: None,
             _save_task: None,
@@ -191,6 +214,7 @@ impl BenchOverlayView {
         self.queue_id = 0;
         self.rerolls_remaining = 0;
         self.pending_champion = None;
+        self.pending_reroll = false;
         self.status = None;
         cx.notify();
     }
@@ -263,9 +287,10 @@ impl BenchOverlayView {
 
     /// 摇号（重随）当前英雄
     fn reroll(&mut self, cx: &mut Context<Self>) {
-        if self.pending_champion.is_some() {
+        if self.pending_champion.is_some() || self.pending_reroll {
             return;
         }
+        self.pending_reroll = true;
         self.status = Some("摇号中…".into());
         cx.notify();
 
@@ -280,6 +305,7 @@ impl BenchOverlayView {
                 log::warn!("[BenchOverlay] {}", e);
             }
             let _ = this.update(cx, |view, cx| {
+                view.pending_reroll = false;
                 view.status = Some(message);
                 cx.notify();
             });
@@ -289,9 +315,10 @@ impl BenchOverlayView {
 
     /// 摇号并瞬时换回原英雄
     fn reroll_and_restore(&mut self, cx: &mut Context<Self>) {
-        if self.pending_champion.is_some() {
+        if self.pending_champion.is_some() || self.pending_reroll {
             return;
         }
+        self.pending_reroll = true;
         self.status = Some("摇号换回中…".into());
         cx.notify();
 
@@ -306,6 +333,7 @@ impl BenchOverlayView {
                 log::warn!("[BenchOverlay] {}", e);
             }
             let _ = this.update(cx, |view, cx| {
+                view.pending_reroll = false;
                 view.status = Some(message);
                 cx.notify();
             });
@@ -617,6 +645,8 @@ impl Render for BenchOverlayView {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 |_ev, window, _app| {
+                                    // [D07-a] 用户主动隐藏：置位后本轮选人不再被重复事件自动打开
+                                    mark_bench_user_hidden();
                                     window.remove_window();
                                 },
                             ),

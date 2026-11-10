@@ -13,8 +13,12 @@
 //! 严格依照 [05-6-GPUI_TOOLS_SETTINGS_STYLE_PARITY.md] 规范实现 21 行：
 //! 13 张折叠卡 + 8 个直显行。
 
+pub mod client_ops;
 pub mod components;
 pub mod data;
+pub mod personalization;
+pub mod selectors;
+pub mod spectate;
 
 use crate::components::badge::{Badge, BadgeVariant};
 use crate::components::collapse_card::{collapse_card, lane_tabs, number_stepper, setting_row};
@@ -146,6 +150,17 @@ pub struct ToolsView {
     pub cleaner_search: String,
     pub cleaner_selected_ids: HashSet<String>,
 
+    /// 好友扫描结果（来自 LCU `/lol-chat/v1/friends` 真实数据） // [D01]
+    pub cleaner_friends: Vec<crate::services::friend_cleaner::CleanerFriend>, // [D01]
+    /// 好友扫描进行中 // [D01]
+    pub cleaner_scanning: bool, // [D01]
+    /// 好友搜索框文本（文本框回调直接写入，渲染时参与真实过滤） // [D01]
+    pub cleaner_search_live: std::rc::Rc<std::cell::RefCell<String>>, // [D01]
+    /// 观战名称输入框焦点（首次点击惰性创建） // [D01]
+    pub spectate_name_focus: std::rc::Rc<std::cell::OnceCell<FocusHandle>>, // [D01]
+    /// 好友搜索框焦点（首次点击惰性创建） // [D01]
+    pub cleaner_search_focus: std::rc::Rc<std::cell::OnceCell<FocusHandle>>, // [D01]
+
     pub signature_buffer: String,
     pub profile_skin_id_buffer: String,
     pub bg_selected_champion: Option<i32>,
@@ -172,8 +187,34 @@ pub struct ToolsView {
     pub selected_badges: Vec<String>,
     pub selected_title: String,
 
+    /// 真实皮肤列表（选英雄后由 services::profile_background::load_skins 回写） // [D09/D11]
+    pub bg_skins: Vec<crate::services::profile_background::SkinInfo>, // [D09/D11]
+    /// 皮肤预览索引（上一个/下一个循环，取消零写入） // [D09/D11]
+    pub bg_preview_index: usize, // [D09/D11]
+    /// 皮肤列表加载中 // [D09/D11]
+    pub bg_loading: bool, // [D09/D11]
+    /// 加载/写入失败文案（含重试入口） // [D09/D11]
+    pub bg_error: Option<String>, // [D09/D11]
+    /// 回读到的当前主页背景皮肤 ID // [D09/D11]
+    pub bg_current_skin_id: Option<i32>, // [D09/D11]
+    /// 打开装配弹层时的选中快照（取消回滚，零写入） // [D09/D11]
+    pub badges_snapshot_badges: Vec<String>, // [D09/D11]
+    pub badges_snapshot_title: String, // [D09/D11]
+    /// 清除勋章 / 清除边框的二次确认框 // [D09/D11]
+    pub confirm_clear_badges: bool, // [D09/D11]
+    pub confirm_clear_border: bool, // [D09/D11]
+
     // 临时操作反馈文本
     pub status_feedback: Option<(String, bool)>,
+
+    /// 选用/禁用选择器搜索词（文本输入回调直接写入，渲染时参与过滤） // [D04-D07]
+    pub hover_picker_search_live: std::rc::Rc<std::cell::RefCell<String>>, // [D04-D07]
+    pub ban_picker_search_live: std::rc::Rc<std::cell::RefCell<String>>, // [D04-D07]
+    /// 选择器搜索框焦点（首次点击惰性创建） // [D04-D07]
+    pub hover_picker_focus: std::rc::Rc<std::cell::OnceCell<FocusHandle>>, // [D04-D07]
+    pub ban_picker_focus: std::rc::Rc<std::cell::OnceCell<FocusHandle>>, // [D04-D07]
+    /// 打开选择器前的 FunctionsConfig 快照（取消回滚，零写入） // [D04-D07]
+    pub picker_backup: Option<Box<yuumi_core::config::FunctionsConfig>>, // [D04-D07]
 }
 
 impl Default for ToolsView {
@@ -187,14 +228,6 @@ impl ToolsView {
         let mut open_cards = HashSet::new();
         // 默认展开高频卡片：自动接受对局
         open_cards.insert("autoaccept".to_string());
-
-        let mut cleaner_selected = HashSet::new();
-        cleaner_selected.insert("f1".to_string());
-        cleaner_selected.insert("f2".to_string());
-
-        let mut badges = Vec::new();
-        badges.push("b1".to_string());
-        badges.push("b2".to_string());
 
         Self {
             open_cards,
@@ -217,7 +250,13 @@ impl ToolsView {
             cleaner_has_scanned: false,
             cleaner_filter: "days180".to_string(),
             cleaner_search: String::new(),
-            cleaner_selected_ids: cleaner_selected,
+            cleaner_selected_ids: HashSet::new(),
+
+            cleaner_friends: Vec::new(), // [D01]
+            cleaner_scanning: false,     // [D01]
+            cleaner_search_live: std::rc::Rc::new(std::cell::RefCell::new(String::new())), // [D01]
+            spectate_name_focus: std::rc::Rc::new(std::cell::OnceCell::new()), // [D01]
+            cleaner_search_focus: std::rc::Rc::new(std::cell::OnceCell::new()), // [D01]
 
             signature_buffer: String::new(),
             profile_skin_id_buffer: String::new(),
@@ -239,10 +278,27 @@ impl ToolsView {
             open_spoof_division_dropdown: false,
 
             show_badges_modal: false,
-            selected_badges: badges,
-            selected_title: "t1".to_string(),
+            // 不再使用 b1/b2/t1 模拟数据：打开弹层时由真实偏好回读覆盖 // [D09/D11]
+            selected_badges: Vec::new(), // [D09/D11]
+            selected_title: String::new(), // [D09/D11]
+
+            bg_skins: Vec::new(), // [D09/D11]
+            bg_preview_index: 0, // [D09/D11]
+            bg_loading: false, // [D09/D11]
+            bg_error: None, // [D09/D11]
+            bg_current_skin_id: None, // [D09/D11]
+            badges_snapshot_badges: Vec::new(), // [D09/D11]
+            badges_snapshot_title: String::new(), // [D09/D11]
+            confirm_clear_badges: false, // [D09/D11]
+            confirm_clear_border: false, // [D09/D11]
 
             status_feedback: None,
+
+            hover_picker_search_live: std::rc::Rc::new(std::cell::RefCell::new(String::new())), // [D04-D07]
+            ban_picker_search_live: std::rc::Rc::new(std::cell::RefCell::new(String::new())), // [D04-D07]
+            hover_picker_focus: std::rc::Rc::new(std::cell::OnceCell::new()), // [D04-D07]
+            ban_picker_focus: std::rc::Rc::new(std::cell::OnceCell::new()), // [D04-D07]
+            picker_backup: None, // [D04-D07]
         }
     }
 
@@ -530,314 +586,6 @@ impl ToolsView {
     }
 
     // 行 3: 自动选用/预选英雄 (折叠卡 - T-V04)
-    fn render_auto_hover_card<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let enabled = config.functions.enable_auto_hover_champion;
-        let confirm_timeout = config.functions.auto_select_confirm_on_timeout;
-        let open = self.open_cards.contains("autohover");
-
-        let status = if enabled {
-            "已开启".to_string()
-        } else {
-            "未启用".to_string()
-        };
-
-        let current_lane = self.hover_active_lane;
-        let pick_list = match current_lane {
-            "top" => &config.functions.auto_select_champion_top,
-            "jug" => &config.functions.auto_select_champion_jug,
-            "mid" => &config.functions.auto_select_champion_mid,
-            "bot" => &config.functions.auto_select_champion_bot,
-            "sup" => &config.functions.auto_select_champion_sup,
-            _ => &config.functions.auto_select_champion,
-        };
-
-        let act_toggle = on_action.clone();
-        let act_hover = on_action.clone();
-        let act_timeout = on_action.clone();
-        let act_lane = on_action.clone();
-        let act_clear = on_action.clone();
-        let act_open_picker = on_action.clone();
-        let act_close_picker = on_action.clone();
-        let act_select_champ = on_action.clone();
-        let act_remove_champ = on_action.clone();
-
-        collapse_card(
-            "tools-card-autohover".into(),
-            open,
-            Some("icons/user.svg"),
-            "自动选用/预选英雄",
-            "选人阶段优先亮起意向英雄或按分路首选列表自动锁定",
-            Some(status),
-            move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("autohover"), win, app),
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(10.0))
-                // 开关 1: 开启自动选用
-                .child(setting_row(
-                    "开启自动选用",
-                    Some("进入选人阶段后自动亮起或选用当前分路预设英雄"),
-                    div()
-                        .cursor_pointer()
-                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                            act_hover(ToolsAction::ToggleAutoHover, win, app)
-                        })
-                        .child(Switch::new(enabled)),
-                ))
-                // 开关 2: 倒计时结束前自动确认
-                .child(setting_row(
-                    "倒计时结束前自动确认",
-                    Some("配合亮起意向模式使用，防止因超时未选被判秒退惩罚"),
-                    div()
-                        .cursor_pointer()
-                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                            act_timeout(ToolsAction::ToggleConfirmOnTimeout, win, app)
-                        })
-                        .child(Switch::new(confirm_timeout)),
-                ))
-                // 分路选择选项卡
-                .child(lane_tabs(current_lane, move |lane, win, app| {
-                    act_lane(ToolsAction::SetHoverLane(lane), win, app)
-                }))
-                // 英雄选择器组件
-                .child(champion_picker(
-                    "hover-champ-picker".into(),
-                    pick_list,
-                    self.open_hover_picker,
-                    &self.hover_picker_search,
-                    move |_ev, win, app| act_clear(ToolsAction::ClearPickChampion(current_lane), win, app),
-                    move |_ev, win, app| act_open_picker(ToolsAction::TogglePicker("hover"), win, app),
-                    move |_ev, win, app| act_close_picker(ToolsAction::TogglePicker("hover"), win, app),
-                    move |cid, win, app| {
-                        act_select_champ(
-                            ToolsAction::SetPickerChampion {
-                                lane: current_lane,
-                                is_ban: false,
-                                champion_id: cid,
-                            },
-                            win,
-                            app,
-                        )
-                    },
-                    move |_cid, win, app| {
-                        act_remove_champ(ToolsAction::ClearPickChampion(current_lane), win, app)
-                    },
-                )),
-        )
-    }
-
-    // 行 4: 自动禁用英雄 (折叠卡 - T-V04)
-    fn render_auto_ban_card<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let enabled = config.functions.enable_auto_ban_champion;
-        let pretend = config.functions.pretend_ban;
-        let delay = config.functions.auto_ban_delay;
-        let open = self.open_cards.contains("autoban");
-
-        let status = if enabled {
-            format!("已开启 · 延迟 {:.1}s", delay)
-        } else {
-            "未启用".to_string()
-        };
-
-        let current_lane = self.ban_active_lane;
-        let ban_list = match current_lane {
-            "top" => &config.functions.auto_ban_champion_top,
-            "jug" => &config.functions.auto_ban_champion_jug,
-            "mid" => &config.functions.auto_ban_champion_mid,
-            "bot" => &config.functions.auto_ban_champion_bot,
-            "sup" => &config.functions.auto_ban_champion_sup,
-            _ => &config.functions.auto_ban_champion,
-        };
-
-        let act_toggle = on_action.clone();
-        let act_switch = on_action.clone();
-        let act_pretend = on_action.clone();
-        let act_dec = on_action.clone();
-        let act_inc = on_action.clone();
-        let act_lane = on_action.clone();
-        let act_clear = on_action.clone();
-        let act_open_picker = on_action.clone();
-        let act_close_picker = on_action.clone();
-        let act_select_champ = on_action.clone();
-        let act_remove_champ = on_action.clone();
-
-        collapse_card(
-            "tools-card-autoban".into(),
-            open,
-            Some("icons/close.svg"),
-            "自动禁用英雄",
-            "禁用阶段自动锁定首选 ban 位，防止忘记禁英雄或超时秒退",
-            Some(status),
-            move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("autoban"), win, app),
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(10.0))
-                .child(setting_row(
-                    "开启自动禁用",
-                    Some("进入禁用阶段后自动执行英雄禁用"),
-                    div()
-                        .cursor_pointer()
-                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                            act_switch(ToolsAction::ToggleAutoBan, win, app)
-                        })
-                        .child(Switch::new(enabled)),
-                ))
-                .child(setting_row(
-                    "假装禁用",
-                    Some("先亮起预设禁用英雄，在禁用倒计时末尾才执行确认"),
-                    div()
-                        .cursor_pointer()
-                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                            act_pretend(ToolsAction::TogglePretendBan, win, app)
-                        })
-                        .child(Switch::new(pretend)),
-                ))
-                .child(setting_row(
-                    "禁用延迟",
-                    Some("禁用阶段等待指定秒数后再执行 (0~15 秒，步长 0.5s)"),
-                    number_stepper(
-                        "stepper-ban-delay".into(),
-                        format!("{:.1} 秒", delay),
-                        delay > 0.0,
-                        delay < 15.0,
-                        move |_ev, win, app| {
-                            act_dec(ToolsAction::SetAutoBanDelay((delay - 0.5).max(0.0)), win, app)
-                        },
-                        move |_ev, win, app| {
-                            act_inc(ToolsAction::SetAutoBanDelay((delay + 0.5).min(15.0)), win, app)
-                        },
-                    ),
-                ))
-                .child(lane_tabs(current_lane, move |lane, win, app| {
-                    act_lane(ToolsAction::SetBanLane(lane), win, app)
-                }))
-                // 英雄选择器组件
-                .child(champion_picker(
-                    "ban-champ-picker".into(),
-                    ban_list,
-                    self.open_ban_picker,
-                    &self.ban_picker_search,
-                    move |_ev, win, app| act_clear(ToolsAction::ClearBanChampion(current_lane), win, app),
-                    move |_ev, win, app| act_open_picker(ToolsAction::TogglePicker("ban"), win, app),
-                    move |_ev, win, app| act_close_picker(ToolsAction::TogglePicker("ban"), win, app),
-                    move |cid, win, app| {
-                        act_select_champ(
-                            ToolsAction::SetPickerChampion {
-                                lane: current_lane,
-                                is_ban: true,
-                                champion_id: cid,
-                            },
-                            win,
-                            app,
-                        )
-                    },
-                    move |_cid, win, app| {
-                        act_remove_champ(ToolsAction::ClearBanChampion(current_lane), win, app)
-                    },
-                )),
-        )
-    }
-
-    // 行 5: 自动设置召唤师技能 (折叠卡 - T-V05)
-    fn render_auto_spell_card<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let enabled = config.functions.enable_auto_set_spells;
-        let open = self.open_cards.contains("autospell");
-
-        let current_lane = self.spell_active_lane;
-        let spell_list = match current_lane {
-            "top" => &config.functions.auto_set_summoner_spell_top,
-            "jug" => &config.functions.auto_set_summoner_spell_jug,
-            "mid" => &config.functions.auto_set_summoner_spell_mid,
-            "bot" => &config.functions.auto_set_summoner_spell_bot,
-            "sup" => &config.functions.auto_set_summoner_spell_sup,
-            _ => &config.functions.auto_set_summoner_spell,
-        };
-
-        let spell1 = spell_list.first().copied().unwrap_or(4);
-        let spell2 = spell_list.get(1).copied().unwrap_or(14);
-
-        let status = if enabled {
-            format!("D: {} · F: {}", get_spell_name(spell1), get_spell_name(spell2))
-        } else {
-            "未启用".to_string()
-        };
-
-        let act_toggle = on_action.clone();
-        let act_switch = on_action.clone();
-        let act_lane = on_action.clone();
-        let act_slot_click = on_action.clone();
-        let act_select_spell1 = on_action.clone();
-        let act_select_spell2 = on_action.clone();
-        let act_close = on_action.clone();
-        let is_d_slot = self.spell_active_slot == Some("D");
-
-        collapse_card(
-            "tools-card-autospell".into(),
-            open,
-            Some("icons/wrench.svg"),
-            "自动设置召唤师技能",
-            "进入选人房间时自动校验并配置常用召唤师技能 (D/F 键)",
-            Some(status),
-            move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("autospell"), win, app),
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(10.0))
-                .child(setting_row(
-                    "开启自动设置技能",
-                    Some("进入选人房间时自动将技能切换为当前分路预设"),
-                    div()
-                        .cursor_pointer()
-                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                            act_switch(ToolsAction::ToggleAutoSpell, win, app)
-                        })
-                        .child(Switch::new(enabled)),
-                ))
-                .child(lane_tabs(current_lane, move |lane, win, app| {
-                    act_lane(ToolsAction::SetSpellLane(lane), win, app)
-                }))
-                .child(spell_picker(
-                    Some(spell1),
-                    Some(spell2),
-                    self.spell_active_slot,
-                    move |slot, win, app| act_slot_click(ToolsAction::TogglePicker(slot), win, app),
-                    move |sid, win, app| {
-                        act_select_spell1(
-                            ToolsAction::SetSpellId {
-                                lane: current_lane,
-                                is_spell1: is_d_slot,
-                                spell_id: sid,
-                            },
-                            win,
-                            app,
-                        )
-                    },
-                    move |slot, win, app| {
-                        let is_d = slot == "D";
-                        act_select_spell2(
-                            ToolsAction::SetSpellId {
-                                lane: current_lane,
-                                is_spell1: is_d,
-                                spell_id: 4,
-                            },
-                            win,
-                            app,
-                        )
-                    },
-                    move |_ev, win, app| act_close(ToolsAction::TogglePicker("close_spell"), win, app),
-                )),
-        )
-    }
 
     // ─────────────────────────────────────────────────────────────
     // 游戏组卡片与直显行实现
@@ -943,363 +691,6 @@ impl ToolsView {
         )
     }
 
-    // 行 7: 实时直接观战召唤师 (折叠卡 - T-V07)
-    fn render_spectate_card<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let open = self.open_cards.contains("spectate");
-        let act_toggle = on_action.clone();
-        let act_launch = on_action.clone();
-        let act_toggle_dd = on_action.clone();
-        let act_select_method = on_action.clone();
-
-        collapse_card(
-            "tools-card-spectate".into(),
-            open,
-            Some("icons/search.svg"),
-            "实时直接观战召唤师",
-            "输入游戏玩家召唤师名称或 Riot ID，直接调用游戏客户端引擎启动观战",
-            Some("点击展开".to_string()),
-            move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("spectate"), win, app),
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(10.0))
-                // 行 1: 召唤师输入框带内嵌后缀按钮
-                .child(setting_row(
-                    "召唤师名称",
-                    Some("输入目标召唤师昵称#TAG，直接启动对局实时观战"),
-                    suffix_input(
-                        "input-spectate-name".into(),
-                        &self.spectate_name_buffer,
-                        "输入游戏昵称#TAG...",
-                        "启动观战",
-                        false,
-                        300.0,
-                        move |_ev, win, app| act_launch(ToolsAction::LaunchSpectate, win, app),
-                    ),
-                ))
-                // 行 2: 120px 启动方式下拉框
-                .child(setting_row(
-                    "启动方式",
-                    Some("选择通过 LCU 原生客户端接口或 CMD 独立拉起游戏本体"),
-                    select_dropdown(
-                        "dropdown-spectate-method",
-                        120.0,
-                        if self.spectate_method == "CMD" { "CMD" } else { "LCU API" }.to_string(),
-                        self.open_spectate_method_dropdown,
-                        false,
-                        vec![("LCU", "LCU API"), ("CMD", "CMD")],
-                        move |win, app| act_toggle_dd(ToolsAction::ToggleDropdownMenu("spectate_method"), win, app),
-                        move |val, win, app| act_select_method(ToolsAction::SetSpectateMethod(val.to_string()), win, app),
-                    ),
-                )),
-        )
-    }
-
-    // 行 8: 好友管理与僵尸号清理 (折叠卡 - T-V08)
-    fn render_friend_cleaner_card<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let open = self.open_cards.contains("friendcleaner");
-        let act_toggle = on_action.clone();
-        let act_scan = on_action.clone();
-        let act_del = on_action.clone();
-        let act_toggle_filter = on_action.clone();
-        let act_select_filter = on_action.clone();
-        let act_select_all = on_action.clone();
-        let act_clear_sel = on_action.clone();
-
-        let filter_label = match self.cleaner_filter.as_str() {
-            "days360" => "超过 360 天未打游戏 (23)",
-            "days90" => "超过 90 天未打游戏 (62)",
-            "never" => "从未打过游戏 (5)",
-            "hidden" => "🔒 战绩已隐藏 (8)",
-            "all" => "全部好友 (92)",
-            _ => "超过 180 天未打游戏 (48)",
-        };
-
-        collapse_card(
-            "tools-card-friendcleaner".into(),
-            open,
-            Some("icons/user.svg"),
-            "好友管理与僵尸号清理",
-            "智能检索超过设定天数未上线的游戏好友，支持一键批量移除",
-            Some(if self.cleaner_has_scanned {
-                format!("已扫描 · 筛选出 {} 人", MOCK_FRIENDS.len())
-            } else {
-                "未扫描".to_string()
-            }),
-            move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("friendcleaner"), win, app),
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(10.0))
-                // 未扫描态：仅显示扫描好友按钮
-                .when(!self.cleaner_has_scanned, |this| {
-                    let scan_cb = act_scan.clone();
-                    this.child(
-                        div()
-                            .p(px(16.0))
-                            .rounded_md()
-                            .bg(Theme::HOVER_BG)
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(2.0))
-                                    .child(
-                                        div()
-                                            .text_size(px(13.0))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(Theme::TEXT_PRIMARY)
-                                            .child("扫描好友列表并自动检测每位好友的最后活跃时间"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(11.5))
-                                            .text_color(Theme::TEXT_MUTED)
-                                            .child("穿透查询最近对局与熟练度时间，保护隐藏战绩玩家不被误删"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .px(px(16.0))
-                                    .py(px(6.0))
-                                    .rounded_md()
-                                    .bg(Theme::ACCENT_PRIMARY)
-                                    .text_size(px(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(gpui::white())
-                                    .cursor_pointer()
-                                    .hover(|s| s.opacity(0.85))
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        scan_cb(ToolsAction::ScanFriends, win, app)
-                                    })
-                                    .child("开始扫描好友"),
-                            ),
-                    )
-                })
-                // 已扫描态：操作栏 + 列表
-                .when(self.cleaner_has_scanned, |this| {
-                    let scan_cb = act_scan.clone();
-                    this.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(10.0))
-                            // 顶行：重新扫描 + 250px 筛选下拉 + 170px 搜索框
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .gap(px(10.0))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(10.0))
-                                            .child(
-                                                div()
-                                                    .px(px(12.0))
-                                                    .py(px(5.0))
-                                                    .rounded_md()
-                                                    .bg(Theme::ACCENT_PRIMARY)
-                                                    .text_size(px(12.0))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(gpui::white())
-                                                    .cursor_pointer()
-                                                    .hover(|s| s.opacity(0.85))
-                                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                        scan_cb(ToolsAction::ScanFriends, win, app)
-                                                    })
-                                                    .child("重新扫描好友"),
-                                            )
-                                            .child(select_dropdown(
-                                                "dropdown-cleaner-filter",
-                                                250.0,
-                                                filter_label.to_string(),
-                                                self.open_cleaner_filter_dropdown,
-                                                false,
-                                                vec![
-                                                    ("days180", "超过 180 天未打游戏 (48)"),
-                                                    ("days360", "超过 360 天未打游戏 (23)"),
-                                                    ("days90", "超过 90 天未打游戏 (62)"),
-                                                    ("never", "从未打过游戏 (5)"),
-                                                    ("hidden", "🔒 战绩已隐藏 (8)"),
-                                                    ("all", "全部好友 (92)"),
-                                                ],
-                                                move |win, app| act_toggle_filter(ToolsAction::ToggleDropdownMenu("cleaner_filter"), win, app),
-                                                move |val, win, app| act_select_filter(ToolsAction::SetCleanerFilter(val.to_string()), win, app),
-                                            )),
-                                    )
-                                    .child(
-                                        div()
-                                            .w(px(170.0))
-                                            .h(px(28.0))
-                                            .rounded_md()
-                                            .border_1()
-                                            .border_color(Theme::CARD_BORDER)
-                                            .bg(Theme::CARD_BG)
-                                            .px(px(8.0))
-                                            .flex()
-                                            .items_center()
-                                            .text_size(px(11.5))
-                                            .text_color(Theme::TEXT_MUTED)
-                                            .child("搜索游戏名/备注..."),
-                                    ),
-                            )
-                            // 次行：全选、清空勾选、批量删除按钮
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(8.0))
-                                            .child(
-                                                div()
-                                                    .px(px(10.0))
-                                                    .py(px(4.0))
-                                                    .rounded_md()
-                                                    .border_1()
-                                                    .border_color(Theme::CARD_BORDER)
-                                                    .bg(Theme::CARD_BG)
-                                                    .text_size(px(11.5))
-                                                    .text_color(Theme::TEXT_SECONDARY)
-                                                    .cursor_pointer()
-                                                    .hover(|s| s.bg(Theme::HOVER_BG))
-                                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                        act_select_all(ToolsAction::SelectAllCleanerFriends, win, app)
-                                                    })
-                                                    .child("勾选当前列表"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .px(px(10.0))
-                                                    .py(px(4.0))
-                                                    .rounded_md()
-                                                    .border_1()
-                                                    .border_color(Theme::CARD_BORDER)
-                                                    .bg(Theme::CARD_BG)
-                                                    .text_size(px(11.5))
-                                                    .text_color(Theme::TEXT_SECONDARY)
-                                                    .cursor_pointer()
-                                                    .hover(|s| s.bg(Theme::HOVER_BG))
-                                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                        act_clear_sel(ToolsAction::ClearSelectedCleanerFriends, win, app)
-                                                    })
-                                                    .child("清空勾选"),
-                                            ),
-                                    )
-                                    .child(danger_button(
-                                        format!("批量删除选中的 {} 人", self.cleaner_selected_ids.len()),
-                                        move |_ev, win, app| act_del(ToolsAction::BatchDeleteOfflineFriends, win, app),
-                                    )),
-                            )
-                            // 好友列表
-                            .child(
-                                div()
-                                    .id("cleaner-friends-list-scroll")
-                                    .w_full()
-                                    .max_h(px(220.0))
-                                    .overflow_y_scroll()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(4.0))
-                                    .children(MOCK_FRIENDS.iter().map(|f| {
-                                        let fid = f.id.to_string();
-                                        let is_selected = self.cleaner_selected_ids.contains(&fid);
-                                        let act_check = on_action.clone();
-
-                                        div()
-                                            .w_full()
-                                            .px(px(12.0))
-                                            .py(px(6.0))
-                                            .rounded_md()
-                                            .border_1()
-                                            .border_color(if is_selected {
-                                                Theme::SIDEBAR_ACTIVE_BORDER
-                                            } else {
-                                                Theme::CARD_BORDER
-                                            })
-                                            .bg(if is_selected {
-                                                Theme::ACCENT_LIGHT
-                                            } else {
-                                                Theme::CARD_BG
-                                            })
-                                            .flex()
-                                            .items_center()
-                                            .justify_between()
-                                            .cursor_pointer()
-                                            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
-                                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                act_check(ToolsAction::ToggleSelectCleanerFriend(fid.clone()), win, app)
-                                            })
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .items_center()
-                                                    .gap(px(10.0))
-                                                    .child(
-                                                        div()
-                                                            .size(px(16.0))
-                                                            .rounded(px(3.0))
-                                                            .border_1()
-                                                            .border_color(if is_selected {
-                                                                Theme::ACCENT_PRIMARY
-                                                            } else {
-                                                                Theme::CARD_BORDER
-                                                            })
-                                                            .bg(if is_selected {
-                                                                Theme::ACCENT_PRIMARY
-                                                            } else {
-                                                                Theme::CARD_BG
-                                                            })
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_center()
-                                                            .text_size(px(10.0))
-                                                            .text_color(gpui::white())
-                                                            .child(if is_selected { "✓" } else { "" }),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_size(px(12.5))
-                                                            .font_weight(FontWeight::MEDIUM)
-                                                            .text_color(Theme::TEXT_PRIMARY)
-                                                            .child(f.name),
-                                                    )
-                                                    .when(!f.note.is_empty(), |s| {
-                                                        s.child(
-                                                            div()
-                                                                .text_size(px(11.0))
-                                                                .text_color(Theme::TEXT_MUTED)
-                                                                .child(format!("({})", f.note)),
-                                                        )
-                                                    }),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_size(px(11.5))
-                                                    .text_color(Theme::LOSS_TEXT)
-                                                    .child(format!("离线 {} 天", f.days)),
-                                            )
-                                    })),
-                            ),
-                    )
-                }),
-        )
-    }
 
     // 行 9: 大乱斗板凳席悬浮窗 (直显行 - T-V02)
     fn render_bench_overlay_row<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
@@ -1415,502 +806,4 @@ impl ToolsView {
         )
     }
 
-    // 行 12: 锁定游戏设置 (直显行 - T-V02)
-    fn render_lock_game_settings_row<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let locked = self.is_game_settings_locked;
-        let act_switch = on_action.clone();
-
-        direct_card_row(
-            "tools-row-locksettings".into(),
-            CardGroupPosition::Single,
-            "icons/lock.svg",
-            "锁定游戏设置 (只读保护)",
-            "锁定 Game.cfg 与 PersistedSettings.json 为只读，防止客户端意外重置键位与画质",
-            div()
-                .cursor_pointer()
-                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                    act_switch(ToolsAction::ToggleLockGameSettings, win, app)
-                })
-                .child(Switch::new(locked)),
-        )
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // 客户端管理组直显行实现 (T-V01)
-    // ─────────────────────────────────────────────────────────────
-
-    // 行 13: 修复客户端窗口 (直显行)
-    fn render_fix_window_row<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let act_fix = on_action.clone();
-
-        direct_card_row(
-            "tools-row-fixwindow".into(),
-            CardGroupPosition::Top,
-            "icons/maximize.svg",
-            "修复客户端窗口大小与位置",
-            "重置因分辨率错位导致的黑边，一键恢复 1600x900 100% 原始缩放并居中",
-            div()
-                .px(px(16.0))
-                .py(px(5.0))
-                .rounded_md()
-                .border_1()
-                .border_color(Theme::CARD_BORDER)
-                .bg(Theme::CARD_BG)
-                .text_size(px(12.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(Theme::TEXT_PRIMARY)
-                .cursor_pointer()
-                .hover(|s| s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY))
-                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                    act_fix(ToolsAction::FixClientWindow, win, app)
-                })
-                .child("修复"),
-        )
-    }
-
-    // 行 14: 重启客户端 (直显行)
-    fn render_restart_client_row<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let act_restart = on_action.clone();
-
-        direct_card_row(
-            "tools-row-restartclient".into(),
-            CardGroupPosition::Bottom,
-            "icons/restore.svg",
-            "重启客户端 (LeagueClientUx)",
-            "安全重启英雄联盟前端渲染进程，解决界面卡死、白屏或无响应",
-            div()
-                .px(px(16.0))
-                .py(px(5.0))
-                .rounded_md()
-                .border_1()
-                .border_color(Theme::CARD_BORDER)
-                .bg(Theme::CARD_BG)
-                .text_size(px(12.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(Theme::TEXT_PRIMARY)
-                .cursor_pointer()
-                .hover(|s| s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY))
-                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                    act_restart(ToolsAction::RestartClient, win, app)
-                })
-                .child("重启"),
-        )
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // 个人主页与社交装扮组实现 (T-V10, T-V11, T-V03)
-    // ─────────────────────────────────────────────────────────────
-
-    // 行 15: 自定义个性签名 (折叠卡 - T-V10)
-    fn render_signature_card<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let open = self.open_cards.contains("signature");
-        let act_toggle = on_action.clone();
-        let act_apply = on_action.clone();
-
-        collapse_card(
-            "tools-card-signature".into(),
-            open,
-            Some("icons/copy.svg"),
-            "修改个人签名",
-            "修改好友列表中展示的个性化状态签名文本",
-            Some("点击展开".to_string()),
-            move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("signature"), win, app),
-            setting_row(
-                "输入新的个性化签名:",
-                Some("留空将清空当前展示的状态签名"),
-                suffix_input(
-                    "input-signature".into(),
-                    &self.signature_buffer,
-                    "输入新签名...",
-                    "保存签名",
-                    false,
-                    300.0,
-                    move |_ev, win, app| act_apply(ToolsAction::ApplySignature, win, app),
-                ),
-            ),
-        )
-    }
-
-    // 行 16: 修改个人主页背景 (折叠卡 - T-V10)
-    fn render_profile_bg_card<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let open = self.open_cards.contains("profilebg");
-        let act_toggle = on_action.clone();
-        let act_open_picker = on_action.clone();
-        let act_close_picker = on_action.clone();
-        let act_select_champ = on_action.clone();
-        let act_select_skin = on_action.clone();
-
-        let current_champ_id = self.bg_selected_champion.unwrap_or(157);
-        let champ_ids = vec![current_champ_id];
-
-        collapse_card(
-            "tools-card-profilebg".into(),
-            open,
-            Some("icons/user.svg"),
-            "修改个人主页背景",
-            "设置个人生涯资料卡片背景展示的英雄及皮肤",
-            Some("点击展开".to_string()),
-            move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("profilebg"), win, app),
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(10.0))
-                .child(
-                    div()
-                        .text_size(px(12.5))
-                        .text_color(Theme::TEXT_MUTED)
-                        .child("选择背景展示的英雄与皮肤立绘:"),
-                )
-                // 单英雄选择器
-                .child(champion_picker(
-                    "bg-champ-picker".into(),
-                    &champ_ids,
-                    self.open_bg_champion_picker,
-                    "",
-                    move |_ev, _win, _app| {},
-                    move |_ev, win, app| act_open_picker(ToolsAction::TogglePicker("bg_champ"), win, app),
-                    move |_ev, win, app| act_close_picker(ToolsAction::TogglePicker("bg_champ"), win, app),
-                    move |cid, win, app| act_select_champ(ToolsAction::SelectBgChampion(cid), win, app),
-                    move |_cid, _win, _app| {},
-                ))
-                // 皮肤预览与选择
-                .child(
-                    div()
-                        .p(px(12.0))
-                        .rounded_md()
-                        .border_1()
-                        .border_color(Theme::CARD_BORDER)
-                        .bg(Theme::HOVER_BG)
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .child(
-                                    div()
-                                        .size(px(36.0))
-                                        .rounded(px(4.0))
-                                        .bg(Theme::ACCENT_LIGHT)
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_size(px(14.0))
-                                        .child("🖼️"),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(2.0))
-                                        .child(
-                                            div()
-                                                .text_size(px(13.0))
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::TEXT_PRIMARY)
-                                                .child("当前已选皮肤: 黑夜使者 亚索"),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_size(px(11.0))
-                                                .text_color(Theme::TEXT_MUTED)
-                                                .child("皮肤 ID: 157003 · 支持一键更换并应用到名片"),
-                                        ),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .px(px(14.0))
-                                .py(px(5.0))
-                                .rounded_md()
-                                .bg(Theme::ACCENT_PRIMARY)
-                                .text_size(px(12.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(gpui::white())
-                                .cursor_pointer()
-                                .hover(|s| s.opacity(0.85))
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    act_select_skin(ToolsAction::SelectBgSkin(157003), win, app)
-                                })
-                                .child("应用此皮肤背景"),
-                        ),
-                ),
-        )
-    }
-
-    // 行 17: 修改段位展示 (折叠卡 - T-V11)
-    fn render_rank_spoof_card<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let open = self.open_cards.contains("rankspoof");
-        let act_toggle = on_action.clone();
-        let act_apply = on_action.clone();
-        let act_toggle_q = on_action.clone();
-        let act_toggle_t = on_action.clone();
-        let act_toggle_d = on_action.clone();
-        let act_select_q = on_action.clone();
-        let act_select_t = on_action.clone();
-        let act_select_d = on_action.clone();
-
-        let queue_label = SPOOF_QUEUES
-            .iter()
-            .find(|(q, _)| *q == self.spoof_queue)
-            .map(|(_, n)| *n)
-            .unwrap_or("单双排位");
-
-        let tier_label = SPOOF_TIERS
-            .iter()
-            .find(|(t, _)| *t == self.spoof_tier)
-            .map(|(_, n)| *n)
-            .unwrap_or("最强王者");
-
-        // 王者、宗师、大师、未定级时小段禁用
-        let division_disabled = matches!(
-            self.spoof_tier.as_str(),
-            "CHALLENGER" | "GRANDMASTER" | "MASTER" | "UNRANKED"
-        );
-
-        collapse_card(
-            "tools-card-rankspoof".into(),
-            open,
-            Some("icons/bookmark.svg"),
-            "修改生涯与卡片段位展示",
-            "修改好友聊天中展示的伪装段位图标与阶位",
-            Some("点击展开".to_string()),
-            move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("rankspoof"), win, app),
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(10.0))
-                // 行 1: 140px 队列下拉
-                .child(setting_row(
-                    "选择展示队列",
-                    Some("选择要在个人卡片上模拟的排位赛模式"),
-                    select_dropdown(
-                        "dropdown-spoof-queue",
-                        140.0,
-                        queue_label.to_string(),
-                        self.open_spoof_queue_dropdown,
-                        false,
-                        SPOOF_QUEUES.to_vec(),
-                        move |win, app| act_toggle_q(ToolsAction::ToggleDropdownMenu("spoof_queue"), win, app),
-                        move |val, win, app| act_select_q(ToolsAction::SetSpoofQueue(val.to_string()), win, app),
-                    ),
-                ))
-                // 行 2: 段位与阶位 (130px 段位 + 80px 小段 + 应用按钮)
-                .child(setting_row(
-                    "段位与阶位",
-                    Some("设定好友名片与浮窗预览呈现的段位阶层"),
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(select_dropdown(
-                            "dropdown-spoof-tier",
-                            130.0,
-                            tier_label.to_string(),
-                            self.open_spoof_tier_dropdown,
-                            false,
-                            SPOOF_TIERS.to_vec(),
-                            move |win, app| act_toggle_t(ToolsAction::ToggleDropdownMenu("spoof_tier"), win, app),
-                            move |val, win, app| act_select_t(ToolsAction::SetSpoofTier(val.to_string()), win, app),
-                        ))
-                        .child(select_dropdown(
-                            "dropdown-spoof-div",
-                            80.0,
-                            self.spoof_division.clone(),
-                            self.open_spoof_division_dropdown,
-                            division_disabled,
-                            SPOOF_DIVISIONS.iter().map(|&d| (d, d)).collect(),
-                            move |win, app| act_toggle_d(ToolsAction::ToggleDropdownMenu("spoof_division"), win, app),
-                            move |val, win, app| act_select_d(ToolsAction::SetSpoofDivision(val.to_string()), win, app),
-                        ))
-                        .child(
-                            div()
-                                .px(px(12.0))
-                                .py(px(5.0))
-                                .rounded_md()
-                                .bg(Theme::ACCENT_PRIMARY)
-                                .text_size(px(12.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(gpui::white())
-                                .cursor_pointer()
-                                .hover(|s| s.opacity(0.85))
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    act_apply(ToolsAction::ApplyRankSpoof, win, app)
-                                })
-                                .child("应用伪装段位"),
-                        ),
-                )),
-        )
-    }
-
-    // 行 18: 修改在线状态 (折叠卡 - T-V11)
-    fn render_online_status_card<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let open = self.open_cards.contains("onlinestatus");
-        let act_toggle = on_action.clone();
-        let act_chat = on_action.clone();
-        let act_away = on_action.clone();
-        let act_offline = on_action.clone();
-
-        let status_desc = match self.online_status.as_str() {
-            "away" => "当前状态: 离开 (Away)",
-            "offline" | "mobile" => "当前状态: 离线 (Offline)",
-            _ => "当前状态: 在线 (Online)",
-        };
-
-        collapse_card(
-            "tools-card-onlinestatus".into(),
-            open,
-            Some("icons/menu.svg"),
-            "修改在线状态",
-            "自由切换在好友列表中的显示状态 (在线 / 离开 / 移动端离线)",
-            Some(status_desc.to_string()),
-            move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("onlinestatus"), win, app),
-            setting_row(
-                "在线状态",
-                Some("切换你在好友列表中的当前状态呈现"),
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(self.render_status_btn("设为在线", self.online_status == "chat", move |win, app| {
-                        act_chat(ToolsAction::SetOnlineStatus("chat".to_string()), win, app)
-                    }))
-                    .child(self.render_status_btn("设为离开", self.online_status == "away", move |win, app| {
-                        act_away(ToolsAction::SetOnlineStatus("away".to_string()), win, app)
-                    }))
-                    .child(self.render_status_btn("设为离线", self.online_status == "offline", move |win, app| {
-                        act_offline(ToolsAction::SetOnlineStatus("offline".to_string()), win, app)
-                    })),
-            ),
-        )
-    }
-
-    fn render_status_btn<F>(&self, label: &'static str, active: bool, on_click: F) -> Div
-    where
-        F: Fn(&mut Window, &mut App) + 'static + Clone,
-    {
-        div()
-            .px(px(14.0))
-            .py(px(5.0))
-            .rounded_md()
-            .border_1()
-            .border_color(if active {
-                Theme::ACCENT_PRIMARY
-            } else {
-                Theme::CARD_BORDER
-            })
-            .bg(if active {
-                Theme::ACCENT_LIGHT
-            } else {
-                Theme::CARD_BG
-            })
-            .text_size(px(12.0))
-            .font_weight(if active {
-                FontWeight::BOLD
-            } else {
-                FontWeight::MEDIUM
-            })
-            .text_color(if active {
-                Theme::ACCENT_PRIMARY
-            } else {
-                Theme::TEXT_PRIMARY
-            })
-            .cursor_pointer()
-            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
-            .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
-            .child(label)
-    }
-
-    // 行 19: 自定义装配 (直显行 - T-V03)
-    fn render_badges_preferences_row<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let act_open = on_action.clone();
-
-        direct_card_row(
-            "tools-row-badges".into(),
-            CardGroupPosition::Top,
-            "icons/bookmark.svg",
-            "装配称号与挑战勋章",
-            "自定义佩戴个人名片的称号与 3 枚挑战勋章",
-            div()
-                .px(px(14.0))
-                .py(px(5.0))
-                .rounded_md()
-                .border_1()
-                .border_color(Theme::ACCENT_PRIMARY)
-                .bg(Theme::CARD_BG)
-                .text_size(px(12.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(Theme::ACCENT_PRIMARY)
-                .cursor_pointer()
-                .hover(|s| s.bg(Theme::ACCENT_LIGHT))
-                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                    act_open(ToolsAction::ToggleBadgesModal(true), win, app)
-                })
-                .child("自定义装配"),
-        )
-    }
-
-    // 行 20: 卸下全部勋章 (直显行 - T-V03)
-    fn render_clear_badges_row<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let act_clear = on_action.clone();
-
-        direct_card_row(
-            "tools-row-clearbadges".into(),
-            CardGroupPosition::Middle,
-            "icons/close.svg",
-            "卸下全部勋章",
-            "一键卸下所有已佩戴的挑战勋章",
-            danger_button("卸下", move |_ev, win, app| {
-                act_clear(ToolsAction::ClearBadges, win, app)
-            }),
-        )
-    }
-
-    // 行 21: 卸下头像边框 (直显行 - T-V03)
-    fn render_clear_border_row<F>(&self, on_action: F) -> impl IntoElement
-    where
-        F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let act_clear = on_action.clone();
-
-        direct_card_row(
-            "tools-row-clearborder".into(),
-            CardGroupPosition::Bottom,
-            "icons/close.svg",
-            "卸下头像边框",
-            "移除个人主页中配置的旗帜与头像边框",
-            danger_button("卸下", move |_ev, win, app| {
-                act_clear(ToolsAction::ClearBorder, win, app)
-            }),
-        )
-    }
 }

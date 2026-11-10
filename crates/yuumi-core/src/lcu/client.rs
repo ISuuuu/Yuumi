@@ -41,6 +41,9 @@ pub const ALLOWED_API_PREFIXES: &[&str] = &[
     "/lol-item-sets/",
     "/lol-login/",
     "/lol-replays/",
+    // D11 清除头像边框：旧版 ClearBorderCard.vue:24-30 的唯一等价端点
+    // PUT /lol-regalia/v2/current-regalia {preferredBorderType:"NONE"}，允许列表内无等价接口
+    "/lol-regalia/",
     "/lol-inventory/",
     "/lol-loot/",
     "/lol-champions/",
