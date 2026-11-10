@@ -161,6 +161,10 @@ pub struct SearchView {
     pub is_background_refreshing: bool,
     /// 搜索失败或空态错误提示
     pub search_error: Option<String>,
+    /// 详情加载失败错误提示
+    pub detail_error: Option<String>,
+    /// 搜索世代 ID：防止快速并发搜索时旧响应回填覆盖新结果
+    pub search_generation: usize,
     /// 当前查询到的召唤师完整显示名 (Name#Tag)
     pub current_summoner_name: Option<String>,
     /// 当前查询到的召唤师 PUUID
@@ -230,6 +234,8 @@ impl SearchView {
             is_page_switching: false,
             is_background_refreshing: false,
             search_error: None,
+            detail_error: None,
+            search_generation: 0,
             current_summoner_name: None,
             current_summoner_puuid: None,
             current_summoner_id: 0,
@@ -403,6 +409,8 @@ impl SearchView {
         on_toggle_upload: impl Fn(bool, &mut Window, &mut App) + 'static + Clone,
         on_copy_game_id: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
         on_player_click: impl Fn(String, u64, String, &mut Window, &mut App) + 'static + Clone,
+        on_replay: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
+        on_retry_detail: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         // S01: 离线时复用离线状态组件
         if !is_connected {
@@ -537,6 +545,8 @@ impl SearchView {
                                         selected_game_id,
                                         on_copy_game_id,
                                         on_player_click,
+                                        on_replay.clone(),
+                                        on_retry_detail.clone(),
                                     )),
                             )
                             // 搜索中半透明全屏遮罩
@@ -1316,6 +1326,8 @@ impl SearchView {
         selected_game_id: Option<u64>,
         on_copy_game_id: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
         on_player_click: impl Fn(String, u64, String, &mut Window, &mut App) + 'static + Clone,
+        on_replay: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
+        on_retry_detail: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let is_loading = self.is_loading_detail;
 
@@ -1332,32 +1344,62 @@ impl SearchView {
                 .gap_3()
                 .overflow_y_scroll()
                 // 1. 头部大 Banner (S09)
-                .child(self.render_detail_banner(d, on_copy_game_id))
+                .child(self.render_detail_banner(d, on_copy_game_id, on_replay))
                 // 2. 队伍详细数据 (S10, S11: 蓝方 -> 红方)
                 .child(self.render_team_table(&d.blue, d.queue_id, on_player_click.clone()))
                 .child(self.render_team_table(&d.red, d.queue_id, on_player_click))
                 .into_any_element(),
-            None => div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .size_full()
-                .gap_3()
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(Theme::TEXT_PRIMARY)
-                        .child(if is_loading {
-                            "正在拉取对局详细数据...".to_string()
-                        } else if let Some(gid) = selected_game_id {
-                            format!("已选对局 ID: {}，等待详情载入", gid)
-                        } else {
-                            "请在左侧选择一场对局以查看详情".to_string()
-                        }),
-                )
-                .into_any_element(),
+            None => {
+                let retry_cb = on_retry_detail;
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .size_full()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(if self.detail_error.is_some() {
+                                Theme::LOSS_TEXT
+                            } else {
+                                Theme::TEXT_PRIMARY
+                            })
+                            .child(if is_loading {
+                                "正在拉取对局详细数据...".to_string()
+                            } else if let Some(ref err) = self.detail_error {
+                                format!("对局详情载入失败: {}", err)
+                            } else if let Some(gid) = selected_game_id {
+                                format!("已选对局 ID: {}，等待详情载入", gid)
+                            } else {
+                                "当前队列暂无对局记录".to_string()
+                            }),
+                    )
+                    .when(self.detail_error.is_some() && selected_game_id.is_some(), |this| {
+                        let gid = selected_game_id.unwrap();
+                        this.child(
+                            div()
+                                .px_3()
+                                .py_1p5()
+                                .rounded(px(6.0))
+                                .bg(Theme::CARD_BG)
+                                .border_1()
+                                .border_color(Theme::CARD_BORDER)
+                                .hover(|s| s.bg(Theme::CARD_BG_HOVER).border_color(Theme::ACCENT_PRIMARY))
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(Theme::TEXT_PRIMARY)
+                                .cursor_pointer()
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    retry_cb(gid, win, app);
+                                })
+                                .child("重试载入详情"),
+                        )
+                    })
+                    .into_any_element()
+            }
         })
     }
 
@@ -1366,6 +1408,7 @@ impl SearchView {
         &self,
         d: &GameDetail,
         on_copy_game_id: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
+        on_replay: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let win = d.win;
         let gid = d.game_id;
@@ -1440,8 +1483,10 @@ impl SearchView {
                     .flex()
                     .items_center()
                     .gap_2()
-                    // 回放按钮（对齐 Vue ReplayButton 的带文字样式）
-                    .child(
+                    // 回放按钮（对齐 Vue ReplayButton 的带文字样式与状态机）
+                    .child({
+                        let replay_cb = on_replay.clone();
+                        let replay_state = crate::replay_store::get_replay_state(gid);
                         div()
                             .id("btn-replay")
                             .h(px(30.0))
@@ -1449,20 +1494,60 @@ impl SearchView {
                             .rounded(px(6.0))
                             .bg(Theme::CARD_BG)
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                            .border_color(match replay_state {
+                                crate::match_model::ReplayState::Watch => Theme::WIN_BORDER,
+                                crate::match_model::ReplayState::Downloading
+                                | crate::match_model::ReplayState::Checking => {
+                                    Theme::ACCENT_PRIMARY
+                                }
+                                crate::match_model::ReplayState::Error => Theme::LOSS_BORDER,
+                                _ => Theme::CARD_BORDER,
+                            })
+                            .hover(|s| {
+                                s.border_color(Theme::ACCENT_PRIMARY)
+                                    .bg(Theme::CARD_BG_HOVER)
+                            })
                             .cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                app.stop_propagation();
+                                replay_cb(gid, win, app);
+                            })
                             .flex()
                             .items_center()
                             .gap_1()
-                            .child(icon("icons/play.svg", 12.0, Theme::TEXT_MUTED))
+                            .child(icon(
+                                match replay_state {
+                                    crate::match_model::ReplayState::Watch => "icons/play.svg",
+                                    crate::match_model::ReplayState::Error => "icons/refresh.svg",
+                                    _ => "icons/play.svg",
+                                },
+                                12.0,
+                                match replay_state {
+                                    crate::match_model::ReplayState::Watch => Theme::WIN_TEXT,
+                                    crate::match_model::ReplayState::Error => Theme::LOSS_TEXT,
+                                    crate::match_model::ReplayState::Downloading
+                                    | crate::match_model::ReplayState::Checking => {
+                                        Theme::ACCENT_PRIMARY
+                                    }
+                                    _ => Theme::TEXT_MUTED,
+                                },
+                            ))
                             .child(
                                 div()
                                     .text_size(px(12.2))
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .child("回放"),
-                            ),
-                    )
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(match replay_state {
+                                        crate::match_model::ReplayState::Watch => Theme::WIN_TEXT,
+                                        crate::match_model::ReplayState::Error => Theme::LOSS_TEXT,
+                                        crate::match_model::ReplayState::Downloading
+                                        | crate::match_model::ReplayState::Checking => {
+                                            Theme::ACCENT_PRIMARY
+                                        }
+                                        _ => Theme::TEXT_MUTED,
+                                    })
+                                    .child(replay_state.label()),
+                            )
+                    })
                     // 复制 Game ID 按钮 (30x30)
                     .child(
                         div()

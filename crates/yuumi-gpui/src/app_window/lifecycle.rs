@@ -30,17 +30,29 @@ impl MainWindow {
                 log::info!("[MainWindow] 接收到真实战绩数据: count={}", matches.len());
                 let items: Vec<MatchItem> = matches.into_iter().map(MatchItem::new).collect();
                 self.stats = CareerHeaderStats::compute(&items);
-                self.search_view.matches = items.clone();
 
-                // 未搜索场景下（进入战绩查询页自动带出的战绩）也要选中并载入首局详情，
-                // 否则右栏会一直停在「等待详情载入」的空态
-                let keep_selected = self
-                    .search_view
-                    .selected_game_id
-                    .filter(|id| items.iter().any(|m| m.display.game_id == *id));
-                if keep_selected.is_none() {
-                    if let Some(first_id) = items.first().map(|m| m.display.game_id) {
-                        self.load_match_detail(first_id, cx);
+                // B06 规范：隔离本人刷新与他人搜索，若当前正在查询他人，绝不替换搜索列表
+                let viewing_other_in_search = match (
+                    &self.search_view.current_summoner_puuid,
+                    &self.own_summoner,
+                ) {
+                    (Some(curr_puuid), Some(own)) => curr_puuid != &own.puuid,
+                    _ => false,
+                };
+
+                if !viewing_other_in_search {
+                    self.search_view.matches = items.clone();
+
+                    // 未搜索场景下（进入战绩查询页自动带出的战绩）也要选中并载入首局详情，
+                    // 否则右栏会一直停在「等待详情载入」的空态
+                    let keep_selected = self
+                        .search_view
+                        .selected_game_id
+                        .filter(|id| items.iter().any(|m| m.display.game_id == *id));
+                    if keep_selected.is_none() {
+                        if let Some(first_id) = items.first().map(|m| m.display.game_id) {
+                            self.load_match_detail(first_id, cx);
+                        }
                     }
                 }
 

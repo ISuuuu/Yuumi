@@ -25,6 +25,31 @@ impl MatchItem {
     }
 }
 
+/// 对局回放状态枚举（对齐 Vue ReplayButton.vue）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReplayState {
+    #[default]
+    Idle,
+    Checking,
+    Downloading,
+    Watch,
+    Unsupported,
+    Error,
+}
+
+impl ReplayState {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Idle => "回放",
+            Self::Checking => "检查中...",
+            Self::Downloading => "下载中...",
+            Self::Watch => "观看回放",
+            Self::Unsupported => "不可用",
+            Self::Error => "重试",
+        }
+    }
+}
+
 // 转发 MatchLike 实现
 impl MatchLike for MatchItem {
     fn is_remake(&self) -> bool {

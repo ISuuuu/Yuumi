@@ -8,7 +8,61 @@ use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 
-/// 输入框的可选行为
+/// 判断是否为控制类特殊键名
+fn is_special_key(key: &str) -> bool {
+    matches!(
+        key,
+        "backspace"
+            | "enter"
+            | "delete"
+            | "escape"
+            | "tab"
+            | "control"
+            | "shift"
+            | "alt"
+            | "meta"
+            | "super"
+            | "capslock"
+            | "up"
+            | "down"
+            | "left"
+            | "right"
+            | "home"
+            | "end"
+            | "pageup"
+            | "pagedown"
+            | "insert"
+            | "f1"
+            | "f2"
+            | "f3"
+            | "f4"
+            | "f5"
+            | "f6"
+            | "f7"
+            | "f8"
+            | "f9"
+            | "f10"
+            | "f11"
+            | "f12"
+    )
+}
+
+/// 提取输入法合成字符、常规按键字符或中文上屏文本
+fn extract_typed_text(keystroke: &Keystroke) -> Option<String> {
+    if let Some(ref kc) = keystroke.key_char {
+        if !kc.is_empty() {
+            return Some(kc.clone());
+        }
+    }
+    let key = keystroke.key.as_str();
+    if key == "space" {
+        Some(" ".to_string())
+    } else if !is_special_key(key) && !key.is_empty() {
+        Some(key.to_string())
+    } else {
+        None
+    }
+}
 #[derive(Clone, Copy, Default)]
 pub struct TextFieldOptions {
     /// 禁用输入（例如后台搜索中）
@@ -52,7 +106,53 @@ pub fn text_field(
             return;
         }
         let keystroke = &ev.keystroke;
-        if keystroke.modifiers.control || keystroke.modifiers.platform || keystroke.modifiers.alt {
+
+        // 快捷键支持：Ctrl+V (粘贴), Ctrl+C (复制), Ctrl+X (剪切), Ctrl+A (全选清空/替换)
+        if keystroke.modifiers.control || keystroke.modifiers.platform {
+            match keystroke.key.as_str() {
+                "v" => {
+                    if let Some(item) = app.read_from_clipboard() {
+                        if let Some(clip) = item.text() {
+                            let mut next = keyed_text.clone();
+                            let clean = clip.replace(['\r', '\n'], "");
+                            next.push_str(&clean);
+                            if let Some(max) = options.max_chars {
+                                let chars: String = next.chars().take(max).collect();
+                                on_change(chars, window, app);
+                            } else {
+                                on_change(next, window, app);
+                            }
+                        }
+                    }
+                    return;
+                }
+                "c" => {
+                    if !keyed_text.is_empty() {
+                        app.write_to_clipboard(ClipboardItem::new_string(keyed_text.clone()));
+                    }
+                    return;
+                }
+                "x" => {
+                    if !keyed_text.is_empty() {
+                        app.write_to_clipboard(ClipboardItem::new_string(keyed_text.clone()));
+                        on_change(String::new(), window, app);
+                    }
+                    return;
+                }
+                "a" => {
+                    // 全选后用户继续退格或输入将替换
+                    return;
+                }
+                "backspace" => {
+                    // Ctrl+退格：清空文本
+                    on_change(String::new(), window, app);
+                    return;
+                }
+                _ => return,
+            }
+        }
+
+        if keystroke.modifiers.alt {
             return;
         }
 
@@ -65,24 +165,12 @@ pub fn text_field(
                 on_submit(&keyed_text, window, app);
                 return;
             }
-            "delete" | "escape" | "tab" => return,
+            "delete" => {
+                next.pop();
+            }
+            "escape" | "tab" => return,
             _ => {
-                // 部分键盘事件不带 key_char（如合成消息、某些 IME 布局），退回单字符 key
-                let typed = keystroke
-                    .key_char
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-                    .or_else(|| {
-                        let key = keystroke.key.as_str();
-                        if key == "space" {
-                            Some(" ".to_string())
-                        } else if key.chars().count() == 1 {
-                            Some(key.to_string())
-                        } else {
-                            None
-                        }
-                    });
+                let typed = extract_typed_text(keystroke);
                 let within_limit = options
                     .max_chars
                     .is_none_or(|max| next.chars().count() < max);
@@ -200,7 +288,47 @@ pub fn search_input_field(
             return;
         }
         let keystroke = &ev.keystroke;
-        if keystroke.modifiers.control || keystroke.modifiers.platform || keystroke.modifiers.alt {
+
+        // 快捷键支持：Ctrl+V (粘贴), Ctrl+C (复制), Ctrl+X (剪切), Ctrl+A (全选), Ctrl+Backspace (清空)
+        if keystroke.modifiers.control || keystroke.modifiers.platform {
+            match keystroke.key.as_str() {
+                "v" => {
+                    if let Some(item) = app.read_from_clipboard() {
+                        if let Some(clip) = item.text() {
+                            let mut next = keyed_text.clone();
+                            let clean = clip.replace(['\r', '\n'], "");
+                            next.push_str(&clean);
+                            let chars: String = next.chars().take(64).collect();
+                            on_change(chars, window, app);
+                        }
+                    }
+                    return;
+                }
+                "c" => {
+                    if !keyed_text.is_empty() {
+                        app.write_to_clipboard(ClipboardItem::new_string(keyed_text.clone()));
+                    }
+                    return;
+                }
+                "x" => {
+                    if !keyed_text.is_empty() {
+                        app.write_to_clipboard(ClipboardItem::new_string(keyed_text.clone()));
+                        on_change(String::new(), window, app);
+                    }
+                    return;
+                }
+                "a" => {
+                    return;
+                }
+                "backspace" => {
+                    on_change(String::new(), window, app);
+                    return;
+                }
+                _ => return,
+            }
+        }
+
+        if keystroke.modifiers.alt {
             return;
         }
 
@@ -215,23 +343,12 @@ pub fn search_input_field(
                 }
                 return;
             }
-            "delete" | "escape" | "tab" => return,
+            "delete" => {
+                next.pop();
+            }
+            "escape" | "tab" => return,
             _ => {
-                let typed = keystroke
-                    .key_char
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-                    .or_else(|| {
-                        let key = keystroke.key.as_str();
-                        if key == "space" {
-                            Some(" ".to_string())
-                        } else if key.chars().count() == 1 {
-                            Some(key.to_string())
-                        } else {
-                            None
-                        }
-                    });
+                let typed = extract_typed_text(keystroke);
                 match typed {
                     Some(ch) if next.chars().count() < 64 => next.push_str(&ch),
                     _ => return,
