@@ -2,7 +2,7 @@ use crate::views::Route;
 use std::collections::HashMap;
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem},
-    Icon, TrayIcon, TrayIconBuilder, TrayIconEvent,
+    Icon, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +29,7 @@ impl TrayManager {
             .with_menu(Box::new(tray_menu))
             .with_tooltip("Yuumi")
             .with_icon(icon)
+            .with_menu_on_left_click(false)
             .build()
             .map_err(|e| e.to_string())?;
 
@@ -104,28 +105,39 @@ impl TrayManager {
         Ok(())
     }
 
-    /// 检查托盘事件（菜单点击或图标点击）
+    /// 检查并排空托盘事件队列（菜单点击或图标点击），返回最后发生的有效动作
     pub fn poll_event(&self) -> Option<TrayAction> {
-        if let Ok(event) = MenuEvent::receiver().try_recv() {
+        let mut last_action = None;
+
+        while let Ok(event) = MenuEvent::receiver().try_recv() {
             if let Some(action) = self.menu_actions.get(&event.id) {
-                return Some(action.clone());
+                last_action = Some(action.clone());
             }
         }
 
-        if let Ok(event) = TrayIconEvent::receiver().try_recv() {
+        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
             match event {
-                TrayIconEvent::Click { button, .. } => {
-                    if button == tray_icon::MouseButton::Left {
-                        return Some(TrayAction::ToggleWindow);
+                TrayIconEvent::Click {
+                    button,
+                    button_state,
+                    ..
+                } => {
+                    // 仅在鼠标按键抬起 (Up) 时触发，避免 Down 与 Up 触发两次 Toggle 导致窗口闪现又消失
+                    if button == tray_icon::MouseButton::Left
+                        && button_state == MouseButtonState::Up
+                    {
+                        last_action = Some(TrayAction::ToggleWindow);
                     }
                 }
-                TrayIconEvent::DoubleClick { .. } => {
-                    return Some(TrayAction::ShowWindow);
+                TrayIconEvent::DoubleClick { button, .. } => {
+                    if button == tray_icon::MouseButton::Left {
+                        last_action = Some(TrayAction::ShowWindow);
+                    }
                 }
                 _ => {}
             }
         }
 
-        None
+        last_action
     }
 }

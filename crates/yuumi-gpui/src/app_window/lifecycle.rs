@@ -661,21 +661,29 @@ impl MainWindow {
                 if let Some(hwnd) = platform::find_main_window_hwnd() {
                     platform::restore_and_foreground(hwnd);
                 }
+                cx.notify();
             }
             TrayAction::ToggleWindow => {
                 if let Some(hwnd) = platform::find_main_window_hwnd() {
-                    if platform::is_window_visible(hwnd) {
+                    let is_visible = platform::is_window_visible(hwnd);
+                    let is_minimized = platform::is_window_minimized(hwnd);
+                    let is_foreground = platform::is_foreground_window(hwnd);
+
+                    // 仅当窗口完全可见、非最小化且已是当前前台焦点时，才切换为隐藏
+                    if is_visible && !is_minimized && is_foreground {
                         platform::hide_window(hwnd);
                     } else {
                         platform::restore_and_foreground(hwnd);
                     }
                 }
+                cx.notify();
             }
             TrayAction::Navigate(route) => {
                 if let Some(hwnd) = platform::find_main_window_hwnd() {
                     platform::restore_and_foreground(hwnd);
                 }
                 self.switch_route(route, cx);
+                cx.notify();
             }
             TrayAction::Quit => {
                 self.quit_application(cx);

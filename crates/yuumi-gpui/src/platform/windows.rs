@@ -6,12 +6,13 @@ use windows::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM, WPARAM,
 };
 use windows::Win32::System::Threading::CreateMutexW;
-use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetActiveWindow, SetFocus};
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowExW, FindWindowW, GetWindowLongW, IsWindowVisible, PostMessageW, SetForegroundWindow,
-    SetWindowLongW, SetWindowPos, ShowWindow, GWL_EXSTYLE, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE, SW_MINIMIZE,
-    SW_RESTORE, SW_SHOW, WM_NCLBUTTONDOWN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    FindWindowExW, FindWindowW, GetForegroundWindow, GetWindowLongW, IsIconic, IsWindowVisible,
+    PostMessageW, SetForegroundWindow, SetWindowLongW, SetWindowPos, ShowWindowAsync, GWL_EXSTYLE,
+    HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_NCLBUTTONDOWN,
+    WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
 /// 命名互斥量守卫，负责释放句柄
@@ -118,16 +119,18 @@ pub fn find_window_by_title(title: &str) -> Option<HWND> {
 /// 激活并将窗口置于最前
 pub fn restore_and_foreground(hwnd: HWND) {
     unsafe {
-        let _ = ShowWindow(hwnd, SW_SHOW);
-        let _ = ShowWindow(hwnd, SW_RESTORE);
+        let _ = ShowWindowAsync(hwnd, SW_RESTORE);
+        let _ = ShowWindowAsync(hwnd, SW_SHOW);
         let _ = SetForegroundWindow(hwnd);
+        let _ = SetActiveWindow(hwnd);
+        let _ = SetFocus(hwnd);
     }
 }
 
 /// 隐藏窗口（用于关闭到系统托盘）
 pub fn hide_window(hwnd: HWND) {
     unsafe {
-        let _ = ShowWindow(hwnd, SW_HIDE);
+        let _ = ShowWindowAsync(hwnd, SW_HIDE);
     }
 }
 
@@ -136,10 +139,20 @@ pub fn is_window_visible(hwnd: HWND) -> bool {
     unsafe { IsWindowVisible(hwnd).as_bool() }
 }
 
+/// 检查窗口是否处于最小化状态
+pub fn is_window_minimized(hwnd: HWND) -> bool {
+    unsafe { IsIconic(hwnd).as_bool() }
+}
+
+/// 检查指定窗口是否为当前系统前台激活窗口
+pub fn is_foreground_window(hwnd: HWND) -> bool {
+    unsafe { GetForegroundWindow() == hwnd }
+}
+
 /// 最小化窗口
 pub fn minimize_window(hwnd: HWND) {
     unsafe {
-        let _ = ShowWindow(hwnd, SW_MINIMIZE);
+        let _ = ShowWindowAsync(hwnd, SW_MINIMIZE);
     }
 }
 

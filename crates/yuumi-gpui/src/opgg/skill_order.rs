@@ -159,7 +159,8 @@ pub fn skill_order_section(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::skill_palette;
+    use crate::theme::Theme;
 
     #[test]
     fn skill_palette_covers_all_four_abilities() {
