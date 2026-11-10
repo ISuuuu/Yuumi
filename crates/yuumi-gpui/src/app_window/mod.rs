@@ -150,6 +150,8 @@ pub struct MainWindow {
     opgg_window: Option<WindowHandle<OpggWindow>>,
     /// OP.GG 入口的临时提示文案（未连接 LCU 等场景）
     opgg_hint: Option<String>,
+    /// 最近一次已成功记录相遇的对局 ID（防止结算多事件重复写入）
+    last_recorded_encounter_game_id: Option<u64>,
 }
 
 impl MainWindow {
@@ -252,6 +254,7 @@ impl MainWindow {
             notice_popup_open: false,
             opgg_window: None,
             opgg_hint: None,
+            last_recorded_encounter_game_id: None,
         }
     }
 }

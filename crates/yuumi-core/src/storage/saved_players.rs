@@ -58,7 +58,9 @@ pub fn init_db(path: &Path) -> Result<Connection, String> {
             update_at INTEGER NOT NULL
          );
          CREATE INDEX IF NOT EXISTS idx_encountered_puuid
-            ON encountered_games (puuid, self_puuid, queue_type);",
+            ON encountered_games (puuid, self_puuid, queue_type);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_encountered_unique
+            ON encountered_games (game_id, puuid, self_puuid);",
     )
     .map_err(|e| format!("建表失败: {}", e))?;
 
@@ -148,11 +150,11 @@ impl SavedPlayersStorage {
 
         let sql = "SELECT COUNT(*)
                    FROM saved_players sp
-                   WHERE (?1 IS NULL OR sp.self_puuid = '' OR sp.self_puuid = ?1)
+                   WHERE (?1 IS NULL OR ?1 = '' OR sp.self_puuid = ?1)
                      AND (?2 IS NULL OR ?2 = '' OR ?2 = '全部' OR ?2 = 'all'
                           OR (?2 = '置顶' AND sp.is_pinned = 1)
                           OR ((?2 = '已标记' OR ?2 = '标记玩家' OR ?2 = 'tagged') AND sp.tag IS NOT NULL AND sp.tag != '')
-                          OR ((?2 = '多次相遇' OR ?2 = 'multiple') AND (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = sp.puuid AND (sp.self_puuid = '' OR eg.self_puuid = sp.self_puuid)) >= 2)
+                          OR ((?2 = '多次相遇' OR ?2 = 'multiple') AND (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid) >= 2)
                           OR sp.tag = ?2)
                      AND (?3 = '' OR sp.summoner_name LIKE ?4 OR COALESCE(sp.tag_line, '') LIKE ?4 OR COALESCE(sp.tag, '') LIKE ?4 OR COALESCE(sp.notes, '') LIKE ?4)";
 
@@ -186,16 +188,17 @@ impl SavedPlayersStorage {
 
         let sql = "SELECT sp.puuid, sp.summoner_name, COALESCE(sp.tag_line, ''), sp.tag,
                           sp.champion_id, sp.profile_icon_id,
-                          (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = sp.puuid AND (sp.self_puuid = '' OR eg.self_puuid = sp.self_puuid)) AS enc_cnt,
+                          (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid) AS enc_cnt,
                           COALESCE(sp.last_met_at, sp.update_at) AS last_met,
                           sp.is_pinned, COALESCE(sp.notes, ''),
-                          (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = sp.puuid AND (sp.self_puuid = '' OR eg.self_puuid = sp.self_puuid) ORDER BY eg.update_at DESC LIMIT 1) AS last_queue
+                          (SELECT queue_type FROM encountered_games eg WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid ORDER BY eg.update_at DESC LIMIT 1) AS last_queue,
+                          sp.self_puuid
                    FROM saved_players sp
-                   WHERE (?1 IS NULL OR sp.self_puuid = '' OR sp.self_puuid = ?1)
+                   WHERE (?1 IS NULL OR ?1 = '' OR sp.self_puuid = ?1)
                      AND (?2 IS NULL OR ?2 = '' OR ?2 = '全部' OR ?2 = 'all'
                           OR (?2 = '置顶' AND sp.is_pinned = 1)
                           OR ((?2 = '已标记' OR ?2 = '标记玩家' OR ?2 = 'tagged') AND sp.tag IS NOT NULL AND sp.tag != '')
-                          OR ((?2 = '多次相遇' OR ?2 = 'multiple') AND (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = sp.puuid AND (sp.self_puuid = '' OR eg.self_puuid = sp.self_puuid)) >= 2)
+                          OR ((?2 = '多次相遇' OR ?2 = 'multiple') AND (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid) >= 2)
                           OR sp.tag = ?2)
                      AND (?3 = '' OR sp.summoner_name LIKE ?4 OR COALESCE(sp.tag_line, '') LIKE ?4 OR COALESCE(sp.tag, '') LIKE ?4 OR COALESCE(sp.notes, '') LIKE ?4)
                    ORDER BY sp.is_pinned DESC, last_met DESC, sp.update_at DESC
@@ -215,6 +218,7 @@ impl SavedPlayersStorage {
 
                     Ok(SavedPlayer {
                         puuid: r.get(0)?,
+                        self_puuid: r.get(11)?,
                         summoner_name: r.get(1)?,
                         tag_line: r.get(2)?,
                         tag: r.get(3)?,
@@ -262,7 +266,7 @@ impl SavedPlayersStorage {
 
         let sql = "SELECT COUNT(*)
                    FROM encountered_games
-                   WHERE puuid = ?1 AND (?2 IS NULL OR self_puuid = '' OR self_puuid = ?2)";
+                   WHERE puuid = ?1 AND (?2 IS NULL OR ?2 = '' OR self_puuid = ?2)";
 
         let count: i64 = conn
             .query_row(sql, params![puuid, self_puuid], |r| r.get(0))
@@ -286,7 +290,7 @@ impl SavedPlayersStorage {
 
         let sql = "SELECT game_id, queue_type, champion_id, update_at
                    FROM encountered_games
-                   WHERE puuid = ?1 AND (?2 IS NULL OR self_puuid = '' OR self_puuid = ?2)
+                   WHERE puuid = ?1 AND (?2 IS NULL OR ?2 = '' OR self_puuid = ?2)
                    ORDER BY update_at DESC
                    LIMIT ?3 OFFSET ?4";
 
@@ -323,7 +327,8 @@ impl SavedPlayersStorage {
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
         let sql = "SELECT puuid, self_puuid, region, rso_platform_id, tag, summoner_name,
-                          profile_icon_id, tag_line, champion_id, update_at, last_met_at
+                          profile_icon_id, tag_line, champion_id, update_at, last_met_at,
+                          COALESCE(notes, '')
                    FROM saved_players
                    WHERE tag IS NOT NULL AND tag != ''";
 
@@ -345,6 +350,7 @@ impl SavedPlayersStorage {
                     champion_id: r.get(8)?,
                     update_at: r.get(9)?,
                     last_met_at: r.get(10)?,
+                    notes: r.get(11)?,
                 })
             })
             .map_err(|e| format!("执行导出查询失败: {}", e))?;
@@ -372,14 +378,15 @@ impl SavedPlayersStorage {
         let mut count = 0u32;
 
         {
-            let sql = "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at)
-                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            let sql = "INSERT INTO saved_players (puuid, self_puuid, region, rso_platform_id, tag, summoner_name, profile_icon_id, tag_line, champion_id, update_at, last_met_at, notes)
+                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                        ON CONFLICT(puuid, self_puuid, region, rso_platform_id) DO UPDATE SET
                          tag = excluded.tag,
                          summoner_name = CASE WHEN excluded.summoner_name = '' THEN saved_players.summoner_name ELSE excluded.summoner_name END,
                          profile_icon_id = CASE WHEN excluded.profile_icon_id = 0 THEN saved_players.profile_icon_id ELSE excluded.profile_icon_id END,
                          tag_line = CASE WHEN excluded.tag_line IS NULL OR excluded.tag_line = '' THEN saved_players.tag_line ELSE excluded.tag_line END,
                          champion_id = CASE WHEN excluded.champion_id = 0 THEN saved_players.champion_id ELSE excluded.champion_id END,
+                         notes = CASE WHEN excluded.notes != '' THEN excluded.notes ELSE saved_players.notes END,
                          update_at = excluded.update_at,
                          last_met_at = COALESCE(excluded.last_met_at, saved_players.last_met_at)";
 
@@ -398,6 +405,7 @@ impl SavedPlayersStorage {
                     r.champion_id,
                     r.update_at,
                     r.last_met_at,
+                    r.notes,
                 ]);
                 if res.is_ok() {
                     count += 1;
@@ -409,7 +417,7 @@ impl SavedPlayersStorage {
         Ok(count)
     }
 
-    /// 切换或更新玩家置顶状态
+    /// 切换或更新玩家置顶状态（带完整本机账号与目标记录作用域）
     pub fn update_pin(&self, puuid: &str, self_puuid: &str, is_pinned: bool) -> Result<(), String> {
         let conn = self
             .conn
@@ -419,16 +427,20 @@ impl SavedPlayersStorage {
         let pinned_val = if is_pinned { 1 } else { 0 };
         let now = chrono::Utc::now().timestamp_millis();
 
-        conn.execute(
-            "UPDATE saved_players SET is_pinned = ?1, update_at = ?2 WHERE puuid = ?3 AND (?4 = '' OR self_puuid = ?4)",
+        let rows = conn.execute(
+            "UPDATE saved_players SET is_pinned = ?1, update_at = ?2 WHERE puuid = ?3 AND self_puuid = ?4",
             params![pinned_val, now, puuid, self_puuid],
         )
         .map_err(|e| format!("更新置顶失败: {}", e))?;
 
+        if rows == 0 {
+            return Err(format!("未找到目标玩家记录进行置顶更新 (puuid={}, self_puuid={})", puuid, self_puuid));
+        }
+
         Ok(())
     }
 
-    /// 更新玩家标签与备忘录
+    /// 更新玩家标签与备忘录（带完整本机账号与目标记录作用域，避免空账号跨记录）
     pub fn update_tag_and_notes(
         &self,
         puuid: &str,
@@ -443,16 +455,20 @@ impl SavedPlayersStorage {
 
         let now = chrono::Utc::now().timestamp_millis();
 
-        conn.execute(
-            "UPDATE saved_players SET tag = ?1, notes = ?2, update_at = ?3 WHERE puuid = ?4 AND (?5 = '' OR self_puuid = ?5)",
+        let rows = conn.execute(
+            "UPDATE saved_players SET tag = ?1, notes = ?2, update_at = ?3 WHERE puuid = ?4 AND self_puuid = ?5",
             params![tag, notes, now, puuid, self_puuid],
         )
         .map_err(|e| format!("更新玩家标签与备注失败: {}", e))?;
 
+        if rows == 0 {
+            return Err(format!("未找到目标玩家记录进行标签更新 (puuid={}, self_puuid={})", puuid, self_puuid));
+        }
+
         Ok(())
     }
 
-    /// 删除玩家记录以及关联的相遇历史
+    /// 删除玩家记录以及关联的相遇历史（带完整本机账号与目标记录作用域）
     pub fn delete_player(&self, puuid: &str, self_puuid: &str) -> Result<(), String> {
         let mut conn = self
             .conn
@@ -461,32 +477,27 @@ impl SavedPlayersStorage {
 
         let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-        if self_puuid.is_empty() {
-            tx.execute("DELETE FROM saved_players WHERE puuid = ?1", params![puuid])
-                .map_err(|e| e.to_string())?;
-            tx.execute(
-                "DELETE FROM encountered_games WHERE puuid = ?1",
-                params![puuid],
-            )
-            .map_err(|e| e.to_string())?;
-        } else {
-            tx.execute(
-                "DELETE FROM saved_players WHERE puuid = ?1 AND self_puuid = ?2",
-                params![puuid, self_puuid],
-            )
-            .map_err(|e| e.to_string())?;
-            tx.execute(
-                "DELETE FROM encountered_games WHERE puuid = ?1 AND self_puuid = ?2",
-                params![puuid, self_puuid],
-            )
-            .map_err(|e| e.to_string())?;
+        let rows = tx.execute(
+            "DELETE FROM saved_players WHERE puuid = ?1 AND self_puuid = ?2",
+            params![puuid, self_puuid],
+        )
+        .map_err(|e| e.to_string())?;
+
+        tx.execute(
+            "DELETE FROM encountered_games WHERE puuid = ?1 AND self_puuid = ?2",
+            params![puuid, self_puuid],
+        )
+        .map_err(|e| e.to_string())?;
+
+        if rows == 0 {
+            return Err(format!("未找到目标玩家记录进行删除 (puuid={}, self_puuid={})", puuid, self_puuid));
         }
 
         tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    /// 批量记录对局相遇玩家（对局结束时调用）
+    /// 批量记录对局相遇玩家（对局结束时调用，自动按 (game_id, puuid, self_puuid) 去重）
     pub fn record_encounters(
         &self,
         players: &[GamePlayerRecord],
@@ -541,18 +552,162 @@ impl SavedPlayersStorage {
             )
             .map_err(|e| format!("记录相遇玩家失败: {}", e))?;
 
-            tx.execute(
-                "INSERT INTO encountered_games (game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at, champion_id)
-                 VALUES (?1, ?2, ?3, '', '', ?4, ?5, ?6)",
-                params![game_id as i64, player.puuid, self_puuid, queue_type, ts, player.champion_id],
-            )
-            .map_err(|e| format!("记录相遇对局失败: {}", e))?;
+            // 库内键防重复：同局同一玩家不重复插入
+            let exists: bool = tx
+                .query_row(
+                    "SELECT 1 FROM encountered_games WHERE game_id = ?1 AND puuid = ?2 AND self_puuid = ?3 LIMIT 1",
+                    params![game_id as i64, player.puuid, self_puuid],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
 
-            recorded += 1;
+            if !exists {
+                tx.execute(
+                    "INSERT INTO encountered_games (game_id, puuid, self_puuid, region, rso_platform_id, queue_type, update_at, champion_id)
+                     VALUES (?1, ?2, ?3, '', '', ?4, ?5, ?6)",
+                    params![game_id as i64, player.puuid, self_puuid, queue_type, ts, player.champion_id],
+                )
+                .map_err(|e| format!("记录相遇对局失败: {}", e))?;
+                recorded += 1;
+            }
         }
 
         tx.commit().map_err(|e| e.to_string())?;
         Ok(recorded)
+    }
+
+    /// 查询指定本机账号下所有已标记的玩家 (puuid, tag)，用于选人阶段标记提醒
+    pub fn query_tagged_for_reminder(
+        &self,
+        self_puuid: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT puuid, tag FROM saved_players WHERE self_puuid = ?1 AND tag IS NOT NULL AND tag != ''",
+            )
+            .map_err(|e| format!("准备提醒查询失败: {}", e))?;
+
+        let rows = stmt
+            .query_map(params![self_puuid], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|e| format!("执行提醒查询失败: {}", e))?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| format!("解析提醒数据失败: {}", e))?);
+        }
+        Ok(out)
+    }
+
+    /// 获取指定本机账号的路人集简要标记映射 (puuid -> (tag, encounter_count))，用于对局信息页徽标展示
+    pub fn get_saved_markers(
+        &self,
+        self_puuid: &str,
+    ) -> std::collections::HashMap<String, (Option<String>, u32)> {
+        let Ok(conn) = self.conn.lock() else {
+            return std::collections::HashMap::new();
+        };
+
+        let sql = "SELECT sp.puuid, sp.tag,
+                          (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid) AS enc_cnt
+                   FROM saved_players sp
+                   WHERE (?1 = '' OR sp.self_puuid = ?1)
+                     AND ((sp.tag IS NOT NULL AND sp.tag != '')
+                          OR (SELECT COUNT(*) FROM encountered_games eg WHERE eg.puuid = sp.puuid AND eg.self_puuid = sp.self_puuid) >= 2)";
+
+        let mut stmt = match conn.prepare(sql) {
+            Ok(s) => s,
+            Err(_) => return std::collections::HashMap::new(),
+        };
+
+        let rows = stmt.query_map(params![self_puuid], |r| {
+            let puuid: String = r.get(0)?;
+            let tag: Option<String> = r.get(1)?;
+            let count: i64 = r.get(2)?;
+            Ok((puuid, (tag, count.max(0) as u32)))
+        });
+
+        let mut map = std::collections::HashMap::new();
+        if let Ok(rows) = rows {
+            for r in rows.flatten() {
+                map.insert(r.0, r.1);
+            }
+        }
+        map
+    }
+
+    /// 查询缺少 tag_line、summoner_name 或 profile_icon_id 的记录，用于 LCU 身份信息异步补齐
+    pub fn query_missing_identity_players(&self) -> Result<Vec<(String, String)>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT puuid, self_puuid FROM saved_players
+                 WHERE tag_line IS NULL OR tag_line = '' OR summoner_name IS NULL OR summoner_name = '' OR profile_icon_id = 0",
+            )
+            .map_err(|e| format!("准备缺失身份查询失败: {}", e))?;
+
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|e| format!("执行缺失身份查询失败: {}", e))?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| format!("解析缺失身份行失败: {}", e))?);
+        }
+        Ok(out)
+    }
+
+    /// 批量回填更新玩家身份信息 (puuid, self_puuid, tag_line, summoner_name, profile_icon_id)
+    pub fn batch_update_identities(
+        &self,
+        updates: &[(String, String, String, String, i32)],
+    ) -> Result<u32, String> {
+        if updates.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let mut count = 0u32;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "UPDATE saved_players
+                     SET tag_line = CASE WHEN tag_line IS NULL OR tag_line = '' THEN ?1 ELSE tag_line END,
+                         summoner_name = CASE WHEN summoner_name IS NULL OR summoner_name = '' THEN ?2 ELSE summoner_name END,
+                         profile_icon_id = CASE WHEN profile_icon_id = 0 THEN ?3 ELSE profile_icon_id END
+                     WHERE puuid = ?4 AND self_puuid = ?5",
+                )
+                .map_err(|e| e.to_string())?;
+
+            for (puuid, self_puuid, tag_line, summoner_name, profile_icon_id) in updates {
+                if stmt
+                    .execute(params![
+                        tag_line,
+                        summoner_name,
+                        profile_icon_id,
+                        puuid,
+                        self_puuid
+                    ])
+                    .is_ok()
+                {
+                    count += 1;
+                }
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(count)
     }
 }
 
@@ -663,5 +818,62 @@ mod tests {
 
         let imported_count = storage.import_tagged_players(&exported).expect("导入失败");
         assert_eq!(imported_count, 1);
+
+        // 9. 选人提醒查询测试
+        let reminders = storage
+            .query_tagged_for_reminder(self_puuid)
+            .expect("提醒查询失败");
+        assert_eq!(reminders.len(), 1);
+        assert_eq!(reminders[0].0, "player-1");
+        assert_eq!(reminders[0].1, "大腿");
+
+        // 10. 重复结算去重测试 (同局多次调用不重复计入)
+        let duplicate_record = storage
+            .record_encounters(&players[..1], self_puuid, 999901, "420")
+            .expect("再次记录相遇应成功");
+        assert_eq!(duplicate_record, 0, "已记录对局不应重复插入");
+        let enc_games = storage
+            .query_encountered_games("player-1", Some(self_puuid), 10)
+            .expect("查询对局");
+        assert_eq!(enc_games.len(), 1);
+
+        // 11. 双账号隔离测试
+        let other_self_puuid = "other-account-puuid";
+        let other_players = vec![GamePlayerRecord {
+            puuid: "player-1".to_string(),
+            summoner_name: "测试玩家一".to_string(),
+            tag_line: Some("CN1".to_string()),
+            profile_icon_id: 501,
+            champion_id: 157,
+        }];
+        storage
+            .record_encounters(&other_players, other_self_puuid, 888801, "420")
+            .expect("其他账号记录相遇");
+        let my_enc = storage
+            .query_encountered_games("player-1", Some(self_puuid), 10)
+            .expect("我的相遇");
+        assert_eq!(my_enc.len(), 1);
+        assert_eq!(my_enc[0].game_id, 999901);
+
+        let other_enc = storage
+            .query_encountered_games("player-1", Some(other_self_puuid), 10)
+            .expect("对方相遇");
+        assert_eq!(other_enc.len(), 1);
+        assert_eq!(other_enc[0].game_id, 888801);
+
+        // 12. 身份回填测试
+        let _missing = storage
+            .query_missing_identity_players()
+            .expect("查询缺失身份");
+        // player-1 profile_icon_id 501, tag_line CN1, summoner_name 测试玩家一，都不缺失
+        let updates = vec![(
+            "player-1".to_string(),
+            self_puuid.to_string(),
+            "NEW_TAG".to_string(),
+            "新名称".to_string(),
+            999,
+        )];
+        let updated = storage.batch_update_identities(&updates).expect("更新身份");
+        assert_eq!(updated, 1);
     }
 }

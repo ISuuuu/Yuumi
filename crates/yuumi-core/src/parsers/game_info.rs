@@ -458,6 +458,12 @@ pub struct GameInfoPlayer {
     /// 近期常用英雄统计（最多 3 个）
     #[serde(default)]
     pub top_champions: Vec<TopChampion>,
+    /// 路人集自定义标签 (如 "大腿", "避坑")
+    #[serde(default)]
+    pub saved_tag: Option<String>,
+    /// 历史相遇总次数
+    #[serde(default)]
+    pub saved_encounter_count: u32,
     /// 是否成功拉到段位或战绩（否则前端展示占位）
     pub data_available: bool,
 }
@@ -677,6 +683,8 @@ fn make_mock_player(
         profile_icon_id,
         matches,
         top_champions,
+        saved_tag: None,
+        saved_encounter_count: 0,
         data_available: true,
     }
 }
@@ -977,6 +985,8 @@ fn parse_snapshot_json(content: &str) -> Result<LiveGameInfo, Box<dyn std::error
                 profile_icon_id,
                 matches,
                 top_champions,
+                saved_tag: None,
+                saved_encounter_count: 0,
                 data_available: true,
             });
         }
@@ -1234,6 +1244,7 @@ struct PlayerBuildContext<'a> {
     self_puuid: &'a str,
     self_summoner_id: Option<i64>,
     assets: &'a GameDataAssets,
+    saved_markers: HashMap<String, (Option<String>, u32)>,
 }
 
 fn build_player(
@@ -1318,6 +1329,15 @@ fn build_player(
     top_champions.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| b.win_rate.cmp(&a.win_rate)));
     top_champions.truncate(3);
 
+    let (saved_tag, saved_encounter_count) = if !puuid.is_empty() {
+        ctx.saved_markers
+            .get(&puuid)
+            .map(|(t, c)| (t.clone(), *c))
+            .unwrap_or((None, 0))
+    } else {
+        (None, 0)
+    };
+
     GameInfoPlayer {
         puuid,
         summoner_id,
@@ -1370,6 +1390,8 @@ fn build_player(
         profile_icon_id: 0,
         matches: recent.to_vec(),
         top_champions,
+        saved_tag,
+        saved_encounter_count,
         data_available: ranked.is_some() || recent_count > 0,
     }
 }
@@ -1384,12 +1406,17 @@ pub fn build_live_game_info(
     assets: &GameDataAssets,
 ) -> LiveGameInfo {
     let (side, side_matched) = bind_team_side(source, self_puuid, self_summoner_id);
+    let saved_markers = crate::storage::SavedPlayersStorage::open_default()
+        .map(|s| s.get_saved_markers(self_puuid))
+        .unwrap_or_default();
+
     let build_ctx = PlayerBuildContext {
         my_games: &my_recent.games,
         latest_my_game_id: my_recent.latest_game_id,
         self_puuid,
         self_summoner_id,
         assets,
+        saved_markers,
     };
 
     let blue_premade = resolve_premade_groups(&source.blue);
