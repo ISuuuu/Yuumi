@@ -1,5 +1,6 @@
 // 战绩查询路由：查询、详情、翻页、复制与跨页跳转。
 use super::*;
+use crate::match_model::ReplayState;
 
 impl MainWindow {
     fn upload_current_search_page(&self) {
@@ -47,10 +48,19 @@ impl MainWindow {
             return;
         }
 
-        self.search_view.save_to_history(&trimmed);
+        // 防双击与连击：正在搜索中则忽略重复请求
+        if self.search_view.is_searching {
+            return;
+        }
+
+        // 推进搜索世代代数，防止快速连续搜索时慢响应回填覆盖新结果
+        self.search_view.search_generation += 1;
+        let current_gen = self.search_view.search_generation;
+
         self.search_view.show_history = false;
         self.search_view.set_search_query(&trimmed);
         self.search_view.set_searching(true);
+        self.search_view.detail_error = None;
         if let Some(gid) = target_game_id {
             self.search_view.selected_game_id = Some(gid);
         }
@@ -67,9 +77,11 @@ impl MainWindow {
                 (Some(c), Some(a)) => (c, a),
                 _ => {
                     let _ = entity.update(cx, |this, cx| {
-                        this.search_view
-                            .set_search_error("客户端未连接或离线中，请先启动英雄联盟");
-                        cx.notify();
+                        if this.search_view.search_generation == current_gen {
+                            this.search_view
+                                .set_search_error("客户端未连接或离线中，请先启动英雄联盟");
+                            cx.notify();
+                        }
                     });
                     return;
                 }
@@ -98,6 +110,11 @@ impl MainWindow {
                                 .or_else(|| items.first().map(|m| m.display.game_id));
 
                             let _ = entity.update(cx, |this, cx| {
+                                if this.search_view.search_generation != current_gen {
+                                    return;
+                                }
+                                // B03 规范：仅在查询成功后才将规范的 Riot ID 存入历史记录
+                                this.search_view.save_to_history(&full_name);
                                 this.search_view.set_search_results(
                                     full_name,
                                     summoner.puuid.clone(),
@@ -120,26 +137,32 @@ impl MainWindow {
                                     .await
                                 {
                                     let _ = entity.update(cx, |this, cx| {
-                                        this.search_view.insert_game_detail(gid, detail);
-                                        cx.notify();
+                                        if this.search_view.search_generation == current_gen {
+                                            this.search_view.insert_game_detail(gid, detail);
+                                            cx.notify();
+                                        }
                                     });
                                 }
                             }
                         }
                         Err(e) => {
                             let _ = entity.update(cx, |this, cx| {
-                                this.search_view
-                                    .set_search_error(format!("获取战绩失败: {}", e));
-                                cx.notify();
+                                if this.search_view.search_generation == current_gen {
+                                    this.search_view
+                                        .set_search_error(format!("获取战绩失败: {}", e));
+                                    cx.notify();
+                                }
                             });
                         }
                     }
                 }
                 Err(e) => {
                     let _ = entity.update(cx, |this, cx| {
-                        this.search_view
-                            .set_search_error(format!("未找到召唤师: {}", e));
-                        cx.notify();
+                        if this.search_view.search_generation == current_gen {
+                            this.search_view
+                                .set_search_error(format!("未找到召唤师: {}", e));
+                            cx.notify();
+                        }
                     });
                 }
             }
@@ -149,6 +172,11 @@ impl MainWindow {
 
     pub(super) fn load_match_detail(&mut self, game_id: u64, cx: &mut Context<Self>) {
         if self.search_view.details_cache.contains_key(&game_id) {
+            // 修复 B04 缺陷：缓存命中分支必须递增请求代数并重置加载/错误状态，
+            // 避免已发出的旧网络请求在晚到后覆盖当前选中的缓存详情！
+            self.search_view.select_request_id += 1;
+            self.search_view.is_loading_detail = false;
+            self.search_view.detail_error = None;
             self.search_view.selected_game_id = Some(game_id);
             cx.notify();
             return;
@@ -158,6 +186,7 @@ impl MainWindow {
         let req_id = self.search_view.select_request_id;
         self.search_view.selected_game_id = Some(game_id);
         self.search_view.is_loading_detail = true;
+        self.search_view.detail_error = None;
         cx.notify();
 
         let live_service = self.live_service.clone();
@@ -174,6 +203,7 @@ impl MainWindow {
                         if this.search_view.select_request_id == req_id {
                             this.search_view.insert_game_detail(game_id, detail);
                             this.search_view.is_loading_detail = false;
+                            this.search_view.detail_error = None;
                             cx.notify();
                         }
                     });
@@ -185,8 +215,137 @@ impl MainWindow {
                 if this.search_view.select_request_id == req_id {
                     log::warn!("[MainWindow] 对局详情拉取失败: game_id={}", game_id);
                     this.search_view.is_loading_detail = false;
+                    this.search_view.detail_error = Some("获取对局详情失败，请重试".to_string());
                     cx.notify();
                 }
+            });
+        })
+        .detach();
+    }
+
+    /// 统一对局回放处理状态机（支持检查状态、下载进度轮询、自动观看与重试）
+    pub(super) fn handle_replay(&mut self, game_id: u64, cx: &mut Context<Self>) {
+        let current = crate::replay_store::get_replay_state(game_id);
+        if matches!(current, ReplayState::Checking | ReplayState::Downloading) {
+            log::info!("[MainWindow] 回放正在处理中，忽略重复点击: game_id={}", game_id);
+            return;
+        }
+        if matches!(current, ReplayState::Unsupported) {
+            log::warn!("[MainWindow] 回放不可用或已过期: game_id={}", game_id);
+            return;
+        }
+
+        let live = self.live_service.clone();
+
+        // 已就绪：直接触发客户端播放
+        if matches!(current, ReplayState::Watch) {
+            cx.spawn(async move |entity, cx| {
+                if let Some(client) = live.get_client().await {
+                    if let Err(e) = yuumi_core::parsers::replay::watch_game_replay(&client, game_id).await {
+                        log::error!("[MainWindow] 启动回放失败: {}", e);
+                        let _ = entity.update(cx, |_this, cx| {
+                            crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                            cx.notify();
+                        });
+                    }
+                }
+            })
+            .detach();
+            return;
+        }
+
+        // Idle 或 Error：先进入 Checking
+        crate::replay_store::set_replay_state(game_id, ReplayState::Checking);
+        cx.notify();
+
+        cx.spawn(async move |entity, cx| {
+            let Some(client) = live.get_client().await else {
+                log::warn!("[MainWindow] LCU 客户端未连接，无法获取回放");
+                let _ = entity.update(cx, |_this, cx| {
+                    crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                    cx.notify();
+                });
+                return;
+            };
+
+            match yuumi_core::parsers::replay::get_replay_status(&client, game_id).await {
+                Ok(status) => {
+                    let s = status.to_ascii_lowercase();
+                    if s == "watch" || s == "found" {
+                        let _ = entity.update(cx, |_this, cx| {
+                            crate::replay_store::set_replay_state(game_id, ReplayState::Watch);
+                            cx.notify();
+                        });
+                        let _ = yuumi_core::parsers::replay::watch_game_replay(&client, game_id).await;
+                        return;
+                    } else if s == "unsupported" || s == "incompatible" || s == "missingorexpired" || s == "lost" {
+                        let _ = entity.update(cx, |_this, cx| {
+                            crate::replay_store::set_replay_state(game_id, ReplayState::Unsupported);
+                            cx.notify();
+                        });
+                        return;
+                    } else if s == "downloading" {
+                        let _ = entity.update(cx, |_this, cx| {
+                            crate::replay_store::set_replay_state(game_id, ReplayState::Downloading);
+                            cx.notify();
+                        });
+                    } else {
+                        // 触发下载
+                        let _ = entity.update(cx, |_this, cx| {
+                            crate::replay_store::set_replay_state(game_id, ReplayState::Downloading);
+                            cx.notify();
+                        });
+                        if let Err(e) = yuumi_core::parsers::replay::download_game_replay(&client, game_id).await {
+                            log::error!("[MainWindow] 触发下载回放失败: {}", e);
+                            let _ = entity.update(cx, |_this, cx| {
+                                crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                                cx.notify();
+                            });
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("[MainWindow] 获取回放状态失败: {}", e);
+                    let _ = entity.update(cx, |_this, cx| {
+                        crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                        cx.notify();
+                    });
+                    return;
+                }
+            }
+
+            // 轮询下载进度（最多 40 次，每次 1.5 秒）
+            for _ in 1..=40 {
+                cx.background_executor().timer(Duration::from_millis(1500)).await;
+                if let Ok(st) = yuumi_core::parsers::replay::get_replay_status(&client, game_id).await {
+                    let s = st.to_ascii_lowercase();
+                    if s == "watch" || s == "found" {
+                        let _ = entity.update(cx, |_this, cx| {
+                            crate::replay_store::set_replay_state(game_id, ReplayState::Watch);
+                            cx.notify();
+                        });
+                        return;
+                    } else if s == "unsupported" || s == "incompatible" || s == "missingorexpired" || s == "lost" {
+                        let _ = entity.update(cx, |_this, cx| {
+                            crate::replay_store::set_replay_state(game_id, ReplayState::Unsupported);
+                            cx.notify();
+                        });
+                        return;
+                    } else if s == "error" {
+                        let _ = entity.update(cx, |_this, cx| {
+                            crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                            cx.notify();
+                        });
+                        return;
+                    }
+                }
+            }
+
+            // 超时
+            let _ = entity.update(cx, |_this, cx| {
+                crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                cx.notify();
             });
         })
         .detach();
@@ -256,6 +415,8 @@ impl MainWindow {
         let view_upload = view.clone();
         let view_copy = view.clone();
         let view_player = view.clone();
+        let view_replay = view.clone();
+        let view_retry = view.clone();
 
         let on_select_match = {
             let v = view.clone();
@@ -276,6 +437,11 @@ impl MainWindow {
                     if let Some(first) = paged.first() {
                         let gid = first.display.game_id;
                         this.load_match_detail(gid, cx);
+                    } else {
+                        // B04 规范：空筛选时清除选中的对局与详情，保持左右栏状态一致
+                        this.search_view.selected_game_id = None;
+                        this.search_view.last_detail = None;
+                        this.search_view.detail_error = None;
                     }
                     cx.notify();
                 });
@@ -388,6 +554,16 @@ impl MainWindow {
                     } else if summoner_id > 0 {
                         this.perform_search(&name, cx);
                     }
+                });
+            },
+            move |game_id, _window, app| {
+                view_replay.update(app, |this, cx| {
+                    this.handle_replay(game_id, cx);
+                });
+            },
+            move |game_id, _window, app| {
+                view_retry.update(app, |this, cx| {
+                    this.load_match_detail(game_id, cx);
                 });
             },
         ))

@@ -11,7 +11,18 @@ impl MainWindow {
         }
     }
 
-    pub(super) fn refresh_career(&mut self, _cx: &mut Context<Self>) {
+    pub(super) fn refresh_career(&mut self, cx: &mut Context<Self>) {
+        // B01 规范：若当前正在查看他人生涯，刷新应重新拉取该他人的战绩与资料，而不是拉取登录账号
+        if self.career_view.is_viewing_other {
+            if let Some(ref s) = self.career_view.summoner {
+                let puuid = s.puuid.clone();
+                let name = s.full_name();
+                let icon = s.icon_path();
+                self.view_other_career(puuid, name, icon, cx);
+                return;
+            }
+        }
+
         let live = self.live_service.clone();
         let limit = self.app_config.functions.career_games_number as usize;
         yuumi_core::runtime::spawn_background(async move {
@@ -145,6 +156,10 @@ impl MainWindow {
                         action,
                         ..
                     } => {
+                        if quantity <= 0 {
+                            log::warn!("[MainWindow] 开启/合成数量为 0，取消执行");
+                            return;
+                        }
                         let item = LootActionItem {
                             recipe_name,
                             ingredients,
@@ -156,7 +171,9 @@ impl MainWindow {
                             views::career::LootQuantityAction::Craft => LootActionKind::Open,
                         };
                         yuumi_core::runtime::spawn_background(async move {
-                            let _ = live.run_loot_action(kind, vec![item]).await;
+                            if let Err(e) = live.run_loot_action(kind, vec![item]).await {
+                                log::error!("[MainWindow] 执行战利品开启/合成动作失败: {}", e);
+                            }
                             live.refresh_career_data().await;
                         });
                     }
@@ -170,7 +187,7 @@ impl MainWindow {
                             self.career_view
                                 .loot_items
                                 .iter()
-                                .filter(|i| i.is_openable)
+                                .filter(|i| i.is_openable && i.count > 0)
                                 .map(|i| LootActionItem {
                                     loot_id: i.loot_id.clone(),
                                     name: i.name.clone(),
@@ -184,7 +201,7 @@ impl MainWindow {
                             self.career_view
                                 .loot_items
                                 .iter()
-                                .filter(|i| selected_ids.contains(&i.loot_id))
+                                .filter(|i| selected_ids.contains(&i.loot_id) && i.count > 0)
                                 .map(|i| LootActionItem {
                                     loot_id: i.loot_id.clone(),
                                     name: i.item_desc.clone(),
@@ -196,8 +213,15 @@ impl MainWindow {
                                 .collect()
                         };
 
+                        if items.is_empty() {
+                            log::warn!("[MainWindow] 战利品动作为空条目，取消执行");
+                            return;
+                        }
+
                         yuumi_core::runtime::spawn_background(async move {
-                            let _ = live.run_loot_action(action_kind, items).await;
+                            if let Err(e) = live.run_loot_action(action_kind, items).await {
+                                log::error!("[MainWindow] 执行批量战利品动作失败: {}", e);
+                            }
                             live.refresh_career_data().await;
                         });
                     }
@@ -368,6 +392,7 @@ impl MainWindow {
         let view_filter = view_entity.clone();
         let view_bar = view_entity.clone();
         let view_loot = view_entity.clone();
+        let view_replay = view_entity.clone();
         let is_connected = matches!(self.connection_status, ConnectionStatus::Connected { .. });
         el.child(self.career_view.render(
             &self.matches,
@@ -439,6 +464,11 @@ impl MainWindow {
             self.loot_value_focus.is_focused(window),
             move |action: LootAction, _window, app| {
                 view_loot.update(app, |this, cx| this.apply_loot_action(action, cx));
+            },
+            move |game_id, _window, app| {
+                view_replay.update(app, |this, cx| {
+                    this.handle_replay(game_id, cx);
+                });
             },
         ))
     }

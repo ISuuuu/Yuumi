@@ -15,6 +15,7 @@ mod game_info_view;
 mod match_model;
 mod opgg;
 pub mod platform;
+pub mod replay_store;
 pub mod services;
 mod theme;
 mod tray;
