@@ -55,6 +55,7 @@ impl MainWindow {
         let view_search_cb = view_entity.clone();
         let view_load_demo = view_entity.clone();
         let view_exit_demo = view_entity.clone();
+        let game_info_filter = self.app_config.functions.game_info_filter;
         el.overflow_hidden().h_full().child(GameInfoView::render(
             self.game_info.as_deref(),
             self.current_phase.as_str(),
@@ -62,6 +63,7 @@ impl MainWindow {
             connected,
             view_mode,
             active_tab,
+            game_info_filter,
             move |mode, _window, app| {
                 view_mode_cb.update(app, |this, cx| {
                     this.switch_game_info_view_mode(mode, cx);

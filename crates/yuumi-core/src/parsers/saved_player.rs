@@ -24,6 +24,9 @@ pub struct EncounteredGameRecord {
 pub struct SavedPlayer {
     /// 唯一标识符 PUUID
     pub puuid: String,
+    /// 记录归属的本机账号 PUUID
+    #[serde(default)]
+    pub self_puuid: String,
     /// 召唤师名称
     pub summoner_name: String,
     /// 标签号 (如 "CN1", "KR1", "001")
@@ -74,6 +77,8 @@ pub struct TaggedPlayerExportDto {
     pub update_at: i64,
     #[serde(default)]
     pub last_met_at: Option<i64>,
+    #[serde(default)]
+    pub notes: String,
 }
 
 impl SavedPlayer {
@@ -85,6 +90,7 @@ impl SavedPlayer {
     ) -> Self {
         Self {
             puuid: puuid.into(),
+            self_puuid: String::new(),
             summoner_name: summoner_name.into(),
             tag_line: tag_line.into(),
             tag: None,
@@ -166,6 +172,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
     vec![
         SavedPlayer {
             puuid: "mock-puuid-faker".to_string(),
+            self_puuid: String::new(),
             summoner_name: "Hide on bush".to_string(),
             tag_line: "KR1".to_string(),
             tag: Some("绝活".to_string()),
@@ -202,6 +209,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
         },
         SavedPlayer {
             puuid: "mock-puuid-jungle".to_string(),
+            self_puuid: String::new(),
             summoner_name: "峡谷巡航机".to_string(),
             tag_line: "CN1".to_string(),
             tag: Some("大腿".to_string()),
@@ -231,6 +239,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
         },
         SavedPlayer {
             puuid: "mock-puuid-top-troll".to_string(),
+            self_puuid: String::new(),
             summoner_name: "绝不下路支援".to_string(),
             tag_line: "CN2".to_string(),
             tag: Some("避坑".to_string()),
@@ -260,6 +269,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
         },
         SavedPlayer {
             puuid: "mock-puuid-afk".to_string(),
+            self_puuid: String::new(),
             summoner_name: "网络波动中".to_string(),
             tag_line: "CN1".to_string(),
             tag: Some("演员/挂机".to_string()),
@@ -280,6 +290,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
         },
         SavedPlayer {
             puuid: "mock-puuid-support".to_string(),
+            self_puuid: String::new(),
             summoner_name: "温和猫猫酱".to_string(),
             tag_line: "CN3".to_string(),
             tag: Some("大腿".to_string()),
@@ -309,6 +320,7 @@ pub fn create_mock_saved_players() -> Vec<SavedPlayer> {
         },
         SavedPlayer {
             puuid: "mock-puuid-adc-master".to_string(),
+            self_puuid: String::new(),
             summoner_name: "狂暴滑板鞋".to_string(),
             tag_line: "001".to_string(),
             tag: Some("绝活".to_string()),
