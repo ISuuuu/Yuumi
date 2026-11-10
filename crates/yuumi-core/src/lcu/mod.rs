@@ -3,6 +3,7 @@ pub mod client;
 pub mod event_projection;
 pub mod game_data;
 pub mod monitor;
+pub mod write;
 pub mod ws;
 
 pub use asset_cache::AssetCache;

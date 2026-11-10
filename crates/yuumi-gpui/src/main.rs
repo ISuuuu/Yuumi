@@ -19,6 +19,7 @@ mod career_view;
 mod components;
 mod game_info_view;
 mod match_model;
+mod opgg;
 pub mod platform;
 pub mod services;
 mod theme;
@@ -27,10 +28,10 @@ pub mod views;
 
 use bench_overlay::{load_saved_origin, BenchOverlayView};
 use components::notice_popup::notice_popup;
-use components::opgg_modal::{opgg_modal, OpggTab};
 use components::sidebar::Sidebar;
 use components::titlebar::{phase_label, TitleBar};
 use match_model::MatchItem;
+use opgg::{OpggWindow, OPGG_WINDOW_TITLE};
 use services::{ConnectionStatus, LiveLcuEvent, LiveLcuService};
 use theme::Theme;
 use tray::TrayManager;
@@ -142,12 +143,10 @@ pub struct MainWindow {
     has_update: bool,
     /// 公告弹窗是否打开
     notice_popup_open: bool,
-    /// OP.GG 辅助弹窗是否打开
-    opgg_modal_open: bool,
-    /// OP.GG 弹窗当前选中的页签
-    opgg_tab: OpggTab,
-    /// OP.GG 当前选中的位置
-    opgg_position: &'static str,
+    /// OP.GG 独立窗口句柄（存在即复用并聚焦）
+    opgg_window: Option<WindowHandle<OpggWindow>>,
+    /// OP.GG 入口的临时提示文案（未连接 LCU 等场景）
+    opgg_hint: Option<String>,
 }
 
 impl MainWindow {
@@ -248,9 +247,8 @@ impl MainWindow {
             main_scroll_handle: ScrollHandle::new(),
             has_update: false,
             notice_popup_open: false,
-            opgg_modal_open: false,
-            opgg_tab: OpggTab::TierList,
-            opgg_position: "MID",
+            opgg_window: None,
+            opgg_hint: None,
         }
     }
 
@@ -388,6 +386,10 @@ impl MainWindow {
                     "ChampSelect" | "GameStart" | "InProgress" | "Reconnect"
                 ) {
                     self.game_info_loading = false;
+                }
+                // 进入选人阶段按配置自动弹出 OP.GG（已有窗口则聚焦）
+                if phase == GamePhase::ChampSelect && self.app_config.functions.auto_show_opgg {
+                    self.open_opgg_window(cx);
                 }
                 if phase != GamePhase::ChampSelect {
                     // 选人结束（或进入其它阶段）即收起板凳席悬浮窗
@@ -625,9 +627,105 @@ impl MainWindow {
         cx.notify();
     }
 
-    pub fn toggle_opgg_modal(&mut self, open: bool, cx: &mut Context<Self>) {
-        self.opgg_modal_open = open;
+    /// 打开 OP.GG 独立窗口；未连接 LCU 时给出提示并返回。
+    ///
+    /// 已有窗口时直接聚焦复用，句柄失效则重建（对照 Vue 的 `getByLabel("opgg")`）。
+    pub fn open_opgg_window(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.connection_status, ConnectionStatus::Connected { .. }) {
+            self.show_opgg_hint("未连接到英雄联盟客户端，无法打开 OP.GG", cx);
+            return;
+        }
+
+        if let Some(handle) = &self.opgg_window {
+            let alive = handle
+                .update(cx, |_view, window, _cx| window.activate_window())
+                .is_ok();
+            if alive {
+                return;
+            }
+            log::warn!("[OPGG] 窗口句柄已失效，重新创建");
+            self.opgg_window = None;
+        }
+
+        let service = self.live_service.clone();
+        let proxy = yuumi_core::opgg::ProxyConfig {
+            enable: self.app_config.general.enable_http_proxy,
+            addr: self.app_config.general.http_proxy_addr.clone(),
+        };
+        let on_top = self.app_config.functions.enable_opgg_on_top;
+        let initial_champion = self.initial_opgg_champion();
+        let window_options = WindowOptions {
+            window_bounds: Some(opgg_window_bounds(cx)),
+            titlebar: Some(TitlebarOptions {
+                title: Some(OPGG_WINDOW_TITLE.into()),
+                appears_transparent: false,
+                traffic_light_position: None,
+            }),
+            kind: WindowKind::Normal,
+            focus: true,
+            is_movable: true,
+            is_resizable: true,
+            ..Default::default()
+        };
+
+        match cx.open_window(window_options, move |_window, cx| {
+            cx.new(move |cx| OpggWindow::new(service, proxy, initial_champion, cx))
+        }) {
+            Ok(handle) => {
+                self.opgg_window = Some(handle);
+                if on_top {
+                    // 置顶需等原生窗口就绪后再套用 Win32 样式
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(120));
+                        match platform::find_window_by_title(OPGG_WINDOW_TITLE) {
+                            Some(hwnd) => platform::set_window_topmost(hwnd, true),
+                            None => log::warn!("[OPGG] 未找到窗口 HWND，置顶未应用"),
+                        }
+                    });
+                }
+            }
+            Err(err) => log::error!("[OPGG] 创建窗口失败: {}", err),
+        }
+    }
+
+    /// 关闭并销毁 OP.GG 独立窗口
+    pub fn close_opgg_window(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.opgg_window.take() {
+            let _ = handle.update(cx, |_view, window, _cx| window.remove_window());
+        }
+    }
+
+    /// 首屏进详情用的英雄：按自动选人配置依次检查通用与五个分路
+    fn initial_opgg_champion(&self) -> Option<i32> {
+        let functions = &self.app_config.functions;
+        if !functions.enable_auto_select_champion {
+            return None;
+        }
+        let candidates: [&Vec<i32>; 6] = [
+            &functions.auto_select_champion,
+            &functions.auto_select_champion_mid,
+            &functions.auto_select_champion_top,
+            &functions.auto_select_champion_sup,
+            &functions.auto_select_champion_jug,
+            &functions.auto_select_champion_bot,
+        ];
+        candidates
+            .iter()
+            .find_map(|list| list.first().copied().filter(|id| *id > 0))
+    }
+
+    /// 显示 OP.GG 入口提示（3 秒后自动消失）
+    fn show_opgg_hint(&mut self, message: &str, cx: &mut Context<Self>) {
+        self.opgg_hint = Some(message.to_string());
         cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(3)).await;
+            let _ = this.update(cx, |this, cx| {
+                this.opgg_hint = None;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub fn trigger_reconnect(&mut self, cx: &mut Context<Self>) {
@@ -2149,7 +2247,7 @@ impl Render for MainWindow {
                             let entity = view_entity.clone();
                             move |_window, app| {
                                 entity.update(app, |this, cx| {
-                                    this.toggle_opgg_modal(true, cx);
+                                    this.open_opgg_window(cx);
                                 });
                             }
                         },
@@ -2758,39 +2856,23 @@ impl Render for MainWindow {
                         )),
                 )
             })
-            // 4. OP.GG 辅助数据弹窗 (OpggModal)
-            .child(opgg_modal(
-                self.opgg_modal_open,
-                self.opgg_tab,
-                self.opgg_position,
-                None,
-                {
-                    let v = view_entity.clone();
-                    move |tab, _win, app| {
-                        v.update(app, |this, cx| {
-                            this.opgg_tab = tab;
-                            cx.notify();
-                        });
-                    }
-                },
-                {
-                    let v = view_entity.clone();
-                    move |pos, _win, app| {
-                        v.update(app, |this, cx| {
-                            this.opgg_position = pos;
-                            cx.notify();
-                        });
-                    }
-                },
-                {
-                    let v = view_entity.clone();
-                    move |_win, app| {
-                        v.update(app, |this, cx| {
-                            this.toggle_opgg_modal(false, cx);
-                        });
-                    }
-                },
-            ))
+            // 4. OP.GG 入口提示（独立窗口已在原生窗口层打开，这里仅承载临时提示）
+            .when_some(self.opgg_hint.clone(), |el, hint| {
+                el.child(
+                    div()
+                        .absolute()
+                        .bottom(px(20.0))
+                        .left(px(20.0))
+                        .px(px(14.0))
+                        .py(px(10.0))
+                        .rounded(px(8.0))
+                        .bg(Theme::GOLD)
+                        .shadow_md()
+                        .text_size(px(12.0))
+                        .text_color(Theme::TEXT_ON_PRIMARY)
+                        .child(hint),
+                )
+            })
     }
 }
 
@@ -2807,6 +2889,34 @@ fn main_window_bounds(cx: &App) -> WindowBounds {
         height = height.min(max_height);
     }
     WindowBounds::centered(Size { width, height }, cx)
+}
+
+/// OP.GG 窗口默认 760 × 820 逻辑像素，贴靠主窗口所在屏幕的右上角
+/// （对照 Vue `openOpggWindow` 的 `x = pos.x + width - 760 - 2, y = pos.y + 2`），
+/// 工作区不足时先收敛尺寸，保证标题栏与内容可达。
+fn opgg_window_bounds(cx: &App) -> WindowBounds {
+    let mut width = px(760.0);
+    let mut height = px(820.0);
+    if let Some(display) = cx.primary_display() {
+        let bounds = display.bounds();
+        width = width.min((bounds.size.width - px(40.0)).max(px(600.0)));
+        height = height.min((bounds.size.height - px(80.0)).max(px(520.0)));
+        let origin = Point {
+            x: bounds.origin.x + bounds.size.width - width - px(2.0),
+            y: bounds.origin.y + px(2.0),
+        };
+        return WindowBounds::Windowed(Bounds {
+            origin,
+            size: Size { width, height },
+        });
+    }
+    WindowBounds::Windowed(Bounds {
+        origin: Point {
+            x: px(120.0),
+            y: px(60.0),
+        },
+        size: Size { width, height },
+    })
 }
 
 fn main() {

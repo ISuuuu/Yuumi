@@ -6,7 +6,7 @@
 //! - 底部动作区（5 大入口）：OP.GG、修复重连、公告通知、召唤师名片(登录态)、设置(带更新小红点)；
 //! - 选中态青透底 + 4px 内侧指示条，悬停与折叠对齐 Vue。
 
-use crate::components::icon::icon;
+use crate::components::icon::{icon, opgg_logo};
 use crate::components::lcu_image::LcuImage;
 use crate::theme::Theme;
 use crate::views::Route;
@@ -118,7 +118,7 @@ impl Sidebar {
                     .child(Self::render_bottom_action(
                         "action-opgg",
                         "OP.GG",
-                        "icons/opgg.svg",
+                        opgg_logo(18.0),
                         expanded,
                         on_open_opgg,
                     ))
@@ -126,7 +126,7 @@ impl Sidebar {
                     .child(Self::render_bottom_action(
                         "action-reconnect",
                         "修复加载",
-                        "icons/refresh.svg",
+                        icon("icons/refresh.svg", 18.0, Theme::TEXT_MUTED).into_any_element(),
                         expanded,
                         on_reconnect,
                     ))
@@ -134,7 +134,7 @@ impl Sidebar {
                     .child(Self::render_bottom_action(
                         "action-notice",
                         "公告日志",
-                        "icons/bell.svg",
+                        icon("icons/bell.svg", 18.0, Theme::TEXT_MUTED).into_any_element(),
                         expanded,
                         on_open_notice,
                     ))
@@ -253,7 +253,7 @@ impl Sidebar {
     fn render_bottom_action(
         id: &'static str,
         label: &'static str,
-        icon_path: &'static str,
+        icon_el: AnyElement,
         expanded: bool,
         on_click: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
@@ -272,7 +272,7 @@ impl Sidebar {
             .when(!expanded, |el| el.justify_center())
             .hover(|s| s.bg(Theme::HOVER_BG))
             .cursor_pointer()
-            .child(icon(icon_path, 18.0, Theme::TEXT_MUTED))
+            .child(icon_el)
             .when(expanded, |el| {
                 el.child(
                     div()

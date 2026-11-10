@@ -2,6 +2,7 @@ pub mod agents;
 pub mod config;
 pub mod gameflow;
 pub mod lcu;
+pub mod opgg;
 pub mod parsers;
 pub mod runtime;
 pub mod storage;
