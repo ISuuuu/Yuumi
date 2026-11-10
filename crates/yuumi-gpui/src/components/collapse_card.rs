@@ -35,15 +35,15 @@ pub fn collapse_card(
         } else {
             Theme::CARD_BORDER
         })
-        .rounded(px(8.0))
+        .rounded(px(12.0))
         .shadow_sm()
         .overflow_hidden()
         // 头部可点击区域
         .child(
             div()
                 .w_full()
-                .px(px(16.0))
-                .py(px(12.0))
+                .px(px(24.0))
+                .py(px(16.0))
                 .flex()
                 .items_center()
                 .justify_between()
@@ -54,47 +54,34 @@ pub fn collapse_card(
                     div()
                         .flex()
                         .items_center()
-                        .gap(px(14.0))
+                        .gap(px(12.0))
                         .flex_1()
                         .when_some(icon_name, |this, icon_path| {
-                            this.child(
-                                div()
-                                    .size(px(32.0))
-                                    .rounded(px(6.0))
-                                    .bg(if open {
-                                        Theme::ACCENT_LIGHT
-                                    } else {
-                                        Theme::HOVER_BG
-                                    })
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(icon(
-                                        icon_path,
-                                        16.0,
-                                        if open {
-                                            Theme::ACCENT_PRIMARY
-                                        } else {
-                                            Theme::TEXT_MUTED
-                                        },
-                                    )),
-                            )
+                            this.child(icon(
+                                icon_path,
+                                16.0,
+                                if open {
+                                    Theme::ACCENT_PRIMARY
+                                } else {
+                                    Theme::TEXT_MUTED
+                                },
+                            ))
                         })
                         .child(
                             div()
                                 .flex()
                                 .flex_col()
-                                .gap(px(2.0))
+                                .gap(px(4.0))
                                 .child(
                                     div()
                                         .text_size(px(13.5))
-                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .font_weight(FontWeight::BOLD)
                                         .text_color(Theme::TEXT_PRIMARY)
                                         .child(title),
                                 )
                                 .child(
                                     div()
-                                        .text_size(px(11.5))
+                                        .text_size(px(12.0))
                                         .text_color(Theme::TEXT_MUTED)
                                         .child(desc),
                                 ),
@@ -119,9 +106,9 @@ pub fn collapse_card(
                         })
                         .child(icon(
                             if open {
-                                "icons/chevron-up.svg"
-                            } else {
                                 "icons/chevron-down.svg"
+                            } else {
+                                "icons/chevron-right.svg"
                             },
                             14.0,
                             Theme::TEXT_MUTED,
@@ -135,11 +122,11 @@ pub fn collapse_card(
                     .w_full()
                     .border_t_1()
                     .border_color(Theme::CARD_BORDER.opacity(0.6))
-                    .px(px(16.0))
-                    .py(px(12.0))
+                    .px(px(24.0))
+                    .py(px(16.0))
                     .flex()
                     .flex_col()
-                    .gap(px(10.0))
+                    .gap(px(12.0))
                     .child(content),
             )
         })
@@ -148,11 +135,10 @@ pub fn collapse_card(
 /// 标准设置行（左侧标题/说明，右侧控件）
 pub fn setting_row(
     title: impl Into<SharedString>,
-    desc: Option<impl Into<SharedString>>,
+    desc: Option<&'static str>,
     control: impl IntoElement,
 ) -> Div {
     let title = title.into();
-    let desc_opt = desc.map(|d| d.into());
 
     div()
         .w_full()
@@ -173,7 +159,7 @@ pub fn setting_row(
                         .text_color(Theme::TEXT_PRIMARY)
                         .child(title),
                 )
-                .when_some(desc_opt, |this, d| {
+                .when_some(desc, |this, d| {
                     this.child(div().text_size(px(11.5)).text_color(Theme::TEXT_MUTED).child(d))
                 }),
         )
@@ -192,8 +178,8 @@ pub fn settings_card_item(
 
     div()
         .w_full()
-        .px(px(16.0))
-        .py(px(12.0))
+        .px(px(24.0))
+        .py(px(16.0))
         .bg(Theme::CARD_BG)
         .when(border_bottom, |s| {
             s.border_b_1().border_color(Theme::CARD_BORDER.opacity(0.5))
@@ -206,23 +192,29 @@ pub fn settings_card_item(
             div()
                 .flex()
                 .flex_col()
-                .gap(px(2.0))
+                .gap(px(4.0))
                 .flex_1()
                 .child(
                     div()
                         .text_size(px(13.5))
-                        .font_weight(FontWeight::MEDIUM)
+                        .font_weight(FontWeight::BOLD)
                         .text_color(Theme::TEXT_PRIMARY)
                         .child(title),
                 )
                 .when_some(desc_opt, |this, d| {
-                    this.child(div().text_size(px(11.5)).text_color(Theme::TEXT_MUTED).child(d))
+                    this.child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(Theme::TEXT_MUTED)
+                            .line_height(relative(1.4))
+                            .child(d),
+                    )
                 }),
         )
         .child(control)
 }
 
-/// 数值步进器（[-] 数值 [+]）
+/// 数值步进器（数值居左，减加按钮居右，宽度 140px，1:1 对标 Naive UI n-input-number）
 pub fn number_stepper(
     id: ElementId,
     value_display: String,
@@ -233,7 +225,7 @@ pub fn number_stepper(
 ) -> Stateful<Div> {
     div()
         .id(id)
-        .w(px(130.0))
+        .w(px(140.0))
         .h(px(28.0))
         .rounded_md()
         .border_1()
@@ -243,70 +235,132 @@ pub fn number_stepper(
         .items_center()
         .justify_between()
         .overflow_hidden()
-        // 减按钮
-        .child(
-            div()
-                .w(px(28.0))
-                .h_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px(14.0))
-                .font_weight(FontWeight::BOLD)
-                .text_color(if can_decrement {
-                    Theme::TEXT_PRIMARY
-                } else {
-                    Theme::TEXT_MUTED.opacity(0.4)
-                })
-                .cursor(if can_decrement {
-                    CursorStyle::PointingHand
-                } else {
-                    CursorStyle::OperationNotAllowed
-                })
-                .when(can_decrement, |this| {
-                    this.hover(|s| s.bg(Theme::HOVER_BG))
-                        .on_mouse_down(MouseButton::Left, on_decrement)
-                })
-                .child("−"),
-        )
-        // 数值显示
+        // 左侧数值显示
         .child(
             div()
                 .flex_1()
                 .h_full()
+                .px(px(10.0))
                 .flex()
                 .items_center()
-                .justify_center()
                 .text_size(px(12.5))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(Theme::TEXT_PRIMARY)
                 .child(value_display),
         )
-        // 加按钮
+        // 右侧减加按钮组
         .child(
             div()
-                .w(px(28.0))
+                .flex()
+                .items_center()
                 .h_full()
+                .border_l_1()
+                .border_color(Theme::CARD_BORDER.opacity(0.6))
+                // 减按钮
+                .child(
+                    div()
+                        .w(px(26.0))
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(if can_decrement {
+                            Theme::TEXT_PRIMARY
+                        } else {
+                            Theme::TEXT_MUTED.opacity(0.3)
+                        })
+                        .cursor(if can_decrement {
+                            CursorStyle::PointingHand
+                        } else {
+                            CursorStyle::OperationNotAllowed
+                        })
+                        .when(can_decrement, |this| {
+                            this.hover(|s| s.bg(Theme::HOVER_BG))
+                                .on_mouse_down(MouseButton::Left, on_decrement)
+                        })
+                        .child("−"),
+                )
+                // 分隔细线
+                .child(
+                    div()
+                        .w(px(1.0))
+                        .h(px(14.0))
+                        .bg(Theme::CARD_BORDER.opacity(0.6)),
+                )
+                // 加按钮
+                .child(
+                    div()
+                        .w(px(26.0))
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(if can_increment {
+                            Theme::TEXT_PRIMARY
+                        } else {
+                            Theme::TEXT_MUTED.opacity(0.3)
+                        })
+                        .cursor(if can_increment {
+                            CursorStyle::PointingHand
+                        } else {
+                            CursorStyle::OperationNotAllowed
+                        })
+                        .when(can_increment, |this| {
+                            this.hover(|s| s.bg(Theme::HOVER_BG))
+                                .on_mouse_down(MouseButton::Left, on_increment)
+                        })
+                        .child("+"),
+                ),
+        )
+}
+
+/// 标准复选框（16x16 方块 + 勾选标记 + 文本标签，对标 Naive UI n-checkbox）
+pub fn checkbox(
+    id: ElementId,
+    label: impl Into<SharedString>,
+    checked: bool,
+    on_toggle: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let label = label.into();
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, on_toggle)
+        .child(
+            div()
+                .size(px(16.0))
+                .rounded(px(3.0))
+                .border_1()
+                .border_color(if checked {
+                    Theme::ACCENT_PRIMARY
+                } else {
+                    Theme::CARD_BORDER
+                })
+                .bg(if checked {
+                    Theme::ACCENT_PRIMARY
+                } else {
+                    Theme::CARD_BG
+                })
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(14.0))
+                .text_size(px(11.0))
+                .text_color(gpui::white())
                 .font_weight(FontWeight::BOLD)
-                .text_color(if can_increment {
-                    Theme::TEXT_PRIMARY
-                } else {
-                    Theme::TEXT_MUTED.opacity(0.4)
-                })
-                .cursor(if can_increment {
-                    CursorStyle::PointingHand
-                } else {
-                    CursorStyle::OperationNotAllowed
-                })
-                .when(can_increment, |this| {
-                    this.hover(|s| s.bg(Theme::HOVER_BG))
-                        .on_mouse_down(MouseButton::Left, on_increment)
-                })
-                .child("+"),
+                .child(if checked { "✓" } else { "" }),
+        )
+        .child(
+            div()
+                .text_size(px(12.5))
+                .text_color(Theme::TEXT_PRIMARY)
+                .child(label),
         )
 }
 

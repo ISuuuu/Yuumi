@@ -55,6 +55,11 @@ impl Card {
         self
     }
 
+    pub fn rounded(mut self, r: Pixels) -> Self {
+        self.element = self.element.rounded(r);
+        self
+    }
+
     pub fn border_color(mut self, color: Hsla) -> Self {
         self.element = self.element.border_color(color);
         self

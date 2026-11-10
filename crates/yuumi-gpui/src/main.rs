@@ -1567,6 +1567,125 @@ impl MainWindow {
                 self.tools_view.set_feedback("在线状态已切换", false);
                 cx.notify();
             }
+            ToolsAction::TogglePicker(kind) => {
+                match kind {
+                    "hover" => self.tools_view.open_hover_picker = !self.tools_view.open_hover_picker,
+                    "ban" => self.tools_view.open_ban_picker = !self.tools_view.open_ban_picker,
+                    "bg_champ" => self.tools_view.open_bg_champion_picker = !self.tools_view.open_bg_champion_picker,
+                    "D" => self.tools_view.spell_active_slot = Some("D"),
+                    "F" => self.tools_view.spell_active_slot = Some("F"),
+                    "close_spell" => self.tools_view.spell_active_slot = None,
+                    _ => {}
+                }
+                cx.notify();
+            }
+            ToolsAction::SetPickerChampion { lane, is_ban, champion_id } => {
+                if is_ban {
+                    let list = match lane {
+                        "top" => &mut self.app_config.functions.auto_ban_champion_top,
+                        "jug" => &mut self.app_config.functions.auto_ban_champion_jug,
+                        "mid" => &mut self.app_config.functions.auto_ban_champion_mid,
+                        "bot" => &mut self.app_config.functions.auto_ban_champion_bot,
+                        "sup" => &mut self.app_config.functions.auto_ban_champion_sup,
+                        _ => &mut self.app_config.functions.auto_ban_champion,
+                    };
+                    *list = vec![champion_id];
+                    self.tools_view.open_ban_picker = false;
+                } else {
+                    let list = match lane {
+                        "top" => &mut self.app_config.functions.auto_select_champion_top,
+                        "jug" => &mut self.app_config.functions.auto_select_champion_jug,
+                        "mid" => &mut self.app_config.functions.auto_select_champion_mid,
+                        "bot" => &mut self.app_config.functions.auto_select_champion_bot,
+                        "sup" => &mut self.app_config.functions.auto_select_champion_sup,
+                        _ => &mut self.app_config.functions.auto_select_champion,
+                    };
+                    *list = vec![champion_id];
+                    self.tools_view.open_hover_picker = false;
+                }
+                self.persist_config(cx);
+            }
+            ToolsAction::ToggleDropdownMenu(menu) => {
+                match menu {
+                    "lobby_mode" => self.tools_view.open_lobby_mode_dropdown = !self.tools_view.open_lobby_mode_dropdown,
+                    "spectate_method" => self.tools_view.open_spectate_method_dropdown = !self.tools_view.open_spectate_method_dropdown,
+                    "cleaner_filter" => self.tools_view.open_cleaner_filter_dropdown = !self.tools_view.open_cleaner_filter_dropdown,
+                    "spoof_queue" => self.tools_view.open_spoof_queue_dropdown = !self.tools_view.open_spoof_queue_dropdown,
+                    "spoof_tier" => self.tools_view.open_spoof_tier_dropdown = !self.tools_view.open_spoof_tier_dropdown,
+                    "spoof_division" => self.tools_view.open_spoof_division_dropdown = !self.tools_view.open_spoof_division_dropdown,
+                    _ => {}
+                }
+                cx.notify();
+            }
+            ToolsAction::SetSpectateMethod(m) => {
+                self.tools_view.spectate_method = m;
+                self.tools_view.open_spectate_method_dropdown = false;
+                cx.notify();
+            }
+            ToolsAction::SetCleanerFilter(f) => {
+                self.tools_view.cleaner_filter = f;
+                self.tools_view.open_cleaner_filter_dropdown = false;
+                cx.notify();
+            }
+            ToolsAction::ToggleSelectCleanerFriend(id) => {
+                if self.tools_view.cleaner_selected_ids.contains(&id) {
+                    self.tools_view.cleaner_selected_ids.remove(&id);
+                } else {
+                    self.tools_view.cleaner_selected_ids.insert(id);
+                }
+                cx.notify();
+            }
+            ToolsAction::SelectAllCleanerFriends => {
+                for f in crate::views::tools::data::MOCK_FRIENDS {
+                    self.tools_view.cleaner_selected_ids.insert(f.id.to_string());
+                }
+                cx.notify();
+            }
+            ToolsAction::ClearSelectedCleanerFriends => {
+                self.tools_view.cleaner_selected_ids.clear();
+                cx.notify();
+            }
+            ToolsAction::SelectBgChampion(cid) => {
+                self.tools_view.bg_selected_champion = Some(cid);
+                self.tools_view.open_bg_champion_picker = false;
+                self.tools_view.set_feedback("已选择背景英雄", false);
+                cx.notify();
+            }
+            ToolsAction::SelectBgSkin(sid) => {
+                self.tools_view.bg_selected_skin_id = Some(sid);
+                let live = self.live_service.clone();
+                yuumi_core::runtime::spawn_background(async move {
+                    if let Some(client) = live.get_client().await {
+                        let body = serde_json::json!({ "key": "backgroundSkinId", "value": sid });
+                        let _ = client
+                            .request("POST", "/lol-summoner/v1/current-summoner/summoner-profile", Some(body), false)
+                            .await;
+                    }
+                });
+                self.tools_view.set_feedback(format!("已应用背景皮肤 ID: {}", sid), false);
+                cx.notify();
+            }
+            ToolsAction::ToggleBadgesModal(show) => {
+                self.tools_view.show_badges_modal = show;
+                cx.notify();
+            }
+            ToolsAction::ToggleBadgeItem(bid) => {
+                if let Some(pos) = self.tools_view.selected_badges.iter().position(|id| id == &bid) {
+                    self.tools_view.selected_badges.remove(pos);
+                } else if self.tools_view.selected_badges.len() < 3 {
+                    self.tools_view.selected_badges.push(bid);
+                }
+                cx.notify();
+            }
+            ToolsAction::ClearBadgesModal => {
+                self.tools_view.selected_badges.clear();
+                cx.notify();
+            }
+            ToolsAction::SaveBadgesPreferences => {
+                self.tools_view.show_badges_modal = false;
+                self.tools_view.set_feedback("称号与挑战勋章装配成功！", false);
+                cx.notify();
+            }
         }
     }
 
@@ -1752,6 +1871,7 @@ impl MainWindow {
                 });
             }
             SettingsAction::SetLogLevel(lvl) => {
+                self.settings_view.open_log_level_dropdown = false;
                 self.app_config.general.log_level = lvl;
                 self.persist_config(cx);
             }
@@ -1766,24 +1886,57 @@ impl MainWindow {
                 self.persist_config(cx);
             }
             SettingsAction::SetThemeMode(mode) => {
+                self.settings_view.open_theme_mode_dropdown = false;
                 self.app_config.personalization.theme_mode = mode;
                 self.persist_config(cx);
             }
             SettingsAction::SetThemeColor(color) => {
+                self.settings_view.open_theme_color_picker = false;
                 self.app_config.personalization.theme_color = color;
                 self.persist_config(cx);
             }
+            SettingsAction::SetWinCardColor(color) => {
+                self.settings_view.open_win_color_picker = false;
+                self.app_config.personalization.win_card_color = color;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetLoseCardColor(color) => {
+                self.settings_view.open_lose_color_picker = false;
+                self.app_config.personalization.lose_card_color = color;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetRemakeCardColor(color) => {
+                self.settings_view.open_remake_color_picker = false;
+                self.app_config.personalization.remake_card_color = color;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetLightDeathsColor(color) => {
+                self.settings_view.open_light_death_color_picker = false;
+                self.app_config.personalization.light_deaths_number_color = color;
+                self.persist_config(cx);
+            }
+            SettingsAction::SetDarkDeathsColor(color) => {
+                self.settings_view.open_dark_death_color_picker = false;
+                self.app_config.personalization.dark_deaths_number_color = color;
+                self.persist_config(cx);
+            }
             SettingsAction::ResetThemeColor => {
+                self.settings_view.open_theme_color_picker = false;
                 self.app_config.personalization.theme_color = "#009faa".to_string();
                 self.persist_config(cx);
             }
             SettingsAction::ResetCardColors => {
+                self.settings_view.open_win_color_picker = false;
+                self.settings_view.open_lose_color_picker = false;
+                self.settings_view.open_remake_color_picker = false;
                 self.app_config.personalization.win_card_color = "#3339B01B".to_string();
                 self.app_config.personalization.lose_card_color = "#33D3190C".to_string();
                 self.app_config.personalization.remake_card_color = "#33A2A2A2".to_string();
                 self.persist_config(cx);
             }
             SettingsAction::ResetDeathsColors => {
+                self.settings_view.open_light_death_color_picker = false;
+                self.settings_view.open_dark_death_color_picker = false;
                 self.app_config.personalization.light_deaths_number_color =
                     "#ffb60000".to_string();
                 self.app_config.personalization.dark_deaths_number_color =
@@ -1791,10 +1944,12 @@ impl MainWindow {
                 self.persist_config(cx);
             }
             SettingsAction::SetDpiScale(s) => {
+                self.settings_view.open_scale_dropdown = false;
                 self.app_config.personalization.dpi_scale = s;
                 self.persist_config(cx);
             }
             SettingsAction::SetLanguage(l) => {
+                self.settings_view.open_lang_dropdown = false;
                 self.app_config.personalization.language = l;
                 self.persist_config(cx);
             }
@@ -1802,6 +1957,17 @@ impl MainWindow {
                 self.settings_view
                     .set_feedback("当前已是最新版本 (v2.5.0)", false);
                 cx.notify();
+            }
+            SettingsAction::ToggleCheckUpdate => {
+                self.app_config.general.enable_check_update =
+                    !self.app_config.general.enable_check_update;
+                self.persist_config(cx);
+            }
+            SettingsAction::GoToReleases => {
+                #[cfg(target_os = "windows")]
+                let _ = std::process::Command::new("cmd")
+                    .args(["/c", "start", "", "https://github.com/ISuuuu/Yuumi/releases/latest"])
+                    .spawn();
             }
             SettingsAction::ToggleHttpProxy => {
                 self.app_config.general.enable_http_proxy =
@@ -1811,6 +1977,62 @@ impl MainWindow {
             SettingsAction::SetHttpProxyAddr(addr) => {
                 self.app_config.general.http_proxy_addr = addr;
                 self.persist_config(cx);
+            }
+            SettingsAction::ToggleChangelog => {
+                self.settings_view.show_changelog = !self.settings_view.show_changelog;
+                cx.notify();
+            }
+            SettingsAction::OpenRepo => {
+                #[cfg(target_os = "windows")]
+                let _ = std::process::Command::new("cmd")
+                    .args(["/c", "start", "", "https://github.com/ISuuuu/Yuumi"])
+                    .spawn();
+            }
+            SettingsAction::ToggleDropdown(name) => {
+                match name {
+                    "log_level" => {
+                        self.settings_view.open_log_level_dropdown =
+                            !self.settings_view.open_log_level_dropdown;
+                    }
+                    "theme_mode" => {
+                        self.settings_view.open_theme_mode_dropdown =
+                            !self.settings_view.open_theme_mode_dropdown;
+                    }
+                    "dpi_scale" => {
+                        self.settings_view.open_scale_dropdown =
+                            !self.settings_view.open_scale_dropdown;
+                    }
+                    "language" => {
+                        self.settings_view.open_lang_dropdown =
+                            !self.settings_view.open_lang_dropdown;
+                    }
+                    "theme_color" => {
+                        self.settings_view.open_theme_color_picker =
+                            !self.settings_view.open_theme_color_picker;
+                    }
+                    "win_color" => {
+                        self.settings_view.open_win_color_picker =
+                            !self.settings_view.open_win_color_picker;
+                    }
+                    "lose_color" => {
+                        self.settings_view.open_lose_color_picker =
+                            !self.settings_view.open_lose_color_picker;
+                    }
+                    "remake_color" => {
+                        self.settings_view.open_remake_color_picker =
+                            !self.settings_view.open_remake_color_picker;
+                    }
+                    "light_death" => {
+                        self.settings_view.open_light_death_color_picker =
+                            !self.settings_view.open_light_death_color_picker;
+                    }
+                    "dark_death" => {
+                        self.settings_view.open_dark_death_color_picker =
+                            !self.settings_view.open_dark_death_color_picker;
+                    }
+                    _ => {}
+                }
+                cx.notify();
             }
         }
     }

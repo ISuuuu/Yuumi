@@ -122,3 +122,115 @@ pub fn dropdown_menu(
         .flex_col()
         .children(items)
 }
+
+/// 表单下拉选择框（固定宽度，对齐 Naive UI n-select）
+///
+/// 触发区显示当前选中项文本与展开/收起箭头，点击触发展开浮层菜单，菜单与触发框等宽并精确锚定在正下方。
+pub fn select_dropdown(
+    id: ElementId,
+    width_px: f32,
+    current_label: impl Into<SharedString>,
+    open: bool,
+    menu: impl IntoElement,
+    on_toggle: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let current_label = current_label.into();
+
+    div()
+        .id(id)
+        .relative()
+        .child(
+            div()
+                .w(px(width_px))
+                .h(px(28.0))
+                .px(px(10.0))
+                .rounded_md()
+                .border_1()
+                .border_color(if open {
+                    Theme::SIDEBAR_ACTIVE_BORDER
+                } else {
+                    Theme::CARD_BORDER
+                })
+                .bg(if open {
+                    Theme::ACCENT_LIGHT
+                } else {
+                    Theme::CARD_BG
+                })
+                .flex()
+                .items_center()
+                .justify_between()
+                .cursor_pointer()
+                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                .on_mouse_down(MouseButton::Left, on_toggle)
+                .child(
+                    div()
+                        .text_size(px(12.5))
+                        .text_color(Theme::TEXT_PRIMARY)
+                        .child(current_label),
+                )
+                .child(icon(
+                    if open {
+                        "icons/chevron-up.svg"
+                    } else {
+                        "icons/chevron-down.svg"
+                    },
+                    12.0,
+                    Theme::TEXT_MUTED,
+                )),
+        )
+        .when(open, |this| {
+            this.child(
+                deferred(
+                    div()
+                        .absolute()
+                        .top_full()
+                        .left_0()
+                        .mt(px(4.0))
+                        .w(px(width_px))
+                        .occlude()
+                        .bg(rgb(0xffffff))
+                        .border_1()
+                        .border_color(Theme::CARD_BORDER)
+                        .rounded_lg()
+                        .shadow_md()
+                        .overflow_hidden()
+                        .py(px(4.0))
+                        .child(menu),
+                )
+                .with_priority(20),
+            )
+        })
+}
+
+/// 表单下拉选择框的选项行
+pub fn select_dropdown_item(
+    label: impl Into<SharedString>,
+    active: bool,
+    on_select: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+    let label = label.into();
+    div()
+        .w_full()
+        .px(px(10.0))
+        .py(px(6.0))
+        .text_size(px(12.0))
+        .text_color(if active {
+            Theme::ACCENT_PRIMARY
+        } else {
+            Theme::TEXT_PRIMARY
+        })
+        .font_weight(if active {
+            FontWeight::SEMIBOLD
+        } else {
+            FontWeight::NORMAL
+        })
+        .bg(if active {
+            Theme::ACCENT_LIGHT
+        } else {
+            transparent_black()
+        })
+        .cursor_pointer()
+        .hover(|s| s.bg(Theme::HOVER_BG))
+        .on_mouse_down(MouseButton::Left, on_select)
+        .child(label)
+}
