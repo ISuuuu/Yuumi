@@ -10,7 +10,6 @@
 //! 严格依照 [05-5-GPUI_VUE_PAGE_PARITY.md] S01~S12 规范实现。
 
 use crate::components::card::Card;
-use crate::components::dropdown::{dropdown_item, dropdown_menu, dropdown_trigger};
 use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
 use crate::components::text_field::search_input_field;
@@ -186,8 +185,36 @@ pub struct SearchView {
     pub focus_handle: FocusHandle,
 }
 
+/// 本地持久化搜索历史路径
+fn get_history_file_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|p| p.join("Yuumi").join("search_history.json"))
+}
+
+fn load_history_from_disk() -> Vec<String> {
+    if let Some(path) = get_history_file_path() {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(list) = serde_json::from_str::<Vec<String>>(&content) {
+                return list;
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn save_history_to_disk(list: &[String]) {
+    if let Some(path) = get_history_file_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(content) = serde_json::to_string_pretty(list) {
+            let _ = std::fs::write(path, content);
+        }
+    }
+}
+
 impl SearchView {
     pub fn new(cx: &mut App) -> Self {
+        let history = load_history_from_disk();
         Self {
             search_query: String::new(),
             active_queue_filter: None,
@@ -207,7 +234,7 @@ impl SearchView {
             current_summoner_puuid: None,
             current_summoner_id: 0,
             queue_menu_open: false,
-            search_history: Vec::new(),
+            search_history: history,
             show_history: false,
             upload_enabled: true,
             has_upload_api_url: false,
@@ -243,7 +270,7 @@ impl SearchView {
         self.is_page_switching = false;
     }
 
-    /// 保存搜索历史项（去重、最新在前、上限 20 条）
+    /// 保存搜索历史项（去重、最新在前、上限 20 条，并持久化到本地）
     pub fn save_to_history(&mut self, entry: &str) {
         let trimmed = entry.trim();
         if trimmed.is_empty() {
@@ -254,11 +281,13 @@ impl SearchView {
         if self.search_history.len() > 20 {
             self.search_history.truncate(20);
         }
+        save_history_to_disk(&self.search_history);
     }
 
     /// 移除单条搜索历史
     pub fn remove_from_history(&mut self, entry: &str) {
         self.search_history.retain(|item| item != entry);
+        save_history_to_disk(&self.search_history);
     }
 
     /// 填充搜索结果并定位对局
@@ -331,14 +360,27 @@ impl SearchView {
     pub fn filtered_history(&self) -> Vec<&str> {
         let q = self.search_query.trim().to_lowercase();
         if q.is_empty() {
-            self.search_history.iter().map(String::as_str).collect()
-        } else {
-            self.search_history
-                .iter()
-                .filter(|item| item.to_lowercase().contains(&q))
-                .map(String::as_str)
-                .collect()
+            return self.search_history.iter().map(String::as_str).collect();
         }
+
+        // 如果输入框内容和当前展示的召唤师姓名完全一致（代表没有进行新的输入，仅仅是点击聚焦），则展示全部历史记录
+        if let Some(ref current_name) = self.current_summoner_name {
+            let cn = current_name.trim().to_lowercase();
+            if cn == q {
+                return self.search_history.iter().map(String::as_str).collect();
+            }
+            if let Some((name_part, _)) = cn.split_once('#') {
+                if name_part.trim().to_lowercase() == q {
+                    return self.search_history.iter().map(String::as_str).collect();
+                }
+            }
+        }
+
+        self.search_history
+            .iter()
+            .filter(|item| item.to_lowercase().contains(&q))
+            .map(String::as_str)
+            .collect()
     }
 
     /// 渲染战绩查询完整视图
@@ -351,8 +393,10 @@ impl SearchView {
         on_search: impl Fn(&str, &mut Window, &mut App) + 'static + Clone,
         on_input_change: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
         is_search_focused: bool,
+        on_open_history: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_toggle_queue_menu: impl Fn(bool, &mut Window, &mut App) + 'static + Clone,
         on_delete_history: impl Fn(&str, &mut Window, &mut App) + 'static + Clone,
+        on_close_history: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_prev_page: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_next_page: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_career_click: impl Fn(&mut Window, &mut App) + 'static + Clone,
@@ -390,12 +434,17 @@ impl SearchView {
         let (paged_matches, total_count, has_more) = self.paged_filtered_matches();
         let selected_game_id = self
             .selected_game_id
+            .filter(|id| paged_matches.iter().any(|m| m.display.game_id == *id))
             .or_else(|| paged_matches.first().map(|m| m.display.game_id));
 
-        // 缓存未命中时沿用最近一次详情：切换对局的高频场景下，右栏保持内容连续而非先清空
-        let current_detail = selected_game_id
-            .and_then(|id| self.details_cache.get(&id))
-            .or(self.last_detail.as_ref());
+        // 仅在当前有效列表非空时允许显示详情或回退，零场对局时呈现空态
+        let current_detail = if paged_matches.is_empty() {
+            None
+        } else {
+            selected_game_id
+                .and_then(|id| self.details_cache.get(&id))
+                .or(self.last_detail.as_ref())
+        };
 
         div()
             .id("search-view-root")
@@ -420,7 +469,9 @@ impl SearchView {
                         on_search.clone(),
                         on_input_change.clone(),
                         is_search_focused,
+                        on_open_history,
                         on_delete_history,
+                        on_close_history,
                         on_career_click,
                         on_filter_queue,
                         on_toggle_queue_menu,
@@ -542,7 +593,9 @@ impl SearchView {
         on_search: impl Fn(&str, &mut Window, &mut App) + 'static + Clone,
         on_input_change: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
         is_search_focused: bool,
+        on_open_history: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_delete_history: impl Fn(&str, &mut Window, &mut App) + 'static + Clone,
+        on_close_history: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_career_click: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_filter_queue: impl Fn(Option<i32>, &mut Window, &mut App) + 'static + Clone,
         on_toggle_queue_menu: impl Fn(bool, &mut Window, &mut App) + 'static + Clone,
@@ -551,28 +604,40 @@ impl SearchView {
         let is_disabled = self.is_searching || self.is_background_refreshing;
         let query_text = self.search_query.clone();
         let history_matches = self.filtered_history();
-        let is_history_open = self.show_history && !history_matches.is_empty();
+        let is_history_open =
+            self.show_history && !self.is_searching && !history_matches.is_empty();
+        let close_hist_out = on_close_history.clone();
 
-        div().w_full().mb(px(16.0)).child(
-            Card::new().p(px(12.0)).child(
+        div().w_full().mb(px(19.2)).child(
+            Card::new().py(px(10.0)).px(px(16.0)).child(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(12.0))
                     .w_full()
-                    // 1. 弹性搜索输入框包装器 (max-width 580px, 占满剩余弹性宽度)
+                    // 1. 弹性搜索输入框包装器 (max-width 580px, 占满剩余弹性宽度，含历史面板)
                     .child(
                         div()
+                            .id("search-input-wrapper")
                             .relative()
                             .flex_1()
                             .max_w(px(580.0))
+                            .when(is_history_open, |w| {
+                                w.on_mouse_down_out(move |_ev, win, app| {
+                                    close_hist_out(win, app);
+                                })
+                            })
                             .child({
                                 let on_submit = on_search.clone();
                                 let on_change = on_input_change.clone();
-                                search_input_field(
+                                div().id("search-input-click-area").on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    if !is_disabled {
+                                        on_open_history(win, app);
+                                    }
+                                }).child(search_input_field(
                                     "search-bar-input",
                                     &query_text,
-                                    "输入召唤师名称，按 Enter 查询...",
+                                    "输入召唤师名称进行搜索...",
                                     px(580.0),
                                     &self.focus_handle,
                                     is_search_focused,
@@ -583,98 +648,143 @@ impl SearchView {
                                         on_input_change(String::new(), win, app);
                                     },
                                     move |val, win, app| on_submit(val, win, app),
-                                )
+                                ))
                             })
-                            // 搜索历史下拉浮层 (S03: 去重20条，单条删除，锚定输入框下方)
+                            // 搜索历史下拉浮层 (5.2: show_history 唯一开关，自然换行，顶接缝底圆角，260px上限)
                             .when(is_history_open, |this| {
                                 let del_cb = on_delete_history.clone();
                                 let choose_cb = on_search.clone();
+                                let close_cb = on_close_history.clone();
                                 this.child(
-                                    div()
-                                        .absolute()
-                                        .top(px(34.0))
-                                        .left_0()
-                                        .right_0()
-                                        .bg(Theme::CARD_BG_HOVER)
-                                        .border_1()
-                                        .border_color(Theme::CARD_BORDER)
-                                        .rounded_b(Theme::RADIUS_MD)
-                                        .shadow_md()
-                                        .p_3()
-                                        .flex()
-                                        .flex_col()
-                                        .gap_2()
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::TEXT_MUTED)
-                                                .child("🕐 历史记录"),
-                                        )
-                                        .child(div().flex().flex_wrap().gap_2().children(
-                                            history_matches.into_iter().map(|item| {
-                                                let item_val = item.to_string();
-                                                let item_for_del = item.to_string();
-                                                let choose = choose_cb.clone();
-                                                let del = del_cb.clone();
+                                    deferred(
+                                        div()
+                                            .id("search-history-dropdown")
+                                            .absolute()
+                                            .top(px(28.0))
+                                            .left_0()
+                                            .right_0()
+                                            .occlude()
+                                            .bg(Theme::CARD_BG_HOVER)
+                                            .border_1()
+                                            .border_t_0()
+                                            .border_color(Theme::CARD_BORDER)
+                                            .rounded_b(px(8.0))
+                                            .shadow_lg()
+                                            .p(px(12.0))
+                                            .max_h(px(260.0))
+                                            .overflow_y_scroll()
+                                            .flex()
+                                            .flex_col()
+                                            .gap(px(10.0))
+                                            .child(
                                                 div()
                                                     .flex()
                                                     .items_center()
-                                                    .gap_1p5()
-                                                    .px_2p5()
-                                                    .py_1()
-                                                    .rounded(px(14.0))
-                                                    .bg(Theme::HOVER_BG)
-                                                    .border_1()
+                                                    .justify_between()
+                                                    .pb(px(6.0))
+                                                    .border_b_1()
                                                     .border_color(Theme::CARD_BORDER)
-                                                    .cursor_pointer()
-                                                    .hover(|s| {
-                                                        s.bg(Theme::ACCENT_LIGHT)
-                                                            .border_color(Theme::ACCENT_PRIMARY)
-                                                    })
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        move |_ev, win, app| {
-                                                            choose(&item_val, win, app);
-                                                        },
-                                                    )
                                                     .child(
                                                         div()
-                                                            .text_xs()
-                                                            .text_color(Theme::TEXT_PRIMARY)
-                                                            .child(item.to_string()),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
+                                                            .text_size(px(11.5))
+                                                            .font_weight(FontWeight::BOLD)
                                                             .text_color(Theme::TEXT_MUTED)
-                                                            .hover(|s| {
-                                                                s.text_color(Theme::LOSS_TEXT)
-                                                            })
-                                                            .on_mouse_down(
-                                                                MouseButton::Left,
-                                                                move |_ev, win, app| {
-                                                                    del(&item_for_del, win, app);
-                                                                },
-                                                            )
-                                                            .child("✕"),
-                                                    )
-                                            }),
-                                        )),
+                                                            .child("🕐 搜索历史"),
+                                                    ),
+                                            )
+                                            .child(div().flex().flex_wrap().gap(px(8.0)).children(
+                                                history_matches.into_iter().map(|item| {
+                                                    let item_val = item.to_string();
+                                                    let item_for_del = item.to_string();
+                                                    let choose = choose_cb.clone();
+                                                    let del = del_cb.clone();
+                                                    let close_on_choose = close_cb.clone();
+                                                    div()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(px(6.0))
+                                                        .px(px(10.0))
+                                                        .py(px(4.0))
+                                                        .rounded(px(14.0))
+                                                        .bg(Theme::HOVER_BG)
+                                                        .border_1()
+                                                        .border_color(Theme::CARD_BORDER)
+                                                        .cursor_pointer()
+                                                        .max_w(px(260.0))
+                                                        .hover(|s| {
+                                                            s.bg(Theme::ACCENT_LIGHT)
+                                                                .border_color(Theme::ACCENT_PRIMARY)
+                                                        })
+                                                        .on_mouse_down(
+                                                            MouseButton::Left,
+                                                            move |_ev, win, app| {
+                                                                close_on_choose(win, app);
+                                                                choose(&item_val, win, app);
+                                                            },
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .overflow_hidden()
+                                                                .whitespace_nowrap()
+                                                                .text_size(px(12.5))
+                                                                .font_weight(FontWeight::SEMIBOLD)
+                                                                .text_color(Theme::TEXT_PRIMARY)
+                                                                .child(item.to_string()),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .flex_none()
+                                                                .size(px(14.0))
+                                                                .rounded_full()
+                                                                .flex()
+                                                                .items_center()
+                                                                .justify_center()
+                                                                .text_size(px(10.0))
+                                                                .text_color(Theme::TEXT_MUTED)
+                                                                .hover(|s| {
+                                                                    s.bg(Theme::LOSS_BG).text_color(
+                                                                        Theme::LOSS_TEXT,
+                                                                    )
+                                                                })
+                                                                .on_mouse_down(
+                                                                    MouseButton::Left,
+                                                                    move |_ev, _win, app| {
+                                                                        app.stop_propagation();
+                                                                        del(
+                                                                            &item_for_del,
+                                                                            _win,
+                                                                            app,
+                                                                        );
+                                                                    },
+                                                                )
+                                                                .child("✕"),
+                                                        )
+                                                }),
+                                            )),
+                                    )
+                                    .with_priority(3),
                                 )
                             }),
                     )
-                    // 2. 生涯按钮 (S04)
+                    // 2. 生涯按钮 (S04: 高28px, 圆角10px, 字号14px, 左右各10px内边距, 常规字重)
                     .child(
                         div()
                             .id("search-career-btn")
-                            .h(px(32.0))
-                            .px_3()
-                            .rounded(px(6.0))
+                            .h(px(28.0))
+                            .px(px(10.0))
+                            .rounded(px(10.0))
                             .bg(Theme::CARD_BG)
                             .border_1()
                             .border_color(Theme::CARD_BORDER)
-                            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY).bg(Theme::HOVER_BG))
+                            .text_color(Theme::TEXT_PRIMARY)
+                            .hover(|s| {
+                                s.border_color(Theme::ACCENT_PRIMARY)
+                                    .text_color(Theme::ACCENT_PRIMARY)
+                            })
+                            .active(|s| {
+                                s.border_color(Theme::ACCENT_HOVER)
+                                    .text_color(Theme::ACCENT_HOVER)
+                            })
                             .flex()
                             .items_center()
                             .justify_center()
@@ -684,42 +794,17 @@ impl SearchView {
                             })
                             .child(
                                 div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_size(px(14.0))
+                                    .font_weight(FontWeight::NORMAL)
                                     .child("生涯"),
                             ),
                     )
-                    // 3. 队列筛选下拉 (S05: 130px 宽)
-                    .child({
-                        let on_toggle = on_toggle_queue_menu.clone();
-                        let is_open = self.queue_menu_open;
-                        let label = SEARCH_QUEUE_OPTIONS
-                            .iter()
-                            .find(|o| o.id == self.active_queue_filter)
-                            .map(|o| o.label)
-                            .unwrap_or("全部")
-                            .to_string();
-                        let items = SEARCH_QUEUE_OPTIONS.into_iter().map(|option| {
-                            let select_cb = on_filter_queue.clone();
-                            let close_cb = on_toggle_queue_menu.clone();
-                            dropdown_item(
-                                option.label,
-                                self.active_queue_filter == option.id,
-                                move |win, app| {
-                                    select_cb(option.id, win, app);
-                                    close_cb(false, win, app);
-                                },
-                            )
-                        });
-                        div().w(px(130.0)).child(dropdown_trigger(
-                            "search-queue-select-trigger",
-                            label,
-                            self.queue_menu_open,
-                            dropdown_menu(130.0, items),
-                            move |win, app| on_toggle(!is_open, win, app),
-                        ))
-                    })
+                    // 3. 队列筛选下拉 (S05: 130px 宽, 对齐 Vue Naive UI n-select small, 与历史互斥)
+                    .child(self.render_search_queue_select(
+                        on_filter_queue,
+                        on_toggle_queue_menu,
+                        on_close_history,
+                    ))
                     // 4. 上传复选框 (S01: 仅配置了 UploadApiUrl 时显示)
                     .when(self.has_upload_api_url, |this| {
                         let is_checked = self.upload_enabled;
@@ -766,6 +851,166 @@ impl SearchView {
                     }),
             ),
         )
+    }
+
+    /// 战绩查询专用队列下拉 (1:1 复刻 Vue Search.vue n-select size="small" 130px)
+    fn render_search_queue_select(
+        &self,
+        on_filter_queue: impl Fn(Option<i32>, &mut Window, &mut App) + 'static + Clone,
+        on_toggle_queue_menu: impl Fn(bool, &mut Window, &mut App) + 'static + Clone,
+        on_close_history: impl Fn(&mut Window, &mut App) + 'static + Clone,
+    ) -> impl IntoElement {
+        let is_open = self.queue_menu_open;
+        let on_toggle = on_toggle_queue_menu.clone();
+        let on_close_hist = on_close_history;
+        let current_filter = self.active_queue_filter;
+        let label = SEARCH_QUEUE_OPTIONS
+            .iter()
+            .find(|o| o.id == current_filter)
+            .map(|o| o.label)
+            .unwrap_or("全部")
+            .to_string();
+
+        let on_close_out = on_toggle_queue_menu.clone();
+        let on_select_cb = on_filter_queue.clone();
+        let on_close_select = on_toggle_queue_menu;
+
+        let close_on_click_out = on_close_out;
+        div()
+            .id("search-queue-select-wrapper")
+            .w(px(130.0))
+            .relative()
+            .when(is_open, |w| {
+                w.on_mouse_down_out(move |_ev, win, app| {
+                    close_on_click_out(false, win, app);
+                })
+            })
+            .child(
+                div()
+                    .id("search-queue-select-trigger")
+                    .w(px(130.0))
+                    .h(px(28.0))
+                    .rounded(px(10.0))
+                    .bg(Theme::CARD_BG)
+                    .border_1()
+                    .border_color(if is_open {
+                        Theme::ACCENT_PRIMARY
+                    } else {
+                        Theme::CARD_BORDER
+                    })
+                    .map(|mut el| {
+                        if is_open {
+                            el.style().box_shadow = Some(vec![BoxShadow {
+                                color: Theme::ACCENT_ALPHA_20,
+                                offset: point(px(0.0), px(0.0)),
+                                blur_radius: px(0.0),
+                                spread_radius: px(2.0),
+                            }]);
+                        }
+                        el
+                    })
+                    .hover(|s| {
+                        if !is_open {
+                            s.border_color(Theme::ACCENT_PRIMARY)
+                        } else {
+                            s
+                        }
+                    })
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                        if !is_open {
+                            on_close_hist(win, app);
+                        }
+                        on_toggle(!is_open, win, app);
+                    })
+                    .child(
+                        div()
+                            .pl(px(12.0))
+                            .text_size(px(14.0))
+                            .font_weight(FontWeight::NORMAL)
+                            .text_color(Theme::TEXT_PRIMARY)
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .pr(px(8.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                svg()
+                                    .path(if is_open {
+                                        "icons/chevron-up.svg"
+                                    } else {
+                                        "icons/chevron-down.svg"
+                                    })
+                                    .flex_none()
+                                    .size(px(16.0))
+                                    .text_color(Theme::TEXT_MUTED),
+                            ),
+                    ),
+            )
+            .when(is_open, |this| {
+                this.child(
+                    deferred(
+                        div()
+                            .id("search-queue-select-menu")
+                            .absolute()
+                            .top_full()
+                            .left_0()
+                            .mt(px(4.0))
+                            .min_w(px(130.0))
+                            .w_full()
+                            .py(px(4.0))
+                            .occlude()
+                            .bg(Theme::CARD_BG_HOVER)
+                            .border_1()
+                            .border_color(Theme::CARD_BORDER)
+                            .rounded(px(8.0))
+                            .shadow_md()
+                            .children(SEARCH_QUEUE_OPTIONS.into_iter().map(|option| {
+                                let is_selected = current_filter == option.id;
+                                let select = on_select_cb.clone();
+                                let close = on_close_select.clone();
+                                div()
+                                    .h(px(28.0))
+                                    .px(px(12.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(Theme::HOVER_BG))
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        select(option.id, win, app);
+                                        close(false, win, app);
+                                    })
+                                    .child(
+                                        div()
+                                            .text_size(px(14.0))
+                                            .font_weight(FontWeight::NORMAL)
+                                            .text_color(if is_selected {
+                                                Theme::ACCENT_PRIMARY
+                                            } else {
+                                                Theme::TEXT_PRIMARY
+                                            })
+                                            .child(option.label),
+                                    )
+                                    .when(is_selected, |row| {
+                                        row.child(
+                                            div()
+                                                .text_size(px(14.0))
+                                                .text_color(Theme::ACCENT_PRIMARY)
+                                                .child("✓"),
+                                        )
+                                    })
+                            })),
+                    )
+                    .with_priority(2),
+                )
+            })
     }
 
     /// 左侧对局列表与翻页控制（固定 180px 宽度，S06, S07, S08）

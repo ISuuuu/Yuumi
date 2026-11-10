@@ -25,6 +25,16 @@ impl Card {
         self
     }
 
+    pub fn px(mut self, padding: Pixels) -> Self {
+        self.element = self.element.px(padding);
+        self
+    }
+
+    pub fn py(mut self, padding: Pixels) -> Self {
+        self.element = self.element.py(padding);
+        self
+    }
+
     pub fn p_3(mut self) -> Self {
         self.element = self.element.p_3();
         self

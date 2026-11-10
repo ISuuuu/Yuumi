@@ -1667,9 +1667,14 @@ impl MainWindow {
             }
             ToolsAction::TogglePicker(kind) => {
                 match kind {
-                    "hover" => self.tools_view.open_hover_picker = !self.tools_view.open_hover_picker,
+                    "hover" => {
+                        self.tools_view.open_hover_picker = !self.tools_view.open_hover_picker
+                    }
                     "ban" => self.tools_view.open_ban_picker = !self.tools_view.open_ban_picker,
-                    "bg_champ" => self.tools_view.open_bg_champion_picker = !self.tools_view.open_bg_champion_picker,
+                    "bg_champ" => {
+                        self.tools_view.open_bg_champion_picker =
+                            !self.tools_view.open_bg_champion_picker
+                    }
                     "D" => self.tools_view.spell_active_slot = Some("D"),
                     "F" => self.tools_view.spell_active_slot = Some("F"),
                     "close_spell" => self.tools_view.spell_active_slot = None,
@@ -1677,7 +1682,11 @@ impl MainWindow {
                 }
                 cx.notify();
             }
-            ToolsAction::SetPickerChampion { lane, is_ban, champion_id } => {
+            ToolsAction::SetPickerChampion {
+                lane,
+                is_ban,
+                champion_id,
+            } => {
                 if is_ban {
                     let list = match lane {
                         "top" => &mut self.app_config.functions.auto_ban_champion_top,
@@ -1705,12 +1714,30 @@ impl MainWindow {
             }
             ToolsAction::ToggleDropdownMenu(menu) => {
                 match menu {
-                    "lobby_mode" => self.tools_view.open_lobby_mode_dropdown = !self.tools_view.open_lobby_mode_dropdown,
-                    "spectate_method" => self.tools_view.open_spectate_method_dropdown = !self.tools_view.open_spectate_method_dropdown,
-                    "cleaner_filter" => self.tools_view.open_cleaner_filter_dropdown = !self.tools_view.open_cleaner_filter_dropdown,
-                    "spoof_queue" => self.tools_view.open_spoof_queue_dropdown = !self.tools_view.open_spoof_queue_dropdown,
-                    "spoof_tier" => self.tools_view.open_spoof_tier_dropdown = !self.tools_view.open_spoof_tier_dropdown,
-                    "spoof_division" => self.tools_view.open_spoof_division_dropdown = !self.tools_view.open_spoof_division_dropdown,
+                    "lobby_mode" => {
+                        self.tools_view.open_lobby_mode_dropdown =
+                            !self.tools_view.open_lobby_mode_dropdown
+                    }
+                    "spectate_method" => {
+                        self.tools_view.open_spectate_method_dropdown =
+                            !self.tools_view.open_spectate_method_dropdown
+                    }
+                    "cleaner_filter" => {
+                        self.tools_view.open_cleaner_filter_dropdown =
+                            !self.tools_view.open_cleaner_filter_dropdown
+                    }
+                    "spoof_queue" => {
+                        self.tools_view.open_spoof_queue_dropdown =
+                            !self.tools_view.open_spoof_queue_dropdown
+                    }
+                    "spoof_tier" => {
+                        self.tools_view.open_spoof_tier_dropdown =
+                            !self.tools_view.open_spoof_tier_dropdown
+                    }
+                    "spoof_division" => {
+                        self.tools_view.open_spoof_division_dropdown =
+                            !self.tools_view.open_spoof_division_dropdown
+                    }
                     _ => {}
                 }
                 cx.notify();
@@ -1735,7 +1762,9 @@ impl MainWindow {
             }
             ToolsAction::SelectAllCleanerFriends => {
                 for f in crate::views::tools::data::MOCK_FRIENDS {
-                    self.tools_view.cleaner_selected_ids.insert(f.id.to_string());
+                    self.tools_view
+                        .cleaner_selected_ids
+                        .insert(f.id.to_string());
                 }
                 cx.notify();
             }
@@ -1756,11 +1785,17 @@ impl MainWindow {
                     if let Some(client) = live.get_client().await {
                         let body = serde_json::json!({ "key": "backgroundSkinId", "value": sid });
                         let _ = client
-                            .request("POST", "/lol-summoner/v1/current-summoner/summoner-profile", Some(body), false)
+                            .request(
+                                "POST",
+                                "/lol-summoner/v1/current-summoner/summoner-profile",
+                                Some(body),
+                                false,
+                            )
                             .await;
                     }
                 });
-                self.tools_view.set_feedback(format!("已应用背景皮肤 ID: {}", sid), false);
+                self.tools_view
+                    .set_feedback(format!("已应用背景皮肤 ID: {}", sid), false);
                 cx.notify();
             }
             ToolsAction::ToggleBadgesModal(show) => {
@@ -1768,7 +1803,12 @@ impl MainWindow {
                 cx.notify();
             }
             ToolsAction::ToggleBadgeItem(bid) => {
-                if let Some(pos) = self.tools_view.selected_badges.iter().position(|id| id == &bid) {
+                if let Some(pos) = self
+                    .tools_view
+                    .selected_badges
+                    .iter()
+                    .position(|id| id == &bid)
+                {
                     self.tools_view.selected_badges.remove(pos);
                 } else if self.tools_view.selected_badges.len() < 3 {
                     self.tools_view.selected_badges.push(bid);
@@ -1781,7 +1821,8 @@ impl MainWindow {
             }
             ToolsAction::SaveBadgesPreferences => {
                 self.tools_view.show_badges_modal = false;
-                self.tools_view.set_feedback("称号与挑战勋章装配成功！", false);
+                self.tools_view
+                    .set_feedback("称号与挑战勋章装配成功！", false);
                 cx.notify();
             }
         }
@@ -2035,10 +2076,8 @@ impl MainWindow {
             SettingsAction::ResetDeathsColors => {
                 self.settings_view.open_light_death_color_picker = false;
                 self.settings_view.open_dark_death_color_picker = false;
-                self.app_config.personalization.light_deaths_number_color =
-                    "#ffb60000".to_string();
-                self.app_config.personalization.dark_deaths_number_color =
-                    "#ffff8d8d".to_string();
+                self.app_config.personalization.light_deaths_number_color = "#ffb60000".to_string();
+                self.app_config.personalization.dark_deaths_number_color = "#ffff8d8d".to_string();
                 self.persist_config(cx);
             }
             SettingsAction::SetDpiScale(s) => {
@@ -2064,7 +2103,12 @@ impl MainWindow {
             SettingsAction::GoToReleases => {
                 #[cfg(target_os = "windows")]
                 let _ = std::process::Command::new("cmd")
-                    .args(["/c", "start", "", "https://github.com/ISuuuu/Yuumi/releases/latest"])
+                    .args([
+                        "/c",
+                        "start",
+                        "",
+                        "https://github.com/ISuuuu/Yuumi/releases/latest",
+                    ])
                     .spawn();
             }
             SettingsAction::ToggleHttpProxy => {
@@ -2185,6 +2229,8 @@ impl MainWindow {
             return;
         }
 
+        self.search_view.save_to_history(&trimmed);
+        self.search_view.show_history = false;
         self.search_view.set_search_query(&trimmed);
         self.search_view.set_searching(true);
         if let Some(gid) = target_game_id {
@@ -2770,10 +2816,14 @@ impl Render for MainWindow {
                                     move |new_text: String, _win: &mut Window, app: &mut App| {
                                         v.update(app, |this, cx| {
                                             this.search_view.set_search_query(new_text);
+                                            this.search_view.show_history = true;
                                             cx.notify();
                                         });
                                     }
                                 };
+
+                                let view_open_hist = view.clone();
+                                let view_close_hist = view.clone();
 
                                 let connected = matches!(
                                     self.connection_status,
@@ -2787,6 +2837,13 @@ impl Render for MainWindow {
                                     on_search,
                                     on_input_change,
                                     self.search_view.focus_handle.is_focused(window),
+                                    move |_window, app| {
+                                        view_open_hist.update(app, |this, cx| {
+                                            this.search_view.show_history = true;
+                                            this.search_view.queue_menu_open = false;
+                                            cx.notify();
+                                        });
+                                    },
                                     move |open, _window, app| {
                                         view_sq.update(app, |this, cx| {
                                             this.set_search_queue_menu(open, cx)
@@ -2796,6 +2853,12 @@ impl Render for MainWindow {
                                         let e = entry.to_string();
                                         view_del_hist.update(app, |this, cx| {
                                             this.search_view.remove_from_history(&e);
+                                            cx.notify();
+                                        });
+                                    },
+                                    move |_window, app| {
+                                        view_close_hist.update(app, |this, cx| {
+                                            this.search_view.show_history = false;
                                             cx.notify();
                                         });
                                     },

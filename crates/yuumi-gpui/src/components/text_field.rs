@@ -3,6 +3,7 @@
 //! gpui 0.2 尚未提供内置文本输入元素，这里给出最小可用实现：
 //! 由视图持有文本，按键事件在元素内处理并回调新文本。
 
+use crate::components::icon::icon;
 use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -244,14 +245,16 @@ pub fn search_input_field(
     let clear_cb = on_clear;
     let submit_cb = on_submit;
     let submit_text = current.clone();
+    // Naive UI 2.44.1 的浅色 quaternary 按钮使用中性文字色，禁用时半透明。
+    let search_icon_color: Hsla = rgb(0x333639).into();
 
     div()
         .id(id)
         .track_focus(focus)
-        .h(px(32.0))
+        .h(px(28.0))
         .w_full()
         .max_w(max_width)
-        .rounded(px(6.0))
+        .rounded(px(10.0))
         .bg(Theme::CARD_BG)
         .border_1()
         .border_color(if is_focused {
@@ -259,11 +262,29 @@ pub fn search_input_field(
         } else {
             Theme::CARD_BORDER
         })
+        .map(|mut el| {
+            if is_focused {
+                el.style().box_shadow = Some(vec![BoxShadow {
+                    color: Theme::ACCENT_LIGHT,
+                    offset: point(px(0.0), px(0.0)),
+                    blur_radius: px(0.0),
+                    spread_radius: px(3.0),
+                }]);
+            }
+            el
+        })
+        .hover(|s| {
+            if !disabled && !is_focused {
+                s.border_color(Theme::ACCENT_PRIMARY)
+            } else {
+                s
+            }
+        })
         .px(px(10.0))
         .flex()
         .items_center()
         .justify_between()
-        .gap_2()
+        .gap(px(6.0))
         .cursor_text()
         .on_mouse_down(MouseButton::Left, move |_ev, window, _cx| {
             window.focus(&focus_for_click);
@@ -275,7 +296,7 @@ pub fn search_input_field(
                 .min_w(px(0.0))
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_size(px(12.5))
+                .text_size(px(14.0))
                 .text_color(if has_text {
                     Theme::TEXT_PRIMARY
                 } else {
@@ -287,59 +308,60 @@ pub fn search_input_field(
                     placeholder.to_string()
                 }),
         )
-        // 清除按钮
-        .when(has_text && !disabled && !loading, |this| {
-            this.child(
-                div()
-                    .flex_none()
-                    .text_size(px(12.0))
-                    .text_color(Theme::TEXT_MUTED)
-                    .cursor_pointer()
-                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
-                    .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
-                        clear_cb(window, app);
-                    })
-                    .child("✕"),
-            )
-        })
-        // 加载指示
-        .when(loading, |this| {
-            this.child(
-                div()
-                    .flex_none()
-                    .text_size(px(12.0))
-                    .text_color(Theme::ACCENT_PRIMARY)
-                    .child("⏳"),
-            )
-        })
-        // 右侧圆形搜索按钮（对照 Vue n-button quaternary circle size="tiny"）
+        // 右侧操作区：清除按钮 + 放大镜搜索按钮 (Vue quaternary circle tiny 1:1)
         .child(
             div()
-                .id("search-suffix-btn")
-                .flex_none()
-                .size(px(22.0))
-                .rounded(px(11.0))
                 .flex()
                 .items_center()
-                .justify_center()
-                .bg(if can_search {
-                    Theme::ACCENT_LIGHT
-                } else {
-                    Theme::HOVER_BG
+                .gap(px(4.0))
+                // 清除图标：位于放大镜左侧，仅在有文字且未禁用未加载时显示
+                .when(has_text && !disabled && !loading, |suffix| {
+                    let clear_cb = clear_cb.clone();
+                    suffix.child(
+                        div()
+                            .id("search-clear-btn")
+                            .flex_none()
+                            .size(px(18.0))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
+                            .text_color(Theme::TEXT_MUTED)
+                            .hover(|s| s.text_color(Theme::TEXT_PRIMARY).bg(Theme::HOVER_BG))
+                            .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+                                app.stop_propagation();
+                                clear_cb(window, app);
+                            })
+                            .child(svg().path("icons/close.svg").flex_none().size(px(12.0))),
+                    )
                 })
-                .text_color(if can_search {
-                    Theme::ACCENT_PRIMARY
-                } else {
-                    Theme::TEXT_MUTED
-                })
-                .text_size(px(11.0))
-                .cursor_pointer()
-                .when(can_search, |this| {
-                    this.hover(|s| s.bg(Theme::ACCENT_PRIMARY).text_color(Theme::BG_APP))
-                        .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
-                            submit_cb(&submit_text, window, app);
+                // Vue 的 22px 按钮内，Naive UI 图标槽将 SVG 的实际绘制宽度限制为 14px。
+                .child(
+                    div()
+                        .id("search-suffix-btn")
+                        .flex_none()
+                        .size(px(22.0))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .when(can_search, |btn| {
+                            let submit_cb = submit_cb.clone();
+                            let submit_text = submit_text.clone();
+                            btn.cursor_pointer()
+                                .hover(|s| s.bg(rgba(0x2e333817)))
+                                .active(|s| s.bg(rgba(0x2e333821)))
+                                .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+                                    app.stop_propagation();
+                                    submit_cb(&submit_text, window, app);
+                                })
                         })
-                })
-                .child("🔍"),
+                        .child(icon(
+                            "icons/search.svg",
+                            14.0,
+                            search_icon_color.opacity(if can_search { 1.0 } else { 0.5 }),
+                        )),
+                ),
         )
 }
