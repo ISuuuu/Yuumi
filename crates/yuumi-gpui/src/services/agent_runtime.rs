@@ -12,13 +12,17 @@
 //!   避免同一动作被重复提交；
 //! - **无泄漏退出**：所有发送端释放后 Worker 自然退出，`shutdown()` 带超时兜底。
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use yuumi_core::agents::{
     auto_bp::{handle_champ_select_session, ChampSelectSession},
-    auto_match::{handle_phase_change, handle_ready_check, ReadyCheckData},
+    auto_match::{
+        handle_honor_ballot, handle_invitations, handle_phase_change, handle_ready_check,
+        handle_tag_reminders, AutoMatchState, HonorBallot, ReadyCheckData, ReceivedInvitation,
+    },
     config::{AutoBpConfig, AutoMatchConfig},
     lifecycle::LifecycleManager,
     supervisor::AgentSupervisor,
@@ -41,6 +45,12 @@ pub enum MatchAgentEvent {
     PhaseChanged(String),
     /// 匹配确认状态推送
     ReadyCheck(ReadyCheckData),
+    /// 结算荣誉投票推送（`/lol-honor-v2/v1/ballot`）
+    HonorBallot(Box<HonorBallot>),
+    /// 收到的组队邀请列表（`/lol-lobby/v2/received-invitations`）
+    ReceivedInvitations(Vec<ReceivedInvitation>),
+    /// [D04-e] 选人阶段带标记玩家映射（puuid → 标签），由 WS 分派点从路人集只读构造
+    TagReminders(HashMap<String, String>),
 }
 
 /// 投递给 `auto_bp` Worker 的事件
@@ -173,20 +183,64 @@ async fn run_match_worker(
     cfg_tx: Arc<watch::Sender<AutoMatchConfig>>,
     mut rx: mpsc::Receiver<MatchAgentEvent>,
 ) {
+    let mut state = AutoMatchState::new();
+
     while let Some(event) = rx.recv().await {
         let cfg = { cfg_tx.borrow().clone() };
         match event {
             MatchAgentEvent::PhaseChanged(phase) => {
                 run_guarded(
                     "gameflow-phase",
-                    handle_phase_change(&client, &phase, &cfg, &supervisor, &lifecycle),
+                    handle_phase_change(
+                        &client,
+                        &phase,
+                        &cfg,
+                        &supervisor,
+                        &lifecycle,
+                        &mut state,
+                    ),
                 )
                 .await;
             }
             MatchAgentEvent::ReadyCheck(ready) => {
                 run_guarded(
                     "ready-check",
-                    handle_ready_check(&client, &ready, &cfg, &supervisor, &lifecycle),
+                    handle_ready_check(
+                        &client,
+                        &ready,
+                        &cfg,
+                        &supervisor,
+                        &lifecycle,
+                        &mut state,
+                    ),
+                )
+                .await;
+            }
+            MatchAgentEvent::HonorBallot(ballot) => {
+                run_guarded(
+                    "honor-ballot",
+                    handle_honor_ballot(&client, &ballot, &cfg, &supervisor, &mut state),
+                )
+                .await;
+            }
+            MatchAgentEvent::ReceivedInvitations(invitations) => {
+                run_guarded(
+                    "received-invitations",
+                    handle_invitations(&client, &invitations, &cfg),
+                )
+                .await;
+            }
+            MatchAgentEvent::TagReminders(tagged) => {
+                run_guarded(
+                    "tag-reminders",
+                    handle_tag_reminders(
+                        &client,
+                        tagged,
+                        &cfg,
+                        &supervisor,
+                        &lifecycle,
+                        &mut state,
+                    ),
                 )
                 .await;
             }

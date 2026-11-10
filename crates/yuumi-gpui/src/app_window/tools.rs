@@ -56,7 +56,8 @@ impl MainWindow {
                     "sup" => self.app_config.functions.auto_select_champion_sup.clear(),
                     _ => self.app_config.functions.auto_select_champion.clear(),
                 }
-                self.persist_config(cx);
+                // [D06-c] 清空也是选择器内的临时操作，等待「完成」确认才落盘
+                cx.notify();
             }
             ToolsAction::ToggleAutoBan => {
                 self.app_config.functions.enable_auto_ban_champion =
@@ -84,7 +85,8 @@ impl MainWindow {
                     "sup" => self.app_config.functions.auto_ban_champion_sup.clear(),
                     _ => self.app_config.functions.auto_ban_champion.clear(),
                 }
-                self.persist_config(cx);
+                // [D06-c] 清空也是选择器内的临时操作，等待「完成」确认才落盘
+                cx.notify();
             }
             ToolsAction::ToggleAutoSpell => {
                 self.app_config.functions.enable_auto_set_spells =
@@ -154,6 +156,8 @@ impl MainWindow {
                 self.persist_config(cx);
             }
             ToolsAction::OpenBenchOverlayWindow => {
+                // [D07-a] 用户主动打开：清除本会话隐藏标志，允许再次显示
+                crate::bench_overlay::reset_bench_user_hidden();
                 self.open_bench_overlay(cx);
             }
             ToolsAction::ToggleAutoReconnect => {
@@ -173,68 +177,234 @@ impl MainWindow {
             ToolsAction::CreateLobbyNow => {
                 let live = self.live_service.clone();
                 let mode = self.app_config.functions.default_game_mode;
-                yuumi_core::runtime::spawn_background(async move {
-                    if let Some(client) = live.get_client().await {
-                        let body = serde_json::json!({ "queueId": mode });
-                        let _ = client
-                            .request("POST", "/lol-lobby/v2/lobby", Some(body), false)
-                            .await;
-                    }
-                });
-                self.tools_view.set_feedback("已发送创建房间指令", false);
+                self.tools_view.set_feedback("正在创建房间…", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    let result = match live.get_client().await {
+                        Some(client) => {
+                            let body = serde_json::json!({ "queueId": mode });
+                            client
+                                .request("POST", "/lol-lobby/v2/lobby", Some(body), false)
+                                .await
+                                .map(|_| "房间已创建".to_string())
+                        }
+                        None => Err("客户端未连接，创建房间未执行".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok(msg) => this.tools_view.set_feedback(msg, false),
+                            Err(e) => this
+                                .tools_view
+                                .set_feedback(format!("创建房间失败: {}", e), true),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             ToolsAction::ToggleLockGameSettings => {
-                self.tools_view.is_game_settings_locked = !self.tools_view.is_game_settings_locked;
-                self.tools_view.set_feedback(
-                    if self.tools_view.is_game_settings_locked {
-                        "已锁定游戏配置文件 (只读保护)"
-                    } else {
-                        "已解除游戏配置文件只读锁定"
-                    },
-                    false,
-                );
+                let paths = self.app_config.general.lol_path.clone();
+                let target = !self.tools_view.is_game_settings_locked;
+                match services::set_game_settings_readonly(&paths, target) {
+                    Ok(msg) => {
+                        // 回读真实属性，避免界面状态与磁盘状态漂移
+                        self.tools_view.is_game_settings_locked =
+                            services::game_settings_readonly_state(&paths);
+                        self.tools_view.set_feedback(msg, false);
+                    }
+                    Err(e) => {
+                        self.tools_view.is_game_settings_locked =
+                            services::game_settings_readonly_state(&paths);
+                        self.tools_view
+                            .set_feedback(format!("修改游戏设置只读属性失败: {}", e), true);
+                    }
+                }
                 cx.notify();
             }
             ToolsAction::FixClientWindow => {
-                std::thread::spawn(|| {
-                    let _ = services::fix_client_window();
-                });
-                self.tools_view
-                    .set_feedback("已重置客户端窗口为 1600x900", false);
+                self.tools_view.set_feedback("正在修复客户端窗口…", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    let result = cx
+                        .background_executor()
+                        .spawn(async { services::fix_client_window() })
+                        .await;
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok(msg) => this.tools_view.set_feedback(msg, false),
+                            Err(e) => this
+                                .tools_view
+                                .set_feedback(format!("修复客户端窗口失败: {}", e), true),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             ToolsAction::RestartClient => {
-                let live = self.live_service.clone();
-                yuumi_core::runtime::spawn_background(async move {
-                    if let Some(client) = live.get_client().await {
-                        let _ = client
-                            .request("POST", "/riotclient/kill-and-restart-ux", None, false)
-                            .await;
-                    }
-                });
-                self.tools_view.set_feedback("已发送客户端重启指令", false);
+                self.tools_view.set_feedback("正在重启客户端…", false);
                 cx.notify();
+                let live = self.live_service.clone();
+                cx.spawn(async move |entity, cx| {
+                    let result = match live.get_client().await {
+                        Some(client) => client
+                            .request("POST", "/riotclient/kill-and-restart-ux", None, false)
+                            .await
+                            .map(|_| "已发送客户端重启指令".to_string()),
+                        None => Err("客户端未连接，无法重启".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok(msg) => this.tools_view.set_feedback(msg, false),
+                            Err(e) => this
+                                .tools_view
+                                .set_feedback(format!("重启客户端失败: {}", e), true),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             ToolsAction::SpectateSummonerNameInput(name) => {
                 self.tools_view.spectate_name_buffer = name;
                 cx.notify();
             }
             ToolsAction::LaunchSpectate => {
-                self.tools_view.set_feedback("观战指令已发送", false);
+                let name = self.tools_view.spectate_name_buffer.clone();
+                if name.trim().is_empty() {
+                    self.tools_view.set_feedback("请输入召唤师名称", true);
+                    cx.notify();
+                    return;
+                }
+                let method =
+                    services::spectate::SpectateMethod::from_ui(&self.tools_view.spectate_method);
+                let lol_path = self
+                    .app_config
+                    .general
+                    .lol_path
+                    .iter()
+                    .find(|p| p.as_str() != services::WEGAME_MARKER)
+                    .cloned();
+                let live = self.live_service.clone();
+                self.tools_view.set_feedback("正在启动观战…", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    let result = match live.get_client().await {
+                        Some(client) => {
+                            services::spectate::launch_spectate(
+                                &client,
+                                &name,
+                                method,
+                                lol_path.as_deref(),
+                            )
+                            .await
+                        }
+                        None => Err("客户端未连接，请先启动英雄联盟".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok(msg) => this.tools_view.set_feedback(msg, false),
+                            Err(e) => this.tools_view.set_feedback(e, true),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             ToolsAction::ScanFriends => {
-                self.tools_view.set_feedback("好友扫描完成", false);
+                if self.tools_view.cleaner_scanning {
+                    return;
+                }
+                self.tools_view.cleaner_scanning = true;
+                self.tools_view.set_feedback("正在扫描好友列表…", false);
                 cx.notify();
+                let live = self.live_service.clone();
+                cx.spawn(async move |entity, cx| {
+                    let result = match live.get_client().await {
+                        Some(client) => services::friend_cleaner::scan_friends(&client).await,
+                        None => Err("客户端未连接，无法读取好友列表".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        this.tools_view.cleaner_scanning = false;
+                        match result {
+                            Ok(friends) => {
+                                let count = friends.len();
+                                this.tools_view.cleaner_friends = friends;
+                                this.tools_view.cleaner_has_scanned = true;
+                                this.tools_view.cleaner_selected_ids.clear();
+                                this.tools_view.set_feedback(
+                                    format!("扫描完成，共获取 {} 位好友并完成战绩分析", count),
+                                    false,
+                                );
+                            }
+                            Err(e) => {
+                                this.tools_view.cleaner_has_scanned = false;
+                                this.tools_view
+                                    .set_feedback(format!("扫描好友失败: {}", e), true);
+                            }
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             ToolsAction::SetCleanerDays(d) => {
                 self.tools_view.cleaner_days = d;
                 cx.notify();
             }
             ToolsAction::BatchDeleteOfflineFriends => {
-                self.tools_view.set_feedback("批量清理已完成", false);
+                let ids: Vec<String> = self.tools_view.cleaner_selected_ids.iter().cloned().collect();
+                if ids.is_empty() {
+                    self.tools_view
+                        .set_feedback("未勾选任何好友，已取消删除", false);
+                    cx.notify();
+                    return;
+                }
+                self.tools_view.set_feedback("正在删除选中的好友…", false);
                 cx.notify();
+                let live = self.live_service.clone();
+                cx.spawn(async move |entity, cx| {
+                    let outcome = match live.get_client().await {
+                        Some(client) => {
+                            services::friend_cleaner::delete_friends(&client, &ids).await
+                        }
+                        None => {
+                            let _ = entity.update(cx, |this, cx| {
+                                this.tools_view
+                                    .set_feedback("客户端未连接，删除未执行", true);
+                                cx.notify();
+                            });
+                            return;
+                        }
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        let deleted = outcome.deleted.len();
+                        let failed = outcome.failed.len();
+                        this.tools_view
+                            .cleaner_friends
+                            .retain(|friend| !outcome.deleted.contains(&friend.id));
+                        this.tools_view.cleaner_selected_ids.clear();
+                        if failed == 0 {
+                            this.tools_view
+                                .set_feedback(format!("成功清理 {} 位好友", deleted), false);
+                        } else {
+                            let first_error = outcome
+                                .failed
+                                .first()
+                                .map(|(_, err)| err.clone())
+                                .unwrap_or_default();
+                            this.tools_view.set_feedback(
+                                format!(
+                                    "删除完成：成功 {} 位，失败 {} 位（{}）",
+                                    deleted, failed, first_error
+                                ),
+                                true,
+                            );
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             ToolsAction::SignatureInput(s) => {
                 self.tools_view.signature_buffer = s;
@@ -243,42 +413,129 @@ impl MainWindow {
             ToolsAction::ApplySignature => {
                 let sig = self.tools_view.signature_buffer.clone();
                 let live = self.live_service.clone();
-                yuumi_core::runtime::spawn_background(async move {
-                    if let Some(client) = live.get_client().await {
-                        let body = serde_json::json!({ "statusMessage": sig });
-                        let _ = client
-                            .request("PUT", "/lol-chat/v1/me", Some(body), false)
-                            .await;
-                    }
-                });
-                self.tools_view.set_feedback("个性签名已更新", false);
+                self.tools_view.set_feedback("正在保存个性签名…", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    let result = match live.get_client().await {
+                        Some(client) => {
+                            let body = serde_json::json!({ "statusMessage": sig });
+                            client
+                                .request("PUT", "/lol-chat/v1/me", Some(body), false)
+                                .await
+                                .map(|_| "个性签名已更新".to_string())
+                        }
+                        None => Err("客户端未连接，签名未写入".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok(msg) => this.tools_view.set_feedback(msg, false),
+                            Err(e) => this
+                                .tools_view
+                                .set_feedback(format!("保存签名失败: {}", e), true),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
-            ToolsAction::ProfileBgSkinInput(s) => {
-                self.tools_view.profile_skin_id_buffer = s;
+            // D09：主页背景弹层指令通道（选英雄加载、上一个/下一个、取消、重试）
+            // 全部只改预览态，零写入；仅 ApplyProfileBackground 才真正写 LCU。
+            ToolsAction::ProfileBgSkinInput(cmd) => {
+                match cmd.as_str() {
+                    "open" => {
+                        if self.tools_view.bg_skins.is_empty() {
+                            self.tools_view
+                                .set_feedback("请先选择英雄以加载真实皮肤列表", true);
+                        } else {
+                            self.tools_view.open_bg_skin_modal = true;
+                            self.tools_view.bg_error = None;
+                        }
+                    }
+                    "cancel" | "close" => {
+                        // 取消零写入：关闭弹层并把预览索引恢复到当前回读的背景
+                        self.tools_view.open_bg_skin_modal = false;
+                        if let Some(cur) = self.tools_view.bg_current_skin_id {
+                            if let Some(pos) =
+                                self.tools_view.bg_skins.iter().position(|s| s.id == cur)
+                            {
+                                self.tools_view.bg_preview_index = pos;
+                            }
+                        }
+                        self.tools_view.bg_error = None;
+                    }
+                    "prev" => {
+                        let n = self.tools_view.bg_skins.len();
+                        if n > 0 {
+                            self.tools_view.bg_preview_index =
+                                (self.tools_view.bg_preview_index + n - 1) % n;
+                        }
+                    }
+                    "next" => {
+                        let n = self.tools_view.bg_skins.len();
+                        if n > 0 {
+                            self.tools_view.bg_preview_index =
+                                (self.tools_view.bg_preview_index + 1) % n;
+                        }
+                    }
+                    "retry" => {
+                        if let Some(cid) = self.tools_view.bg_selected_champion {
+                            self.spawn_skins_load(cid, cx);
+                        }
+                    }
+                    _ => {
+                        // 兼容原义：纯文本只进输入缓存，不写 LCU
+                        self.tools_view.profile_skin_id_buffer = cmd;
+                    }
+                }
                 cx.notify();
             }
             ToolsAction::ApplyProfileBackground => {
-                if let Ok(skin_id) = self.tools_view.profile_skin_id_buffer.trim().parse::<i32>() {
-                    let live = self.live_service.clone();
-                    yuumi_core::runtime::spawn_background(async move {
-                        if let Some(client) = live.get_client().await {
-                            let body =
-                                serde_json::json!({ "key": "backgroundSkinId", "value": skin_id });
-                            let _ = client
-                                .request(
-                                    "POST",
-                                    "/lol-summoner/v1/current-summoner/summoner-profile",
-                                    Some(body),
-                                    false,
-                                )
-                                .await;
-                        }
-                    });
-                    self.tools_view
-                        .set_feedback(format!("已应用背景皮肤 ID: {}", skin_id), false);
-                }
+                // 确认才写入：取预览态当前皮肤 ID，写入并回读，按真实结果反馈
+                let preview_idx = self
+                    .tools_view
+                    .bg_preview_index
+                    .min(self.tools_view.bg_skins.len().saturating_sub(1));
+                let skin_id = match self.tools_view.bg_skins.get(preview_idx) {
+                    Some(s) => s.id,
+                    None => {
+                        self.tools_view
+                            .set_feedback("没有可应用的皮肤，请先选择英雄", true);
+                        cx.notify();
+                        return;
+                    }
+                };
+                let live = self.live_service.clone();
+                self.tools_view.set_feedback("正在应用主页背景…", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    let result = match live.get_client().await {
+                        Some(client) => {
+                            crate::services::profile_background::apply_skin(&client, skin_id).await
+                        }
+                        None => Err("客户端未连接，背景未写入".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok(readback) => {
+                                this.tools_view.bg_current_skin_id = readback;
+                                this.tools_view.bg_error = None;
+                                this.tools_view.open_bg_skin_modal = false;
+                                this.tools_view.set_feedback(
+                                    format!("已应用背景皮肤 ID: {}（已回读）", skin_id),
+                                    false,
+                                );
+                            }
+                            Err(e) => {
+                                // 失败保留预览弹层与选择，便于直接重试
+                                this.tools_view.bg_error = Some(e.clone());
+                                this.tools_view
+                                    .set_feedback(format!("应用背景皮肤失败: {}", e), true);
+                            }
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             ToolsAction::SetSpoofQueue(q) => {
                 self.tools_view.spoof_queue = q;
@@ -293,95 +550,183 @@ impl MainWindow {
                 cx.notify();
             }
             ToolsAction::ApplyRankSpoof => {
+                let queue = self.tools_view.spoof_queue.clone();
                 let tier = self.tools_view.spoof_tier.clone();
                 let div = self.tools_view.spoof_division.clone();
                 let live = self.live_service.clone();
-                yuumi_core::runtime::spawn_background(async move {
-                    if let Some(client) = live.get_client().await {
-                        let body = serde_json::json!({
-                            "lol": {
-                                "rankedLeagueTier": tier,
-                                "rankedLeagueDivision": div,
-                            }
-                        });
-                        let _ = client
-                            .request("PUT", "/lol-chat/v1/me", Some(body), false)
-                            .await;
-                    }
-                });
-                self.tools_view.set_feedback("伪装段位已生效", false);
+                self.tools_view.set_feedback("正在应用段位展示…", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    let result = match live.get_client().await {
+                        Some(client) => {
+                            // 对齐旧版 RankSpoofCard：队列 / 段位 / 小段一并提交
+                            let body = serde_json::json!({
+                                "lol": {
+                                    "rankedLeagueQueue": queue,
+                                    "rankedLeagueTier": tier,
+                                    "rankedLeagueDivision": div,
+                                }
+                            });
+                            client
+                                .request("PUT", "/lol-chat/v1/me", Some(body), false)
+                                .await
+                                .map(|_| ())
+                        }
+                        None => Err("客户端未连接，段位未写入".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok(()) => this.tools_view.set_feedback("伪装段位已生效", false),
+                            Err(e) => this
+                                .tools_view
+                                .set_feedback(format!("伪装段位失败: {}", e), true),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             ToolsAction::SetOnlineStatus(st) => {
                 self.tools_view.online_status = st.clone();
                 let live = self.live_service.clone();
-                yuumi_core::runtime::spawn_background(async move {
-                    if let Some(client) = live.get_client().await {
-                        let body = serde_json::json!({ "availability": st });
-                        let _ = client
-                            .request("PUT", "/lol-chat/v1/me", Some(body), false)
-                            .await;
-                    }
-                });
-                self.tools_view.set_feedback("在线状态已切换", false);
+                self.tools_view.set_feedback("正在切换在线状态…", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    let result = match live.get_client().await {
+                        Some(client) => {
+                            let body = serde_json::json!({ "availability": st });
+                            client
+                                .request("PUT", "/lol-chat/v1/me", Some(body), false)
+                                .await
+                                .map(|_| "在线状态已切换".to_string())
+                        }
+                        None => Err("客户端未连接，状态未写入".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok(msg) => this.tools_view.set_feedback(msg, false),
+                            // 按真实请求结果反馈，不再提前报成功
+                            Err(e) => this
+                                .tools_view
+                                .set_feedback(format!("切换在线状态失败: {}", e), true),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
+            // D11-e：首次点击只展开二次确认框（零写入），确认后才发真实请求
             ToolsAction::ClearBadges => {
+                if !self.tools_view.confirm_clear_badges {
+                    self.tools_view.confirm_clear_badges = true;
+                    cx.notify();
+                    return;
+                }
+                self.tools_view.confirm_clear_badges = false;
                 let live = self.live_service.clone();
-                yuumi_core::runtime::spawn_background(async move {
-                    if let Some(client) = live.get_client().await {
-                        let body = serde_json::json!({ "challengeIds": [] });
-                        let _ = client
-                            .request(
-                                "POST",
-                                "/lol-challenges/v1/update-player-preferences",
-                                Some(body),
-                                false,
-                            )
-                            .await;
-                    }
-                });
-                self.tools_view.set_feedback("已清空成就勋章展示", false);
+                self.tools_view.set_feedback("正在清除成就勋章…", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    // 只清 challengeIds，请求体带当前 title / bannerAccent 保护称号与头像框
+                    let result = match live.get_client().await {
+                        Some(client) => crate::services::challenges::clear_badges(&client)
+                            .await
+                            .map(|_| "已清空成就勋章展示".to_string()),
+                        None => Err("客户端未连接，清除未执行".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok(msg) => this.tools_view.set_feedback(msg, false),
+                            Err(e) => this
+                                .tools_view
+                                .set_feedback(format!("清除勋章失败: {}", e), true),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             ToolsAction::ClearBorder => {
+                if !self.tools_view.confirm_clear_border {
+                    self.tools_view.confirm_clear_border = true;
+                    cx.notify();
+                    return;
+                }
+                self.tools_view.confirm_clear_border = false;
                 let live = self.live_service.clone();
-                yuumi_core::runtime::spawn_background(async move {
-                    if let Some(client) = live.get_client().await {
-                        let body = serde_json::json!({ "bannerId": "" });
-                        let _ = client
-                            .request(
-                                "POST",
-                                "/lol-challenges/v1/update-player-preferences",
-                                Some(body),
-                                false,
-                            )
-                            .await;
-                    }
-                });
-                self.tools_view.set_feedback("已清除个人边框", false);
+                self.tools_view.set_feedback("正在清除个人边框…", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    // 对齐旧版 ClearBorderCard.vue：PUT /lol-regalia/v2/current-regalia，
+                    // 仅清边框，不影响挑战勋章与称号（该前缀已在白名单内扩充）
+                    let result = match live.get_client().await {
+                        Some(client) => crate::services::challenges::clear_border(&client)
+                            .await
+                            .map(|_| "已清除个人头像边框".to_string()),
+                        None => Err("客户端未连接，清除未执行".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok(msg) => this.tools_view.set_feedback(msg, false),
+                            Err(e) => this
+                                .tools_view
+                                .set_feedback(format!("清除边框失败: {}", e), true),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             ToolsAction::ApplyOnlineStatus => {
+                // [D10-c] 收敛为单一写入路径：本分支无 UI 触发，且曾与 SetOnlineStatus 重复写
+                // PUT /lol-chat/v1/me {availability}（丢弃结果、提前报成功）。保留该分支
+                // （既有死代码不删），委托给 SetOnlineStatus 的活路径，避免同端点重复写入。
                 let status = self.tools_view.online_status.clone();
-                let live = self.live_service.clone();
-                yuumi_core::runtime::spawn_background(async move {
-                    if let Some(client) = live.get_client().await {
-                        let body = serde_json::json!({ "availability": status });
-                        let _ = client
-                            .request("PUT", "/lol-chat/v1/me", Some(body), false)
-                            .await;
-                    }
-                });
-                self.tools_view.set_feedback("在线状态已切换", false);
-                cx.notify();
+                self.handle_tools_action(ToolsAction::SetOnlineStatus(status), cx);
             }
             ToolsAction::TogglePicker(kind) => {
                 match kind {
                     "hover" => {
+                        // [D06-d] 打开前保存 FunctionsConfig 快照，供取消零写入回滚
+                        if !self.tools_view.open_hover_picker {
+                            self.tools_view.picker_backup =
+                                Some(Box::new(self.app_config.functions.clone()));
+                        }
                         self.tools_view.open_hover_picker = !self.tools_view.open_hover_picker
                     }
-                    "ban" => self.tools_view.open_ban_picker = !self.tools_view.open_ban_picker,
+                    "ban" => {
+                        if !self.tools_view.open_ban_picker {
+                            self.tools_view.picker_backup =
+                                Some(Box::new(self.app_config.functions.clone()));
+                        }
+                        self.tools_view.open_ban_picker = !self.tools_view.open_ban_picker;
+                    }
+                    // [D06-c] 「完成」才落盘，清空临时快照
+                    "confirm_hover" => {
+                        self.tools_view.open_hover_picker = false;
+                        self.tools_view.picker_backup = None;
+                        self.persist_config(cx);
+                    }
+                    "confirm_ban" => {
+                        self.tools_view.open_ban_picker = false;
+                        self.tools_view.picker_backup = None;
+                        self.persist_config(cx);
+                    }
+                    // [D06-d] 「✕ / 收起」为取消：恢复打开前配置，零写入
+                    "cancel_hover" => {
+                        if let Some(backup) = self.tools_view.picker_backup.take() {
+                            self.app_config.functions = *backup;
+                            self.automation = self.app_config.to_automation_settings();
+                        }
+                        self.tools_view.open_hover_picker = false;
+                    }
+                    "cancel_ban" => {
+                        if let Some(backup) = self.tools_view.picker_backup.take() {
+                            self.app_config.functions = *backup;
+                            self.automation = self.app_config.to_automation_settings();
+                        }
+                        self.tools_view.open_ban_picker = false;
+                    }
                     "bg_champ" => {
                         self.tools_view.open_bg_champion_picker =
                             !self.tools_view.open_bg_champion_picker
@@ -398,30 +743,33 @@ impl MainWindow {
                 is_ban,
                 champion_id,
             } => {
-                if is_ban {
-                    let list = match lane {
-                        "top" => &mut self.app_config.functions.auto_ban_champion_top,
-                        "jug" => &mut self.app_config.functions.auto_ban_champion_jug,
-                        "mid" => &mut self.app_config.functions.auto_ban_champion_mid,
-                        "bot" => &mut self.app_config.functions.auto_ban_champion_bot,
-                        "sup" => &mut self.app_config.functions.auto_ban_champion_sup,
-                        _ => &mut self.app_config.functions.auto_ban_champion,
+                // [D05-a][D06-b] 以运行时 AutomationSettings 为权威修改候选，再同步回 AppConfig
+                {
+                    let list: &mut Vec<i32> = match (is_ban, lane) {
+                        (true, "top") => &mut self.automation.auto_bp.ban_champion_ids_top,
+                        (true, "jug") => &mut self.automation.auto_bp.ban_champion_ids_jug,
+                        (true, "mid") => &mut self.automation.auto_bp.ban_champion_ids_mid,
+                        (true, "bot") => &mut self.automation.auto_bp.ban_champion_ids_bot,
+                        (true, "sup") => &mut self.automation.auto_bp.ban_champion_ids_sup,
+                        (true, _) => &mut self.automation.auto_bp.ban_champion_ids,
+                        (false, "top") => &mut self.automation.auto_bp.pick_champion_ids_top,
+                        (false, "jug") => &mut self.automation.auto_bp.pick_champion_ids_jug,
+                        (false, "mid") => &mut self.automation.auto_bp.pick_champion_ids_mid,
+                        (false, "bot") => &mut self.automation.auto_bp.pick_champion_ids_bot,
+                        (false, "sup") => &mut self.automation.auto_bp.pick_champion_ids_sup,
+                        (false, _) => &mut self.automation.auto_bp.pick_champion_ids,
                     };
-                    *list = vec![champion_id];
-                    self.tools_view.open_ban_picker = false;
-                } else {
-                    let list = match lane {
-                        "top" => &mut self.app_config.functions.auto_select_champion_top,
-                        "jug" => &mut self.app_config.functions.auto_select_champion_jug,
-                        "mid" => &mut self.app_config.functions.auto_select_champion_mid,
-                        "bot" => &mut self.app_config.functions.auto_select_champion_bot,
-                        "sup" => &mut self.app_config.functions.auto_select_champion_sup,
-                        _ => &mut self.app_config.functions.auto_select_champion,
-                    };
-                    *list = vec![champion_id];
-                    self.tools_view.open_hover_picker = false;
+                    // [D06-b] Vue ChampionPicker 语义：点已选移除、未达上限追加、达上限忽略
+                    if let Some(pos) = list.iter().position(|id| *id == champion_id) {
+                        list.remove(pos);
+                    } else if list.len() < crate::views::tools::components::PICKER_MAX_COUNT {
+                        list.push(champion_id);
+                    }
                 }
-                self.persist_config(cx);
+                // [D05-a] sync_automation_settings 的真实消费点：运行时配置回写磁盘配置模型
+                self.app_config.sync_automation_settings(&self.automation);
+                // [D06-c] 选择不落盘，等待「完成」确认；面板保持展开以便继续多选
+                cx.notify();
             }
             ToolsAction::ToggleDropdownMenu(menu) => {
                 match menu {
@@ -472,71 +820,254 @@ impl MainWindow {
                 cx.notify();
             }
             ToolsAction::SelectAllCleanerFriends => {
-                for f in crate::views::tools::data::MOCK_FRIENDS {
-                    self.tools_view
-                        .cleaner_selected_ids
-                        .insert(f.id.to_string());
-                }
+                // 只勾选当前筛选 + 搜索命中的好友（对齐 Vue `selectAllFiltered`）
+                let now = services::friend_cleaner::now_ms();
+                let query = self.tools_view.cleaner_search_live.borrow().clone();
+                let ids: Vec<String> = services::friend_cleaner::filtered_friends(
+                    &self.tools_view.cleaner_friends,
+                    &self.tools_view.cleaner_filter,
+                    &query,
+                    now,
+                )
+                .into_iter()
+                .map(|friend| friend.id.clone())
+                .collect();
+                self.tools_view.cleaner_selected_ids.extend(ids);
                 cx.notify();
             }
             ToolsAction::ClearSelectedCleanerFriends => {
                 self.tools_view.cleaner_selected_ids.clear();
                 cx.notify();
             }
+            // D09-c：选英雄自动拉真实皮肤列表并回读当前背景，零写入
             ToolsAction::SelectBgChampion(cid) => {
                 self.tools_view.bg_selected_champion = Some(cid);
                 self.tools_view.open_bg_champion_picker = false;
-                self.tools_view.set_feedback("已选择背景英雄", false);
-                cx.notify();
+                self.tools_view.open_bg_skin_modal = false;
+                self.spawn_skins_load(cid, cx);
             }
+            // D09-b：缩略图点击只改预览态，消除「选皮肤即写」
             ToolsAction::SelectBgSkin(sid) => {
                 self.tools_view.bg_selected_skin_id = Some(sid);
-                let live = self.live_service.clone();
-                yuumi_core::runtime::spawn_background(async move {
-                    if let Some(client) = live.get_client().await {
-                        let body = serde_json::json!({ "key": "backgroundSkinId", "value": sid });
-                        let _ = client
-                            .request(
-                                "POST",
-                                "/lol-summoner/v1/current-summoner/summoner-profile",
-                                Some(body),
-                                false,
-                            )
-                            .await;
-                    }
-                });
-                self.tools_view
-                    .set_feedback(format!("已应用背景皮肤 ID: {}", sid), false);
+                if let Some(pos) = self.tools_view.bg_skins.iter().position(|s| s.id == sid) {
+                    self.tools_view.bg_preview_index = pos;
+                }
                 cx.notify();
             }
+            // D11-b/e：打开弹层回读真实称号/勋章与当前偏好并快照；取消回滚零写入
             ToolsAction::ToggleBadgesModal(show) => {
-                self.tools_view.show_badges_modal = show;
-                cx.notify();
+                if show {
+                    self.tools_view.badges_snapshot_badges =
+                        self.tools_view.selected_badges.clone();
+                    self.tools_view.badges_snapshot_title =
+                        self.tools_view.selected_title.clone();
+                    self.tools_view.show_badges_modal = true;
+                    crate::views::tools::personalization::update_badges_view_state(|s| {
+                        s.badge_search.clear();
+                        s.title_search.clear();
+                        s.tier_filter = "all".to_string();
+                        s.error = None;
+                    });
+                    self.spawn_badges_load(cx);
+                } else {
+                    // 取消：回滚临时选择，零写入 LCU
+                    self.tools_view.selected_badges =
+                        self.tools_view.badges_snapshot_badges.clone();
+                    self.tools_view.selected_title =
+                        self.tools_view.badges_snapshot_title.clone();
+                    self.tools_view.show_badges_modal = false;
+                    crate::views::tools::personalization::update_badges_view_state(|s| {
+                        s.loading = false;
+                        s.error = None;
+                    });
+                    cx.notify();
+                }
             }
-            ToolsAction::ToggleBadgeItem(bid) => {
-                if let Some(pos) = self
-                    .tools_view
-                    .selected_badges
-                    .iter()
-                    .position(|id| id == &bid)
-                {
-                    self.tools_view.selected_badges.remove(pos);
-                } else if self.tools_view.selected_badges.len() < 3 {
-                    self.tools_view.selected_badges.push(bid);
+            // D11：弹层通用指令通道（badges_modal 的 on_toggle_badge 与确认框共用）
+            // "<id>" / "remove:idx" / "title:id" / "search:text" / "titlesearch:text"
+            // "filter:value" / "retry" / "cancel-clear"
+            ToolsAction::ToggleBadgeItem(cmd) => {
+                if let Some(rest) = cmd.strip_prefix("search:") {
+                    let text = rest.to_string();
+                    crate::views::tools::personalization::update_badges_view_state(|s| {
+                        s.badge_search = text;
+                    });
+                } else if let Some(rest) = cmd.strip_prefix("titlesearch:") {
+                    let text = rest.to_string();
+                    crate::views::tools::personalization::update_badges_view_state(|s| {
+                        s.title_search = text;
+                    });
+                } else if let Some(rest) = cmd.strip_prefix("filter:") {
+                    let value = rest.to_string();
+                    crate::views::tools::personalization::update_badges_view_state(|s| {
+                        s.tier_filter = value;
+                    });
+                } else if let Some(rest) = cmd.strip_prefix("title:") {
+                    self.tools_view.selected_title = rest.to_string();
+                } else if let Some(rest) = cmd.strip_prefix("remove:") {
+                    if let Ok(idx) = rest.parse::<usize>() {
+                        if idx < self.tools_view.selected_badges.len() {
+                            self.tools_view.selected_badges.remove(idx);
+                        }
+                    }
+                } else if cmd == "cancel-clear" {
+                    self.tools_view.confirm_clear_badges = false;
+                    self.tools_view.confirm_clear_border = false;
+                } else if cmd == "retry" {
+                    self.spawn_badges_load(cx);
+                } else {
+                    // 纯勋章 ID：切换装配（最多 3 枚）
+                    if let Some(pos) = self
+                        .tools_view
+                        .selected_badges
+                        .iter()
+                        .position(|id| id == &cmd)
+                    {
+                        self.tools_view.selected_badges.remove(pos);
+                    } else if self.tools_view.selected_badges.len() < 3 {
+                        self.tools_view.selected_badges.push(cmd);
+                    }
                 }
                 cx.notify();
             }
             ToolsAction::ClearBadgesModal => {
                 self.tools_view.selected_badges.clear();
+                self.tools_view.selected_title.clear();
                 cx.notify();
             }
             ToolsAction::SaveBadgesPreferences => {
-                self.tools_view.show_badges_modal = false;
-                self.tools_view
-                    .set_feedback("称号与挑战勋章装配成功！", false);
+                let title = self.tools_view.selected_title.clone();
+                let challenge_ids = self.tools_view.selected_badges.clone();
+                let live = self.live_service.clone();
+                self.tools_view.set_feedback("正在保存称号与勋章装配…", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    // 真实写入 + 回读当前偏好，成功才关弹层，失败保留选择与弹层便于重试
+                    let result: Result<(String, Vec<String>), String> = match live.get_client().await {
+                        Some(client) => {
+                            match crate::services::challenges::save_preferences(
+                                &client,
+                                &title,
+                                &challenge_ids,
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    crate::services::challenges::read_preferences(&client).await
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
+                        None => Err("客户端未连接，装配未写入".to_string()),
+                    };
+                    let _ = entity.update(cx, |this, cx| {
+                        match result {
+                            Ok((read_title, read_ids)) => {
+                                this.tools_view.selected_title = read_title;
+                                this.tools_view.selected_badges = read_ids;
+                                this.tools_view.badges_snapshot_title =
+                                    this.tools_view.selected_title.clone();
+                                this.tools_view.badges_snapshot_badges =
+                                    this.tools_view.selected_badges.clone();
+                                this.tools_view.show_badges_modal = false;
+                                this.tools_view
+                                    .set_feedback("称号与挑战勋章装配成功（已回读）", false);
+                            }
+                            Err(e) => {
+                                crate::views::tools::personalization::update_badges_view_state(|s| {
+                                    s.error = Some(e.clone());
+                                });
+                                this.tools_view
+                                    .set_feedback(format!("装配失败: {}", e), true);
+                            }
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
         }
+    }
+
+    /// D09：选英雄后异步读取真实皮肤列表 + 回读当前主页背景，写回视图（零写入）
+    fn spawn_skins_load(&mut self, champion_id: i32, cx: &mut Context<Self>) {
+        let live = self.live_service.clone();
+        self.tools_view.bg_loading = true;
+        self.tools_view.bg_error = None;
+        cx.notify();
+        cx.spawn(async move |entity, cx| {
+            let result = match live.get_client().await {
+                Some(client) => {
+                    let skins =
+                        crate::services::profile_background::load_skins(&client, champion_id).await;
+                    let current =
+                        crate::services::profile_background::read_current_background(&client).await;
+                    match (skins, current) {
+                        (Ok(list), Ok(cur)) => Ok((list, cur)),
+                        (Err(e), _) | (_, Err(e)) => Err(e),
+                    }
+                }
+                None => Err("客户端未连接，无法读取皮肤列表".to_string()),
+            };
+            let _ = entity.update(cx, |this, cx| {
+                this.tools_view.bg_loading = false;
+                match result {
+                    Ok((list, cur)) => {
+                        this.tools_view.bg_current_skin_id = cur;
+                        this.tools_view.bg_preview_index = cur
+                            .and_then(|id| list.iter().position(|s| s.id == id))
+                            .unwrap_or(0);
+                        this.tools_view.bg_skins = list;
+                        this.tools_view.bg_error = None;
+                    }
+                    Err(e) => {
+                        this.tools_view.bg_skins.clear();
+                        this.tools_view.bg_error = Some(e);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// D11：打开弹层 / 重试时异步读取真实称号、勋章与当前偏好，写回视图与弹层状态
+    fn spawn_badges_load(&mut self, cx: &mut Context<Self>) {
+        let live = self.live_service.clone();
+        crate::views::tools::personalization::update_badges_view_state(|s| {
+            s.loading = true;
+            s.error = None;
+        });
+        cx.notify();
+        cx.spawn(async move |entity, cx| {
+            let result = match live.get_client().await {
+                Some(client) => crate::services::challenges::load(&client).await,
+                None => Err("客户端未连接，无法读取称号与勋章".to_string()),
+            };
+            let _ = entity.update(cx, |this, cx| {
+                match result {
+                    Ok(data) => {
+                        crate::views::tools::personalization::update_badges_view_state(|s| {
+                            s.owned_badges = data.badges;
+                            s.owned_titles = data.titles;
+                            s.loading = false;
+                            s.error = None;
+                        });
+                        // 回读的真实当前佩戴覆盖临时选择（不重置打开时的取消快照）
+                        this.tools_view.selected_badges = data.current_badges;
+                        this.tools_view.selected_title = data.current_title;
+                    }
+                    Err(e) => {
+                        crate::views::tools::personalization::update_badges_view_state(|s| {
+                            s.loading = false;
+                            s.error = Some(e);
+                        });
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// 工具箱路由渲染与 ToolsAction 回调。

@@ -21,9 +21,24 @@ pub struct AutoMatchConfig {
     /// 延时再来一局
     pub auto_play_again: bool,
     /// 再来一局延迟（秒）
+    ///
+    /// 旧版按结算阶段区分固定延迟（WaitingForStats 10s / PreEndOfGame 3.25s /
+    /// EndOfGame 1.575s），本字段仅作为其他结算阶段的兜底值保留。
     pub auto_play_again_delay: u64,
     /// 自动点赞队友
     pub auto_honor: bool,
+    /// 自动接受好友组队邀请
+    pub auto_handle_invite: bool,
+    /// 空闲阶段自动创建预设房间
+    pub auto_create_lobby: bool,
+    /// 自动创建房间使用的队列 ID
+    pub default_game_mode: u32,
+    /// 选人阶段播报我方阵营（大乱斗报边）
+    pub aram_team_side: bool,
+    /// 阵营播报是否对队友可见（false 时使用仅本地可见的 celebration 消息）
+    pub aram_team_side_visible: bool,
+    /// 选人阶段对带标记玩家发送聊天提醒
+    pub tag_reminder: bool,
 }
 
 impl Default for AutoMatchConfig {
@@ -35,6 +50,12 @@ impl Default for AutoMatchConfig {
             auto_play_again: false,
             auto_play_again_delay: 5,
             auto_honor: true,
+            auto_handle_invite: false,
+            auto_create_lobby: false,
+            default_game_mode: 2400,
+            aram_team_side: false,
+            aram_team_side_visible: false,
+            tag_reminder: false,
         }
     }
 }
@@ -42,22 +63,50 @@ impl Default for AutoMatchConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AutoBpConfig {
-    /// 自动选英雄开关
+    /// 自动选英雄开关（在选人回合锁定）
     pub auto_pick: bool,
-    /// 自动选人意向优先
+    /// 自动选人意向优先（只亮英雄，不锁定）
     pub auto_pick_intent: bool,
     /// 默认选用英雄 ID 列表
     pub pick_champion_ids: Vec<i32>,
+    /// 分路选用候选（上 / 野 / 中 / 下 / 辅）
+    pub pick_champion_ids_top: Vec<i32>,
+    pub pick_champion_ids_jug: Vec<i32>,
+    pub pick_champion_ids_mid: Vec<i32>,
+    pub pick_champion_ids_bot: Vec<i32>,
+    pub pick_champion_ids_sup: Vec<i32>,
     /// 自动禁英雄开关
     pub auto_ban: bool,
     /// 默认禁用英雄 ID 列表
     pub ban_champion_ids: Vec<i32>,
+    /// 分路禁用候选（上 / 野 / 中 / 下 / 辅）
+    pub ban_champion_ids_top: Vec<i32>,
+    pub ban_champion_ids_jug: Vec<i32>,
+    pub ban_champion_ids_mid: Vec<i32>,
+    pub ban_champion_ids_bot: Vec<i32>,
+    pub ban_champion_ids_sup: Vec<i32>,
+    /// 禁用延迟（毫秒），旧版配置为 0~15 秒、步长 0.5 秒
+    pub ban_delay_ms: u32,
+    /// 假装禁用：先排除队友意向英雄再执行
+    pub pretend_ban: bool,
     /// 自动配置召唤师技能
     pub auto_spell: bool,
     /// 默认技能 1
     pub spell1_id: i32,
     /// 默认技能 2
     pub spell2_id: i32,
+    /// 分路技能候选（上 / 野 / 中 / 下 / 辅），不足两枚时回退默认技能
+    pub spell_ids_top: Vec<i32>,
+    pub spell_ids_jug: Vec<i32>,
+    pub spell_ids_mid: Vec<i32>,
+    pub spell_ids_bot: Vec<i32>,
+    pub spell_ids_sup: Vec<i32>,
+    /// 选人倒计时结束前自动确认锁定
+    pub confirm_on_timeout: bool,
+    /// 自动同意楼层交换
+    pub auto_pick_order_swap: bool,
+    /// 自动同意英雄交换
+    pub auto_champ_trade: bool,
 }
 
 impl Default for AutoBpConfig {
@@ -66,11 +115,84 @@ impl Default for AutoBpConfig {
             auto_pick: false,
             auto_pick_intent: true,
             pick_champion_ids: Vec::new(),
+            pick_champion_ids_top: Vec::new(),
+            pick_champion_ids_jug: Vec::new(),
+            pick_champion_ids_mid: Vec::new(),
+            pick_champion_ids_bot: Vec::new(),
+            pick_champion_ids_sup: Vec::new(),
             auto_ban: false,
             ban_champion_ids: Vec::new(),
+            ban_champion_ids_top: Vec::new(),
+            ban_champion_ids_jug: Vec::new(),
+            ban_champion_ids_mid: Vec::new(),
+            ban_champion_ids_bot: Vec::new(),
+            ban_champion_ids_sup: Vec::new(),
+            ban_delay_ms: 0,
+            pretend_ban: false,
             auto_spell: false,
             spell1_id: 4,  // 闪现
             spell2_id: 14, // 点燃
+            spell_ids_top: Vec::new(),
+            spell_ids_jug: Vec::new(),
+            spell_ids_mid: Vec::new(),
+            spell_ids_bot: Vec::new(),
+            spell_ids_sup: Vec::new(),
+            confirm_on_timeout: true,
+            auto_pick_order_swap: false,
+            auto_champ_trade: false,
+        }
+    }
+}
+
+impl AutoBpConfig {
+    /// 按分路取选用候选；分路为空时回退默认候选
+    pub fn pick_candidates(&self, position: &str) -> Vec<i32> {
+        let lane = match position {
+            "top" => &self.pick_champion_ids_top,
+            "jungle" => &self.pick_champion_ids_jug,
+            "middle" => &self.pick_champion_ids_mid,
+            "bottom" => &self.pick_champion_ids_bot,
+            "utility" => &self.pick_champion_ids_sup,
+            _ => &self.pick_champion_ids,
+        };
+        let mut list = lane.clone();
+        if !self.pick_champion_ids.is_empty() && lane != &self.pick_champion_ids {
+            list.extend(self.pick_champion_ids.iter().copied());
+        }
+        list
+    }
+
+    /// 按分路取禁用候选；分路为空时回退默认候选
+    pub fn ban_candidates(&self, position: &str) -> Vec<i32> {
+        let lane = match position {
+            "top" => &self.ban_champion_ids_top,
+            "jungle" => &self.ban_champion_ids_jug,
+            "middle" => &self.ban_champion_ids_mid,
+            "bottom" => &self.ban_champion_ids_bot,
+            "utility" => &self.ban_champion_ids_sup,
+            _ => &self.ban_champion_ids,
+        };
+        let mut list = lane.clone();
+        if !self.ban_champion_ids.is_empty() && lane != &self.ban_champion_ids {
+            list.extend(self.ban_champion_ids.iter().copied());
+        }
+        list
+    }
+
+    /// 按分路取召唤师技能；分路不足两枚或分路未知时回退默认（与选用/禁用候选一致）
+    pub fn spell_pair(&self, position: &str) -> Vec<i32> {
+        let lane = match position {
+            "top" => &self.spell_ids_top,
+            "jungle" => &self.spell_ids_jug,
+            "middle" => &self.spell_ids_mid,
+            "bottom" => &self.spell_ids_bot,
+            "utility" => &self.spell_ids_sup,
+            _ => return vec![self.spell1_id, self.spell2_id],
+        };
+        if lane.len() >= 2 {
+            vec![lane[0], lane[1]]
+        } else {
+            vec![self.spell1_id, self.spell2_id]
         }
     }
 }

@@ -289,6 +289,121 @@ fn fix_client_window_win32() -> Result<String, String> {
     }
 }
 
+/// 游戏设置锁定的目标文件（相对客户端根目录）
+const GAME_SETTINGS_FILES: &[&str] =
+    &["Game/Config/Game.cfg", "Game/Config/PersistedSettings.json"];
+
+/// 解析客户端根目录下真实存在的游戏设置文件
+pub fn game_settings_files(lol_paths: &[String]) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    for raw in lol_paths {
+        if raw == WEGAME_MARKER || raw.eq_ignore_ascii_case("wegame") {
+            continue;
+        }
+        let path = Path::new(raw);
+        let base = if path.is_file() {
+            match path.parent() {
+                Some(parent) => parent.to_path_buf(),
+                None => continue,
+            }
+        } else {
+            path.to_path_buf()
+        };
+        for relative in GAME_SETTINGS_FILES {
+            let file = base.join(relative);
+            if file.is_file() && !files.contains(&file) {
+                files.push(file);
+            }
+        }
+    }
+    files
+}
+
+/// 读取当前游戏设置文件是否处于只读锁定（任一文件可读且全部只读才算锁定）
+pub fn game_settings_readonly_state(lol_paths: &[String]) -> bool {
+    let files = game_settings_files(lol_paths);
+    !files.is_empty()
+        && files.iter().all(|file| {
+            std::fs::metadata(file)
+                .map(|metadata| metadata.permissions().readonly())
+                .unwrap_or(false)
+        })
+}
+
+/// 锁定/解锁 `Game.cfg` 与 `PersistedSettings.json` 的只读属性，并回读校验。
+///
+/// 任一步骤失败时回滚已修改的文件，返回真实错误而不是报告成功。
+pub fn set_game_settings_readonly(lol_paths: &[String], readonly: bool) -> Result<String, String> {
+    let files = game_settings_files(lol_paths);
+    if files.is_empty() {
+        return Err(
+            "未找到 Game.cfg 与 PersistedSettings.json，请先在设置中配置客户端路径并登录一次游戏以生成配置文件"
+                .to_string(),
+        );
+    }
+
+    let mut changed: Vec<(PathBuf, bool)> = Vec::new();
+    for file in &files {
+        let metadata = match std::fs::metadata(file) {
+            Ok(metadata) => metadata,
+            Err(e) => {
+                rollback_readonly(&changed);
+                return Err(format!("读取 {} 属性失败: {}", file.display(), e));
+            }
+        };
+        let previous = metadata.permissions().readonly();
+        if previous == readonly {
+            continue;
+        }
+
+        let mut permissions = metadata.permissions();
+        permissions.set_readonly(readonly);
+        if let Err(e) = std::fs::set_permissions(file, permissions) {
+            rollback_readonly(&changed);
+            return Err(format!("修改 {} 属性失败: {}", file.display(), e));
+        }
+
+        // 回读校验，确保属性真正生效
+        let verified = std::fs::metadata(file)
+            .map(|metadata| metadata.permissions().readonly())
+            .unwrap_or(previous);
+        if verified != readonly {
+            rollback_readonly(&changed);
+            return Err(format!("{} 只读属性回读校验失败", file.display()));
+        }
+
+        changed.push((file.clone(), previous));
+    }
+
+    let names = files
+        .iter()
+        .map(|file| {
+            file.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| file.display().to_string())
+        })
+        .collect::<Vec<String>>()
+        .join("、");
+    Ok(format!(
+        "已{} {} 个游戏配置文件({})",
+        if readonly { "锁定" } else { "解锁" },
+        files.len(),
+        names
+    ))
+}
+
+fn rollback_readonly(changed: &[(PathBuf, bool)]) {
+    for (file, previous) in changed {
+        if let Ok(metadata) = std::fs::metadata(file) {
+            let mut permissions = metadata.permissions();
+            permissions.set_readonly(*previous);
+            if let Err(e) = std::fs::set_permissions(file, permissions) {
+                log::warn!("[SystemTools] 回滚 {} 只读属性失败: {}", file.display(), e);
+            }
+        }
+    }
+}
+
 /// lol_path 列表中的特殊标记：表示该条目为「启动 WeGame」而非真实客户端路径
 pub const WEGAME_MARKER: &str = "WeGame";
 

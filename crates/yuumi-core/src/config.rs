@@ -185,6 +185,10 @@ pub struct FunctionsConfig {
     pub watched_friend_puuids: Vec<String>,
     pub enable_friend_radar: bool,
     pub enable_dodge_in_game_info: bool,
+    /// 再来一局兜底延迟（秒）：与 `AutoMatchConfig.auto_play_again_delay` 双向映射 // [D05-a]
+    pub auto_play_again_delay: u32,
+    /// 自动同意队友换人 / 换楼：`AutomationSettings.auto_trade` 的 AppConfig 等价字段 // [D05-a]
+    pub auto_trade: bool,
 }
 
 impl Default for FunctionsConfig {
@@ -248,6 +252,8 @@ impl Default for FunctionsConfig {
             watched_friend_puuids: Vec::new(),
             enable_friend_radar: false,
             enable_dodge_in_game_info: false,
+            auto_play_again_delay: 5,
+            auto_trade: false,
         }
     }
 }
@@ -355,21 +361,47 @@ impl AppConfig {
                 auto_accept_delay: f.auto_accept_matching_delay as u64,
                 auto_reconnect: f.enable_auto_reconnect,
                 auto_play_again: f.enable_auto_play_again,
-                auto_play_again_delay: 5,
+                auto_play_again_delay: f.auto_play_again_delay as u64,
                 auto_honor: f.enable_auto_honor,
+                auto_handle_invite: f.enable_auto_handle_invite,
+                auto_create_lobby: f.enable_auto_create_lobby,
+                default_game_mode: f.default_game_mode,
+                aram_team_side: f.enable_auto_aram_team_side,
+                aram_team_side_visible: f.aram_team_side_visible_to_team,
+                tag_reminder: f.enable_auto_tag_reminder,
             },
             auto_bp: crate::agents::config::AutoBpConfig {
-                auto_pick: f.enable_auto_select_champion || f.enable_auto_hover_champion,
+                auto_pick: f.enable_auto_select_champion,
                 auto_pick_intent: f.enable_auto_hover_champion,
                 pick_champion_ids: f.auto_select_champion.clone(),
+                pick_champion_ids_top: f.auto_select_champion_top.clone(),
+                pick_champion_ids_jug: f.auto_select_champion_jug.clone(),
+                pick_champion_ids_mid: f.auto_select_champion_mid.clone(),
+                pick_champion_ids_bot: f.auto_select_champion_bot.clone(),
+                pick_champion_ids_sup: f.auto_select_champion_sup.clone(),
                 auto_ban: f.enable_auto_ban_champion,
                 ban_champion_ids: f.auto_ban_champion.clone(),
+                ban_champion_ids_top: f.auto_ban_champion_top.clone(),
+                ban_champion_ids_jug: f.auto_ban_champion_jug.clone(),
+                ban_champion_ids_mid: f.auto_ban_champion_mid.clone(),
+                ban_champion_ids_bot: f.auto_ban_champion_bot.clone(),
+                ban_champion_ids_sup: f.auto_ban_champion_sup.clone(),
+                ban_delay_ms: (f.auto_ban_delay.max(0.0) * 1000.0).round() as u32,
+                pretend_ban: f.pretend_ban,
                 auto_spell: f.enable_auto_set_spells,
                 spell1_id: f.auto_set_summoner_spell.first().copied().unwrap_or(4),
                 spell2_id: f.auto_set_summoner_spell.get(1).copied().unwrap_or(14),
+                spell_ids_top: f.auto_set_summoner_spell_top.clone(),
+                spell_ids_jug: f.auto_set_summoner_spell_jug.clone(),
+                spell_ids_mid: f.auto_set_summoner_spell_mid.clone(),
+                spell_ids_bot: f.auto_set_summoner_spell_bot.clone(),
+                spell_ids_sup: f.auto_set_summoner_spell_sup.clone(),
+                confirm_on_timeout: f.auto_select_confirm_on_timeout,
+                auto_pick_order_swap: f.auto_accept_ceil_swap,
+                auto_champ_trade: f.auto_accept_champ_trade,
             },
             aram_bench_overlay: f.enable_bench_overlay,
-            auto_trade: f.auto_accept_ceil_swap || f.auto_accept_champ_trade,
+            auto_trade: f.auto_trade,
         }
     }
 
@@ -380,20 +412,71 @@ impl AppConfig {
         f.auto_accept_matching_delay = s.auto_match.auto_accept_delay as u32;
         f.enable_auto_reconnect = s.auto_match.auto_reconnect;
         f.enable_auto_play_again = s.auto_match.auto_play_again;
+        f.auto_play_again_delay = s
+            .auto_match
+            .auto_play_again_delay
+            .min(u32::MAX as u64) as u32;
         f.enable_auto_honor = s.auto_match.auto_honor;
+        f.enable_auto_handle_invite = s.auto_match.auto_handle_invite;
+        f.enable_auto_create_lobby = s.auto_match.auto_create_lobby;
+        f.default_game_mode = s.auto_match.default_game_mode;
+        f.enable_auto_aram_team_side = s.auto_match.aram_team_side;
+        f.aram_team_side_visible_to_team = s.auto_match.aram_team_side_visible;
+        f.enable_auto_tag_reminder = s.auto_match.tag_reminder;
 
-        f.enable_auto_select_champion = s.auto_bp.auto_pick && !s.auto_bp.auto_pick_intent;
+        f.enable_auto_select_champion = s.auto_bp.auto_pick;
         f.enable_auto_hover_champion = s.auto_bp.auto_pick_intent;
         f.auto_select_champion = s.auto_bp.pick_champion_ids.clone();
+        f.auto_select_champion_top = s.auto_bp.pick_champion_ids_top.clone();
+        f.auto_select_champion_jug = s.auto_bp.pick_champion_ids_jug.clone();
+        f.auto_select_champion_mid = s.auto_bp.pick_champion_ids_mid.clone();
+        f.auto_select_champion_bot = s.auto_bp.pick_champion_ids_bot.clone();
+        f.auto_select_champion_sup = s.auto_bp.pick_champion_ids_sup.clone();
 
         f.enable_auto_ban_champion = s.auto_bp.auto_ban;
         f.auto_ban_champion = s.auto_bp.ban_champion_ids.clone();
+        f.auto_ban_champion_top = s.auto_bp.ban_champion_ids_top.clone();
+        f.auto_ban_champion_jug = s.auto_bp.ban_champion_ids_jug.clone();
+        f.auto_ban_champion_mid = s.auto_bp.ban_champion_ids_mid.clone();
+        f.auto_ban_champion_bot = s.auto_bp.ban_champion_ids_bot.clone();
+        f.auto_ban_champion_sup = s.auto_bp.ban_champion_ids_sup.clone();
+        f.auto_ban_delay = s.auto_bp.ban_delay_ms as f64 / 1000.0;
+        f.pretend_ban = s.auto_bp.pretend_ban;
 
         f.enable_auto_set_spells = s.auto_bp.auto_spell;
         f.auto_set_summoner_spell = vec![s.auto_bp.spell1_id, s.auto_bp.spell2_id];
+        f.auto_set_summoner_spell_top = s.auto_bp.spell_ids_top.clone();
+        f.auto_set_summoner_spell_jug = s.auto_bp.spell_ids_jug.clone();
+        f.auto_set_summoner_spell_mid = s.auto_bp.spell_ids_mid.clone();
+        f.auto_set_summoner_spell_bot = s.auto_bp.spell_ids_bot.clone();
+        f.auto_set_summoner_spell_sup = s.auto_bp.spell_ids_sup.clone();
+        f.auto_select_confirm_on_timeout = s.auto_bp.confirm_on_timeout;
 
         f.enable_bench_overlay = s.aram_bench_overlay;
-        f.auto_accept_ceil_swap = s.auto_trade;
-        f.auto_accept_champ_trade = s.auto_trade;
+        f.auto_trade = s.auto_trade;
+        f.auto_accept_ceil_swap = s.auto_bp.auto_pick_order_swap;
+        f.auto_accept_champ_trade = s.auto_bp.auto_champ_trade;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// [D05-a] to/sync 对新增字段的双向映射必须自洽，避免半截映射
+    #[test]
+    fn automation_settings_roundtrip_keeps_new_fields() {
+        let mut cfg = AppConfig::default();
+        cfg.functions.auto_play_again_delay = 9;
+        cfg.functions.auto_trade = true;
+
+        let settings = cfg.to_automation_settings();
+        assert_eq!(settings.auto_match.auto_play_again_delay, 9);
+        assert!(settings.auto_trade);
+
+        let mut restored = AppConfig::default();
+        restored.sync_automation_settings(&settings);
+        assert_eq!(restored.functions.auto_play_again_delay, 9);
+        assert!(restored.functions.auto_trade);
     }
 }

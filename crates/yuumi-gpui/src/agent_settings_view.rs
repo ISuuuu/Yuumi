@@ -32,6 +32,7 @@ impl AgentSettingsView {
                 auto_spell: true,
                 spell1_id: 4,  // 闪现
                 spell2_id: 14, // 点燃
+                ..AutoBpConfig::default()
             },
         }
     }

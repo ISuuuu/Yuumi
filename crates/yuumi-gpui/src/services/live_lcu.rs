@@ -1,5 +1,6 @@
 //! 真实 LCU 实时连接与数据编排管理服务
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch, RwLock};
 use tokio::task::JoinHandle;
@@ -30,7 +31,9 @@ use yuumi_core::parsers::match_parser::{fetch_match_history, MatchDisplay};
 use yuumi_core::parsers::summoner::{fetch_current_summoner, SummonerInfo};
 use yuumi_core::parsers::teammates::{fetch_recent_teammates, RecentTeammate};
 
+use crate::bench_overlay::{bench_user_hidden, reset_bench_user_hidden}; // [D07-a]
 use crate::services::agent_runtime::{AgentRuntime, BpAgentEvent, MatchAgentEvent};
+use yuumi_core::storage::SavedPlayersStorage; // [D04-e]
 
 /// 选人会话变化后的对局信息拉取防抖间隔
 const CHAMP_SELECT_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -326,6 +329,11 @@ impl LiveLcuService {
                 if let Some(d) = &dispatcher {
                     d.dispatch_match(MatchAgentEvent::PhaseChanged(phase_str.clone()));
                 }
+                // [D07-a] 进入新一轮选人：清除「本会话用户已隐藏」标志，允许下轮自动弹出
+                let previous_phase = self.get_current_phase().await;
+                if phase_str.as_str() == "ChampSelect" && previous_phase != "ChampSelect" {
+                    reset_bench_user_hidden();
+                }
                 let phase = GamePhase::from(phase_str.as_str());
                 *self.current_phase.write().await = phase_str.clone();
                 let _ = self
@@ -364,9 +372,35 @@ impl LiveLcuService {
                     if let Some(d) = &dispatcher {
                         d.dispatch_bp(BpAgentEvent::ChampSelect(Box::new(session.clone())));
                     }
+
+                    // [D04-e] tag_reminder 开启时，从路人集存储只读构造 puuid→标签 映射并
+                    // 投递给 auto_match Worker；同局去重由 handle_tag_reminders 按 match_epoch 完成。
+                    let tag_reminder_enabled = self.auto_match_cfg.borrow().tag_reminder;
+                    if tag_reminder_enabled {
+                        let self_puuid = current_self_puuid(&self.status);
+                        let tagged = load_tagged_players_map(&self_puuid);
+                        if !tagged.is_empty() {
+                            if let Some(d) = &dispatcher {
+                                d.dispatch_match(MatchAgentEvent::TagReminders(tagged));
+                            }
+                        }
+                    }
+
+                    // [D07-a] 用户本会话已隐藏板凳席：广播「非板凳席」会话，使主窗清空
+                    // bench_session，sync_bench_overlay 判定 should_show=false，重复选人事件
+                    // 与 persist_config 都不会再自动重开悬浮窗。
+                    let ui_session = if bench_user_hidden() {
+                        let mut hidden = session.clone();
+                        hidden.queue_id = 0;
+                        hidden.is_custom_game = false;
+                        hidden.bench_enabled = false;
+                        hidden
+                    } else {
+                        session.clone()
+                    };
                     let _ = self
                         .event_tx
-                        .send(LiveLcuEvent::ChampSelectUpdated(session));
+                        .send(LiveLcuEvent::ChampSelectUpdated(ui_session));
                 }
                 // 选人内容变化（锁英雄 / 换位）时刷新对局信息看板
                 if self.get_current_phase().await == "ChampSelect" {
@@ -382,6 +416,29 @@ impl LiveLcuService {
                 if matches!(phase.as_str(), "GameStart" | "InProgress" | "Reconnect") {
                     self.schedule_game_info_refresh(phase, IN_PROGRESS_DELAY)
                         .await;
+                }
+            }
+            // 结算荣誉投票：交给 auto_match 决定是否自动点赞
+            "/lol-honor-v2/v1/ballot" => {
+                if let Some(d) = &dispatcher {
+                    if let Ok(ballot) =
+                        serde_json::from_value::<yuumi_core::agents::auto_match::HonorBallot>(
+                            event.data,
+                        )
+                    {
+                        d.dispatch_match(MatchAgentEvent::HonorBallot(Box::new(ballot)));
+                    }
+                }
+            }
+            // 收到的组队邀请：交给 auto_match 决定是否自动接受
+            "/lol-lobby/v2/received-invitations" => {
+                if let Some(d) = &dispatcher {
+                    if let Ok(invitations) = serde_json::from_value::<
+                        Vec<yuumi_core::agents::auto_match::ReceivedInvitation>,
+                    >(event.data)
+                    {
+                        d.dispatch_match(MatchAgentEvent::ReceivedInvitations(invitations));
+                    }
                 }
             }
             _ => {}
@@ -725,4 +782,45 @@ fn to_disenchant_items(items: &[LootActionItem]) -> Vec<loot_actions::Disenchant
             upgrade_recipe_name: i.upgrade_recipe_name.clone(),
         })
         .collect()
+}
+
+/// [D04-e] 同步读取当前登录召唤师 puuid（只借用 watch Ref，不跨 await 持有）。
+fn current_self_puuid(status: &watch::Sender<ConnectionStatus>) -> String {
+    let guard = status.borrow();
+    match &*guard {
+        ConnectionStatus::Connected { summoner, .. } => match &**summoner {
+            Some(s) => s.puuid.clone(),
+            None => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
+/// [D04-e] 从路人集存储只读构造 `puuid → 标签` 映射。
+///
+/// 对齐旧版 `query_tagged_for_reminder` 的 self_puuid 作用域（self_puuid 为空的记录视为
+/// 全局）；C 工单已通过 `SavedPlayersStorage::export_tagged_players` 暴露该数据契约，
+/// 本函数只消费、不修改 storage 模块。
+fn load_tagged_players_map(self_puuid: &str) -> HashMap<String, String> {
+    if self_puuid.is_empty() {
+        return HashMap::new();
+    }
+    let Ok(storage) = SavedPlayersStorage::open_default() else {
+        log::warn!("[LiveLcu] 标记提醒：路人集数据库不可用");
+        return HashMap::new();
+    };
+    match storage.export_tagged_players() {
+        Ok(records) => records
+            .into_iter()
+            .filter(|r| r.self_puuid.is_empty() || r.self_puuid.as_str() == self_puuid)
+            .filter_map(|r| {
+                let tag = r.tag.unwrap_or_default();
+                (!tag.is_empty()).then(|| (r.puuid, tag))
+            })
+            .collect(),
+        Err(e) => {
+            log::warn!("[LiveLcu] 标记提醒：读取标记玩家失败: {}", e);
+            HashMap::new()
+        }
+    }
 }
