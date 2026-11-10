@@ -5,6 +5,7 @@ impl MainWindow {
     pub(super) fn handle_live_event(&mut self, event: LiveLcuEvent, cx: &mut Context<Self>) {
         match event {
             LiveLcuEvent::ConnectionChanged(status) => {
+                let was_connected = matches!(self.connection_status, ConnectionStatus::Connected { .. });
                 if let ConnectionStatus::Connected { summoner, .. } = &status {
                     if let Some(s) = summoner.as_ref() {
                         self.own_summoner = Some(s.clone());
@@ -16,12 +17,20 @@ impl MainWindow {
                         // 资料卡头像也要预热，否则 LcuImage 只显示占位文字
                         prewarm_assets(vec![s.icon_path()], cx);
                     }
+                    // 首次连接且当前停留在首页时，自动跳转到生涯页（对照 Vue 行为）
+                    if !was_connected && self.current_route == Route::Home {
+                        self.switch_route(Route::Career, cx);
+                    }
                 }
                 if matches!(status, ConnectionStatus::Disconnected) {
                     // 客户端断开：立即收起悬浮窗，避免残留空窗
                     self.bench_session = None;
                     self.game_info_loading = false;
                     self.close_bench_overlay(cx);
+                    // 客户端断开连接时自动返回首页（对照 Vue 行为）
+                    if was_connected {
+                        self.switch_route(Route::Home, cx);
+                    }
                 }
                 self.connection_status = status;
                 cx.notify();
@@ -145,6 +154,16 @@ impl MainWindow {
                     // 选人结束（或进入其它阶段）即收起板凳席悬浮窗
                     self.bench_session = None;
                     self.close_bench_overlay(cx);
+                }
+
+                // 开局最小化：游戏开始或进入游戏中时自动最小化窗口
+                if matches!(phase, GamePhase::GameStart | GamePhase::InProgress)
+                    && self.app_config.general.enable_game_start_minimize
+                {
+                    log::info!("[MainWindow] 检测到开局阶段 {:?} 且开启开局最小化，执行最小化窗口", phase);
+                    if let Some(hwnd) = platform::find_main_window_hwnd() {
+                        platform::minimize_window(hwnd);
+                    }
                 }
 
                 // 对局结束（结算阶段）：若存在 10 人快照，自动持久化记录同局相遇玩家
@@ -478,19 +497,109 @@ impl MainWindow {
     pub(super) fn trigger_reconnect(&mut self, cx: &mut Context<Self>) {
         log::info!("[MainWindow] 用户触发重新连接/修复流程");
         let live = self.live_service.clone();
+        let phase = self.current_phase.clone();
         yuumi_core::runtime::spawn_background(async move {
             if let Some(client) = live.get_client().await {
-                let _ = client
-                    .request(
-                        "POST",
-                        "/lol-gameflow/v1/session/request-lobby-phase",
-                        None,
-                        false,
-                    )
-                    .await;
+                if matches!(phase.as_str(), "InProgress" | "GameStart" | "Reconnect") {
+                    // 游戏中 → 调用 reconnect API（指数退避重试最多 5 次）
+                    for i in 0..5 {
+                        let res = client
+                            .request("POST", "/lol-gameflow/v1/reconnect", None, false)
+                            .await;
+                        if res.is_ok() {
+                            log::info!("[MainWindow] 游戏重连 API 调用成功");
+                            break;
+                        }
+                        if i < 4 {
+                            tokio::time::sleep(Duration::from_millis(500 * (1 << i))).await;
+                        }
+                    }
+                } else {
+                    // 其他阶段 → 请求回到大厅房间阶段并刷新
+                    let _ = client
+                        .request(
+                            "POST",
+                            "/lol-gameflow/v1/session/request-lobby-phase",
+                            None,
+                            false,
+                        )
+                        .await;
+                }
             }
         });
         cx.notify();
+    }
+
+    /// 真实拉取 GitHub 公告数据并更新状态
+    pub(super) fn fetch_notice(&mut self, cx: &mut Context<Self>) {
+        self.notice_loading = true;
+        self.notice_error = false;
+        cx.notify();
+
+        let proxy_cfg = yuumi_core::opgg::ProxyConfig {
+            enable: self.app_config.general.enable_http_proxy,
+            addr: self.app_config.general.http_proxy_addr.clone(),
+        };
+
+        const NOTICE_URL: &str =
+            "https://raw.githubusercontent.com/ISuuuu/Yuumi/main/NOTICE.md";
+
+        cx.spawn(async move |entity, cx| {
+            let res = yuumi_core::opgg::fetch_github_text(NOTICE_URL, &proxy_cfg).await;
+            let _ = entity.update(cx, |this, cx| {
+                this.notice_loading = false;
+                match res {
+                    Ok(text) => {
+                        log::info!("[Notice] 成功拉取 GitHub 公告，字符数: {}", text.len());
+                        this.notice_content = Some(text);
+                        this.notice_error = false;
+                    }
+                    Err(e) => {
+                        log::warn!("[Notice] 拉取 GitHub 公告失败: {}", e);
+                        this.notice_error = true;
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// 处理系统托盘分发动作
+    pub(super) fn handle_tray_action(&mut self, action: TrayAction, cx: &mut Context<Self>) {
+        match action {
+            TrayAction::ShowWindow => {
+                if let Some(hwnd) = platform::find_main_window_hwnd() {
+                    platform::restore_and_foreground(hwnd);
+                }
+            }
+            TrayAction::ToggleWindow => {
+                if let Some(hwnd) = platform::find_main_window_hwnd() {
+                    if platform::is_window_visible(hwnd) {
+                        platform::hide_window(hwnd);
+                    } else {
+                        platform::restore_and_foreground(hwnd);
+                    }
+                }
+            }
+            TrayAction::Navigate(route) => {
+                if let Some(hwnd) = platform::find_main_window_hwnd() {
+                    platform::restore_and_foreground(hwnd);
+                }
+                self.switch_route(route, cx);
+            }
+            TrayAction::Quit => {
+                self.quit_application(cx);
+            }
+        }
+    }
+
+    /// 显式退出应用：彻底关闭独立窗口、释放后台资源并退出
+    pub(super) fn quit_application(&mut self, cx: &mut Context<Self>) {
+        log::info!("[MainWindow] 用户触发显式退出，释放资源并退出应用");
+        self.close_bench_overlay(cx);
+        self.close_opgg_window(cx);
+        cx.quit();
     }
 
     /// 将全局配置同步进磁盘、Agent 运行时与悬浮窗
@@ -505,6 +614,10 @@ impl MainWindow {
             .live_service
             .auto_bp_cfg
             .send(self.automation.auto_bp.clone());
+
+        if let Some(tray) = self.tray.as_mut() {
+            let _ = tray.update_menu(self.app_config.functions.hide_tft);
+        }
 
         if let Err(e) = self.app_config.save() {
             log::warn!("[Config] 全局配置持久化失败: {}", e);

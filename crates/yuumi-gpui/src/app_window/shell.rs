@@ -74,9 +74,15 @@ impl Render for MainWindow {
                             this.app_config.general.enable_close_to_tray.unwrap_or(false)
                         });
                         if close_to_tray {
-                            w.minimize_window();
+                            if let Some(hwnd) = platform::find_main_window_hwnd() {
+                                platform::hide_window(hwnd);
+                            } else {
+                                w.minimize_window();
+                            }
                         } else {
-                            app.quit();
+                            entity.update(app, |this, cx| {
+                                this.quit_application(cx);
+                            });
                         }
                     }
                 },
@@ -136,16 +142,28 @@ impl Render for MainWindow {
                                 });
                             }
                         },
+                        {
+                            let entity = view_entity.clone();
+                            move |_window, app| {
+                                entity.update(app, |this, cx| {
+                                    this.back_to_my_career(cx);
+                                    this.switch_route(Route::Career, cx);
+                                });
+                            }
+                        },
                     ))
                     .child(viewport)
                     // 右下角回到顶部悬浮按钮
                     .when(self.current_route != Route::Home, |this| {
                         let v = view_entity.clone();
-                        let is_saved_page = self.current_route == Route::SavedPlayers;
-                        let scroll_y = if is_saved_page {
-                            -self.saved_players_view.scroll_handle.offset().y
-                        } else {
-                            -self.main_scroll_handle.offset().y
+                        let scroll_y = match self.current_route {
+                            Route::SavedPlayers => -self.saved_players_view.scroll_handle.offset().y,
+                            Route::Career => match self.career_view.active_tab {
+                                views::career::CareerTab::Matches => -self.career_view.matches_scroll_handle.offset().y,
+                                views::career::CareerTab::Loot => -self.career_view.loot_scroll_handle.offset().y,
+                                views::career::CareerTab::Mastery => -self.career_view.mastery_scroll_handle.offset().y,
+                            },
+                            _ => -self.main_scroll_handle.offset().y,
                         };
                         let show_btn = scroll_y > px(180.0);
                         this.when(show_btn, |panel| {
@@ -169,13 +187,33 @@ impl Render for MainWindow {
                                     })
                                     .on_mouse_down(MouseButton::Left, move |_ev, _win, app| {
                                         v.update(app, |this, cx| {
-                                            if this.current_route == Route::SavedPlayers {
-                                                this.saved_players_view
-                                                    .scroll_handle
-                                                    .set_offset(Point::default());
-                                            } else {
-                                                this.main_scroll_handle
-                                                    .set_offset(Point::default());
+                                            match this.current_route {
+                                                Route::SavedPlayers => {
+                                                    this.saved_players_view
+                                                        .scroll_handle
+                                                        .set_offset(Point::default());
+                                                }
+                                                Route::Career => match this.career_view.active_tab {
+                                                    views::career::CareerTab::Matches => {
+                                                        this.career_view
+                                                            .matches_scroll_handle
+                                                            .set_offset(Point::default());
+                                                    }
+                                                    views::career::CareerTab::Loot => {
+                                                        this.career_view
+                                                            .loot_scroll_handle
+                                                            .set_offset(Point::default());
+                                                    }
+                                                    views::career::CareerTab::Mastery => {
+                                                        this.career_view
+                                                            .mastery_scroll_handle
+                                                            .set_offset(Point::default());
+                                                    }
+                                                },
+                                                _ => {
+                                                    this.main_scroll_handle
+                                                        .set_offset(Point::default());
+                                                }
                                             }
                                             cx.notify();
                                         });
@@ -194,6 +232,8 @@ impl Render for MainWindow {
             // 3. 右下角公告通知弹窗 (NoticePopup)
             .when(self.notice_popup_open, |this| {
                 let v = view_entity.clone();
+                let v_retry = view_entity.clone();
+                let content_str = self.notice_content.as_deref().unwrap_or("");
                 this.child(
                     div()
                         .absolute()
@@ -201,10 +241,17 @@ impl Render for MainWindow {
                         .bottom(px(20.0))
                         .child(notice_popup(
                             "版本更新与运行公告",
-                            "当前版本已完整复刻 Vue 纯白水晶极光界面，Direct3D 11 原生极速渲染，内存与启动性能优化完毕。",
+                            self.notice_loading,
+                            self.notice_error,
+                            content_str,
                             move |_win, app| {
                                 v.update(app, |this, cx| {
                                     this.toggle_notice_popup(false, cx);
+                                });
+                            },
+                            move |_win, app| {
+                                v_retry.update(app, |this, cx| {
+                                    this.fetch_notice(cx);
                                 });
                             },
                         )),
@@ -233,6 +280,9 @@ impl Render for MainWindow {
 impl MainWindow {
     pub(super) fn toggle_notice_popup(&mut self, open: bool, cx: &mut Context<Self>) {
         self.notice_popup_open = open;
+        if open && self.notice_content.is_none() && !self.notice_loading {
+            self.fetch_notice(cx);
+        }
         cx.notify();
     }
 

@@ -156,23 +156,7 @@ pub const THEME_COLOR_PRESETS: [(&str, &str); 4] = [
     ("#fa8c16", "暖阳金"),
 ];
 
-/// 解析 6 位或 8 位十六进制颜色字符为 gpui::Rgba
-pub fn parse_hex_color(hex: &str) -> Rgba {
-    let s = hex.trim().trim_start_matches('#');
-    if s.len() == 6 {
-        if let Ok(val) = u32::from_str_radix(s, 16) {
-            return rgba((val << 8) | 0xff);
-        }
-    } else if s.len() == 8 {
-        // Vue: #AARRGGBB
-        if let Ok(val) = u32::from_str_radix(s, 16) {
-            let a = (val >> 24) & 0xff;
-            let rgb = val & 0x00ffffff;
-            return rgba((rgb << 8) | a);
-        }
-    }
-    rgba(0x009faaff)
-}
+pub use crate::theme::parse_hex_color;
 
 /// 清除/展示输入框
 fn clearable_input_box(

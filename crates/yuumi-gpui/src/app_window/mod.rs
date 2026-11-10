@@ -27,7 +27,7 @@ use crate::platform;
 use crate::services;
 use crate::services::{ConnectionStatus, LiveLcuEvent, LiveLcuService};
 use crate::theme::Theme;
-use crate::tray::TrayManager;
+use crate::tray::{TrayAction, TrayManager};
 use crate::views;
 use crate::views::career::{
     CareerBarAction, CareerHeaderStats, CareerView, LootAction, LootModal, LootProgress,
@@ -128,7 +128,7 @@ pub struct MainWindow {
     sidebar_expanded: bool,
     /// 路由历史，供标题栏返回键使用（对照 Vue pageHistory）
     route_history: Vec<Route>,
-    _tray: Option<TrayManager>,
+    tray: Option<TrayManager>,
     overlay_window: Option<WindowHandle<BenchOverlayView>>,
     live_service: LiveLcuService,
     connection_status: ConnectionStatus,
@@ -146,6 +146,12 @@ pub struct MainWindow {
     has_update: bool,
     /// 公告弹窗是否打开
     notice_popup_open: bool,
+    /// 公告内容
+    notice_content: Option<String>,
+    /// 公告是否正在加载
+    notice_loading: bool,
+    /// 公告是否加载出错
+    notice_error: bool,
     /// OP.GG 独立窗口句柄（存在即复用并聚焦）
     opgg_window: Option<WindowHandle<OpggWindow>>,
     /// OP.GG 入口的临时提示文案（未连接 LCU 等场景）
@@ -177,13 +183,29 @@ impl MainWindow {
         let saved_players_view = SavedPlayersView::new(cx);
         let settings_view = SettingsView::new();
         let home_view = HomeView::new();
-        let tray = match TrayManager::new() {
+        let tray = match TrayManager::new(app_config.functions.hide_tft) {
             Ok(tray) => Some(tray),
             Err(e) => {
                 log::warn!("[Tray] 托盘创建失败: {}，托盘功能不可用", e);
                 None
             }
         };
+
+        // 检查「启动时自动运行 LOL」配置
+        if app_config.general.enable_start_lol_with_app {
+            let paths = app_config.general.lol_path.clone();
+            let wegame = app_config.general.wegame_path.clone();
+            std::thread::spawn(move || {
+                let selected = paths
+                    .iter()
+                    .find(|p| *p == yuumi_core::config::WEGAME_MARKER)
+                    .or_else(|| paths.first());
+                let _ = services::launch_lol_client(
+                    selected.map(|s| s.as_str()),
+                    wegame.as_deref(),
+                );
+            });
+        }
 
         // 初始化真实 LCU 实时监控与调度服务
         let asset_cache = std::sync::Arc::new(yuumi_core::lcu::asset_cache::AssetCache::default());
@@ -207,6 +229,24 @@ impl MainWindow {
                 let _ = entity.update(cx, |view, cx| {
                     view.handle_live_event(event_clone, cx);
                 });
+            }
+        })
+        .detach();
+
+        // 启动系统托盘事件轮询任务（每 100ms 检查一次菜单或图标点击事件）
+        cx.spawn(async move |entity, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                let action = entity.update(cx, |this, _cx| {
+                    this.tray.as_ref().and_then(|t| t.poll_event())
+                });
+                if let Ok(Some(action)) = action {
+                    let _ = entity.update(cx, |this, cx| {
+                        this.handle_tray_action(action, cx);
+                    });
+                }
             }
         })
         .detach();
@@ -239,7 +279,7 @@ impl MainWindow {
             current_route: Route::Home,
             sidebar_expanded: false,
             route_history: Vec::new(),
-            _tray: tray,
+            tray,
             overlay_window: None,
             live_service,
             connection_status: ConnectionStatus::Disconnected,
@@ -250,6 +290,9 @@ impl MainWindow {
             main_scroll_handle: ScrollHandle::new(),
             has_update: false,
             notice_popup_open: false,
+            notice_content: None,
+            notice_loading: false,
+            notice_error: false,
             opgg_window: None,
             opgg_hint: None,
         }
