@@ -59,6 +59,7 @@ impl MainWindow {
 
         self.search_view.show_history = false;
         self.search_view.set_search_query(&trimmed);
+        self.search_view.search_query_dirty = false;
         self.search_view.set_searching(true);
         self.search_view.detail_error = None;
         if let Some(gid) = target_game_id {
@@ -461,6 +462,7 @@ impl MainWindow {
             move |new_text: String, _win: &mut Window, app: &mut App| {
                 v.update(app, |this, cx| {
                     this.search_view.set_search_query(new_text);
+                    this.search_view.search_query_dirty = true;
                     this.search_view.show_history = true;
                     cx.notify();
                 });

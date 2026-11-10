@@ -177,6 +177,8 @@ pub struct SearchView {
     pub search_history: Vec<String>,
     /// 历史下拉是否展开
     pub show_history: bool,
+    /// 输入框自上次提交搜索后是否被编辑过（未编辑时历史下拉展示全部记录）
+    pub search_query_dirty: bool,
     /// 是否开启对局上传开关
     pub upload_enabled: bool,
     /// 是否在配置中配置了 UploadApiUrl（有配置才渲染复选框）
@@ -242,6 +244,7 @@ impl SearchView {
             queue_menu_open: false,
             search_history: history,
             show_history: false,
+            search_query_dirty: false,
             upload_enabled: true,
             has_upload_api_url: false,
             target_select_game_id: None,
@@ -366,6 +369,11 @@ impl SearchView {
     pub fn filtered_history(&self) -> Vec<&str> {
         let q = self.search_query.trim().to_lowercase();
         if q.is_empty() {
+            return self.search_history.iter().map(String::as_str).collect();
+        }
+
+        // 自上次提交搜索后未编辑输入（如查询失败后重新点击聚焦），则展示全部历史记录
+        if !self.search_query_dirty {
             return self.search_history.iter().map(String::as_str).collect();
         }
 
