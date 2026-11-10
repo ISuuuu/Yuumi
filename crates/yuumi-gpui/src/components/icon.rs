@@ -19,3 +19,28 @@ pub fn icon(path: &'static str, size: f32, color: Hsla) -> impl IntoElement {
         .h(px(size))
         .text_color(color)
 }
+
+/// 渲染 OP.GG 品牌徽标（原色位图）。
+///
+/// 侧栏入口（18px）与 OP.GG 窗口头部（22px）共用。Vue 侧这两处都是原色
+/// `<img :src="opggIcon">`，若改用 `icon()` 走 SVG 蒙版着色会丢掉渐变与白色字形。
+pub fn opgg_logo(size: f32) -> AnyElement {
+    // Vue 侧 18px 图标配 3px 圆角，同比换算其它尺寸
+    let radius = px(size * 0.17);
+    match crate::assets::opgg_logo_image() {
+        Some(image) => div()
+            .flex_none()
+            .size(px(size))
+            .rounded(radius)
+            .overflow_hidden()
+            .child(img(image).size_full().rounded(radius))
+            .into_any_element(),
+        // 解码失败时退回品牌主色块，保证布局不塌
+        None => div()
+            .flex_none()
+            .size(px(size))
+            .rounded(radius)
+            .bg(rgb(0x636ff9))
+            .into_any_element(),
+    }
+}

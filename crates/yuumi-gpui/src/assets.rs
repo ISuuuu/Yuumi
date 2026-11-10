@@ -37,6 +37,10 @@ impl AssetSource for Assets {
             "icons/bell.svg" => Some(include_bytes!("../assets/icons/bell.svg")),
             "icons/tft.svg" => Some(include_bytes!("../assets/icons/tft.svg")),
             "icons/opgg.svg" => Some(include_bytes!("../assets/icons/opgg.svg")),
+            "icons/tier-1.svg" => Some(include_bytes!("../assets/icons/tier-1.svg")),
+            "icons/tier-2.svg" => Some(include_bytes!("../assets/icons/tier-2.svg")),
+            "icons/tier-3.svg" => Some(include_bytes!("../assets/icons/tier-3.svg")),
+            "icons/tier-4.svg" => Some(include_bytes!("../assets/icons/tier-4.svg")),
             "icons/drag.svg" => Some(include_bytes!("../assets/icons/drag.svg")),
             "icons/cs.svg" => Some(include_bytes!("../assets/icons/cs.svg")),
             "icons/gold.svg" => Some(include_bytes!("../assets/icons/gold.svg")),
@@ -53,7 +57,15 @@ impl AssetSource for Assets {
 /// 应用 Logo（复用仓库内的 `public/logo.png`，避免二进制资源重复入库）
 const LOGO_PNG: &[u8] = include_bytes!("../../../public/logo.png");
 
+/// OP.GG 品牌徽标（原色 PNG）
+///
+/// GPUI 的 `svg()` 会把图形压成 alpha 蒙版并统一着色，官方 logo 的渐变底与
+/// 白色字形会被一并涂成单色而丢失识别度，所以这里内嵌一张由同一份
+/// `assets/icons/opgg.svg` 渲染出的 96×96 原色位图。
+const OPGG_LOGO_PNG: &[u8] = include_bytes!("../assets/icons/opgg-logo.png");
+
 static LOGO_IMAGE: OnceLock<Option<Arc<RenderImage>>> = OnceLock::new();
+static OPGG_LOGO_IMAGE: OnceLock<Option<Arc<RenderImage>>> = OnceLock::new();
 
 /// 同步获取已解码的 Logo 图（首次调用解码，后续命中缓存）
 pub fn logo_image() -> Option<Arc<RenderImage>> {
@@ -61,6 +73,17 @@ pub fn logo_image() -> Option<Arc<RenderImage>> {
         .get_or_init(|| {
             crate::asset_loader::AssetLoader::decode_bytes_to_render_image(LOGO_PNG)
                 .map_err(|e| log::warn!("[Assets] Logo 解码失败: {}", e))
+                .ok()
+        })
+        .clone()
+}
+
+/// 同步获取已解码的 OP.GG 品牌徽标
+pub fn opgg_logo_image() -> Option<Arc<RenderImage>> {
+    OPGG_LOGO_IMAGE
+        .get_or_init(|| {
+            crate::asset_loader::AssetLoader::decode_bytes_to_render_image(OPGG_LOGO_PNG)
+                .map_err(|e| log::warn!("[Assets] OP.GG logo 解码失败: {}", e))
                 .ok()
         })
         .clone()

@@ -6,7 +6,6 @@ pub mod icon;
 pub mod input;
 pub mod lcu_image;
 pub mod notice_popup;
-pub mod opgg_modal;
 pub mod sidebar;
 pub mod switch;
 pub mod text_field;
