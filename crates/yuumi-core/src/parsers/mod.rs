@@ -8,6 +8,7 @@ pub mod replay;
 pub mod saved_player;
 pub mod summoner;
 pub mod teammates;
+pub mod tft;
 
 pub use game_info::*;
 pub use loot::*;

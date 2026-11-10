@@ -299,6 +299,7 @@ impl OpggWindow {
             return;
         };
         let Some(rune) = build.runes.get(self.rune_index).cloned() else {
+            self.show_toast("当前英雄没有可应用的符文方案".to_string(), false, cx);
             return;
         };
         let name = format!("Yuumi: {}", self.champion_display_name(build.summary.as_ref()));

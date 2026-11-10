@@ -8,7 +8,7 @@
 use gpui::prelude::*;
 use gpui::{
     div, px, App, Bounds, ClipboardItem, Context, Div, FocusHandle, FontWeight, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Point, Render, ScrollHandle, Size, Stateful,
+    IntoElement, MouseButton, ParentElement, Pixels, Point, Render, ScrollHandle, Size, Stateful,
     StatefulInteractiveElement, Styled, TitlebarOptions, Window, WindowBounds, WindowHandle,
     WindowKind, WindowOptions,
 };
@@ -38,6 +38,7 @@ use crate::views::home::HomeView;
 use crate::views::saved_players::SavedPlayersView;
 use crate::views::search::SearchView;
 use crate::views::settings::{SettingsAction, SettingsView};
+use crate::views::tft::TftView;
 use crate::views::tools::{ToolsAction, ToolsView};
 use crate::views::Route;
 use yuumi_core::agents::{AutomationSettings, ChampSelectSession, GamePhase};
@@ -55,6 +56,7 @@ mod saved_players;
 mod search;
 mod settings;
 mod shell;
+mod tft;
 mod tools;
 
 /// 主窗口 Win32 标题（与标题栏显示的应用名保持一致，对照 Vue `tauri.conf.json` 的 `title`）
@@ -102,6 +104,8 @@ pub struct MainWindow {
     career_mastery_focus: FocusHandle,
     /// 战利品页价值数值输入框的焦点句柄
     loot_value_focus: FocusHandle,
+    /// 云顶海克斯搜索框的焦点句柄
+    tft_augment_focus: FocusHandle,
     matches: Vec<MatchItem>,
     stats: CareerHeaderStats,
     career_view: CareerView,
@@ -124,6 +128,7 @@ pub struct MainWindow {
     search_view: SearchView,
     saved_players_view: SavedPlayersView,
     settings_view: SettingsView,
+    tft_view: TftView,
     current_route: Route,
     /// 侧栏是否展开（64 ↔ 210，对照 Vue NavigationSidebar）
     sidebar_expanded: bool,
@@ -163,6 +168,8 @@ pub struct MainWindow {
     opgg_hint: Option<String>,
     /// 最近一次已成功记录相遇的对局 ID（防止结算多事件重复写入）
     last_recorded_encounter_game_id: Option<u64>,
+    /// 主窗最近一次渲染时的窗口区域（OP.GG 独立窗据此跟随主窗所在屏幕）
+    main_window_bounds: Option<Bounds<Pixels>>,
 }
 
 impl MainWindow {
@@ -180,6 +187,7 @@ impl MainWindow {
         prewarm_assets(tm_icons, cx);
         let career_mastery_focus = cx.focus_handle();
         let loot_value_focus = cx.focus_handle();
+        let tft_augment_focus = cx.focus_handle();
 
         // 加载持久化的全局配置与自动化配置
         let app_config = AppConfig::load();
@@ -192,6 +200,7 @@ impl MainWindow {
         let saved_players_view = SavedPlayersView::new(cx);
         let mut settings_view = SettingsView::new();
         settings_view.bind_f_inputs(&app_config, cx);
+        let tft_view = TftView::new();
         let home_view = HomeView::new();
         let tray = match TrayManager::new(app_config.functions.hide_tft) {
             Ok(tray) => Some(tray),
@@ -304,8 +313,10 @@ impl MainWindow {
             search_view,
             saved_players_view,
             settings_view,
+            tft_view,
             career_mastery_focus,
             loot_value_focus,
+            tft_augment_focus,
             current_route: Route::Home,
             sidebar_expanded: false,
             route_history: Vec::new(),
@@ -330,6 +341,7 @@ impl MainWindow {
             opgg_window: None,
             opgg_hint: None,
             last_recorded_encounter_game_id: None,
+            main_window_bounds: None,
         }
     }
 }

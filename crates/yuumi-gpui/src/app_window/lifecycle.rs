@@ -55,6 +55,9 @@ impl MainWindow {
                     }
                 }
                 self.connection_status = status;
+                if self.current_route == Route::Tft {
+                    self.ensure_tft_data(cx);
+                }
                 cx.notify();
             }
             LiveLcuEvent::MatchHistoryLoaded(matches) => {
@@ -173,6 +176,10 @@ impl MainWindow {
             }
             LiveLcuEvent::GamePhaseChanged(phase) => {
                 log::info!("[MainWindow] 接收到游戏阶段更新: {:?}", phase);
+                // 与 Vue 的 watch 语义对齐：只在“进入”选人阶段时自动开窗。
+                // LCU 会重复推送同一阶段，若按每次通知开窗，用户手动关闭后会被再次拉起。
+                let entering_champ_select =
+                    phase == GamePhase::ChampSelect && self.current_phase != "ChampSelect";
                 self.current_phase = phase.as_str().to_string();
                 let in_game = matches!(
                     phase,
@@ -202,7 +209,9 @@ impl MainWindow {
                 if phase == GamePhase::ChampSelect {
                     self.game_info = None;
                     self.last_recorded_encounter_game_id = None;
-                    if self.app_config.functions.auto_show_opgg {
+                    // 只在「进入」选人阶段时开窗：LCU 会重复推送同一阶段，
+                    // 否则用户手动关闭的窗口会被下一次重复通知再次拉起。
+                    if entering_champ_select && self.app_config.functions.auto_show_opgg {
                         self.open_opgg_window(cx);
                     }
                 }
@@ -499,7 +508,7 @@ impl MainWindow {
         let on_top = self.app_config.functions.enable_opgg_on_top;
         let initial_champion = self.initial_opgg_champion();
         let window_options = WindowOptions {
-            window_bounds: Some(opgg_window_bounds(cx)),
+            window_bounds: Some(opgg_window_bounds(cx, self.main_window_bounds)),
             titlebar: Some(TitlebarOptions {
                 title: Some(OPGG_WINDOW_TITLE.into()),
                 appears_transparent: false,
@@ -717,10 +726,26 @@ impl MainWindow {
 /// OP.GG 窗口默认 760 × 820 逻辑像素，贴靠主窗口所在屏幕的右上角
 /// （对照 Vue `openOpggWindow` 的 `x = pos.x + width - 760 - 2, y = pos.y + 2`），
 /// 工作区不足时先收敛尺寸，保证标题栏与内容可达。
-pub(super) fn opgg_window_bounds(cx: &App) -> WindowBounds {
+///
+/// 显示器优先取包含主窗中心点的那一块（双屏时跟随主窗），取不到再退回主显示器。
+pub(super) fn opgg_window_bounds(cx: &App, anchor: Option<Bounds<Pixels>>) -> WindowBounds {
     let mut width = px(760.0);
     let mut height = px(820.0);
-    if let Some(display) = cx.primary_display() {
+    let display = anchor
+        .and_then(|bounds| {
+            let center = bounds.center();
+            cx.displays().into_iter().find(|display| {
+                let screen = display.bounds();
+                let right = screen.origin.x + screen.size.width;
+                let bottom = screen.origin.y + screen.size.height;
+                center.x >= screen.origin.x
+                    && center.x <= right
+                    && center.y >= screen.origin.y
+                    && center.y <= bottom
+            })
+        })
+        .or_else(|| cx.primary_display());
+    if let Some(display) = display {
         let bounds = display.bounds();
         width = width.min((bounds.size.width - px(40.0)).max(px(600.0)));
         height = height.min((bounds.size.height - px(80.0)).max(px(520.0)));
