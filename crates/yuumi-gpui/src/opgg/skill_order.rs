@@ -12,11 +12,31 @@ use yuumi_core::opgg::{SkillMastery, SkillOrder};
 /// 技能字母对应的（底色, 文字色, 描边色）
 fn skill_palette(key: &str) -> (Hsla, Hsla, Hsla) {
     match key.to_ascii_uppercase().as_str() {
-        "Q" => (rgba(0x339af014).into(), rgb(0x1c7ed6).into(), rgba(0x339af026).into()),
-        "W" => (rgba(0x37b24d14).into(), rgb(0x2b8a3e).into(), rgba(0x37b24d26).into()),
-        "E" => (rgba(0xf7670714).into(), rgb(0xd9480f).into(), rgba(0xf7670726).into()),
-        "R" => (rgba(0xf03e3e14).into(), rgb(0xc92a2a).into(), rgba(0xf03e3e26).into()),
-        _ => (rgba(0x0000000d).into(), Theme::TEXT_SECONDARY, Theme::CARD_BORDER),
+        "Q" => (
+            rgba(0x339af014).into(),
+            rgb(0x1c7ed6).into(),
+            rgba(0x339af026).into(),
+        ),
+        "W" => (
+            rgba(0x37b24d14).into(),
+            rgb(0x2b8a3e).into(),
+            rgba(0x37b24d26).into(),
+        ),
+        "E" => (
+            rgba(0xf7670714).into(),
+            rgb(0xd9480f).into(),
+            rgba(0xf7670726).into(),
+        ),
+        "R" => (
+            rgba(0xf03e3e14).into(),
+            rgb(0xc92a2a).into(),
+            rgba(0xf03e3e26).into(),
+        ),
+        _ => (
+            rgba(0x0000000d).into(),
+            Theme::TEXT_SECONDARY,
+            Theme::CARD_BORDER,
+        ),
     }
 }
 
@@ -161,7 +181,9 @@ pub fn skill_order_section(
 mod tests {
     use super::*;
 
-    #[test]
+    // 顶层 `use gpui::*` 把 gpui_macros::test 引入了作用域，会遮蔽内置 #[test]，
+    // 必须用全限定路径标注普通单测
+    #[::core::prelude::v1::test]
     fn skill_palette_covers_all_four_abilities() {
         // Q/W/E/R 各自应有独立文字色，未知字母退回次级文字色
         let q = skill_palette("q").1;

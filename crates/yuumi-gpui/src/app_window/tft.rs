@@ -268,16 +268,12 @@ impl MainWindow {
     }
 
     fn show_tft_toast(&mut self, message: String, success: bool, cx: &mut Context<Self>) {
-        self.tft_view.comps_toast = Some((message, success));
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(3)).await;
-            let _ = this.update(cx, |view, cx| {
-                view.tft_view.comps_toast = None;
-                cx.notify();
-            });
-        })
-        .detach();
+        let kind = if success {
+            ToastKind::Success
+        } else {
+            ToastKind::Error
+        };
+        self.toast(kind, message, cx);
     }
 
     pub(super) fn handle_tft_action(&mut self, action: TftAction, cx: &mut Context<Self>) {
@@ -315,7 +311,6 @@ impl MainWindow {
             }
             TftAction::CloseDeck => {
                 self.tft_view.close_deck();
-                self.tft_view.comps_toast = None;
                 cx.notify();
             }
             TftAction::CopyTeamCode(code) => {
@@ -323,12 +318,15 @@ impl MainWindow {
                     self.show_tft_toast("当前阵容没有可复制的阵容码".to_string(), false, cx);
                     return;
                 }
-                cx.write_to_clipboard(ClipboardItem::new_string(code));
-                self.show_tft_toast(
-                    "阵容代码已复制到剪贴板，可进入游戏粘贴导入".to_string(),
-                    true,
-                    cx,
-                );
+                // 对照 Vue I01/I02：以实际写入结果决定提示（剪贴板被占用/失败可感知）
+                match platform::try_write_clipboard(&code) {
+                    Ok(()) => self.show_tft_toast(
+                        "阵容代码已复制到剪贴板，可进入游戏粘贴导入".to_string(),
+                        true,
+                        cx,
+                    ),
+                    Err(e) => self.show_tft_toast(format!("复制阵容代码失败: {}", e), false, cx),
+                }
             }
             TftAction::RefreshAugments => self.load_tft_augments(true, cx),
             TftAction::LoadMoreAugments => {

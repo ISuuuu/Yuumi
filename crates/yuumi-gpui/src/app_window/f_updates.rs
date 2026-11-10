@@ -45,7 +45,8 @@ impl MainWindow {
             Ok(service) => service,
             Err(error) => {
                 if manual {
-                    self.settings_view.set_feedback(error, true);
+                    // 对照 Vue C05：检查失败以 Toast 呈现
+                    self.toast(ToastKind::Error, error, cx);
                     cx.notify();
                 }
                 return;
@@ -68,20 +69,27 @@ impl MainWindow {
                 match result {
                     Ok(Some(info)) => {
                         this.has_update = true;
-                        this.f_update.info = Some(info);
+                        this.f_update.info = Some(info.clone());
                         this.f_update.open = manual;
                         this.f_update.dismissed =
                             !manual && !this.app_config.general.enable_check_update;
+                        // 对照 Vue C01：手动检查发现新版本以 Toast 呈现（保留更新弹窗）
+                        if manual {
+                            let version = info.version.clone();
+                            this.toast(ToastKind::Success, format!("发现新版本 v{}", version), cx);
+                        }
                         if !yuumi_core::runtime::is_portable()
                             && (manual || this.app_config.general.enable_check_update)
                         {
-                            this.download_update(cx);
+                            this.download_update(manual, cx);
                         }
                     }
-                    Ok(None) if manual => this
-                        .settings_view
-                        .set_feedback("当前已是最新 GPUI 版本", false),
-                    Err(error) if manual => this.settings_view.set_feedback(error, true),
+                    // 对照 Vue C02：手动检查已是最新版以 Toast 呈现
+                    Ok(None) if manual => {
+                        this.toast(ToastKind::Success, "当前已是最新 GPUI 版本", cx)
+                    }
+                    // 对照 Vue C05：手动检查失败以 Toast 呈现
+                    Err(error) if manual => this.toast(ToastKind::Error, error, cx),
                     Err(_) => log::warn!("[Update] 启动检查失败"),
                     _ => {}
                 }
@@ -91,7 +99,7 @@ impl MainWindow {
         .detach();
     }
 
-    pub(super) fn download_update(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn download_update(&mut self, manual: bool, cx: &mut Context<Self>) {
         if self.f_update.progress.is_some() || self.f_update.staged.is_some() {
             return;
         }
@@ -111,6 +119,14 @@ impl MainWindow {
         };
         self.f_update.error = None;
         self.f_update.progress = Some((0, None));
+        // 对照 Vue C03/C06：用户主动下载才提示「开始下载」；启动自动下载保持静默
+        if manual {
+            self.toast(
+                ToastKind::Success,
+                format!("已开始下载 v{}", info.version),
+                cx,
+            );
+        }
         cx.notify();
 
         self.f_update.generation = self.f_update.generation.wrapping_add(1);
@@ -197,7 +213,13 @@ impl MainWindow {
                         this.f_update.staged = Some(staged);
                         this.f_update.dismissed = false;
                     }
-                    Err(error) => this.f_update.error = Some(error),
+                    Err(error) => {
+                        this.f_update.error = Some(error.clone());
+                        // 对照 Vue C07：下载失败以 Toast 呈现；用户主动取消不提示
+                        if manual && error != "下载已取消" {
+                            this.toast(ToastKind::Error, format!("下载失败: {}", error), cx);
+                        }
+                    }
                 }
                 cx.notify();
             });
@@ -369,7 +391,8 @@ impl MainWindow {
                         self.f_update.progress.is_none() && self.f_update.staged.is_none(),
                         |el| {
                             el.child(update_action("下载更新", move |_, app| {
-                                entity_download.update(app, |view, cx| view.download_update(cx))
+                                entity_download
+                                    .update(app, |view, cx| view.download_update(true, cx))
                             }))
                         },
                     )

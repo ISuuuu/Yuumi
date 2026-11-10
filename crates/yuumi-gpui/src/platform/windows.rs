@@ -263,6 +263,57 @@ pub use crate::services::system_tools::{
     select_folder,
 };
 
+/// CF_UNICODETEXT 的标准剪贴板格式编号（Win32 文档常量，避免引入 Ole 特性依赖）
+const CF_UNICODETEXT_FORMAT: u32 = 13;
+
+/// 将文本写入系统剪贴板并返回真实写入结果。
+///
+/// gpui 的 `write_to_clipboard` 无返回值，无法感知被占用/失败；
+/// 复制类反馈（阵容码、对局 ID）以本函数的实际写入结果为准（对照设计文档阶段 4）。
+pub fn try_write_clipboard(text: &str) -> Result<(), String> {
+    use windows::Win32::Foundation::GlobalFree;
+    use windows::Win32::Foundation::HGLOBAL;
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+
+    unsafe {
+        OpenClipboard(None).map_err(|e| format!("打开剪贴板失败: {}", e))?;
+        // CloseClipboard 必须无条件执行：剪贴板被其他进程打开时立即释放，避免长时间锁死
+        let result = (|| -> Result<(), String> {
+            EmptyClipboard().map_err(|e| format!("清空剪贴板失败: {}", e))?;
+            // CF_UNICODETEXT：带 NUL 终止的 UTF-16 编码
+            let mut utf16: Vec<u16> = text.encode_utf16().collect();
+            utf16.push(0);
+            let byte_len = utf16.len() * std::mem::size_of::<u16>();
+            let handle: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE, byte_len)
+                .map_err(|e| format!("分配剪贴板内存失败: {}", e))?;
+            let dst = GlobalLock(handle);
+            if dst.is_null() {
+                let _ = GlobalUnlock(handle);
+                let _ = GlobalFree(handle);
+                return Err("锁定剪贴板内存失败".into());
+            }
+            std::ptr::copy_nonoverlapping(utf16.as_ptr(), dst as *mut u16, utf16.len());
+            let _ = GlobalUnlock(handle);
+            // 写入成功后内存所有权移交系统；失败则自行释放
+            match SetClipboardData(
+                CF_UNICODETEXT_FORMAT,
+                windows::Win32::Foundation::HANDLE(handle.0),
+            ) {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    let _ = GlobalFree(handle);
+                    Err(format!("写入剪贴板数据失败: {}", e))
+                }
+            }
+        })();
+        let _ = CloseClipboard();
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

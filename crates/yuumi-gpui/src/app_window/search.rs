@@ -3,6 +3,41 @@ use super::*;
 use crate::match_model::ReplayState;
 
 impl MainWindow {
+    /// 批量上传结果转 Toast（对照 Vue D15-D18）
+    pub(super) fn show_upload_outcome(
+        &mut self,
+        outcome: services::cloud_tasks::UploadOutcome,
+        cx: &mut Context<Self>,
+    ) {
+        use services::cloud_tasks::UploadOutcome;
+        match outcome {
+            UploadOutcome::Uploaded(count) => {
+                self.toast(ToastKind::Success, format!("已上传 {} 场对局", count), cx);
+            }
+            UploadOutcome::Partial(success, failed) => {
+                self.toast(
+                    ToastKind::Warning,
+                    format!("已上传 {} 场对局，{} 场失败", success, failed),
+                    cx,
+                );
+            }
+            UploadOutcome::AllFailed(failed) => {
+                self.toast(
+                    ToastKind::Error,
+                    format!("上传失败: {} 场对局均未上传成功", failed),
+                    cx,
+                );
+            }
+            UploadOutcome::Failed(error) => {
+                self.toast(ToastKind::Error, format!("上传异常: {}", error), cx);
+            }
+            UploadOutcome::AllExisted => {
+                self.toast(ToastKind::Info, "所有对局已存在，无需上传", cx);
+            }
+        }
+        cx.notify();
+    }
+
     fn upload_current_search_page(&self) {
         let Some(owner) = self.own_summoner.as_ref() else {
             return;
@@ -14,7 +49,8 @@ impl MainWindow {
         }
         let (items, _, _) = self.search_view.paged_filtered_matches();
         let ids = items.iter().map(|item| item.display.game_id).collect();
-        self.cloud_tasks.upload_matches(owner.puuid.clone(), ids, true);
+        self.cloud_tasks
+            .upload_matches(owner.puuid.clone(), ids, true);
     }
     /// 控制战绩查询页队列下拉的开合
     pub(super) fn set_search_queue_menu(&mut self, open: bool, cx: &mut Context<Self>) {
@@ -228,7 +264,10 @@ impl MainWindow {
     pub(super) fn handle_replay(&mut self, game_id: u64, cx: &mut Context<Self>) {
         let current = crate::replay_store::get_replay_state(game_id);
         if matches!(current, ReplayState::Checking | ReplayState::Downloading) {
-            log::info!("[MainWindow] 回放正在处理中，忽略重复点击: game_id={}", game_id);
+            log::info!(
+                "[MainWindow] 回放正在处理中，忽略重复点击: game_id={}",
+                game_id
+            );
             return;
         }
         if matches!(current, ReplayState::Unsupported) {
@@ -240,12 +279,18 @@ impl MainWindow {
 
         // 已就绪：直接触发客户端播放
         if matches!(current, ReplayState::Watch) {
+            // 对照 Vue D07：已就绪点击播放
+            self.toast(ToastKind::Info, "正在启动对局回放...", cx);
             cx.spawn(async move |entity, cx| {
                 if let Some(client) = live.get_client().await {
-                    if let Err(e) = yuumi_core::parsers::replay::watch_game_replay(&client, game_id).await {
+                    if let Err(e) =
+                        yuumi_core::parsers::replay::watch_game_replay(&client, game_id).await
+                    {
                         log::error!("[MainWindow] 启动回放失败: {}", e);
-                        let _ = entity.update(cx, |_this, cx| {
+                        let _ = entity.update(cx, |this, cx| {
                             crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                            // 对照 Vue D08
+                            this.toast(ToastKind::Error, format!("启动回放失败: {}", e), cx);
                             cx.notify();
                         });
                     }
@@ -262,8 +307,9 @@ impl MainWindow {
         cx.spawn(async move |entity, cx| {
             let Some(client) = live.get_client().await else {
                 log::warn!("[MainWindow] LCU 客户端未连接，无法获取回放");
-                let _ = entity.update(cx, |_this, cx| {
+                let _ = entity.update(cx, |this, cx| {
                     crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                    this.toast(ToastKind::Error, "客户端未连接，无法获取回放", cx);
                     cx.notify();
                 });
                 return;
@@ -273,33 +319,67 @@ impl MainWindow {
                 Ok(status) => {
                     let s = status.to_ascii_lowercase();
                     if s == "watch" || s == "found" {
-                        let _ = entity.update(cx, |_this, cx| {
+                        let _ = entity.update(cx, |this, cx| {
                             crate::replay_store::set_replay_state(game_id, ReplayState::Watch);
+                            // 对照 Vue D09：已就绪直接播放
+                            this.toast(ToastKind::Info, "回放已下载就绪，正在启动...", cx);
                             cx.notify();
                         });
-                        let _ = yuumi_core::parsers::replay::watch_game_replay(&client, game_id).await;
+                        if let Err(e) =
+                            yuumi_core::parsers::replay::watch_game_replay(&client, game_id).await
+                        {
+                            let _ = entity.update(cx, |this, cx| {
+                                // 对照 Vue D10
+                                this.toast(ToastKind::Error, format!("启动回放失败: {}", e), cx);
+                                cx.notify();
+                            });
+                        }
                         return;
-                    } else if s == "unsupported" || s == "incompatible" || s == "missingorexpired" || s == "lost" {
-                        let _ = entity.update(cx, |_this, cx| {
-                            crate::replay_store::set_replay_state(game_id, ReplayState::Unsupported);
+                    } else if s == "unsupported"
+                        || s == "incompatible"
+                        || s == "missingorexpired"
+                        || s == "lost"
+                    {
+                        let _ = entity.update(cx, |this, cx| {
+                            crate::replay_store::set_replay_state(
+                                game_id,
+                                ReplayState::Unsupported,
+                            );
+                            // 对照 Vue D06
+                            this.toast(ToastKind::Warning, "该对局回放已过期或不可用", cx);
                             cx.notify();
                         });
                         return;
                     } else if s == "downloading" {
-                        let _ = entity.update(cx, |_this, cx| {
-                            crate::replay_store::set_replay_state(game_id, ReplayState::Downloading);
+                        let _ = entity.update(cx, |this, cx| {
+                            crate::replay_store::set_replay_state(
+                                game_id,
+                                ReplayState::Downloading,
+                            );
+                            // 对照 Vue D12：云端已在下载
+                            this.toast(ToastKind::Info, "回放正在下载中...", cx);
                             cx.notify();
                         });
                     } else {
                         // 触发下载
-                        let _ = entity.update(cx, |_this, cx| {
-                            crate::replay_store::set_replay_state(game_id, ReplayState::Downloading);
+                        let _ = entity.update(cx, |this, cx| {
+                            crate::replay_store::set_replay_state(
+                                game_id,
+                                ReplayState::Downloading,
+                            );
+                            // 对照 Vue D13
+                            this.toast(ToastKind::Info, "已开始下载回放文件...", cx);
                             cx.notify();
                         });
-                        if let Err(e) = yuumi_core::parsers::replay::download_game_replay(&client, game_id).await {
+                        if let Err(e) =
+                            yuumi_core::parsers::replay::download_game_replay(&client, game_id)
+                                .await
+                        {
                             log::error!("[MainWindow] 触发下载回放失败: {}", e);
-                            let _ = entity.update(cx, |_this, cx| {
+                            let _ = entity.update(cx, |this, cx| {
                                 crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                                // 对照 Vue D04
+                                this.toast(ToastKind::Error, format!("下载回放失败: {}", e), cx);
                                 cx.notify();
                             });
                             return;
@@ -308,8 +388,10 @@ impl MainWindow {
                 }
                 Err(e) => {
                     log::error!("[MainWindow] 获取回放状态失败: {}", e);
-                    let _ = entity.update(cx, |_this, cx| {
+                    let _ = entity.update(cx, |this, cx| {
                         crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                        // 对照 Vue D14
+                        this.toast(ToastKind::Error, format!("获取回放失败: {}", e), cx);
                         cx.notify();
                     });
                     return;
@@ -318,24 +400,40 @@ impl MainWindow {
 
             // 轮询下载进度（最多 40 次，每次 1.5 秒）
             for _ in 1..=40 {
-                cx.background_executor().timer(Duration::from_millis(1500)).await;
-                if let Ok(st) = yuumi_core::parsers::replay::get_replay_status(&client, game_id).await {
+                cx.background_executor()
+                    .timer(Duration::from_millis(1500))
+                    .await;
+                if let Ok(st) =
+                    yuumi_core::parsers::replay::get_replay_status(&client, game_id).await
+                {
                     let s = st.to_ascii_lowercase();
                     if s == "watch" || s == "found" {
-                        let _ = entity.update(cx, |_this, cx| {
+                        let _ = entity.update(cx, |this, cx| {
                             crate::replay_store::set_replay_state(game_id, ReplayState::Watch);
+                            // 对照 Vue D02
+                            this.toast(ToastKind::Success, "回放下载完成，可点击观看", cx);
                             cx.notify();
                         });
                         return;
-                    } else if s == "unsupported" || s == "incompatible" || s == "missingorexpired" || s == "lost" {
-                        let _ = entity.update(cx, |_this, cx| {
-                            crate::replay_store::set_replay_state(game_id, ReplayState::Unsupported);
+                    } else if s == "unsupported"
+                        || s == "incompatible"
+                        || s == "missingorexpired"
+                        || s == "lost"
+                    {
+                        let _ = entity.update(cx, |this, cx| {
+                            crate::replay_store::set_replay_state(
+                                game_id,
+                                ReplayState::Unsupported,
+                            );
+                            this.toast(ToastKind::Warning, "该对局回放已过期或不可用", cx);
                             cx.notify();
                         });
                         return;
                     } else if s == "error" {
-                        let _ = entity.update(cx, |_this, cx| {
+                        let _ = entity.update(cx, |this, cx| {
                             crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                            // 对照 Vue D04
+                            this.toast(ToastKind::Error, "下载回放失败，请稍后重试", cx);
                             cx.notify();
                         });
                         return;
@@ -344,8 +442,10 @@ impl MainWindow {
             }
 
             // 超时
-            let _ = entity.update(cx, |_this, cx| {
+            let _ = entity.update(cx, |this, cx| {
                 crate::replay_store::set_replay_state(game_id, ReplayState::Error);
+                // 对照 Vue D01
+                this.toast(ToastKind::Warning, "下载回放超时，请重试", cx);
                 cx.notify();
             });
         })
@@ -354,7 +454,17 @@ impl MainWindow {
 
     /// 复制指定 Game ID 并短暂展示反馈
     pub(super) fn copy_search_game_id(&mut self, game_id: u64, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(game_id.to_string()));
+        // 对照 Vue D20：以实际写入结果决定提示（剪贴板被占用/失败可感知）
+        if let Err(e) = platform::try_write_clipboard(&game_id.to_string()) {
+            self.toast(ToastKind::Error, format!("复制对局 ID 失败: {}", e), cx);
+            cx.notify();
+            return;
+        }
+        self.toast(
+            ToastKind::Success,
+            format!("游戏 ID: {} 已复制到剪贴板", game_id),
+            cx,
+        );
         self.search_view.copied_feedback = Some(game_id);
         cx.notify();
 

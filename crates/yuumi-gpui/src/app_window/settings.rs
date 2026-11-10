@@ -50,41 +50,46 @@ impl MainWindow {
                 self.persist_config(cx);
             }
             SettingsAction::DetectLolPath => {
+                // 对照 Vue B01/B02/B03
                 if let Some(path) = services::detect_lol_path() {
-                    if !self.app_config.general.lol_path.contains(&path) {
+                    if self.app_config.general.lol_path.contains(&path) {
+                        self.toast(ToastKind::Info, "该路径已存在", cx);
+                    } else {
                         self.app_config.general.lol_path.push(path.clone());
                         self.home_view.reload_paths();
                         self.persist_config(cx);
+                        self.toast(ToastKind::Success, format!("已添加: {}", path), cx);
                     }
-                    self.settings_view
-                        .set_feedback(format!("已检测到客户端: {}", path), false);
                 } else {
-                    self.settings_view
-                        .set_feedback("未检测到运行中的英雄联盟客户端", true);
+                    self.toast(ToastKind::Error, "未检测到运行中的英雄联盟客户端", cx);
                 }
                 cx.notify();
             }
             SettingsAction::SelectLolFolder => {
+                // 对照 Vue B05/B06：取消选择不提示
                 if let Some(path) = services::select_folder() {
-                    if !self.app_config.general.lol_path.contains(&path) {
+                    if self.app_config.general.lol_path.contains(&path) {
+                        self.toast(ToastKind::Info, "该路径已存在", cx);
+                    } else {
                         self.app_config.general.lol_path.push(path.clone());
                         self.home_view.reload_paths();
                         self.persist_config(cx);
+                        self.toast(ToastKind::Success, format!("已添加: {}", path), cx);
                     }
-                    self.settings_view
-                        .set_feedback(format!("已添加目录: {}", path), false);
                 }
                 cx.notify();
             }
             SettingsAction::AddWegamePath => {
+                // 对照 Vue B08/B09
                 let wegame_marker = yuumi_core::config::WEGAME_MARKER.to_string();
-                if !self.app_config.general.lol_path.contains(&wegame_marker) {
+                if self.app_config.general.lol_path.contains(&wegame_marker) {
+                    self.toast(ToastKind::Info, "WeGame 启动项已存在", cx);
+                } else {
                     self.app_config.general.lol_path.push(wegame_marker);
                     self.home_view.reload_paths();
                     self.persist_config(cx);
+                    self.toast(ToastKind::Success, "已添加 WeGame 启动项", cx);
                 }
-                self.settings_view
-                    .set_feedback("已添加 WeGame 启动项", false);
                 cx.notify();
             }
             SettingsAction::RemoveLolPath(idx) => {
@@ -110,11 +115,9 @@ impl MainWindow {
                         .await;
                     let _ = entity.update(cx, |this, cx| {
                         match res {
-                            Ok(msg) => this.settings_view.set_feedback(msg, false),
-                            Err(e) => {
-                                this.settings_view
-                                    .set_feedback(format!("清理失败: {}", e), true)
-                            }
+                            // 对照 Vue B23：结果走 Toast，"正在清理"仍是局部进行中提示
+                            Ok(msg) => this.toast(ToastKind::Success, msg, cx),
+                            Err(e) => this.toast(ToastKind::Error, format!("清理失败: {}", e), cx),
                         }
                         cx.notify();
                     });
@@ -154,12 +157,13 @@ impl MainWindow {
                 if index == 0
                     && !value.is_empty()
                     && (value.chars().any(char::is_whitespace)
-                        || value.strip_prefix("http://").or_else(|| value.strip_prefix("https://"))
+                        || value
+                            .strip_prefix("http://")
+                            .or_else(|| value.strip_prefix("https://"))
                             .and_then(|rest| rest.split('/').next())
                             .is_none_or(|host| host.is_empty()))
                 {
-                    self.settings_view
-                        .set_feedback("请输入有效的 HTTP 或 HTTPS 上传地址", true);
+                    self.toast(ToastKind::Error, "请输入有效的 HTTP 或 HTTPS 上传地址", cx);
                     cx.notify();
                     return;
                 }
@@ -170,8 +174,11 @@ impl MainWindow {
                             host.is_empty() || port.parse::<u16>().is_err() || port == "0"
                         }))
                 {
-                    self.settings_view
-                        .set_feedback("请输入有效的代理地址（例如 127.0.0.1:7897）", true);
+                    self.toast(
+                        ToastKind::Error,
+                        "请输入有效的代理地址（例如 127.0.0.1:7897）",
+                        cx,
+                    );
                     cx.notify();
                     return;
                 }
@@ -246,20 +253,32 @@ impl MainWindow {
                 self.persist_config(cx);
             }
             SettingsAction::SelectScreenshotFolder => {
+                // 对照 Vue B14：取消选择不提示
                 if let Some(folder) = services::select_folder() {
                     self.settings_view.f_inputs[3] = folder.clone();
                     self.app_config.functions.screenshot_save_path = folder;
                     self.persist_config(cx);
+                    self.toast(ToastKind::Success, "已成功更新截图保存目录", cx);
                 }
             }
             SettingsAction::OpenScreenshotFolder => {
+                // 对照 Vue B16：失败以 Toast 呈现（原实现仅写日志）
                 let path = self.app_config.functions.screenshot_save_path.clone();
-                std::thread::spawn(move || match services::screenshot::screenshot_dir(&path) {
-                    Ok(p) => {
-                    let _ = services::open_folder(p);
+                cx.spawn(async move |entity, cx| {
+                    let res = cx
+                        .background_executor()
+                        .spawn(async move {
+                            services::screenshot::screenshot_dir(&path)
+                                .and_then(|dir| services::open_folder(dir))
+                        })
+                        .await;
+                    if let Err(e) = res {
+                        let _ = entity.update(cx, |this, cx| {
+                            this.toast(ToastKind::Error, format!("无法打开截图文件夹: {}", e), cx);
+                        });
                     }
-                    Err(e) => log::error!("打开截图目录失败: {e}"),
-                });
+                })
+                .detach();
             }
             SettingsAction::SetLogLevel(lvl) => {
                 self.settings_view.open_log_level_dropdown = false;
@@ -268,9 +287,19 @@ impl MainWindow {
                 self.persist_config(cx);
             }
             SettingsAction::OpenLogFolder => {
-                std::thread::spawn(|| {
-                    let _ = services::open_folder(services::logging::log_dir());
-                });
+                // 对照 Vue B24：失败以 Toast 呈现（原实现完全丢弃结果）
+                cx.spawn(async move |entity, cx| {
+                    let res = cx
+                        .background_executor()
+                        .spawn(async move { services::open_folder(services::logging::log_dir()) })
+                        .await;
+                    if let Err(e) = res {
+                        let _ = entity.update(cx, |this, cx| {
+                            this.toast(ToastKind::Error, format!("打开日志文件夹失败: {}", e), cx);
+                        });
+                    }
+                })
+                .detach();
             }
             SettingsAction::ToggleMica => {
                 let new_val = !self.app_config.personalization.mica_enabled;
@@ -342,11 +371,15 @@ impl MainWindow {
                 self.settings_view.open_scale_dropdown = false;
                 self.app_config.personalization.dpi_scale = s;
                 self.persist_config(cx);
+                // 对照 Vue B12：DPI 专用成功提示
+                self.toast(ToastKind::Success, "DPI 缩放已保存", cx);
             }
             SettingsAction::SetLanguage(l) => {
                 self.settings_view.open_lang_dropdown = false;
                 self.app_config.personalization.language = l;
                 self.persist_config(cx);
+                // 对照 Vue B13：语言专用成功提示
+                self.toast(ToastKind::Success, "语言设置已保存", cx);
             }
             SettingsAction::CheckUpdate => {
                 self.check_updates(true, cx);

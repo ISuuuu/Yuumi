@@ -170,12 +170,18 @@ impl MainWindow {
                             views::career::LootQuantityAction::Open => LootActionKind::Open,
                             views::career::LootQuantityAction::Craft => LootActionKind::Open,
                         };
-                        yuumi_core::runtime::spawn_background(async move {
-                            if let Err(e) = live.run_loot_action(kind, vec![item]).await {
-                                log::error!("[MainWindow] 执行战利品开启/合成动作失败: {}", e);
-                            }
+                        cx.spawn(async move |entity, cx| {
+                            let result = live.run_loot_action(kind, vec![item]).await;
+                            let _ = entity.update(cx, |this, cx| {
+                                if let Err(e) = result {
+                                    log::error!("[MainWindow] 执行战利品开启/合成动作失败: {}", e);
+                                    // 对照 Vue E03
+                                    this.toast(ToastKind::Error, format!("开箱失败: {}", e), cx);
+                                }
+                            });
                             live.refresh_career_data().await;
-                        });
+                        })
+                        .detach();
                     }
                     LootModal::Confirm { action_kind, .. } => {
                         let selected_ids = self.career_view.loot_selected.clone();
@@ -215,15 +221,41 @@ impl MainWindow {
 
                         if items.is_empty() {
                             log::warn!("[MainWindow] 战利品动作为空条目，取消执行");
+                            // 对照 Vue E02/E09/E14：前置校验失败以 Toast 呈现
+                            let message = match action_kind {
+                                LootActionKind::SmartOpenAll => "没有可开启的战利品",
+                                LootActionKind::Disenchant => {
+                                    "没有选中任何未拥有的战利品进行操作！"
+                                }
+                                LootActionKind::Reroll => "没有可重铸的战利品组合",
+                                LootActionKind::Upgrade => "没有可升级的战利品",
+                                LootActionKind::Open => "没有可开启的战利品",
+                            };
+                            self.toast(ToastKind::Error, message, cx);
+                            cx.notify();
                             return;
                         }
 
-                        yuumi_core::runtime::spawn_background(async move {
-                            if let Err(e) = live.run_loot_action(action_kind, items).await {
-                                log::error!("[MainWindow] 执行批量战利品动作失败: {}", e);
-                            }
+                        cx.spawn(async move |entity, cx| {
+                            let result = live.run_loot_action(action_kind, items).await;
+                            let _ = entity.update(cx, |this, cx| {
+                                if let Err(e) = result {
+                                    log::error!("[MainWindow] 执行批量战利品动作失败: {}", e);
+                                    // 对照 Vue E08/E13/E15：按动作类型映射失败文案
+                                    let label = match action_kind {
+                                        LootActionKind::Disenchant => "分解失败",
+                                        LootActionKind::Upgrade => "升级失败",
+                                        LootActionKind::Reroll => "重铸失败",
+                                        LootActionKind::SmartOpenAll | LootActionKind::Open => {
+                                            "开箱失败"
+                                        }
+                                    };
+                                    this.toast(ToastKind::Error, format!("{}: {}", label, e), cx);
+                                }
+                            });
                             live.refresh_career_data().await;
-                        });
+                        })
+                        .detach();
                     }
                 }
             }

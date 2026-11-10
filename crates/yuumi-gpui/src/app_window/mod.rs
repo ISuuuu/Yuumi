@@ -7,10 +7,10 @@
 //                   各领域的路由渲染、动作分发与跨页接线
 use gpui::prelude::*;
 use gpui::{
-    div, px, App, Bounds, ClipboardItem, Context, Div, FocusHandle, FontWeight, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Pixels, Point, Render, ScrollHandle, Size, Stateful,
-    StatefulInteractiveElement, Styled, TitlebarOptions, Window, WindowBounds, WindowHandle,
-    WindowKind, WindowOptions,
+    div, px, App, Bounds, ClipboardItem, Context, Div, Entity, FocusHandle, FontWeight,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
+    ScrollHandle, SharedString, Size, Stateful, StatefulInteractiveElement, Styled,
+    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,6 +21,7 @@ use crate::components;
 use crate::components::notice_popup::notice_popup;
 use crate::components::sidebar::Sidebar;
 use crate::components::titlebar::{phase_label, TitleBar};
+use crate::components::toast::{ToastKind, ToastStack};
 use crate::match_model::MatchItem;
 use crate::opgg::{OpggWindow, OPGG_WINDOW_TITLE};
 use crate::platform;
@@ -49,8 +50,8 @@ use yuumi_core::parsers::loot_actions::{LootActionItem, LootActionKind};
 use yuumi_core::parsers::summoner::SummonerInfo;
 
 mod career;
-mod game_info;
 mod f_updates;
+mod game_info;
 mod lifecycle;
 mod saved_players;
 mod search;
@@ -164,8 +165,8 @@ pub struct MainWindow {
     notice_error: bool,
     /// OP.GG 独立窗口句柄（存在即复用并聚焦）
     opgg_window: Option<WindowHandle<OpggWindow>>,
-    /// OP.GG 入口的临时提示文案（未连接 LCU 等场景）
-    opgg_hint: Option<String>,
+    /// 窗口级 Toast 队列（对照 Vue NMessageProvider，全部业务反馈的统一出口）
+    toast_stack: Entity<ToastStack>,
     /// 最近一次已成功记录相遇的对局 ID（防止结算多事件重复写入）
     last_recorded_encounter_game_id: Option<u64>,
     /// 主窗最近一次渲染时的窗口区域（OP.GG 独立窗据此跟随主窗所在屏幕）
@@ -189,8 +190,8 @@ impl MainWindow {
         let loot_value_focus = cx.focus_handle();
         let tft_augment_focus = cx.focus_handle();
 
-        // 加载持久化的全局配置与自动化配置
-        let app_config = AppConfig::load();
+        // 加载持久化的全局配置与自动化配置（异常信息留给首帧 Toast）
+        let (app_config, config_error) = AppConfig::load_with_error();
         let automation = app_config.to_automation_settings();
         let tools_view = ToolsView::new();
 
@@ -202,6 +203,21 @@ impl MainWindow {
         settings_view.bind_f_inputs(&app_config, cx);
         let tft_view = TftView::new();
         let home_view = HomeView::new();
+
+        // 窗口级 Toast 队列：内容变更时通知主窗重绘浮层
+        let toast_stack = cx.new(|_| ToastStack::new());
+        cx.observe(&toast_stack, |_, _, cx| cx.notify()).detach();
+
+        // 对照 Vue A01：配置文件异常时首帧以警告 Toast 呈现（Vue 弹窗为主、Toast 降级）
+        if let Some(config_error) = config_error {
+            toast_stack.update(cx, |stack, cx| {
+                stack.push(
+                    ToastKind::Warning,
+                    format!("配置文件异常:\n{}", config_error),
+                    cx,
+                );
+            });
+        }
         let tray = match TrayManager::new(app_config.functions.hide_tft) {
             Ok(tray) => Some(tray),
             Err(e) => {
@@ -219,10 +235,8 @@ impl MainWindow {
                     .iter()
                     .find(|p| *p == yuumi_core::config::WEGAME_MARKER)
                     .or_else(|| paths.first());
-                let _ = services::launch_lol_client(
-                    selected.map(|s| s.as_str()),
-                    wegame.as_deref(),
-                );
+                let _ =
+                    services::launch_lol_client(selected.map(|s| s.as_str()), wegame.as_deref());
             });
         }
 
@@ -233,17 +247,40 @@ impl MainWindow {
         let mut cloud_tasks = services::cloud_tasks::CloudTasks::new(live_service.clone());
         let mut cloud_status = cloud_tasks.subscribe_status();
         cloud_tasks.apply(&app_config);
-        cx.spawn(async move |entity, cx| {
-            loop {
-                let status = *cloud_status.borrow_and_update();
-                if entity.update(cx, |view, cx| {
+        cx.spawn(async move |entity, cx| loop {
+            let status = *cloud_status.borrow_and_update();
+            if entity
+                .update(cx, |view, cx| {
                     view.settings_view.cloud_status = status;
                     cx.notify();
-                }).is_err() || cloud_status.changed().await.is_err() {
+                })
+                .is_err()
+                || cloud_status.changed().await.is_err()
+            {
+                break;
+            }
+        })
+        .detach();
+
+        // 批量上传结果回传（对照 Vue D15-D18）：仅消费最新一条，避免快速连发时堆积
+        let mut upload_outcomes = cloud_tasks.subscribe_upload_outcomes();
+        cx.spawn(async move |entity, cx| loop {
+            let outcome = upload_outcomes.borrow_and_update().clone();
+            if let Some(outcome) = outcome {
+                if entity
+                    .update(cx, |view, cx| {
+                        view.show_upload_outcome(outcome, cx);
+                    })
+                    .is_err()
+                {
                     break;
                 }
             }
-        }).detach();
+            if upload_outcomes.changed().await.is_err() {
+                break;
+            }
+        })
+        .detach();
 
         // 启动即把持久化配置灌入 Agent 运行时，避免默认值覆盖用户选择
         let _ = live_service
@@ -267,19 +304,17 @@ impl MainWindow {
         .detach();
 
         // 启动系统托盘事件轮询任务（每 100ms 检查一次菜单或图标点击事件）
-        cx.spawn(async move |entity, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(100))
-                    .await;
-                let action = entity.update(cx, |this, _cx| {
-                    this.tray.as_ref().and_then(|t| t.poll_event())
+        cx.spawn(async move |entity, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(100))
+                .await;
+            let action = entity.update(cx, |this, _cx| {
+                this.tray.as_ref().and_then(|t| t.poll_event())
+            });
+            if let Ok(Some(action)) = action {
+                let _ = entity.update(cx, |this, cx| {
+                    this.handle_tray_action(action, cx);
                 });
-                if let Ok(Some(action)) = action {
-                    let _ = entity.update(cx, |this, cx| {
-                        this.handle_tray_action(action, cx);
-                    });
-                }
             }
         })
         .detach();
@@ -339,10 +374,22 @@ impl MainWindow {
             notice_loading: false,
             notice_error: false,
             opgg_window: None,
-            opgg_hint: None,
+            toast_stack,
             last_recorded_encounter_game_id: None,
             main_window_bounds: None,
         }
+    }
+
+    /// 主窗 Toast 统一入口：所有业务反馈（成功/错误/警告/信息）都经这里入队
+    pub(crate) fn toast(
+        &mut self,
+        kind: ToastKind,
+        message: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        self.toast_stack.update(cx, |stack, cx| {
+            stack.push(kind, message, cx);
+        });
     }
 }
 

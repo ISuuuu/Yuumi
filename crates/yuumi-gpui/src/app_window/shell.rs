@@ -73,7 +73,10 @@ impl Render for MainWindow {
                     let entity = view_entity.clone();
                     move |w, app| {
                         let close_to_tray = entity.update(app, |this, _cx| {
-                            this.app_config.general.enable_close_to_tray.unwrap_or(false)
+                            this.app_config
+                                .general
+                                .enable_close_to_tray
+                                .unwrap_or(false)
                         });
                         if close_to_tray {
                             if let Some(hwnd) = platform::find_main_window_hwnd() {
@@ -160,11 +163,19 @@ impl Render for MainWindow {
                     .when(self.current_route != Route::Home, |this| {
                         let v = view_entity.clone();
                         let scroll_y = match self.current_route {
-                            Route::SavedPlayers => -self.saved_players_view.scroll_handle.offset().y,
+                            Route::SavedPlayers => {
+                                -self.saved_players_view.scroll_handle.offset().y
+                            }
                             Route::Career => match self.career_view.active_tab {
-                                views::career::CareerTab::Matches => -self.career_view.matches_scroll_handle.offset().y,
-                                views::career::CareerTab::Loot => -self.career_view.loot_scroll_handle.offset().y,
-                                views::career::CareerTab::Mastery => -self.career_view.mastery_scroll_handle.offset().y,
+                                views::career::CareerTab::Matches => {
+                                    -self.career_view.matches_scroll_handle.offset().y
+                                }
+                                views::career::CareerTab::Loot => {
+                                    -self.career_view.loot_scroll_handle.offset().y
+                                }
+                                views::career::CareerTab::Mastery => {
+                                    -self.career_view.mastery_scroll_handle.offset().y
+                                }
                             },
                             _ => -self.main_scroll_handle.offset().y,
                         };
@@ -196,23 +207,25 @@ impl Render for MainWindow {
                                                         .scroll_handle
                                                         .set_offset(Point::default());
                                                 }
-                                                Route::Career => match this.career_view.active_tab {
-                                                    views::career::CareerTab::Matches => {
-                                                        this.career_view
-                                                            .matches_scroll_handle
-                                                            .set_offset(Point::default());
+                                                Route::Career => {
+                                                    match this.career_view.active_tab {
+                                                        views::career::CareerTab::Matches => {
+                                                            this.career_view
+                                                                .matches_scroll_handle
+                                                                .set_offset(Point::default());
+                                                        }
+                                                        views::career::CareerTab::Loot => {
+                                                            this.career_view
+                                                                .loot_scroll_handle
+                                                                .set_offset(Point::default());
+                                                        }
+                                                        views::career::CareerTab::Mastery => {
+                                                            this.career_view
+                                                                .mastery_scroll_handle
+                                                                .set_offset(Point::default());
+                                                        }
                                                     }
-                                                    views::career::CareerTab::Loot => {
-                                                        this.career_view
-                                                            .loot_scroll_handle
-                                                            .set_offset(Point::default());
-                                                    }
-                                                    views::career::CareerTab::Mastery => {
-                                                        this.career_view
-                                                            .mastery_scroll_handle
-                                                            .set_offset(Point::default());
-                                                    }
-                                                },
+                                                }
                                                 _ => {
                                                     this.main_scroll_handle
                                                         .set_offset(Point::default());
@@ -230,7 +243,7 @@ impl Render for MainWindow {
                                     ),
                             )
                         })
-                    })
+                    }),
             )
             // 3. 右下角公告通知弹窗 (NoticePopup)
             .when(self.notice_popup_open, |this| {
@@ -261,23 +274,8 @@ impl Render for MainWindow {
                 )
             })
             .child(self.render_update_surface(&view_entity))
-            // 4. OP.GG 入口提示（独立窗口已在原生窗口层打开，这里仅承载临时提示）
-            .when_some(self.opgg_hint.clone(), |el, hint| {
-                el.child(
-                    div()
-                        .absolute()
-                        .bottom(px(20.0))
-                        .left(px(20.0))
-                        .px(px(14.0))
-                        .py(px(10.0))
-                        .rounded(px(8.0))
-                        .bg(Theme::GOLD)
-                        .shadow_md()
-                        .text_size(px(12.0))
-                        .text_color(Theme::TEXT_ON_PRIMARY)
-                        .child(hint),
-                )
-            })
+            // 4. 窗口级 Toast 浮层（最后绘制，z 序高于页面与应用内弹窗；不拦截鼠标）
+            .child(components::toast::toast_overlay(self.toast_stack.read(cx)))
     }
 }
 

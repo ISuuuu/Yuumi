@@ -102,7 +102,6 @@ pub enum SavedPlayersAction {
     ExportTagged,
     ImportTagged,
     LoadMore,
-    DismissToast,
 
     // 兼容旧接口
     TogglePin(String),
@@ -143,8 +142,6 @@ pub struct SavedPlayersView {
     pub editing_notes_buffer: String,
     /// 待确认删除的玩家 PUUID（用于弹出删除确认对话框）
     pub confirm_delete_puuid: Option<String>,
-    /// Toast 提示信息：(提示文案, 是否成功)
-    pub toast_message: Option<(String, bool)>,
     /// 正在拉取下一页标志位
     pub is_loading_more: bool,
     /// 异步请求序列计数器（用于丢弃快速切换/输入时的过期响应）
@@ -189,7 +186,6 @@ impl SavedPlayersView {
             editing_tag_buffer: String::new(),
             editing_notes_buffer: String::new(),
             confirm_delete_puuid: None,
-            toast_message: None,
             is_loading_more: false,
             request_seq: 0,
             scroll_handle: ScrollHandle::new(),
@@ -320,16 +316,23 @@ impl SavedPlayersView {
                 .or(self.self_puuid.as_deref());
 
             if let Some(ref s) = self.storage {
-                self.expanded_games_total = s.count_encountered_games(puuid, target_self_puuid).unwrap_or(0);
+                self.expanded_games_total = s
+                    .count_encountered_games(puuid, target_self_puuid)
+                    .unwrap_or(0);
                 self.expanded_games = s
-                    .query_encountered_games_paged(puuid, target_self_puuid, ENCOUNTER_GAMES_PAGE_SIZE, 0)
+                    .query_encountered_games_paged(
+                        puuid,
+                        target_self_puuid,
+                        ENCOUNTER_GAMES_PAGE_SIZE,
+                        0,
+                    )
                     .unwrap_or_default();
             }
         }
     }
 
-    /// 展开玩家加载更多对局
-    pub fn load_more_games(&mut self) {
+    /// 展开玩家加载更多对局（失败文案交由调用方以 Toast 呈现）
+    pub fn load_more_games(&mut self) -> Result<(), String> {
         if let Some(ref puuid) = self.expanded_puuid {
             let next_page = self.expanded_games_page + 1;
             let offset = (next_page - 1) * ENCOUNTER_GAMES_PAGE_SIZE;
@@ -353,17 +356,18 @@ impl SavedPlayersView {
                         self.expanded_games_page = next_page;
                     }
                     Err(e) => {
-                        self.toast_message = Some((format!("加载更多对局失败: {}", e), false));
+                        return Err(format!("加载更多对局失败: {}", e));
                     }
                 }
             }
         }
+        Ok(())
     }
 
-    /// 切换玩家置顶状态（带完整账号作用域，DB 成功后更新 UI 与重新排序）
-    pub fn toggle_pin(&mut self, puuid: &str) {
+    /// 切换玩家置顶状态（带完整账号作用域，DB 成功后更新 UI 与重新排序；失败文案交由调用方以 Toast 呈现）
+    pub fn toggle_pin(&mut self, puuid: &str) -> Result<(), String> {
         let Some(player) = self.players.iter().find(|p| p.puuid == puuid) else {
-            return;
+            return Ok(());
         };
         let target_self_puuid = if !player.self_puuid.is_empty() {
             player.self_puuid.clone()
@@ -386,10 +390,11 @@ impl SavedPlayersView {
                     });
                 }
                 Err(e) => {
-                    self.toast_message = Some((format!("更新置顶失败: {}", e), false));
+                    return Err(format!("更新置顶失败: {}", e));
                 }
             }
         }
+        Ok(())
     }
 
     /// 删除玩家记录
@@ -437,8 +442,8 @@ impl SavedPlayersView {
         }
     }
 
-    /// 保存编辑内容（带完整账号作用域，保留原有备注，成功后再退出编辑模式与更新列表）
-    pub fn save_edit(&mut self, puuid: &str) {
+    /// 保存编辑内容（带完整账号作用域，保留原有备注，成功后再退出编辑模式与更新列表；结果文案交由调用方以 Toast 呈现）
+    pub fn save_edit(&mut self, puuid: &str) -> Result<(), String> {
         let tag_opt = {
             let t = self.editing_tag_buffer.trim();
             if t.is_empty() {
@@ -465,14 +470,12 @@ impl SavedPlayersView {
                         player.notes = notes;
                     }
                     self.editing_puuid = None;
-                    self.toast_message = Some(("标记保存成功".to_string(), true));
+                    Ok(())
                 }
-                Err(e) => {
-                    self.toast_message = Some((format!("保存标记失败: {}", e), false));
-                }
+                Err(e) => Err(format!("保存标记失败: {}", e)),
             }
         } else {
-            self.toast_message = Some(("数据库未连接".to_string(), false));
+            Err("数据库未连接".to_string())
         }
     }
 
@@ -492,24 +495,25 @@ impl SavedPlayersView {
         self.confirm_delete_puuid = None;
     }
 
-    /// 确认删除（失败显示错误反馈，成功才关闭对话框并刷新）
-    pub fn confirm_delete(&mut self, puuid: &str) {
+    /// 确认删除（失败显示错误反馈，成功才关闭对话框并刷新；结果文案交由调用方以 Toast 呈现）
+    pub fn confirm_delete(&mut self, puuid: &str) -> Result<(), String> {
         match self.remove_player(puuid) {
             Ok(_) => {
                 self.confirm_delete_puuid = None;
-                self.toast_message = Some(("玩家已删除".to_string(), true));
                 let self_p = self.self_puuid.clone();
                 self.reload(self_p.as_deref());
+                Ok(())
             }
-            Err(e) => {
-                self.toast_message = Some((format!("删除失败: {}", e), false));
-            }
+            Err(e) => Err(format!("删除失败: {}", e)),
         }
     }
 
-    /// 导出标记玩家到 JSON 文件
-    pub fn export_tagged_to_file(&mut self) {
-        let Some(ref s) = self.storage else { return };
+    /// 导出标记玩家到 JSON 文件。
+    /// 返回 `None` 表示用户取消了文件对话框（无提示）；`Ok(路径)` 供调用方发成功 Toast。
+    pub fn export_tagged_to_file(&mut self) -> Option<Result<String, String>> {
+        let Some(ref s) = self.storage else {
+            return None;
+        };
         match s.export_tagged_players() {
             Ok(data) => {
                 if let Some(path) = rfd::FileDialog::new()
@@ -520,29 +524,25 @@ impl SavedPlayersView {
                 {
                     match serde_json::to_string_pretty(&data) {
                         Ok(json) => match std::fs::write(&path, json) {
-                            Ok(_) => {
-                                self.toast_message =
-                                    Some((format!("已导出到 {}", path.display()), true));
-                            }
-                            Err(e) => {
-                                self.toast_message = Some((format!("导出保存失败: {}", e), false));
-                            }
+                            Ok(_) => Some(Ok(path.display().to_string())),
+                            Err(e) => Some(Err(format!("导出保存失败: {}", e))),
                         },
-                        Err(e) => {
-                            self.toast_message = Some((format!("JSON 序列化失败: {}", e), false));
-                        }
+                        Err(e) => Some(Err(format!("JSON 序列化失败: {}", e))),
                     }
+                } else {
+                    None
                 }
             }
-            Err(e) => {
-                self.toast_message = Some((format!("导出查询失败: {}", e), false));
-            }
+            Err(e) => Some(Err(format!("导出查询失败: {}", e))),
         }
     }
 
-    /// 从 JSON 文件导入标记玩家
-    pub fn import_tagged_from_file(&mut self) {
-        let Some(ref s) = self.storage else { return };
+    /// 从 JSON 文件导入标记玩家。
+    /// 返回 `None` 表示用户取消了文件对话框（无提示）；`Ok(数量)` 供调用方发成功 Toast。
+    pub fn import_tagged_from_file(&mut self) -> Option<Result<u32, String>> {
+        let Some(ref s) = self.storage else {
+            return None;
+        };
         if let Some(path) = rfd::FileDialog::new()
             .set_title("导入标记玩家")
             .add_filter("JSON", &["json"])
@@ -552,24 +552,18 @@ impl SavedPlayersView {
                 Ok(content) => match serde_json::from_str::<Vec<TaggedPlayerExportDto>>(&content) {
                     Ok(records) => match s.import_tagged_players(&records) {
                         Ok(count) => {
-                            self.toast_message = Some((format!("成功导入 {} 名玩家", count), true));
                             let self_p = self.self_puuid.clone();
                             self.reload(self_p.as_deref());
+                            Some(Ok(count))
                         }
-                        Err(e) => {
-                            self.toast_message =
-                                Some((format!("导入写入数据库失败: {}", e), false));
-                        }
+                        Err(e) => Some(Err(format!("导入写入数据库失败: {}", e))),
                     },
-                    Err(e) => {
-                        self.toast_message =
-                            Some((format!("JSON 解析失败，请确认文件格式: {}", e), false));
-                    }
+                    Err(e) => Some(Err(format!("JSON 解析失败，请确认文件格式: {}", e))),
                 },
-                Err(e) => {
-                    self.toast_message = Some((format!("读取文件失败: {}", e), false));
-                }
+                Err(e) => Some(Err(format!("读取文件失败: {}", e))),
             }
+        } else {
+            None
         }
     }
 
@@ -621,10 +615,6 @@ impl SavedPlayersView {
             // 删除确认模态框
             .when_some(self.confirm_delete_puuid.clone(), |this, puuid| {
                 this.child(self.render_delete_modal(puuid, on_action.clone()))
-            })
-            // Toast 浮动提示
-            .when_some(self.toast_message.clone(), |this, (msg, is_ok)| {
-                this.child(self.render_toast(msg, is_ok, on_action.clone()))
             })
     }
 
@@ -1223,7 +1213,9 @@ impl SavedPlayersView {
                                                                 .rounded_full()
                                                                 .bg(Theme::GOLD.opacity(0.15))
                                                                 .border_1()
-                                                                .border_color(Theme::GOLD.opacity(0.4))
+                                                                .border_color(
+                                                                    Theme::GOLD.opacity(0.4),
+                                                                )
                                                                 .text_xs()
                                                                 .font_weight(FontWeight::BOLD)
                                                                 .text_color(Theme::GOLD)
@@ -1483,7 +1475,11 @@ impl SavedPlayersView {
                                             app,
                                         );
                                     })
-                                    .child(if p.is_pinned { "★ 已置顶" } else { "☆ 置顶" }),
+                                    .child(if p.is_pinned {
+                                        "★ 已置顶"
+                                    } else {
+                                        "☆ 置顶"
+                                    }),
                             )
                             .child(
                                 div()
@@ -1714,53 +1710,6 @@ impl SavedPlayersView {
                                     .child("确认删除"),
                             ),
                     ),
-            )
-    }
-
-    /// Toast 提示浮层
-    fn render_toast<F>(&self, msg: String, is_ok: bool, on_action: F) -> impl IntoElement
-    where
-        F: Fn(SavedPlayersAction, &mut Window, &mut App) + 'static + Clone,
-    {
-        let on_dismiss = on_action.clone();
-
-        div()
-            .absolute()
-            .top(px(16.0))
-            .right(px(24.0))
-            .px_4()
-            .py_2()
-            .rounded_lg()
-            .border_1()
-            .border_color(if is_ok {
-                Theme::AURORA_CYAN
-            } else {
-                Theme::LOSS_BORDER
-            })
-            .bg(Theme::CARD_BG)
-            .shadow_lg()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(div().text_sm().child(if is_ok { "✔" } else { "✖" }))
-            .child(
-                div()
-                    .text_xs()
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(Theme::TEXT_PRIMARY)
-                    .child(msg),
-            )
-            .child(
-                div()
-                    .ml_2()
-                    .text_xs()
-                    .text_color(Theme::TEXT_MUTED)
-                    .cursor_pointer()
-                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
-                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                        on_dismiss(SavedPlayersAction::DismissToast, win, app);
-                    })
-                    .child("✕"),
             )
     }
 }

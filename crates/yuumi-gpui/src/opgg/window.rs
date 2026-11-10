@@ -12,6 +12,7 @@
 
 use crate::asset_loader;
 use crate::components::icon::opgg_logo;
+use crate::components::toast::{toast_overlay, ToastKind, ToastStack};
 use crate::opgg::build_detail::{build_detail, BuildDetailContext};
 use crate::opgg::filter_bar::{filter_bar, FilterKind, FilterState};
 use crate::opgg::format::{champion_icon, item_icon, rune_icon, spell_icon};
@@ -24,7 +25,6 @@ use gpui::*;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
 use yuumi_core::lcu::game_data::GameDataAssets;
 use yuumi_core::lcu::write::{
     apply_item_set, apply_rune_page, ItemSetBlockPayload, RunePageParams,
@@ -59,7 +59,8 @@ pub struct OpggWindow {
     rune_index: usize,
     applying_items: bool,
     applying_rune: bool,
-    toast: Option<(String, bool)>,
+    /// 窗口级 Toast 队列（对照 Vue NMessageProvider）
+    toast_stack: Entity<ToastStack>,
 
     game_assets: Option<Arc<GameDataAssets>>,
     catalog: RuneCatalog,
@@ -91,7 +92,11 @@ impl OpggWindow {
             rune_index: 0,
             applying_items: false,
             applying_rune: false,
-            toast: None,
+            toast_stack: {
+                let stack = cx.new(|_| ToastStack::new());
+                cx.observe(&stack, |_, _, cx| cx.notify()).detach();
+                stack
+            },
             game_assets: None,
             catalog: RuneCatalog::default(),
             champion_names: HashMap::new(),
@@ -255,11 +260,8 @@ impl OpggWindow {
                         view.error.clear();
                         // 详情更新时复位符文方案选择（对照 Vue 对 runes 的 watch）
                         view.rune_index = 0;
-                        let paths = build_icon_paths(
-                            &build,
-                            view.game_assets.as_deref(),
-                            &view.catalog,
-                        );
+                        let paths =
+                            build_icon_paths(&build, view.game_assets.as_deref(), &view.catalog);
                         view.build = Some(Arc::new(build));
                         view.prewarm(paths, cx);
                     }
@@ -276,16 +278,14 @@ impl OpggWindow {
     }
 
     fn show_toast(&mut self, message: String, success: bool, cx: &mut Context<Self>) {
-        self.toast = Some((message, success));
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(3)).await;
-            let _ = this.update(cx, |view, cx| {
-                view.toast = None;
-                cx.notify();
-            });
-        })
-        .detach();
+        let kind = if success {
+            ToastKind::Success
+        } else {
+            ToastKind::Error
+        };
+        self.toast_stack.update(cx, |stack, cx| {
+            stack.push(kind, message, cx);
+        });
     }
 
     // ─── 写入 ───
@@ -302,7 +302,10 @@ impl OpggWindow {
             self.show_toast("当前英雄没有可应用的符文方案".to_string(), false, cx);
             return;
         };
-        let name = format!("Yuumi: {}", self.champion_display_name(build.summary.as_ref()));
+        let name = format!(
+            "Yuumi: {}",
+            self.champion_display_name(build.summary.as_ref())
+        );
         let perk_ids = rune_perk_ids(&rune);
         let service = self.service.clone();
 
@@ -344,7 +347,11 @@ impl OpggWindow {
         };
         let blocks = build_item_set_blocks(&build);
         if blocks.is_empty() {
-            self.show_toast("当前英雄暂无推荐出装数据".to_string(), false, cx);
+            // 对照 Vue H04：无推荐出装为警告级别
+            self.toast_stack.update(cx, |stack, cx| {
+                stack.push(ToastKind::Warning, "当前英雄暂无推荐出装数据", cx);
+            });
+            cx.notify();
             return;
         }
 
@@ -354,7 +361,11 @@ impl OpggWindow {
             .and_then(|summary| summary.champion_id)
             .or(self.selected_champion);
         let Some(champion_id) = champion_id else {
-            self.show_toast("无法获取当前英雄信息".to_string(), false, cx);
+            // 对照 Vue H03：缺当前英雄信息为警告级别
+            self.toast_stack.update(cx, |stack, cx| {
+                stack.push(ToastKind::Warning, "无法获取当前英雄信息", cx);
+            });
+            cx.notify();
             return;
         };
 
@@ -664,7 +675,6 @@ fn build_icon_paths(
 impl Render for OpggWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = cx.entity().clone();
-        let toast = self.toast.clone();
         let body = self.render_body(&entity);
         let header = self.render_header(&entity);
 
@@ -725,23 +735,7 @@ impl Render for OpggWindow {
             .child(header)
             .child(filters)
             .child(body)
-            .children(toast.map(|(message, success)| {
-                div()
-                    .absolute()
-                    .bottom(px(16.0))
-                    .left(px(16.0))
-                    .right(px(16.0))
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .rounded(px(6.0))
-                    .bg(if success {
-                        rgba(0x10b981e6)
-                    } else {
-                        rgba(0xf43f5ee6)
-                    })
-                    .text_size(px(12.0))
-                    .text_color(rgb(0xffffff))
-                    .child(message)
-            }))
+            // 窗口级 Toast 浮层（最后绘制，z 序最高；不拦截鼠标）
+            .child(toast_overlay(self.toast_stack.read(cx)))
     }
 }

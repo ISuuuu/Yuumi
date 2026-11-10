@@ -5,7 +5,8 @@ impl MainWindow {
     pub(super) fn handle_live_event(&mut self, event: LiveLcuEvent, cx: &mut Context<Self>) {
         match event {
             LiveLcuEvent::ConnectionChanged(status) => {
-                let was_connected = matches!(self.connection_status, ConnectionStatus::Connected { .. });
+                let was_connected =
+                    matches!(self.connection_status, ConnectionStatus::Connected { .. });
                 if let ConnectionStatus::Connected { summoner, .. } = &status {
                     if let Some(s) = summoner.as_ref() {
                         let is_new_account = self
@@ -22,7 +23,8 @@ impl MainWindow {
                             self.saved_players_view.expanded_games.clear();
                         }
                         self.own_summoner = Some(s.clone());
-                        self.cloud_tasks.upload_matches(s.puuid.clone(), Vec::new(), false);
+                        self.cloud_tasks
+                            .upload_matches(s.puuid.clone(), Vec::new(), false);
                         if !self.career_view.is_viewing_other {
                             self.career_view.summoner = Some(s.clone());
                         }
@@ -66,13 +68,11 @@ impl MainWindow {
                 self.stats = CareerHeaderStats::compute(&items);
 
                 // B06 规范：隔离本人刷新与他人搜索，若当前正在查询他人，绝不替换搜索列表
-                let viewing_other_in_search = match (
-                    &self.search_view.current_summoner_puuid,
-                    &self.own_summoner,
-                ) {
-                    (Some(curr_puuid), Some(own)) => curr_puuid != &own.puuid,
-                    _ => false,
-                };
+                let viewing_other_in_search =
+                    match (&self.search_view.current_summoner_puuid, &self.own_summoner) {
+                        (Some(curr_puuid), Some(own)) => curr_puuid != &own.puuid,
+                        _ => false,
+                    };
 
                 if !viewing_other_in_search {
                     self.search_view.matches = items.clone();
@@ -159,6 +159,18 @@ impl MainWindow {
                 self.career_view.mastery_list = masteries;
                 cx.notify();
             }
+            LiveLcuEvent::MasteryLoadFailed(e) => {
+                log::warn!("[MainWindow] 英雄熟练度拉取失败: {}", e);
+                // 对照 Vue E01：仅本次加载无数据时提示，避免反复刷新刷屏
+                if self.career_view.mastery_list.is_empty() {
+                    self.toast(
+                        ToastKind::Error,
+                        "获取英雄熟练度失败，请确认客户端已连接",
+                        cx,
+                    );
+                }
+                cx.notify();
+            }
             LiveLcuEvent::LootSummaryLoaded(balances, items) => {
                 log::info!(
                     "[MainWindow] 接收到真实战利品数据: 蓝精粹={}, 橙精粹={}, 物品数={}",
@@ -225,7 +237,10 @@ impl MainWindow {
                 if matches!(phase, GamePhase::GameStart | GamePhase::InProgress)
                     && self.app_config.general.enable_game_start_minimize
                 {
-                    log::info!("[MainWindow] 检测到开局阶段 {:?} 且开启开局最小化，执行最小化窗口", phase);
+                    log::info!(
+                        "[MainWindow] 检测到开局阶段 {:?} 且开启开局最小化，执行最小化窗口",
+                        phase
+                    );
                     if let Some(hwnd) = platform::find_main_window_hwnd() {
                         platform::minimize_window(hwnd);
                     }
@@ -235,7 +250,8 @@ impl MainWindow {
                 if matches!(
                     phase,
                     GamePhase::None | GamePhase::Lobby | GamePhase::Matchmaking
-                ) && !self.app_config.functions.enable_reserve_gameinfo {
+                ) && !self.app_config.functions.enable_reserve_gameinfo
+                {
                     self.game_info = None;
                 }
 
@@ -264,21 +280,23 @@ impl MainWindow {
                                     .unwrap_or(false);
 
                                 if !is_already_recorded && !self_puuid.is_empty() && game_id > 0 {
-                                    let players_to_record: Vec<yuumi_core::storage::GamePlayerRecord> =
-                                        info.players()
-                                            .filter(|p| !p.is_local_player && !p.puuid.is_empty())
-                                            .map(|p| yuumi_core::storage::GamePlayerRecord {
-                                                puuid: p.puuid.clone(),
-                                                summoner_name: p.summoner_name.clone(),
-                                                tag_line: if p.tag_line.is_empty() {
-                                                    None
-                                                } else {
-                                                    Some(p.tag_line.clone())
-                                                },
-                                                profile_icon_id: 0,
-                                                champion_id: p.champion_id,
-                                            })
-                                            .collect();
+                                    let players_to_record: Vec<
+                                        yuumi_core::storage::GamePlayerRecord,
+                                    > = info
+                                        .players()
+                                        .filter(|p| !p.is_local_player && !p.puuid.is_empty())
+                                        .map(|p| yuumi_core::storage::GamePlayerRecord {
+                                            puuid: p.puuid.clone(),
+                                            summoner_name: p.summoner_name.clone(),
+                                            tag_line: if p.tag_line.is_empty() {
+                                                None
+                                            } else {
+                                                Some(p.tag_line.clone())
+                                            },
+                                            profile_icon_id: 0,
+                                            champion_id: p.champion_id,
+                                        })
+                                        .collect();
 
                                     if !players_to_record.is_empty() {
                                         match s.record_encounters(
@@ -292,11 +310,15 @@ impl MainWindow {
                                                     "[MainWindow] 对局结束自动记录相遇玩家: 共 {} 人",
                                                     rec
                                                 );
-                                                self.last_recorded_encounter_game_id = Some(game_id);
+                                                self.last_recorded_encounter_game_id =
+                                                    Some(game_id);
                                                 self.saved_players_view.reload(Some(self_puuid));
                                             }
                                             Err(e) => {
-                                                log::warn!("[MainWindow] 自动记录相遇玩家失败: {}", e);
+                                                log::warn!(
+                                                    "[MainWindow] 自动记录相遇玩家失败: {}",
+                                                    e
+                                                );
                                             }
                                         }
                                     }
@@ -333,7 +355,10 @@ impl MainWindow {
 
                 if !info.is_demo
                     && self.cloud_match_played
-                    && matches!(self.current_phase.as_str(), "GameStart" | "InProgress" | "Reconnect" | "PreEndOfGame")
+                    && matches!(
+                        self.current_phase.as_str(),
+                        "GameStart" | "InProgress" | "Reconnect" | "PreEndOfGame"
+                    )
                 {
                     self.cloud_game_id = info.game_id.filter(|id| *id > 0).or(self.cloud_game_id);
                 }
@@ -569,53 +594,75 @@ impl MainWindow {
             .find_map(|list| list.first().copied().filter(|id| *id > 0))
     }
 
-    /// 显示 OP.GG 入口提示（3 秒后自动消失）
+    /// OP.GG 入口提示（对照 Vue A02：未连接时打开 OP.GG 的警告 Toast）
     pub(super) fn show_opgg_hint(&mut self, message: &str, cx: &mut Context<Self>) {
-        self.opgg_hint = Some(message.to_string());
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(3)).await;
-            let _ = this.update(cx, |this, cx| {
-                this.opgg_hint = None;
-                cx.notify();
-            });
-        })
-        .detach();
+        self.toast(ToastKind::Warning, message.to_string(), cx);
     }
 
     pub(super) fn trigger_reconnect(&mut self, cx: &mut Context<Self>) {
         log::info!("[MainWindow] 用户触发重新连接/修复流程");
+        // 对照 Vue A03：未连接时手动重连只提示警告，不发起请求
+        if !matches!(self.connection_status, ConnectionStatus::Connected { .. }) {
+            self.toast(ToastKind::Warning, "客户端未连接，无法手动重连", cx);
+            cx.notify();
+            return;
+        }
         let live = self.live_service.clone();
         let phase = self.current_phase.clone();
-        yuumi_core::runtime::spawn_background(async move {
-            if let Some(client) = live.get_client().await {
-                if matches!(phase.as_str(), "InProgress" | "GameStart" | "Reconnect") {
-                    // 游戏中 → 调用 reconnect API（指数退避重试最多 5 次）
-                    for i in 0..5 {
-                        let res = client
-                            .request("POST", "/lol-gameflow/v1/reconnect", None, false)
-                            .await;
-                        if res.is_ok() {
+        cx.spawn(async move |entity, cx| {
+            let Some(client) = live.get_client().await else {
+                let _ = entity.update(cx, |this, cx| {
+                    // 对照 Vue A03
+                    this.toast(ToastKind::Warning, "客户端未连接，无法手动重连", cx);
+                });
+                return;
+            };
+            if matches!(phase.as_str(), "InProgress" | "GameStart" | "Reconnect") {
+                // 游戏中 → 调用 reconnect API（指数退避重试最多 5 次）
+                let mut last_err = None;
+                for i in 0..5 {
+                    match client
+                        .request("POST", "/lol-gameflow/v1/reconnect", None, false)
+                        .await
+                    {
+                        Ok(_) => {
                             log::info!("[MainWindow] 游戏重连 API 调用成功");
+                            last_err = None;
                             break;
                         }
-                        if i < 4 {
-                            tokio::time::sleep(Duration::from_millis(500 * (1 << i))).await;
+                        Err(e) => {
+                            last_err = Some(e);
+                            if i < 4 {
+                                tokio::time::sleep(Duration::from_millis(500 * (1 << i))).await;
+                            }
                         }
                     }
-                } else {
-                    // 其他阶段 → 请求回到大厅房间阶段并刷新
-                    let _ = client
-                        .request(
-                            "POST",
-                            "/lol-gameflow/v1/session/request-lobby-phase",
-                            None,
-                            false,
-                        )
-                        .await;
                 }
+                let _ = entity.update(cx, |this, cx| match last_err {
+                    // 对照 Vue A04
+                    None => this.toast(ToastKind::Success, "🔄 重新连接已触发，请留意对局窗口", cx),
+                    // 对照 Vue A05
+                    Some(e) => this.toast(ToastKind::Error, format!("重新连接失败: {}", e), cx),
+                });
+            } else {
+                // 其他阶段 → 请求回到大厅房间阶段并刷新
+                let result = client
+                    .request(
+                        "POST",
+                        "/lol-gameflow/v1/session/request-lobby-phase",
+                        None,
+                        false,
+                    )
+                    .await;
+                let _ = entity.update(cx, |this, cx| match result {
+                    // 对照 Vue A04
+                    Ok(_) => this.toast(ToastKind::Success, "🔄 重新连接已触发", cx),
+                    // 对照 Vue A05
+                    Err(e) => this.toast(ToastKind::Error, format!("重新连接失败: {}", e), cx),
+                });
             }
-        });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -630,8 +677,7 @@ impl MainWindow {
             addr: self.app_config.general.http_proxy_addr.clone(),
         };
 
-        const NOTICE_URL: &str =
-            "https://raw.githubusercontent.com/ISuuuu/Yuumi/main/NOTICE.md";
+        const NOTICE_URL: &str = "https://raw.githubusercontent.com/ISuuuu/Yuumi/main/NOTICE.md";
 
         cx.spawn(async move |entity, cx| {
             let res = yuumi_core::opgg::fetch_github_text(NOTICE_URL, &proxy_cfg).await;
@@ -715,6 +761,8 @@ impl MainWindow {
 
         if let Err(e) = self.app_config.save() {
             log::warn!("[Config] 全局配置持久化失败: {}", e);
+            // 对照 Vue B18/B20/B21：用户触发的自动保存失败要以 Toast 呈现
+            self.toast(ToastKind::Error, format!("设置保存失败: {}", e), cx);
         }
 
         // 悬浮窗开关变更需立即生效
