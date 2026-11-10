@@ -335,6 +335,36 @@ impl AppConfig {
         Self::load_from_path(&Self::default_path())
     }
 
+    /// 从默认路径加载全局配置并返回异常信息（供 UI 首帧提示，对照 Vue A01）。
+    /// 文件不存在视为首次启动，返回 `None`；读取或解析失败回退默认配置并携带原因。
+    pub fn load_with_error() -> (Self, Option<String>) {
+        let path = Self::default_path();
+        if !path.exists() {
+            return (Self::default(), None);
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(content) => match serde_json::from_str::<Self>(&content) {
+                Ok(cfg) => (cfg, None),
+                Err(e) => {
+                    log::warn!(
+                        "[Config] 配置文件解析失败({}), 回退默认配置: {}",
+                        path.display(),
+                        e
+                    );
+                    (Self::default(), Some(format!("解析失败: {}", e)))
+                }
+            },
+            Err(e) => {
+                log::warn!(
+                    "[Config] 读取配置文件失败({}), 回退默认配置: {}",
+                    path.display(),
+                    e
+                );
+                (Self::default(), Some(format!("读取失败: {}", e)))
+            }
+        }
+    }
+
     /// 写入指定路径（自动创建目录）
     pub fn save_to_path(&self, path: &Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {

@@ -63,6 +63,8 @@ pub enum LiveLcuEvent {
     ChampSelectUpdated(ChampSelectSession),
     MatchHistoryLoaded(Vec<MatchDisplay>),
     ChampionMasteryLoaded(Vec<ChampionMasteryItem>),
+    /// 英雄熟练度拉取失败（对照 Vue E01，由生涯页以 Toast 呈现）
+    MasteryLoadFailed(String),
     LootSummaryLoaded(EssenceBalances, Vec<LootInventoryItem>),
     /// 战利品写动作的单条进度（由 run_loot_action 逐条广播）
     LootActionProgress(LootActionProgress),
@@ -323,7 +325,8 @@ impl LiveLcuService {
 
     /// 将 WS 事件分发给后台 Agent Worker，并向 UI 广播领域事件
     async fn handle_ws_event(&self, event: LcuWsEvent) {
-        if self.cloud_events.receiver_count() > 0 && yuumi_core::signalr::forwards_event(&event.uri) {
+        if self.cloud_events.receiver_count() > 0 && yuumi_core::signalr::forwards_event(&event.uri)
+        {
             let _ = self.cloud_events.send(event.clone());
         }
         let dispatcher = {
@@ -431,10 +434,9 @@ impl LiveLcuService {
             // 结算荣誉投票：交给 auto_match 决定是否自动点赞
             "/lol-honor-v2/v1/ballot" => {
                 if let Some(d) = &dispatcher {
-                    if let Ok(ballot) =
-                        serde_json::from_value::<yuumi_core::agents::auto_match::HonorBallot>(
-                            event.data,
-                        )
+                    if let Ok(ballot) = serde_json::from_value::<
+                        yuumi_core::agents::auto_match::HonorBallot,
+                    >(event.data)
                     {
                         d.dispatch_match(MatchAgentEvent::HonorBallot(Box::new(ballot)));
                     }
@@ -457,7 +459,8 @@ impl LiveLcuService {
 
     /// 刷新当前登录召唤师的生涯数据（默认最近 20 场战绩）
     pub async fn refresh_career_data(&self) {
-        self.refresh_career_data_with_limit(CAREER_MATCH_LIMIT).await;
+        self.refresh_career_data_with_limit(CAREER_MATCH_LIMIT)
+            .await;
     }
 
     /// 刷新当前登录召唤师的生涯数据，指定拉取的战绩场数上限（1..=100）
@@ -499,8 +502,14 @@ impl LiveLcuService {
         let assets_clone = assets.clone();
         let this_matches = self.clone();
         let matches_task = tokio::spawn(async move {
-            match fetch_match_history(&c_matches, &puuid_clone, Some(0), Some(end_idx), &assets_clone)
-                .await
+            match fetch_match_history(
+                &c_matches,
+                &puuid_clone,
+                Some(0),
+                Some(end_idx),
+                &assets_clone,
+            )
+            .await
             {
                 Ok(mut matches) => {
                     matches.truncate(fetch_limit);
@@ -548,6 +557,7 @@ impl LiveLcuService {
                 }
                 Err(e) => {
                     log::warn!("[LiveLcu] 拉取英雄熟练度失败: {}", e);
+                    let _ = event_tx_mastery.send(LiveLcuEvent::MasteryLoadFailed(e));
                 }
             }
         });

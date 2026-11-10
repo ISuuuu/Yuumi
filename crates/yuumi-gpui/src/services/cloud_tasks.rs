@@ -34,11 +34,28 @@ struct Options {
     in_game: bool,
 }
 
+/// 批量上传结果（对照 Vue D15-D18，由战绩查询页「上传当前页」产生）
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UploadOutcome {
+    /// 全部成功：上传了 success 场
+    Uploaded(u32),
+    /// 部分失败：成功 success 场，失败 failed 场
+    Partial(u32, u32),
+    /// 全部失败：failed 场均未上传成功
+    AllFailed(u32),
+    /// 上传流程异常（队列初始化失败、LCU 未连接、账号变化等）
+    Failed(String),
+    /// 全部已存在（经待传去重与服务端确认，无新上传）
+    AllExisted,
+}
+
 pub struct CloudTasks {
     options: watch::Sender<Options>,
     hub_config: Option<HubConfig>,
     hub_task: Option<JoinHandle<()>>,
     hub_status: watch::Sender<HubStatus>,
+    /// 最近一次批量上传结果（战绩查询页消费后以 Toast 呈现）
+    upload_outcomes: watch::Sender<Option<UploadOutcome>>,
     capture_task: JoinHandle<()>,
     queues: Arc<Mutex<HashMap<String, UploadQueue>>>,
     live: LiveLcuService,
@@ -48,12 +65,14 @@ impl CloudTasks {
     pub fn new(live: LiveLcuService) -> Self {
         let (options, capture_options) = watch::channel(Options::default());
         let (hub_status, _) = watch::channel(HubStatus::Disabled);
+        let (upload_outcomes, _) = watch::channel(None);
         let capture_task = tokio::spawn(capture_loop(capture_options, live.subscribe_status()));
         Self {
             options,
             hub_config: None,
             hub_task: None,
             hub_status,
+            upload_outcomes,
             capture_task,
             queues: Arc::default(),
             live,
@@ -62,6 +81,10 @@ impl CloudTasks {
 
     pub fn subscribe_status(&self) -> watch::Receiver<HubStatus> {
         self.hub_status.subscribe()
+    }
+
+    pub fn subscribe_upload_outcomes(&self) -> watch::Receiver<Option<UploadOutcome>> {
+        self.upload_outcomes.subscribe()
     }
 
     pub fn apply(&mut self, config: &AppConfig) {
@@ -148,6 +171,7 @@ impl CloudTasks {
         }
         let live = self.live.clone();
         let queues = self.queues.clone();
+        let outcomes = self.upload_outcomes.clone();
         runtime::spawn_background(async move {
             let status = live.subscribe_status();
             let transfer = async {
@@ -164,10 +188,21 @@ impl CloudTasks {
             };
             tokio::select! {
                 biased;
+                // 账号或目标地址已变化：丢弃本轮回调，不产生任何 Toast
                 _ = upload_scope_changed(options, status, &url, &owner) => {}
                 result = transfer => {
-                    if let Err(error) = result {
-                        log::warn!("[Upload] 操作未完成: {error}");
+                    match result {
+                        Ok(Some(outcome)) => {
+                            let _ = outcomes.send_replace(Some(outcome));
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            log::warn!("[Upload] 操作未完成: {error}");
+                            if batch && !finished {
+                                let _ =
+                                    outcomes.send_replace(Some(UploadOutcome::Failed(error)));
+                            }
+                        }
                     }
                 }
             }
@@ -255,7 +290,7 @@ async fn upload(
     client: Option<LcuClient>,
     assets: Option<Arc<GameDataAssets>>,
     queues: Arc<Mutex<HashMap<String, UploadQueue>>>,
-) -> Result<(), String> {
+) -> Result<Option<UploadOutcome>, String> {
     // 按目标地址与账号隔离持久化队列，切换账号或服务器时不会串传。
     let key = stable_hash(&format!("{url}\n{owner}"));
     let queue = {
@@ -275,7 +310,7 @@ async fn upload(
     };
     if ids.is_empty() && !finished {
         queue.retry_pending(url).await?;
-        return Ok(());
+        return Ok(None);
     }
     let client = client.ok_or("LCU 未连接")?;
     if finished {
@@ -308,7 +343,7 @@ async fn upload(
         }
         if ids.is_empty() {
             log::info!("[Upload] 未能定位刚结束的对局，仅重试待传队列");
-            return queue.retry_pending(url).await.map(|_| ());
+            return queue.retry_pending(url).await.map(|_| None);
         }
     }
     let names = assets
@@ -325,17 +360,40 @@ async fn upload(
             Err(_) => return Err("无法读取结算对局".into()),
         }
     }
+    if payloads.is_empty() {
+        // 无可上传对局：静默，不触发「全部已存在」误报
+        return Ok(None);
+    }
     if batch {
+        // 对照 Vue D15-D18：批量上传以计数区分新上传 / 部分失败 / 全失败 / 全部已存在
         let (success, failed) = queue.upload_batch(url, &payloads).await?;
-        log::info!("[Upload] 批量上传完成: 成功={} 失败={}", success, failed);
+        let existed = (payloads.len() as u32).saturating_sub(success + failed);
+        log::info!(
+            "[Upload] 批量上传完成: 成功={} 失败={} 已存在={}",
+            success,
+            failed,
+            existed
+        );
+        let outcome = if failed > 0 {
+            if success == 0 {
+                UploadOutcome::AllFailed(failed)
+            } else {
+                UploadOutcome::Partial(success, failed)
+            }
+        } else if success > 0 {
+            UploadOutcome::Uploaded(success)
+        } else {
+            UploadOutcome::AllExisted
+        };
+        Ok(Some(outcome))
     } else {
         for payload in payloads {
             let outcome = queue.enqueue(url, payload).await?;
             log::info!("[Upload] 对局上传完成: {outcome}");
         }
         queue.retry_pending(url).await?;
+        Ok(None)
     }
-    Ok(())
 }
 
 async fn capture_loop(

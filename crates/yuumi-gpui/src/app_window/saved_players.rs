@@ -30,9 +30,10 @@ impl MainWindow {
             let res = handle
                 .spawn(async move {
                     tokio::task::spawn_blocking(move || {
+                        // 对照 Vue F01：首屏加载失败不再静默吞掉，交由 Toast 呈现
                         let total = storage
                             .count_players(self_p.as_deref(), filter.as_deref(), search.as_deref())
-                            .unwrap_or(0);
+                            .map_err(|e| e.to_string())?;
                         let list = storage
                             .query_players(
                                 self_p.as_deref(),
@@ -41,34 +42,46 @@ impl MainWindow {
                                 views::saved_players::SAVED_PLAYERS_PAGE_SIZE,
                                 0,
                             )
-                            .unwrap_or_default();
-                        (total, list)
+                            .map_err(|e| e.to_string())?;
+                        Ok((total, list))
                     })
                     .await
-                    .unwrap_or((0, Vec::new()))
+                    .unwrap_or(Err("后台查询中断".to_string()))
                 })
                 .await;
 
-            if let Ok((total, list)) = res {
-                let _ = entity.update(cx, |this, cx| {
-                    if this.saved_players_view.request_seq != req_id {
-                        return;
-                    }
-                    let mut asset_paths = Vec::new();
-                    for p in &list {
-                        asset_paths.push(p.profile_icon_url());
-                        if let Some(champ) = p.champion_icon_url() {
-                            asset_paths.push(champ);
+            // 统一为 Result<(u32, Vec<SavedPlayer>), String>：后台任务中断视为加载失败
+            let res = res.unwrap_or_else(|_| Err("后台查询中断".to_string()));
+            match res {
+                Ok((total, list)) => {
+                    let _ = entity.update(cx, |this, cx| {
+                        if this.saved_players_view.request_seq != req_id {
+                            return;
                         }
-                    }
-                    prewarm_assets(asset_paths, cx);
+                        let mut asset_paths = Vec::new();
+                        for p in &list {
+                            asset_paths.push(p.profile_icon_url());
+                            if let Some(champ) = p.champion_icon_url() {
+                                asset_paths.push(champ);
+                            }
+                        }
+                        prewarm_assets(asset_paths, cx);
 
-                    this.saved_players_view.current_page = 1;
-                    this.saved_players_view.total_count = total;
-                    this.saved_players_view.players = list;
-                    this.saved_players_view.is_loading_more = false;
-                    cx.notify();
-                });
+                        this.saved_players_view.current_page = 1;
+                        this.saved_players_view.total_count = total;
+                        this.saved_players_view.players = list;
+                        this.saved_players_view.is_loading_more = false;
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = entity.update(cx, |this, cx| {
+                        this.saved_players_view.is_loading_more = false;
+                        // 对照 Vue F01：首屏加载失败以 Toast 呈现
+                        this.toast(ToastKind::Error, format!("路人集加载失败: {}", e), cx);
+                        cx.notify();
+                    });
+                }
             }
         })
         .detach();
@@ -167,9 +180,7 @@ impl MainWindow {
             };
             let updated = handle
                 .spawn(async move {
-                    let targets = storage
-                        .query_missing_identity_players()
-                        .unwrap_or_default();
+                    let targets = storage.query_missing_identity_players().unwrap_or_default();
                     if targets.is_empty() {
                         return 0;
                     }
@@ -201,13 +212,22 @@ impl MainWindow {
                                 })
                                 .unwrap_or("")
                                 .to_string();
-                            let profile_icon_id = info
-                                .get("profileIconId")
-                                .and_then(|v| v.as_i64())
-                                .unwrap_or(0) as i32;
+                            let profile_icon_id =
+                                info.get("profileIconId")
+                                    .and_then(|v| v.as_i64())
+                                    .unwrap_or(0) as i32;
 
-                            if !tag_line.is_empty() || !summoner_name.is_empty() || profile_icon_id > 0 {
-                                updates.push((puuid, self_puuid, tag_line, summoner_name, profile_icon_id));
+                            if !tag_line.is_empty()
+                                || !summoner_name.is_empty()
+                                || profile_icon_id > 0
+                            {
+                                updates.push((
+                                    puuid,
+                                    self_puuid,
+                                    tag_line,
+                                    summoner_name,
+                                    profile_icon_id,
+                                ));
                             }
                         }
                     }
@@ -246,7 +266,9 @@ impl MainWindow {
                         this.reload_saved_players(cx);
                     }
                     SavedPlayersAction::TogglePin(puuid) => {
-                        this.saved_players_view.toggle_pin(&puuid);
+                        if let Err(msg) = this.saved_players_view.toggle_pin(&puuid) {
+                            this.toast(ToastKind::Error, msg, cx);
+                        }
                     }
                     SavedPlayersAction::ToggleExpand(puuid) => {
                         this.saved_players_view.toggle_expand(&puuid);
@@ -258,7 +280,10 @@ impl MainWindow {
                         this.saved_players_view.start_edit(&puuid);
                     }
                     SavedPlayersAction::SaveEdit(puuid) => {
-                        this.saved_players_view.save_edit(&puuid);
+                        match this.saved_players_view.save_edit(&puuid) {
+                            Ok(()) => this.toast(ToastKind::Success, "标记保存成功", cx),
+                            Err(msg) => this.toast(ToastKind::Error, msg, cx),
+                        }
                     }
                     SavedPlayersAction::CancelEdit => {
                         this.saved_players_view.cancel_edit();
@@ -293,22 +318,38 @@ impl MainWindow {
                         this.saved_players_view.cancel_delete();
                     }
                     SavedPlayersAction::ConfirmDelete(puuid) => {
-                        this.saved_players_view.confirm_delete(&puuid);
+                        match this.saved_players_view.confirm_delete(&puuid) {
+                            Ok(()) => this.toast(ToastKind::Success, "玩家已删除", cx),
+                            Err(msg) => this.toast(ToastKind::Error, msg, cx),
+                        }
                         this.reload_saved_players(cx);
                     }
                     SavedPlayersAction::ExportTagged => {
-                        this.saved_players_view.export_tagged_to_file();
+                        match this.saved_players_view.export_tagged_to_file() {
+                            Some(Ok(path)) => {
+                                this.toast(ToastKind::Success, format!("已导出到 {}", path), cx)
+                            }
+                            Some(Err(msg)) => this.toast(ToastKind::Error, msg, cx),
+                            None => {} // 用户取消文件对话框
+                        }
                     }
                     SavedPlayersAction::ImportTagged => {
-                        this.saved_players_view.import_tagged_from_file();
+                        match this.saved_players_view.import_tagged_from_file() {
+                            Some(Ok(count)) => this.toast(
+                                ToastKind::Success,
+                                format!("成功导入 {} 名玩家", count),
+                                cx,
+                            ),
+                            Some(Err(msg)) => this.toast(ToastKind::Error, msg, cx),
+                            None => {} // 用户取消文件对话框
+                        }
                         this.reload_saved_players(cx);
                         this.backfill_saved_players_identity(cx);
                     }
                     SavedPlayersAction::LoadMoreGames => {
-                        this.saved_players_view.load_more_games();
-                    }
-                    SavedPlayersAction::DismissToast => {
-                        this.saved_players_view.toast_message = None;
+                        if let Err(msg) = this.saved_players_view.load_more_games() {
+                            this.toast(ToastKind::Error, msg, cx);
+                        }
                     }
                 }
                 cx.notify();

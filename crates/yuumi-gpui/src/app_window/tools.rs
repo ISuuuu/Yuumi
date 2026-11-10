@@ -192,10 +192,10 @@ impl MainWindow {
                     };
                     let _ = entity.update(cx, |this, cx| {
                         match result {
-                            Ok(msg) => this.tools_view.set_feedback(msg, false),
-                            Err(e) => this
-                                .tools_view
-                                .set_feedback(format!("创建房间失败: {}", e), true),
+                            Ok(msg) => this.toast(ToastKind::Success, msg, cx),
+                            Err(e) => {
+                                this.toast(ToastKind::Error, format!("创建房间失败: {}", e), cx)
+                            }
                         }
                         cx.notify();
                     });
@@ -210,13 +210,16 @@ impl MainWindow {
                         // 回读真实属性，避免界面状态与磁盘状态漂移
                         self.tools_view.is_game_settings_locked =
                             services::game_settings_readonly_state(&paths);
-                        self.tools_view.set_feedback(msg, false);
+                        self.toast(ToastKind::Success, msg, cx);
                     }
                     Err(e) => {
                         self.tools_view.is_game_settings_locked =
                             services::game_settings_readonly_state(&paths);
-                        self.tools_view
-                            .set_feedback(format!("修改游戏设置只读属性失败: {}", e), true);
+                        self.toast(
+                            ToastKind::Error,
+                            format!("修改游戏设置只读属性失败: {}", e),
+                            cx,
+                        );
                     }
                 }
                 cx.notify();
@@ -231,10 +234,12 @@ impl MainWindow {
                         .await;
                     let _ = entity.update(cx, |this, cx| {
                         match result {
-                            Ok(msg) => this.tools_view.set_feedback(msg, false),
-                            Err(e) => this
-                                .tools_view
-                                .set_feedback(format!("修复客户端窗口失败: {}", e), true),
+                            Ok(msg) => this.toast(ToastKind::Success, msg, cx),
+                            Err(e) => this.toast(
+                                ToastKind::Error,
+                                format!("修复客户端窗口失败: {}", e),
+                                cx,
+                            ),
                         }
                         cx.notify();
                     });
@@ -255,10 +260,10 @@ impl MainWindow {
                     };
                     let _ = entity.update(cx, |this, cx| {
                         match result {
-                            Ok(msg) => this.tools_view.set_feedback(msg, false),
-                            Err(e) => this
-                                .tools_view
-                                .set_feedback(format!("重启客户端失败: {}", e), true),
+                            Ok(msg) => this.toast(ToastKind::Success, msg, cx),
+                            Err(e) => {
+                                this.toast(ToastKind::Error, format!("重启客户端失败: {}", e), cx)
+                            }
                         }
                         cx.notify();
                     });
@@ -272,7 +277,7 @@ impl MainWindow {
             ToolsAction::LaunchSpectate => {
                 let name = self.tools_view.spectate_name_buffer.clone();
                 if name.trim().is_empty() {
-                    self.tools_view.set_feedback("请输入召唤师名称", true);
+                    self.toast(ToastKind::Warning, "请输入召唤师名称", cx);
                     cx.notify();
                     return;
                 }
@@ -303,8 +308,8 @@ impl MainWindow {
                     };
                     let _ = entity.update(cx, |this, cx| {
                         match result {
-                            Ok(msg) => this.tools_view.set_feedback(msg, false),
-                            Err(e) => this.tools_view.set_feedback(e, true),
+                            Ok(msg) => this.toast(ToastKind::Success, msg, cx),
+                            Err(e) => this.toast(ToastKind::Error, e, cx),
                         }
                         cx.notify();
                     });
@@ -332,15 +337,15 @@ impl MainWindow {
                                 this.tools_view.cleaner_friends = friends;
                                 this.tools_view.cleaner_has_scanned = true;
                                 this.tools_view.cleaner_selected_ids.clear();
-                                this.tools_view.set_feedback(
+                                this.toast(
+                                    ToastKind::Success,
                                     format!("扫描完成，共获取 {} 位好友并完成战绩分析", count),
-                                    false,
+                                    cx,
                                 );
                             }
                             Err(e) => {
                                 this.tools_view.cleaner_has_scanned = false;
-                                this.tools_view
-                                    .set_feedback(format!("扫描好友失败: {}", e), true);
+                                this.toast(ToastKind::Error, format!("扫描好友失败: {}", e), cx);
                             }
                         }
                         cx.notify();
@@ -353,10 +358,14 @@ impl MainWindow {
                 cx.notify();
             }
             ToolsAction::BatchDeleteOfflineFriends => {
-                let ids: Vec<String> = self.tools_view.cleaner_selected_ids.iter().cloned().collect();
+                let ids: Vec<String> = self
+                    .tools_view
+                    .cleaner_selected_ids
+                    .iter()
+                    .cloned()
+                    .collect();
                 if ids.is_empty() {
-                    self.tools_view
-                        .set_feedback("未勾选任何好友，已取消删除", false);
+                    self.toast(ToastKind::Info, "未勾选任何好友，已取消删除", cx);
                     cx.notify();
                     return;
                 }
@@ -370,8 +379,7 @@ impl MainWindow {
                         }
                         None => {
                             let _ = entity.update(cx, |this, cx| {
-                                this.tools_view
-                                    .set_feedback("客户端未连接，删除未执行", true);
+                                this.toast(ToastKind::Error, "客户端未连接，删除未执行", cx);
                                 cx.notify();
                             });
                             return;
@@ -385,20 +393,24 @@ impl MainWindow {
                             .retain(|friend| !outcome.deleted.contains(&friend.id));
                         this.tools_view.cleaner_selected_ids.clear();
                         if failed == 0 {
-                            this.tools_view
-                                .set_feedback(format!("成功清理 {} 位好友", deleted), false);
+                            this.toast(
+                                ToastKind::Success,
+                                format!("成功清理 {} 位好友", deleted),
+                                cx,
+                            );
                         } else {
                             let first_error = outcome
                                 .failed
                                 .first()
                                 .map(|(_, err)| err.clone())
                                 .unwrap_or_default();
-                            this.tools_view.set_feedback(
+                            this.toast(
+                                ToastKind::Error,
                                 format!(
                                     "删除完成：成功 {} 位，失败 {} 位（{}）",
                                     deleted, failed, first_error
                                 ),
-                                true,
+                                cx,
                             );
                         }
                         cx.notify();
@@ -428,10 +440,10 @@ impl MainWindow {
                     };
                     let _ = entity.update(cx, |this, cx| {
                         match result {
-                            Ok(msg) => this.tools_view.set_feedback(msg, false),
-                            Err(e) => this
-                                .tools_view
-                                .set_feedback(format!("保存签名失败: {}", e), true),
+                            Ok(msg) => this.toast(ToastKind::Success, msg, cx),
+                            Err(e) => {
+                                this.toast(ToastKind::Error, format!("保存签名失败: {}", e), cx)
+                            }
                         }
                         cx.notify();
                     });
@@ -444,8 +456,7 @@ impl MainWindow {
                 match cmd.as_str() {
                     "open" => {
                         if self.tools_view.bg_skins.is_empty() {
-                            self.tools_view
-                                .set_feedback("请先选择英雄以加载真实皮肤列表", true);
+                            self.toast(ToastKind::Warning, "请先选择英雄以加载真实皮肤列表", cx);
                         } else {
                             self.tools_view.open_bg_skin_modal = true;
                             self.tools_view.bg_error = None;
@@ -498,8 +509,7 @@ impl MainWindow {
                 let skin_id = match self.tools_view.bg_skins.get(preview_idx) {
                     Some(s) => s.id,
                     None => {
-                        self.tools_view
-                            .set_feedback("没有可应用的皮肤，请先选择英雄", true);
+                        self.toast(ToastKind::Warning, "没有可应用的皮肤，请先选择英雄", cx);
                         cx.notify();
                         return;
                     }
@@ -520,16 +530,20 @@ impl MainWindow {
                                 this.tools_view.bg_current_skin_id = readback;
                                 this.tools_view.bg_error = None;
                                 this.tools_view.open_bg_skin_modal = false;
-                                this.tools_view.set_feedback(
+                                this.toast(
+                                    ToastKind::Success,
                                     format!("已应用背景皮肤 ID: {}（已回读）", skin_id),
-                                    false,
+                                    cx,
                                 );
                             }
                             Err(e) => {
                                 // 失败保留预览弹层与选择，便于直接重试
                                 this.tools_view.bg_error = Some(e.clone());
-                                this.tools_view
-                                    .set_feedback(format!("应用背景皮肤失败: {}", e), true);
+                                this.toast(
+                                    ToastKind::Error,
+                                    format!("应用背景皮肤失败: {}", e),
+                                    cx,
+                                );
                             }
                         }
                         cx.notify();
@@ -576,10 +590,10 @@ impl MainWindow {
                     };
                     let _ = entity.update(cx, |this, cx| {
                         match result {
-                            Ok(()) => this.tools_view.set_feedback("伪装段位已生效", false),
-                            Err(e) => this
-                                .tools_view
-                                .set_feedback(format!("伪装段位失败: {}", e), true),
+                            Ok(()) => this.toast(ToastKind::Success, "伪装段位已生效", cx),
+                            Err(e) => {
+                                this.toast(ToastKind::Error, format!("伪装段位失败: {}", e), cx)
+                            }
                         }
                         cx.notify();
                     });
@@ -604,11 +618,11 @@ impl MainWindow {
                     };
                     let _ = entity.update(cx, |this, cx| {
                         match result {
-                            Ok(msg) => this.tools_view.set_feedback(msg, false),
+                            Ok(msg) => this.toast(ToastKind::Success, msg, cx),
                             // 按真实请求结果反馈，不再提前报成功
-                            Err(e) => this
-                                .tools_view
-                                .set_feedback(format!("切换在线状态失败: {}", e), true),
+                            Err(e) => {
+                                this.toast(ToastKind::Error, format!("切换在线状态失败: {}", e), cx)
+                            }
                         }
                         cx.notify();
                     });
@@ -636,10 +650,10 @@ impl MainWindow {
                     };
                     let _ = entity.update(cx, |this, cx| {
                         match result {
-                            Ok(msg) => this.tools_view.set_feedback(msg, false),
-                            Err(e) => this
-                                .tools_view
-                                .set_feedback(format!("清除勋章失败: {}", e), true),
+                            Ok(msg) => this.toast(ToastKind::Success, msg, cx),
+                            Err(e) => {
+                                this.toast(ToastKind::Error, format!("清除勋章失败: {}", e), cx)
+                            }
                         }
                         cx.notify();
                     });
@@ -667,10 +681,10 @@ impl MainWindow {
                     };
                     let _ = entity.update(cx, |this, cx| {
                         match result {
-                            Ok(msg) => this.tools_view.set_feedback(msg, false),
-                            Err(e) => this
-                                .tools_view
-                                .set_feedback(format!("清除边框失败: {}", e), true),
+                            Ok(msg) => this.toast(ToastKind::Success, msg, cx),
+                            Err(e) => {
+                                this.toast(ToastKind::Error, format!("清除边框失败: {}", e), cx)
+                            }
                         }
                         cx.notify();
                     });
@@ -859,8 +873,7 @@ impl MainWindow {
                 if show {
                     self.tools_view.badges_snapshot_badges =
                         self.tools_view.selected_badges.clone();
-                    self.tools_view.badges_snapshot_title =
-                        self.tools_view.selected_title.clone();
+                    self.tools_view.badges_snapshot_title = self.tools_view.selected_title.clone();
                     self.tools_view.show_badges_modal = true;
                     crate::views::tools::personalization::update_badges_view_state(|s| {
                         s.badge_search.clear();
@@ -873,8 +886,7 @@ impl MainWindow {
                     // 取消：回滚临时选择，零写入 LCU
                     self.tools_view.selected_badges =
                         self.tools_view.badges_snapshot_badges.clone();
-                    self.tools_view.selected_title =
-                        self.tools_view.badges_snapshot_title.clone();
+                    self.tools_view.selected_title = self.tools_view.badges_snapshot_title.clone();
                     self.tools_view.show_badges_modal = false;
                     crate::views::tools::personalization::update_badges_view_state(|s| {
                         s.loading = false;
@@ -926,6 +938,9 @@ impl MainWindow {
                         self.tools_view.selected_badges.remove(pos);
                     } else if self.tools_view.selected_badges.len() < 3 {
                         self.tools_view.selected_badges.push(cmd);
+                    } else {
+                        // 对照 Vue G13：最多佩戴 3 枚挑战勋章
+                        self.toast(ToastKind::Warning, "最多只能佩戴 3 枚挑战勋章", cx);
                     }
                 }
                 cx.notify();
@@ -939,27 +954,29 @@ impl MainWindow {
                 let title = self.tools_view.selected_title.clone();
                 let challenge_ids = self.tools_view.selected_badges.clone();
                 let live = self.live_service.clone();
-                self.tools_view.set_feedback("正在保存称号与勋章装配…", false);
+                self.tools_view
+                    .set_feedback("正在保存称号与勋章装配…", false);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     // 真实写入 + 回读当前偏好，成功才关弹层，失败保留选择与弹层便于重试
-                    let result: Result<(String, Vec<String>), String> = match live.get_client().await {
-                        Some(client) => {
-                            match crate::services::challenges::save_preferences(
-                                &client,
-                                &title,
-                                &challenge_ids,
-                            )
-                            .await
-                            {
-                                Ok(()) => {
-                                    crate::services::challenges::read_preferences(&client).await
+                    let result: Result<(String, Vec<String>), String> =
+                        match live.get_client().await {
+                            Some(client) => {
+                                match crate::services::challenges::save_preferences(
+                                    &client,
+                                    &title,
+                                    &challenge_ids,
+                                )
+                                .await
+                                {
+                                    Ok(()) => {
+                                        crate::services::challenges::read_preferences(&client).await
+                                    }
+                                    Err(e) => Err(e),
                                 }
-                                Err(e) => Err(e),
                             }
-                        }
-                        None => Err("客户端未连接，装配未写入".to_string()),
-                    };
+                            None => Err("客户端未连接，装配未写入".to_string()),
+                        };
                     let _ = entity.update(cx, |this, cx| {
                         match result {
                             Ok((read_title, read_ids)) => {
@@ -970,15 +987,19 @@ impl MainWindow {
                                 this.tools_view.badges_snapshot_badges =
                                     this.tools_view.selected_badges.clone();
                                 this.tools_view.show_badges_modal = false;
-                                this.tools_view
-                                    .set_feedback("称号与挑战勋章装配成功（已回读）", false);
+                                this.toast(
+                                    ToastKind::Success,
+                                    "称号与挑战勋章装配成功（已回读）",
+                                    cx,
+                                );
                             }
                             Err(e) => {
-                                crate::views::tools::personalization::update_badges_view_state(|s| {
-                                    s.error = Some(e.clone());
-                                });
-                                this.tools_view
-                                    .set_feedback(format!("装配失败: {}", e), true);
+                                crate::views::tools::personalization::update_badges_view_state(
+                                    |s| {
+                                        s.error = Some(e.clone());
+                                    },
+                                );
+                                this.toast(ToastKind::Error, format!("装配失败: {}", e), cx);
                             }
                         }
                         cx.notify();
@@ -1060,8 +1081,10 @@ impl MainWindow {
                     Err(e) => {
                         crate::views::tools::personalization::update_badges_view_state(|s| {
                             s.loading = false;
-                            s.error = Some(e);
+                            s.error = Some(e.clone());
                         });
+                        // 对照 Vue G12：称号与勋章数据加载失败以 Toast 呈现
+                        this.toast(ToastKind::Error, e, cx);
                     }
                 }
                 cx.notify();

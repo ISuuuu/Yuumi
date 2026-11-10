@@ -107,8 +107,6 @@ pub struct TftView {
     pub decks: Vec<MetaDeck>,
     /// 详情浮层中的阵容下标
     pub deck_detail: Option<usize>,
-    pub comps_toast: Option<(String, bool)>,
-
     pub aug_loading: bool,
     pub aug_error: String,
     pub augments: Vec<TftAugmentInfo>,
@@ -143,7 +141,6 @@ impl TftView {
             comps_error: String::new(),
             decks: Vec::new(),
             deck_detail: None,
-            comps_toast: None,
             aug_loading: false,
             aug_error: String::new(),
             augments: Vec::new(),
@@ -992,27 +989,6 @@ impl TftView {
         let side = render_deck_side(deck);
 
         overlay_shell()
-            .when_some(self.comps_toast.clone(), |this, (message, success)| {
-                this.child(
-                    div()
-                        .mb(px(8.0))
-                        .px(px(10.0))
-                        .py(px(4.0))
-                        .rounded(px(6.0))
-                        .bg(if success {
-                            Theme::WIN_BG
-                        } else {
-                            Theme::LOSS_BG
-                        })
-                        .text_size(px(11.5))
-                        .text_color(if success {
-                            Theme::WIN_TEXT
-                        } else {
-                            Theme::LOSS_TEXT
-                        })
-                        .child(message),
-                )
-            })
             .child(
                 div()
                     .flex()
