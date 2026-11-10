@@ -295,6 +295,8 @@ impl MainWindow {
             xp_until_next_level: None,
         };
 
+        let placeholder_icon = other_summoner.icon_path();
+
         self.career_view.is_viewing_other = true;
         self.career_view.active_tab = views::career::CareerTab::Matches;
         self.career_view.summoner = Some(other_summoner);
@@ -302,6 +304,11 @@ impl MainWindow {
         self.matches.clear();
         self.stats = CareerHeaderStats::compute(&[]);
         cx.notify();
+
+        // 从战绩查询 / 对局信息等页面点击他人召唤师时需切换到生涯路由，否则停留在原页面
+        self.switch_route(Route::Career, cx);
+        // LcuImage 只读已预热缓存，切换查看对象后必须重新预热，否则头像一直是占位块
+        prewarm_assets(vec![placeholder_icon], cx);
 
         let live = self.live_service.clone();
         let target_name = name.clone();
@@ -313,9 +320,12 @@ impl MainWindow {
                     yuumi_core::parsers::summoner::fetch_summoner_by_name(&client, &target_name)
                         .await
                 {
+                    let real_icon = real_s.icon_path();
                     let _ = entity.update(cx, |this, cx| {
                         if this.career_view.is_viewing_other {
                             this.career_view.summoner = Some(real_s);
+                            // 真实头像替换占位图标后同样需要预热
+                            prewarm_assets(vec![real_icon], cx);
                             cx.notify();
                         }
                     });

@@ -69,7 +69,18 @@ pub async fn fetch_summoner_by_name(
             urlencoding_encode(game_name),
             urlencoding_encode(tag_line)
         );
-        client.get(&path).await?
+        let val = client.get(&path).await?;
+        // alias/lookup 仅返回 puuid 等精简字段（无头像/等级/名称），
+        // 必须按 puuid 补全完整召唤师信息，否则生涯页头像与 Riot ID 显示异常
+        if let Some(puuid) = val.get("puuid").and_then(|v| v.as_str()) {
+            let full_path = format!("/lol-summoner/v2/summoners/puuid/{}", puuid);
+            if let Ok(full_val) = client.get(&full_path).await {
+                if let Ok(full) = serde_json::from_value::<SummonerInfo>(full_val) {
+                    return Ok(full);
+                }
+            }
+        }
+        val
     } else {
         let path = format!(
             "/lol-summoner/v1/summoners?name={}",

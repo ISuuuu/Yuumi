@@ -530,6 +530,7 @@ impl MainWindow {
                         }
                     }
                     this.back_to_my_career(cx);
+                    this.switch_route(Route::Career, cx);
                 });
             },
             move |val, _window, app| {
@@ -549,9 +550,9 @@ impl MainWindow {
             },
             move |puuid, summoner_id, name, _window, app| {
                 view_player.update(app, |this, cx| {
-                    if !puuid.is_empty() && puuid != "00000000-0000-0000-0000-000000000000" {
-                        this.view_other_career(puuid, name, String::new(), cx);
-                    } else if summoner_id > 0 {
+                    let is_bot = summoner_id == 0
+                        && (puuid.is_empty() || puuid == "00000000-0000-0000-0000-000000000000");
+                    if !is_bot && !name.trim().is_empty() {
                         this.perform_search(&name, cx);
                     }
                 });

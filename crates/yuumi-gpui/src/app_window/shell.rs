@@ -99,7 +99,8 @@ impl Render for MainWindow {
                         self.current_route,
                         self.sidebar_expanded,
                         &self.app_config,
-                        self.career_view.summoner.as_ref(),
+                        // 名片固定展示登录账号信息：查看他人生涯时不得跟随切换
+                        self.own_summoner.as_ref(),
                         "",
                         self.has_update,
                         {
