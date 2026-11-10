@@ -9,6 +9,7 @@ impl MainWindow {
             return;
         };
 
+        let req_id = self.saved_players_view.next_request_seq();
         let filter = if self.saved_players_view.active_tag_filter == "全部" {
             None
         } else {
@@ -50,6 +51,9 @@ impl MainWindow {
 
             if let Ok((total, list)) = res {
                 let _ = entity.update(cx, |this, cx| {
+                    if this.saved_players_view.request_seq != req_id {
+                        return;
+                    }
                     let mut asset_paths = Vec::new();
                     for p in &list {
                         asset_paths.push(p.profile_icon_url());
@@ -98,6 +102,7 @@ impl MainWindow {
             Some(self.saved_players_view.search_query.trim().to_string())
         };
         let self_p = self.saved_players_view.self_puuid.clone();
+        let req_id = self.saved_players_view.request_seq;
 
         let handle = yuumi_core::runtime::tokio_handle();
         cx.spawn(async move |entity, cx| {
@@ -122,6 +127,9 @@ impl MainWindow {
 
             if let Ok(Ok(more)) = res {
                 let _ = entity.update(cx, |this, cx| {
+                    if this.saved_players_view.request_seq != req_id {
+                        return;
+                    }
                     let mut asset_paths = Vec::new();
                     for p in &more {
                         asset_paths.push(p.profile_icon_url());
@@ -139,6 +147,79 @@ impl MainWindow {
             } else {
                 let _ = entity.update(cx, |this, _cx| {
                     this.saved_players_view.is_loading_more = false;
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// 异步通过 LCU 回填路人集中缺失的召唤师名称、TagLine 与头像
+    pub(super) fn backfill_saved_players_identity(&mut self, cx: &mut Context<Self>) {
+        let storage = self.saved_players_view.storage.clone();
+        let Some(storage) = storage else {
+            return;
+        };
+        let live_service = self.live_service.clone();
+        let handle = yuumi_core::runtime::tokio_handle();
+        cx.spawn(async move |entity, cx| {
+            let Some(handle) = handle else {
+                return;
+            };
+            let updated = handle
+                .spawn(async move {
+                    let targets = storage
+                        .query_missing_identity_players()
+                        .unwrap_or_default();
+                    if targets.is_empty() {
+                        return 0;
+                    }
+                    let client = live_service.get_client().await;
+                    let Some(client) = client else {
+                        return 0;
+                    };
+
+                    let mut updates = Vec::new();
+                    for (puuid, self_puuid) in targets {
+                        if puuid.is_empty() {
+                            continue;
+                        }
+                        let path = format!("/lol-summoner/v2/summoners/puuid/{}", puuid);
+                        if let Ok(info) = client.get(&path).await {
+                            let tag_line = info
+                                .get("tagLine")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let summoner_name = info
+                                .get("displayName")
+                                .and_then(|v| v.as_str())
+                                .filter(|s| !s.is_empty())
+                                .or_else(|| {
+                                    info.get("gameName")
+                                        .and_then(|v| v.as_str())
+                                        .filter(|s| !s.is_empty())
+                                })
+                                .unwrap_or("")
+                                .to_string();
+                            let profile_icon_id = info
+                                .get("profileIconId")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(0) as i32;
+
+                            if !tag_line.is_empty() || !summoner_name.is_empty() || profile_icon_id > 0 {
+                                updates.push((puuid, self_puuid, tag_line, summoner_name, profile_icon_id));
+                            }
+                        }
+                    }
+                    storage.batch_update_identities(&updates).unwrap_or(0)
+                })
+                .await
+                .unwrap_or(0);
+
+            if updated > 0 {
+                let _ = entity.update(cx, |this, cx| {
+                    log::info!("[MainWindow] 成功回填 {} 名路人身份信息", updated);
+                    this.reload_saved_players(cx);
                 });
             }
         })
@@ -171,7 +252,7 @@ impl MainWindow {
                         this.saved_players_view.toggle_expand(&puuid);
                     }
                     SavedPlayersAction::RemovePlayer(puuid) => {
-                        this.saved_players_view.remove_player(&puuid);
+                        let _ = this.saved_players_view.remove_player(&puuid);
                     }
                     SavedPlayersAction::StartEdit(puuid) => {
                         this.saved_players_view.start_edit(&puuid);
@@ -221,6 +302,7 @@ impl MainWindow {
                     SavedPlayersAction::ImportTagged => {
                         this.saved_players_view.import_tagged_from_file();
                         this.reload_saved_players(cx);
+                        this.backfill_saved_players_identity(cx);
                     }
                     SavedPlayersAction::LoadMoreGames => {
                         this.saved_players_view.load_more_games();

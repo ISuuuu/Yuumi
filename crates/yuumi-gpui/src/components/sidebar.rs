@@ -31,6 +31,7 @@ impl Sidebar {
         on_open_opgg: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_reconnect: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_open_notice: impl Fn(&mut Window, &mut App) + 'static + Clone,
+        on_select_self: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let mut main_routes = vec![
             Route::Home,
@@ -144,7 +145,7 @@ impl Sidebar {
                             sum,
                             region_name,
                             expanded,
-                            on_select.clone(),
+                            on_select_self,
                         ))
                     })
                     // 5. 设置 (有更新时展示红点)
@@ -295,7 +296,7 @@ impl Sidebar {
         summoner: &SummonerInfo,
         region_name: &str,
         expanded: bool,
-        on_select: impl Fn(Route, &mut Window, &mut App) + 'static + Clone,
+        on_select_self: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let name = summoner.full_name();
         let region = if region_name.is_empty() {
@@ -307,7 +308,7 @@ impl Sidebar {
             "/lol-game-data/assets/v1/profile-icons/{}.jpg",
             summoner.profile_icon_id.unwrap_or(29)
         );
-        let nav_career = on_select;
+        let click_cb = on_select_self;
 
         div()
             .id("sidebar-user-card")
@@ -322,7 +323,7 @@ impl Sidebar {
             .hover(|s| s.bg(Theme::HOVER_BG_STRONG))
             .cursor_pointer()
             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
-                nav_career(Route::Career, window, app);
+                click_cb(window, app);
             })
             .child(
                 LcuImage::new(avatar)

@@ -121,6 +121,58 @@ impl Theme {
     pub fn font_family() -> SharedString {
         "Microsoft YaHei UI".into()
     }
+
+    /// 解析 6 位 (#RRGGBB) 或 8 位 (#AARRGGBB) 十六进制颜色字符为 gpui::Rgba
+    pub fn parse_hex(hex: &str) -> Rgba {
+        parse_hex_color(hex)
+    }
+
+    /// 根据用户个性化配置获取品牌强调色（未配置则返回默认极光青）
+    pub fn accent_color(config: &yuumi_core::config::AppConfig) -> Rgba {
+        parse_hex_color(&config.personalization.theme_color)
+    }
+
+    /// 根据用户个性化配置获取胜利对局卡片底色
+    pub fn win_card_color(config: &yuumi_core::config::AppConfig) -> Rgba {
+        parse_hex_color(&config.personalization.win_card_color)
+    }
+
+    /// 根据用户个性化配置获取失败对局卡片底色
+    pub fn lose_card_color(config: &yuumi_core::config::AppConfig) -> Rgba {
+        parse_hex_color(&config.personalization.lose_card_color)
+    }
+
+    /// 根据用户个性化配置获取重开对局卡片底色
+    pub fn remake_card_color(config: &yuumi_core::config::AppConfig) -> Rgba {
+        parse_hex_color(&config.personalization.remake_card_color)
+    }
+
+    /// 根据用户个性化配置获取死亡数字高亮色
+    pub fn death_color(config: &yuumi_core::config::AppConfig, is_dark: bool) -> Rgba {
+        if is_dark {
+            parse_hex_color(&config.personalization.dark_deaths_number_color)
+        } else {
+            parse_hex_color(&config.personalization.light_deaths_number_color)
+        }
+    }
+}
+
+/// 解析 6 位或 8 位十六进制颜色字符为 gpui::Rgba
+pub fn parse_hex_color(hex: &str) -> Rgba {
+    let s = hex.trim().trim_start_matches('#');
+    if s.len() == 6 {
+        if let Ok(val) = u32::from_str_radix(s, 16) {
+            return rgba((val << 8) | 0xff);
+        }
+    } else if s.len() == 8 {
+        // Vue: #AARRGGBB
+        if let Ok(val) = u32::from_str_radix(s, 16) {
+            let a = (val >> 24) & 0xff;
+            let rgb = val & 0x00ffffff;
+            return rgba((rgb << 8) | a);
+        }
+    }
+    rgba(0x009faaff)
 }
 
 // 兼容别名与全局快捷常量

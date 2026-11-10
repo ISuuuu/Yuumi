@@ -749,6 +749,7 @@ impl CareerView {
         loot_value_focus: &FocusHandle,
         loot_value_focused: bool,
         on_loot_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
+        on_replay: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         if !is_connected {
             return div()
@@ -820,6 +821,7 @@ impl CareerView {
                                         on_select_match,
                                         on_career_bar,
                                         on_click_teammate,
+                                        on_replay,
                                     ))
                                 },
                             )
@@ -1175,6 +1177,7 @@ impl CareerView {
         on_select_match: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
         on_career_bar: impl Fn(CareerBarAction, &mut Window, &mut App) + 'static + Clone,
         on_click_teammate: impl Fn(RecentTeammate, &mut Window, &mut App) + 'static + Clone,
+        on_replay: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let shown: Vec<&MatchItem> = matches
             .iter()
@@ -1238,6 +1241,7 @@ impl CareerView {
                             )
                             .into_any_element()
                     } else {
+                        let replay_cb = on_replay.clone();
                         div()
                             .w(px(1000.0))
                             .flex()
@@ -1247,7 +1251,7 @@ impl CareerView {
                             .children(
                                 shown
                                     .into_iter()
-                                    .map(|m| Self::render_match_card(m, on_select_match.clone())),
+                                    .map(move |m| Self::render_match_card(m, on_select_match.clone(), replay_cb.clone())),
                             )
                             .into_any_element()
                     }),
@@ -1706,6 +1710,7 @@ impl CareerView {
     pub fn render_match_card(
         m: &MatchItem,
         on_select: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
+        on_replay: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let (bg_color, border_color, win_text_color, win_label) = if m.display.remake {
             (
@@ -2080,29 +2085,58 @@ impl CareerView {
                     })
                     .child(div().mt(px(4.0)).child(time_str)),
             )
-            // 8. 回放按钮 (点击阻止卡片事件冒泡)
-            .child(
+            // 8. 回放按钮 (点击阻止卡片事件冒泡，接通真实回放服务)
+            .child({
+                let replay_cb = on_replay;
+                let replay_state = crate::replay_store::get_replay_state(game_id);
                 div()
                     .ml(px(14.0))
                     .flex_shrink_0()
                     .opacity(0.0)
                     .group_hover(group_id.clone(), |s| s.opacity(1.0))
-                    .on_mouse_down(MouseButton::Left, |_ev, _, _| {})
                     .child(
                         div()
                             .size(px(30.0))
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(match replay_state {
+                                crate::match_model::ReplayState::Watch => Theme::WIN_BORDER,
+                                crate::match_model::ReplayState::Downloading
+                                | crate::match_model::ReplayState::Checking => {
+                                    Theme::ACCENT_PRIMARY
+                                }
+                                crate::match_model::ReplayState::Error => Theme::LOSS_BORDER,
+                                _ => Theme::CARD_BORDER,
+                            })
                             .bg(Theme::CARD_BG)
                             .hover(|s| s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY))
                             .flex()
                             .items_center()
                             .justify_center()
                             .cursor_pointer()
-                            .child(icon("icons/play.svg", 13.0, Theme::TEXT_MUTED)),
-                    ),
-            )
+                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                app.stop_propagation();
+                                replay_cb(game_id, win, app);
+                            })
+                            .child(icon(
+                                match replay_state {
+                                    crate::match_model::ReplayState::Watch => "icons/play.svg",
+                                    crate::match_model::ReplayState::Error => "icons/refresh.svg",
+                                    _ => "icons/play.svg",
+                                },
+                                13.0,
+                                match replay_state {
+                                    crate::match_model::ReplayState::Watch => Theme::WIN_TEXT,
+                                    crate::match_model::ReplayState::Error => Theme::LOSS_TEXT,
+                                    crate::match_model::ReplayState::Downloading
+                                    | crate::match_model::ReplayState::Checking => {
+                                        Theme::ACCENT_PRIMARY
+                                    }
+                                    _ => Theme::TEXT_MUTED,
+                                },
+                            )),
+                    )
+            })
     }
 
     fn render_mastery_tab(
@@ -2142,19 +2176,25 @@ impl CareerView {
             .collect();
         list.sort_by(|a, b| {
             let ord = match self.mastery_sort {
-                MasterySort::Points => a.champion_points.cmp(&b.champion_points),
+                MasterySort::Points => a
+                    .champion_points
+                    .cmp(&b.champion_points)
+                    .then(a.champion_id.cmp(&b.champion_id)),
                 MasterySort::Level => a
                     .champion_level
                     .cmp(&b.champion_level)
-                    .then(a.champion_points.cmp(&b.champion_points)),
+                    .then(a.champion_points.cmp(&b.champion_points))
+                    .then(a.champion_id.cmp(&b.champion_id)),
                 MasterySort::Milestone => a
                     .champion_season_milestone
                     .cmp(&b.champion_season_milestone)
-                    .then(a.champion_points.cmp(&b.champion_points)),
+                    .then(a.champion_points.cmp(&b.champion_points))
+                    .then(a.champion_id.cmp(&b.champion_id)),
                 MasterySort::LastPlay => a
                     .last_play_time
                     .cmp(&b.last_play_time)
-                    .then(a.champion_points.cmp(&b.champion_points)),
+                    .then(a.champion_points.cmp(&b.champion_points))
+                    .then(a.champion_id.cmp(&b.champion_id)),
             };
             if self.mastery_sort_desc {
                 ord.reverse()

@@ -15,6 +15,7 @@ mod game_info_view;
 mod match_model;
 mod opgg;
 pub mod platform;
+pub mod replay_store;
 pub mod services;
 mod theme;
 mod tray;
@@ -26,6 +27,7 @@ use app_window::{main_window_bounds, MainWindow};
 pub use app_window::{BENCH_WINDOW_TITLE, MAIN_WINDOW_TITLE};
 
 fn main() {
+    if yuumi_core::update::run_portable_helper_if_requested() { return; }
     // 显式安装全局默认 CryptoProvider，防止 rustls 0.23+ 多 provider 特性冲突
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -57,7 +59,10 @@ fn main() {
     };
 
     // 2. 初始化平台日志系统（输出到标准错误与调试输出）
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    yuumi_core::runtime::init();
+    if let Err(error) = services::logging::init(yuumi_core::config::AppConfig::load().general.log_level) {
+        eprintln!("日志初始化失败: {error}");
+    }
     log::info!("Yuumi GPUI 原生 Direct3D 11/DirectWrite 渲染宿主正在启动...");
 
     // 3. 创建 GPUI 原生应用程序宿主（挂载内嵌图标与 Logo 资源）
@@ -87,11 +92,18 @@ fn main() {
             .open_window(window_options, |_window, cx| cx.new(MainWindow::new))
             .expect("创建 Yuumi GPUI 主窗口失败");
 
+        // 读取持久化配置以按需应用 Mica 与全局 API 并发限制
+        let config = yuumi_core::config::AppConfig::load();
+        yuumi_core::lcu::client::set_api_concurrency(config.functions.api_concurrency_number as usize);
+        let mica_enabled = config.personalization.mica_enabled;
+
         // 异步应用 Windows 11 Mica / DwmExtendFrameIntoClientArea 亚克力极光特效与圆角
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(60));
             if let Some(hwnd) = platform::find_main_window_hwnd() {
-                platform::apply_mica_or_acrylic(hwnd);
+                if mica_enabled {
+                    platform::apply_mica_or_acrylic(hwnd);
+                }
                 platform::set_window_rounded_corners(hwnd);
             } else {
                 log::warn!("[Platform] 未找到主窗口 HWND，跳过 Mica/圆角设置");

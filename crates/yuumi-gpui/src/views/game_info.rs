@@ -18,6 +18,7 @@ use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::collections::HashMap;
+use crate::views::saved_players::tag_badge_colors;
 use yuumi_core::gameflow::team_builder::MapSide;
 use yuumi_core::parsers::game_info::{GameInfoPlayer, LiveGameInfo};
 use yuumi_core::parsers::match_parser::MatchDisplay;
@@ -81,6 +82,7 @@ impl GameInfoView {
         connected: bool,
         view_mode: GameInfoViewMode,
         active_tab: GameInfoTeamTab,
+        game_info_filter: bool,
         on_change_mode: F1,
         on_change_tab: F2,
         on_player_career: F3,
@@ -145,6 +147,7 @@ impl GameInfoView {
                     user_is_red,
                     is_revealed,
                     active_tab,
+                    game_info_filter,
                     on_change_mode,
                     on_change_tab,
                     on_player_career,
@@ -158,6 +161,7 @@ impl GameInfoView {
                     enemy_team,
                     user_is_red,
                     is_revealed,
+                    game_info_filter,
                     on_change_mode,
                     on_change_tab,
                     on_player_search,
@@ -176,6 +180,7 @@ impl GameInfoView {
         user_is_red: bool,
         is_revealed: bool,
         active_tab: GameInfoTeamTab,
+        game_info_filter: bool,
         on_change_mode: F1,
         on_change_tab: F2,
         on_player_career: F3,
@@ -366,6 +371,8 @@ impl GameInfoView {
                         is_ally_tab,
                         false,
                         false,
+                        game_info_filter,
+                        info.queue_id,
                         on_player_search.clone(),
                         idx,
                     )
@@ -402,6 +409,7 @@ impl GameInfoView {
         enemy_team: &[GameInfoPlayer],
         user_is_red: bool,
         is_revealed: bool,
+        game_info_filter: bool,
         on_change_mode: F1,
         on_change_tab: F2,
         on_player_search: F4,
@@ -461,6 +469,8 @@ impl GameInfoView {
                             true,
                             true,
                             false,
+                            game_info_filter,
+                            info.queue_id,
                             on_player_search.clone(),
                             idx,
                         )
@@ -474,6 +484,8 @@ impl GameInfoView {
                                 false,
                                 true,
                                 idx == 0,
+                                game_info_filter,
+                                info.queue_id,
                                 on_player_search.clone(),
                                 ally_team.len() + idx,
                             )
@@ -803,6 +815,12 @@ impl GameInfoView {
             player.summoner_name.clone()
         };
 
+        let is_valid_target = !player.puuid.is_empty()
+            && player.puuid != "00000000-0000-0000-0000-000000000000"
+            && !player.is_bot
+            && !player.summoner_name.is_empty()
+            && !player.summoner_name.starts_with("玩家 ");
+
         div()
             .w_full()
             .rounded_xl()
@@ -888,37 +906,39 @@ impl GameInfoView {
                             .flex()
                             .flex_col()
                             .gap(px(1.5))
-                            // 第 1 行：玩家昵称 (点击进生涯, G06) + 锁 + 宿命/连胜徽标
+                            // 第 1 行：玩家昵称 (点击进生涯, G06) + 锁 + 宿命/标记/连胜徽标
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
                                     .gap(px(4.0))
                                     .min_w_0()
-                                    .child(
-                                        div()
+                                    .child({
+                                        let mut name_el = div()
                                             .text_size(px(12.5))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(Theme::TEXT_PRIMARY)
-                                            .truncate()
-                                            .cursor_pointer()
-                                            .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                move |_ev, win, app| {
-                                                    on_career(
-                                                        if player_puuid.is_empty() {
-                                                            None
+                                            .truncate();
+                                        if is_valid_target {
+                                            let is_local_player = is_local;
+                                            let target_puuid = player_puuid.clone();
+                                            let on_career = on_career.clone();
+                                            name_el = name_el
+                                                .cursor_pointer()
+                                                .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
+                                                .on_mouse_down(
+                                                    MouseButton::Left,
+                                                    move |_ev, win, app| {
+                                                        if is_local_player {
+                                                            on_career(None, win, app);
                                                         } else {
-                                                            Some(player_puuid.clone())
-                                                        },
-                                                        win,
-                                                        app,
-                                                    );
-                                                },
-                                            )
-                                            .child(display_name),
-                                    )
+                                                            on_career(Some(target_puuid.clone()), win, app);
+                                                        }
+                                                    },
+                                                );
+                                        }
+                                        name_el.child(display_name)
+                                    })
                                     // 战绩隐藏锁
                                     .when(!player.data_available, |el| {
                                         el.child(icon(
@@ -947,6 +967,37 @@ impl GameInfoView {
                                                     Theme::LOSS_TEXT
                                                 })
                                                 .child(fate.badge_text()),
+                                        )
+                                    })
+                                    // 路人集标记徽标（大腿 / 避坑 / 绝活等）
+                                    .when_some(player.saved_tag.clone(), |el, tag| {
+                                        let (tag_bg, tag_text, tag_border) = tag_badge_colors(&tag);
+                                        el.child(
+                                            div()
+                                                .px(px(4.0))
+                                                .py(px(1.0))
+                                                .rounded(px(3.0))
+                                                .bg(tag_bg)
+                                                .border_1()
+                                                .border_color(tag_border)
+                                                .text_size(px(9.0))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(tag_text)
+                                                .child(tag),
+                                        )
+                                    })
+                                    // 相遇次数徽标（无自定义 tag 且同局相遇 >= 2 次）
+                                    .when(player.saved_tag.is_none() && player.saved_encounter_count >= 2, |el| {
+                                        el.child(
+                                            div()
+                                                .px(px(4.0))
+                                                .py(px(1.0))
+                                                .rounded(px(3.0))
+                                                .bg(Theme::CARD_BORDER)
+                                                .text_size(px(9.0))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(Theme::TEXT_MUTED)
+                                                .child(format!("相遇{}次", player.saved_encounter_count)),
                                         )
                                     })
                                     // 连胜 / 连败微徽标 (>=2 场显示, G06)
@@ -1067,6 +1118,8 @@ impl GameInfoView {
         _is_ally: bool,
         compact: bool,
         is_first_enemy: bool,
+        game_info_filter: bool,
+        queue_id: i32,
         on_player_search: F,
         index: usize,
     ) -> gpui::AnyElement
@@ -1082,13 +1135,18 @@ impl GameInfoView {
 
         let player_name = player.summoner_name.clone();
         let player_tag = player.tag_line.clone();
-        let on_search = on_player_search;
 
         let display_name = if player.summoner_name.is_empty() {
             format!("玩家 {}", index + 1)
         } else {
             player.summoner_name.clone()
         };
+
+        let is_valid_target = !player.puuid.is_empty()
+            && player.puuid != "00000000-0000-0000-0000-000000000000"
+            && !player.is_bot
+            && !player.summoner_name.is_empty()
+            && !player.summoner_name.starts_with("玩家 ");
 
         // 列头 (G07)
         let col_header = if compact {
@@ -1237,27 +1295,33 @@ impl GameInfoView {
                                         .flex()
                                         .items_center()
                                         .gap(px(2.0))
-                                        .child(
-                                            div()
+                                        .child({
+                                            let mut name_el = div()
                                                 .text_size(px(10.5))
                                                 .font_weight(FontWeight::BOLD)
                                                 .text_color(Theme::TEXT_PRIMARY)
-                                                .truncate()
-                                                .cursor_pointer()
-                                                .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
-                                                .on_mouse_down(
-                                                    MouseButton::Left,
-                                                    move |_ev, win, app| {
-                                                        on_search(
-                                                            player_name.clone(),
-                                                            Some(player_tag.clone()),
-                                                            win,
-                                                            app,
-                                                        );
-                                                    },
-                                                )
-                                                .child(display_name),
-                                        )
+                                                .truncate();
+                                            if is_valid_target {
+                                                let on_search = on_player_search.clone();
+                                                let p_name = player_name.clone();
+                                                let p_tag = player_tag.clone();
+                                                name_el = name_el
+                                                    .cursor_pointer()
+                                                    .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
+                                                    .on_mouse_down(
+                                                        MouseButton::Left,
+                                                        move |_ev, win, app| {
+                                                            on_search(
+                                                                p_name.clone(),
+                                                                if p_tag.is_empty() { None } else { Some(p_tag.clone()) },
+                                                                win,
+                                                                app,
+                                                            );
+                                                        },
+                                                    );
+                                            }
+                                            name_el.child(display_name.clone())
+                                        })
                                         .when(!player.data_available, |el| {
                                             el.child(icon(
                                                 "icons/lock.svg",
@@ -1279,7 +1343,7 @@ impl GameInfoView {
                                 ),
                         ),
                 )
-                // 第三行：左侧常用位置，右侧宿命徽标 (G07)
+                // 第三行：左侧常用位置，右侧宿命/标记徽标 (G07)
                 .child(
                     div()
                         .flex()
@@ -1292,29 +1356,49 @@ impl GameInfoView {
                                 .font_weight(FontWeight::MEDIUM)
                                 .child(format!("{}{} %", short_position(&player.position), player.win_rate)),
                         )
-                        .when_some(player.fate.as_ref(), |el, fate| {
-                            el.child(
-                                div()
-                                    .size(px(12.0))
-                                    .rounded(px(2.5))
-                                    .bg(if fate.ally {
-                                        rgba(0x0577482e)
-                                    } else {
-                                        rgba(0xbf242a26)
-                                    })
-                                    .text_size(px(8.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(if fate.ally {
-                                        Theme::WIN_TEXT
-                                    } else {
-                                        Theme::LOSS_TEXT
-                                    })
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(if fate.ally { "友" } else { "敌" }),
-                            )
-                        }),
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(2.0))
+                                .when_some(player.fate.as_ref(), |el, fate| {
+                                    el.child(
+                                        div()
+                                            .size(px(12.0))
+                                            .rounded(px(2.5))
+                                            .bg(if fate.ally {
+                                                rgba(0x0577482e)
+                                            } else {
+                                                rgba(0xbf242a26)
+                                            })
+                                            .text_size(px(8.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(if fate.ally {
+                                                Theme::WIN_TEXT
+                                            } else {
+                                                Theme::LOSS_TEXT
+                                            })
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(if fate.ally { "友" } else { "敌" }),
+                                    )
+                                })
+                                .when_some(player.saved_tag.clone(), |el, tag| {
+                                    let (tag_bg, tag_text, _) = tag_badge_colors(&tag);
+                                    el.child(
+                                        div()
+                                            .px(px(2.5))
+                                            .py(px(0.5))
+                                            .rounded(px(2.0))
+                                            .bg(tag_bg)
+                                            .text_size(px(8.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(tag_text)
+                                            .child(tag),
+                                    )
+                                }),
+                        ),
                 )
         } else {
             // 5 列正常模式 (!compact 分支)：高度 48px，左右布局 (G07)
@@ -1367,7 +1451,7 @@ impl GameInfoView {
                                 .into_any_element()
                         }),
                 )
-                // 信息区：昵称 + 胜负/段位
+                // 信息区：昵称 + 胜负/段位 + 标记徽标
                 .child(
                     div()
                         .flex_1()
@@ -1380,24 +1464,30 @@ impl GameInfoView {
                                 .flex()
                                 .items_center()
                                 .gap(px(3.0))
-                                .child(
-                                    div()
+                                .child({
+                                    let mut name_el = div()
                                         .text_size(px(11.5))
                                         .font_weight(FontWeight::BOLD)
                                         .text_color(Theme::TEXT_PRIMARY)
-                                        .truncate()
-                                        .cursor_pointer()
-                                        .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
-                                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                            on_search(
-                                                player_name.clone(),
-                                                Some(player_tag.clone()),
-                                                win,
-                                                app,
-                                            );
-                                        })
-                                        .child(display_name),
-                                )
+                                        .truncate();
+                                    if is_valid_target {
+                                        let on_search = on_player_search.clone();
+                                        let p_name = player_name.clone();
+                                        let p_tag = player_tag.clone();
+                                        name_el = name_el
+                                            .cursor_pointer()
+                                            .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
+                                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                on_search(
+                                                    p_name.clone(),
+                                                    if p_tag.is_empty() { None } else { Some(p_tag.clone()) },
+                                                    win,
+                                                    app,
+                                                );
+                                            });
+                                    }
+                                    name_el.child(display_name)
+                                })
                                 .when(!player.data_available, |el| {
                                     el.child(icon(
                                         "icons/lock.svg",
@@ -1424,6 +1514,35 @@ impl GameInfoView {
                                                 Theme::LOSS_TEXT
                                             })
                                             .child(fate.badge_text()),
+                                    )
+                                })
+                                .when_some(player.saved_tag.clone(), |el, tag| {
+                                    let (tag_bg, tag_text, tag_border) = tag_badge_colors(&tag);
+                                    el.child(
+                                        div()
+                                            .px(px(3.0))
+                                            .py(px(0.5))
+                                            .rounded(px(2.0))
+                                            .bg(tag_bg)
+                                            .border_1()
+                                            .border_color(tag_border)
+                                            .text_size(px(8.5))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(tag_text)
+                                            .child(tag),
+                                    )
+                                })
+                                .when(player.saved_tag.is_none() && player.saved_encounter_count >= 2, |el| {
+                                    el.child(
+                                        div()
+                                            .px(px(3.0))
+                                            .py(px(0.5))
+                                            .rounded(px(2.0))
+                                            .bg(Theme::CARD_BORDER)
+                                            .text_size(px(8.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(Theme::TEXT_MUTED)
+                                            .child(format!("相遇{}次", player.saved_encounter_count)),
                                     )
                                 }),
                         )
@@ -1466,7 +1585,22 @@ impl GameInfoView {
         };
 
         // 垂直战绩列表：独立纵向滚动，每人严格前 10 局 (G08, G10)
-        let matches_pane = if player.matches.is_empty() {
+        let filtered_matches: Vec<&MatchDisplay> = if game_info_filter && queue_id > 0 {
+            let q_matches: Vec<&MatchDisplay> = player
+                .matches
+                .iter()
+                .filter(|m| m.queue_id == queue_id)
+                .collect();
+            if q_matches.is_empty() {
+                player.matches.iter().collect()
+            } else {
+                q_matches
+            }
+        } else {
+            player.matches.iter().collect()
+        };
+
+        let matches_pane = if filtered_matches.is_empty() {
             if !player.data_available {
                 div().flex_1().into_any_element()
             } else {
@@ -1485,8 +1619,7 @@ impl GameInfoView {
         } else {
             // 固定 10 个等分槽位：不足 10 局时用透明占位撑满，保证卡片高度始终与满 10 局的列一致，
             // 同时 10 张卡片均分列表可用高度，刚好占满整列（不再在底部留白）。
-            let mut slots: Vec<gpui::AnyElement> = player
-                .matches
+            let mut slots: Vec<gpui::AnyElement> = filtered_matches
                 .iter()
                 .take(10)
                 .map(|m| Self::render_match_card(m, compact))

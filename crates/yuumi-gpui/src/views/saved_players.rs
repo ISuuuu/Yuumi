@@ -27,7 +27,7 @@ pub const ENCOUNTER_GAMES_PAGE_SIZE: usize = 20;
 pub const SAVED_PLAYERS_PAGE_SIZE: usize = 30;
 
 /// 标签颜色映射
-fn tag_badge_colors(tag: &str) -> (Hsla, Hsla, Hsla) {
+pub(crate) fn tag_badge_colors(tag: &str) -> (Hsla, Hsla, Hsla) {
     match tag {
         "大腿" => (Theme::WIN_BG, Theme::WIN_TEXT, Theme::WIN_BORDER), // 翡翠绿
         "避坑" | "演员/挂机" => (Theme::LOSS_BG, Theme::LOSS_TEXT, Theme::LOSS_BORDER), // 珊瑚红 / 绯红
@@ -147,6 +147,8 @@ pub struct SavedPlayersView {
     pub toast_message: Option<(String, bool)>,
     /// 正在拉取下一页标志位
     pub is_loading_more: bool,
+    /// 异步请求序列计数器（用于丢弃快速切换/输入时的过期响应）
+    pub request_seq: u64,
     /// 独立列表滚动控制与位置跟踪句柄
     pub scroll_handle: ScrollHandle,
     /// 顶部搜索框焦点句柄
@@ -189,11 +191,18 @@ impl SavedPlayersView {
             confirm_delete_puuid: None,
             toast_message: None,
             is_loading_more: false,
+            request_seq: 0,
             scroll_handle: ScrollHandle::new(),
             search_focus_handle: cx.focus_handle(),
             edit_tag_focus_handle: cx.focus_handle(),
             edit_notes_focus_handle: cx.focus_handle(),
         }
+    }
+
+    /// 获取并递增请求序列号
+    pub fn next_request_seq(&mut self) -> u64 {
+        self.request_seq = self.request_seq.wrapping_add(1);
+        self.request_seq
     }
 
     /// 使用自定义数据初始化
@@ -302,11 +311,18 @@ impl SavedPlayersView {
         } else {
             self.expanded_puuid = Some(puuid.to_string());
             self.expanded_games_page = 1;
+            let target_self_puuid = self
+                .players
+                .iter()
+                .find(|p| p.puuid == puuid)
+                .map(|p| p.self_puuid.as_str())
+                .filter(|s| !s.is_empty())
+                .or(self.self_puuid.as_deref());
+
             if let Some(ref s) = self.storage {
-                let self_p = self.self_puuid.as_deref();
-                self.expanded_games_total = s.count_encountered_games(puuid, self_p).unwrap_or(0);
+                self.expanded_games_total = s.count_encountered_games(puuid, target_self_puuid).unwrap_or(0);
                 self.expanded_games = s
-                    .query_encountered_games_paged(puuid, self_p, ENCOUNTER_GAMES_PAGE_SIZE, 0)
+                    .query_encountered_games_paged(puuid, target_self_puuid, ENCOUNTER_GAMES_PAGE_SIZE, 0)
                     .unwrap_or_default();
             }
         }
@@ -317,36 +333,78 @@ impl SavedPlayersView {
         if let Some(ref puuid) = self.expanded_puuid {
             let next_page = self.expanded_games_page + 1;
             let offset = (next_page - 1) * ENCOUNTER_GAMES_PAGE_SIZE;
+            let target_self_puuid = self
+                .players
+                .iter()
+                .find(|p| p.puuid == *puuid)
+                .map(|p| p.self_puuid.as_str())
+                .filter(|s| !s.is_empty())
+                .or(self.self_puuid.as_deref());
+
             if let Some(ref s) = self.storage {
-                let self_p = self.self_puuid.as_deref();
-                if let Ok(more) = s.query_encountered_games_paged(
+                match s.query_encountered_games_paged(
                     puuid,
-                    self_p,
+                    target_self_puuid,
                     ENCOUNTER_GAMES_PAGE_SIZE,
                     offset,
                 ) {
-                    self.expanded_games.extend(more);
-                    self.expanded_games_page = next_page;
+                    Ok(more) => {
+                        self.expanded_games.extend(more);
+                        self.expanded_games_page = next_page;
+                    }
+                    Err(e) => {
+                        self.toast_message = Some((format!("加载更多对局失败: {}", e), false));
+                    }
                 }
             }
         }
     }
 
-    /// 切换玩家置顶状态
+    /// 切换玩家置顶状态（带完整账号作用域，DB 成功后更新 UI 与重新排序）
     pub fn toggle_pin(&mut self, puuid: &str) {
-        let mut new_pinned = false;
-        if let Some(player) = self.players.iter_mut().find(|p| p.puuid == puuid) {
-            player.is_pinned = !player.is_pinned;
-            new_pinned = player.is_pinned;
-        }
+        let Some(player) = self.players.iter().find(|p| p.puuid == puuid) else {
+            return;
+        };
+        let target_self_puuid = if !player.self_puuid.is_empty() {
+            player.self_puuid.clone()
+        } else {
+            self.self_puuid.clone().unwrap_or_default()
+        };
+        let new_pinned = !player.is_pinned;
+
         if let Some(ref s) = self.storage {
-            let self_p = self.self_puuid.as_deref().unwrap_or("");
-            let _ = s.update_pin(puuid, self_p, new_pinned);
+            match s.update_pin(puuid, &target_self_puuid, new_pinned) {
+                Ok(_) => {
+                    if let Some(p) = self.players.iter_mut().find(|p| p.puuid == puuid) {
+                        p.is_pinned = new_pinned;
+                    }
+                    // 重新排序：置顶在前，其次按最近相遇倒序
+                    self.players.sort_by(|a, b| {
+                        b.is_pinned
+                            .cmp(&a.is_pinned)
+                            .then_with(|| b.last_met_timestamp.cmp(&a.last_met_timestamp))
+                    });
+                }
+                Err(e) => {
+                    self.toast_message = Some((format!("更新置顶失败: {}", e), false));
+                }
+            }
         }
     }
 
     /// 删除玩家记录
-    pub fn remove_player(&mut self, puuid: &str) {
+    pub fn remove_player(&mut self, puuid: &str) -> Result<(), String> {
+        let target_self_puuid = self
+            .players
+            .iter()
+            .find(|p| p.puuid == puuid)
+            .map(|p| p.self_puuid.clone())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| self.self_puuid.clone().unwrap_or_default());
+
+        if let Some(ref s) = self.storage {
+            s.delete_player(puuid, &target_self_puuid)?;
+        }
         self.players.retain(|p| p.puuid != puuid);
         if self.total_count > 0 {
             self.total_count -= 1;
@@ -358,10 +416,7 @@ impl SavedPlayersView {
         if self.editing_puuid.as_deref() == Some(puuid) {
             self.editing_puuid = None;
         }
-        if let Some(ref s) = self.storage {
-            let self_p = self.self_puuid.as_deref().unwrap_or("");
-            let _ = s.delete_player(puuid, self_p);
-        }
+        Ok(())
     }
 
     /// 开始编辑
@@ -382,7 +437,7 @@ impl SavedPlayersView {
         }
     }
 
-    /// 保存编辑内容
+    /// 保存编辑内容（带完整账号作用域，保留原有备注，成功后再退出编辑模式与更新列表）
     pub fn save_edit(&mut self, puuid: &str) {
         let tag_opt = {
             let t = self.editing_tag_buffer.trim();
@@ -392,15 +447,33 @@ impl SavedPlayersView {
                 Some(t.to_string())
             }
         };
+        let notes = self.editing_notes_buffer.clone();
 
-        if let Some(player) = self.players.iter_mut().find(|p| p.puuid == puuid) {
-            player.tag = tag_opt.clone();
-        }
+        let target_self_puuid = self
+            .players
+            .iter()
+            .find(|p| p.puuid == puuid)
+            .map(|p| p.self_puuid.clone())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| self.self_puuid.clone().unwrap_or_default());
+
         if let Some(ref s) = self.storage {
-            let self_p = self.self_puuid.as_deref().unwrap_or("");
-            let _ = s.update_tag_and_notes(puuid, self_p, tag_opt.as_deref(), "");
+            match s.update_tag_and_notes(puuid, &target_self_puuid, tag_opt.as_deref(), &notes) {
+                Ok(_) => {
+                    if let Some(player) = self.players.iter_mut().find(|p| p.puuid == puuid) {
+                        player.tag = tag_opt;
+                        player.notes = notes;
+                    }
+                    self.editing_puuid = None;
+                    self.toast_message = Some(("标记保存成功".to_string(), true));
+                }
+                Err(e) => {
+                    self.toast_message = Some((format!("保存标记失败: {}", e), false));
+                }
+            }
+        } else {
+            self.toast_message = Some(("数据库未连接".to_string(), false));
         }
-        self.editing_puuid = None;
     }
 
     /// 取消编辑
@@ -419,12 +492,19 @@ impl SavedPlayersView {
         self.confirm_delete_puuid = None;
     }
 
-    /// 确认删除
+    /// 确认删除（失败显示错误反馈，成功才关闭对话框并刷新）
     pub fn confirm_delete(&mut self, puuid: &str) {
-        self.remove_player(puuid);
-        self.confirm_delete_puuid = None;
-        let self_p = self.self_puuid.clone();
-        self.reload(self_p.as_deref());
+        match self.remove_player(puuid) {
+            Ok(_) => {
+                self.confirm_delete_puuid = None;
+                self.toast_message = Some(("玩家已删除".to_string(), true));
+                let self_p = self.self_puuid.clone();
+                self.reload(self_p.as_deref());
+            }
+            Err(e) => {
+                self.toast_message = Some((format!("删除失败: {}", e), false));
+            }
+        }
     }
 
     /// 导出标记玩家到 JSON 文件
@@ -1012,11 +1092,13 @@ impl SavedPlayersView {
         let (tag_bg, tag_text, tag_border) = tag_badge_colors(&tag_label);
 
         let p_puuid_expand = p.puuid.clone();
+        let p_puuid_pin = p.puuid.clone();
         let p_puuid_edit = p.puuid.clone();
         let p_puuid_delete = p.puuid.clone();
         let p_puuid_save = p.puuid.clone();
 
         let on_action_expand = on_action.clone();
+        let on_action_pin = on_action.clone();
         let on_action_edit = on_action.clone();
         let on_action_delete = on_action.clone();
         let on_action_save = on_action.clone();
@@ -1132,6 +1214,22 @@ impl SavedPlayersView {
                                                     .flex()
                                                     .items_center()
                                                     .gap_1p5()
+                                                    // 置顶徽标
+                                                    .when(p.is_pinned, |this| {
+                                                        this.child(
+                                                            div()
+                                                                .px_2()
+                                                                .py_0p5()
+                                                                .rounded_full()
+                                                                .bg(Theme::GOLD.opacity(0.15))
+                                                                .border_1()
+                                                                .border_color(Theme::GOLD.opacity(0.4))
+                                                                .text_xs()
+                                                                .font_weight(FontWeight::BOLD)
+                                                                .text_color(Theme::GOLD)
+                                                                .child("置顶"),
+                                                        )
+                                                    })
                                                     // tag 徽标
                                                     .when(p.tag.is_some(), {
                                                         let tag_label = tag_label.clone();
@@ -1345,11 +1443,48 @@ impl SavedPlayersView {
                             )
                             .into_any_element()
                     } else {
-                        // 非编辑态：编辑标记 + 删除按钮
+                        // 非编辑态：置顶 + 编辑标记 + 删除按钮
                         div()
                             .flex()
                             .items_center()
                             .gap_2()
+                            .child(
+                                div()
+                                    .px_3()
+                                    .py_1()
+                                    .rounded_sm()
+                                    .border_1()
+                                    .border_color(if p.is_pinned {
+                                        Theme::GOLD.opacity(0.6)
+                                    } else {
+                                        Theme::CARD_BORDER
+                                    })
+                                    .bg(if p.is_pinned {
+                                        Theme::GOLD.opacity(0.12)
+                                    } else {
+                                        Theme::CARD_BG
+                                    })
+                                    .text_color(if p.is_pinned {
+                                        Theme::GOLD
+                                    } else {
+                                        Theme::TEXT_MUTED
+                                    })
+                                    .text_xs()
+                                    .cursor_pointer()
+                                    .hover(|s| {
+                                        s.bg(Theme::CARD_BG_HOVER)
+                                            .border_color(Theme::GOLD)
+                                            .text_color(Theme::GOLD)
+                                    })
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        on_action_pin(
+                                            SavedPlayersAction::TogglePin(p_puuid_pin.clone()),
+                                            win,
+                                            app,
+                                        );
+                                    })
+                                    .child(if p.is_pinned { "★ 已置顶" } else { "☆ 置顶" }),
+                            )
                             .child(
                                 div()
                                     .px_3()

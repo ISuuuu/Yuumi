@@ -5,7 +5,10 @@ pub mod lcu;
 pub mod opgg;
 pub mod parsers;
 pub mod runtime;
+pub mod signalr;
 pub mod storage;
+pub mod update;
+pub mod upload;
 
 pub use agents::*;
 pub use config::*;

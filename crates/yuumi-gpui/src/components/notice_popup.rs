@@ -1,18 +1,85 @@
 //! 公告与更新日志右下角浮动通知弹窗 (对照 Vue `src/components/NoticePopup.vue`)
 //!
 //! 纯白水晶极光风格：固定于右下角 (320px 宽)，带毛玻璃底色、投影与关闭按钮；
-//! 展示最新更新动态与注意事项，不打断主窗口路由状态。
+//! 支持真实加载中状态、失败重试与内容展示，不打断主窗口路由状态。
 
+use crate::components::collapse_card::action_button;
 use crate::components::icon::icon;
 use crate::theme::Theme;
 use gpui::*;
 
 pub fn notice_popup(
     title: &'static str,
-    content: &'static str,
+    loading: bool,
+    has_error: bool,
+    content: &str,
     on_close: impl Fn(&mut Window, &mut App) + 'static + Clone,
+    on_retry: impl Fn(&mut Window, &mut App) + 'static + Clone,
 ) -> impl IntoElement {
     let close_cb = on_close;
+    let retry_cb = on_retry;
+
+    let body_element = if loading {
+        div()
+            .p(px(20.0))
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .size(px(16.0))
+                    .rounded_full()
+                    .border(px(2.0))
+                    .border_color(Theme::ACCENT_PRIMARY),
+            )
+            .child(
+                div()
+                    .text_size(px(12.5))
+                    .text_color(Theme::TEXT_MUTED)
+                    .child("正在获取最新公告..."),
+            )
+            .into_any_element()
+    } else if has_error {
+        div()
+            .p(px(16.0))
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .text_size(px(12.5))
+                    .text_color(Theme::LOSS_TEXT)
+                    .child("获取最新公告失败"),
+            )
+            .child(action_button("重试", false, move |_ev, win, app| {
+                retry_cb(win, app);
+            }))
+            .into_any_element()
+    } else {
+        let display_content = if content.is_empty() {
+            "当前版本已完整复刻 Vue 纯白水晶极光界面，Direct3D 11 原生极速渲染，内存与启动性能优化完毕。"
+        } else {
+            content
+        };
+
+        div()
+            .id("notice-content-body")
+            .p(px(14.0))
+            .max_h(px(240.0))
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .text_size(px(12.5))
+            .text_color(Theme::TEXT_SECONDARY)
+            .line_height(relative(1.4))
+            .child(display_content.to_string())
+            .into_any_element()
+    };
 
     div()
         .id("notice-popup-toast")
@@ -68,15 +135,5 @@ pub fn notice_popup(
                 ),
         )
         // 内容区
-        .child(
-            div()
-                .p(px(14.0))
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .text_size(px(12.5))
-                .text_color(Theme::TEXT_SECONDARY)
-                .line_height(relative(1.4))
-                .child(content),
-        )
+        .child(body_element)
 }
