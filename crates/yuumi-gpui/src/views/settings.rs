@@ -11,13 +11,13 @@
 //!
 //! 严格依照 [05-6-GPUI_TOOLS_SETTINGS_STYLE_PARITY.md] F-V01~F-V08 规范实现。
 
-use crate::components::badge::{Badge, BadgeVariant};
 use crate::components::card::Card;
 use crate::components::collapse_card::{
     action_button, checkbox, collapse_card, number_stepper, setting_row, settings_card_item,
 };
 use crate::components::dropdown::{select_dropdown, select_dropdown_item};
 use crate::components::switch::Switch;
+use crate::components::text_field::{text_field, TextFieldOptions};
 use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -56,6 +56,8 @@ pub enum SettingsAction {
 
     // 云服务与菜单
     SetUploadApiUrl(String),
+    EditFInput(&'static str, String),
+    SaveFInput(&'static str),
     ToggleLcuRealtime,
     SetLcuUserId(String),
     ToggleSignalrHub,
@@ -98,6 +100,7 @@ pub enum SettingsAction {
 
     // ─── 7. 关于 ───
     ToggleChangelog,
+    RefreshChangelog,
     OpenRepo,
 }
 
@@ -175,68 +178,6 @@ pub fn parse_hex_color(hex: &str) -> Rgba {
 }
 
 /// 清除/展示输入框
-fn clearable_input_box(
-    placeholder: &'static str,
-    value: &str,
-    disabled: bool,
-    max_w_px: f32,
-    on_clear: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-) -> Div {
-    let has_val = !value.is_empty();
-    div()
-        .w(px(max_w_px))
-        .h(px(28.0))
-        .px(px(10.0))
-        .rounded_md()
-        .border_1()
-        .border_color(if disabled {
-            Theme::CARD_BORDER.opacity(0.5)
-        } else {
-            Theme::CARD_BORDER
-        })
-        .bg(if disabled {
-            Theme::CARD_BG.opacity(0.4)
-        } else {
-            Theme::CARD_BG
-        })
-        .flex()
-        .items_center()
-        .justify_between()
-        .child(
-            div()
-                .text_size(px(12.5))
-                .text_color(if disabled {
-                    Theme::TEXT_MUTED
-                } else if has_val {
-                    Theme::TEXT_PRIMARY
-                } else {
-                    Theme::TEXT_MUTED
-                })
-                .child(if has_val {
-                    value.to_string()
-                } else {
-                    placeholder.to_string()
-                }),
-        )
-        .when(has_val && !disabled, |this| {
-            this.child(
-                div()
-                    .size(px(18.0))
-                    .rounded_full()
-                    .cursor_pointer()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(11.0))
-                    .text_color(Theme::TEXT_MUTED)
-                    .hover(|s| s.bg(Theme::HOVER_BG).text_color(Theme::TEXT_PRIMARY))
-                    .on_mouse_down(MouseButton::Left, on_clear)
-                    .child("✕"),
-            )
-        })
-}
-
-/// 色盘触发框与展开选择浮层
 fn render_color_picker(
     id: ElementId,
     width_px: f32,
@@ -313,13 +254,8 @@ fn render_color_picker(
                                 .text_color(Theme::TEXT_MUTED)
                                 .child("选择推荐色阶:"),
                         )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_wrap()
-                                .gap(px(6.0))
-                                .w(px(180.0))
-                                .children(palette.iter().map(|(hex, _name)| {
+                        .child(div().flex().flex_wrap().gap(px(6.0)).w(px(180.0)).children(
+                            palette.iter().map(|(hex, _name)| {
                                     let h = hex.to_string();
                                     let c = parse_hex_color(hex);
                                     let is_cur = color_hex.eq_ignore_ascii_case(hex);
@@ -339,8 +275,8 @@ fn render_color_picker(
                                         .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                             sel(h.clone(), win, app)
                                         })
-                                })),
-                        ),
+                            }),
+                        )),
                 )
                 .with_priority(25),
             )
@@ -354,6 +290,7 @@ pub struct SettingsView {
 
     // 下拉浮层状态
     pub open_log_level_dropdown: bool,
+    pub cloud_status: yuumi_core::signalr::HubStatus,
     pub open_theme_mode_dropdown: bool,
     pub open_scale_dropdown: bool,
     pub open_lang_dropdown: bool,
@@ -368,6 +305,11 @@ pub struct SettingsView {
 
     // 更新日志弹窗
     pub show_changelog: bool,
+    pub release_loading: bool,
+    pub release_notes: Vec<yuumi_core::update::ReleaseEntry>,
+    pub release_error: Option<String>,
+    pub f_inputs: [String; 4],
+    f_focus: Option<[FocusHandle; 4]>,
 
     // 状态反馈提示
     pub status_feedback: Option<(String, bool)>,
@@ -388,6 +330,7 @@ impl SettingsView {
         Self {
             open_sections,
             open_log_level_dropdown: false,
+            cloud_status: yuumi_core::signalr::HubStatus::Disabled,
             open_theme_mode_dropdown: false,
             open_scale_dropdown: false,
             open_lang_dropdown: false,
@@ -400,8 +343,64 @@ impl SettingsView {
             open_dark_death_color_picker: false,
 
             show_changelog: false,
+            release_loading: false,
+            release_notes: Vec::new(),
+            release_error: None,
+            f_inputs: Default::default(),
+            f_focus: None,
             status_feedback: None,
         }
+    }
+
+    pub fn bind_f_inputs(&mut self, config: &AppConfig, cx: &mut App) {
+        self.f_inputs = [
+            config.general.upload_api_url.clone(),
+            config.general.signalr_user_id.clone(),
+            config.general.http_proxy_addr.clone(),
+            config.functions.screenshot_save_path.clone(),
+        ];
+        self.f_focus = Some(std::array::from_fn(|_| cx.focus_handle()));
+    }
+
+    fn f_input<F>(
+        &self,
+        index: usize,
+        key: &'static str,
+        placeholder: &'static str,
+        on_action: F,
+    ) -> Div
+    where
+        F: Fn(SettingsAction, &mut Window, &mut App) + 'static + Clone,
+    {
+        let Some(focus) = self.f_focus.as_ref().map(|f| &f[index]) else {
+            return div();
+        };
+        let edit = on_action.clone();
+        let clear = on_action.clone();
+        let submit = on_action.clone();
+        let save = on_action.clone();
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(text_field(
+                key,
+                &self.f_inputs[index],
+                placeholder,
+                px(260.0),
+                focus,
+                false,
+                TextFieldOptions::default(),
+                move |value, win, app| edit(SettingsAction::EditFInput(key, value), win, app),
+                move |win, app| {
+                    clear(SettingsAction::EditFInput(key, String::new()), win, app);
+                    clear(SettingsAction::SaveFInput(key), win, app);
+                },
+                move |_, win, app| submit(SettingsAction::SaveFInput(key), win, app),
+            ))
+            .child(action_button("保存", false, move |_, win, app| {
+                save(SettingsAction::SaveFInput(key), win, app)
+            }))
     }
 
     /// 切换折叠分组
@@ -539,9 +538,7 @@ impl SettingsView {
                         },
                         move |_ev, win, app| {
                             act_concurr_inc(
-                                SettingsAction::SetApiConcurrency(
-                                    (cur_concurr + 1).min(10),
-                                ),
+                                SettingsAction::SetApiConcurrency((cur_concurr + 1).min(10)),
                                 win,
                                 app,
                             )
@@ -560,18 +557,14 @@ impl SettingsView {
                         cur_games < 100,
                         move |_ev, win, app| {
                             act_games_dec(
-                                SettingsAction::SetCareerGames(
-                                    cur_games.saturating_sub(5).max(5),
-                                ),
+                                SettingsAction::SetCareerGames(cur_games.saturating_sub(5).max(5)),
                                 win,
                                 app,
                             )
                         },
                         move |_ev, win, app| {
                             act_games_inc(
-                                SettingsAction::SetCareerGames(
-                                    (cur_games + 5).min(100),
-                                ),
+                                SettingsAction::SetCareerGames((cur_games + 5).min(100)),
                                 win,
                                 app,
                             )
@@ -678,9 +671,8 @@ impl SettingsView {
         let act_min = on_action.clone();
 
         let act_toggle_cloud = on_action.clone();
-        let act_clear_upload = on_action.clone();
+
         let act_lcu_rt = on_action.clone();
-        let act_clear_uid = on_action.clone();
 
         let act_toggle_hide = on_action.clone();
         let act_tft = on_action.clone();
@@ -768,7 +760,10 @@ impl SettingsView {
                                                 Theme::TEXT_PRIMARY
                                             })
                                             .child(if is_wegame {
-                                                g.wegame_path.as_deref().unwrap_or("WeGame 安装路径（可手动修改）").to_string()
+                                                g.wegame_path
+                                                    .as_deref()
+                                                    .unwrap_or("WeGame 安装路径（可手动修改）")
+                                                    .to_string()
                                             } else {
                                                 path.clone()
                                             }),
@@ -798,15 +793,27 @@ impl SettingsView {
                             .items_center()
                             .justify_end()
                             .gap(px(8.0))
-                            .child(action_button("自动检测", false, move |_ev, win, app| {
+                            .child(action_button(
+                                "自动检测",
+                                false,
+                                move |_ev, win, app| {
                                 act_detect(SettingsAction::DetectLolPath, win, app)
-                            }))
-                            .child(action_button("浏览文件夹", false, move |_ev, win, app| {
+                                },
+                            ))
+                            .child(action_button(
+                                "浏览文件夹",
+                                false,
+                                move |_ev, win, app| {
                                 act_select_folder(SettingsAction::SelectLolFolder, win, app)
-                            }))
-                            .child(action_button("添加 WeGame 启动项", false, move |_ev, win, app| {
+                                },
+                            ))
+                            .child(action_button(
+                                "添加 WeGame 启动项",
+                                false,
+                                move |_ev, win, app| {
                                 act_add_wegame(SettingsAction::AddWegamePath, win, app)
-                            })),
+                                },
+                            )),
                     ),
             ))
             // 常规通用直显面板 (启动客户端、清除缓存、关闭到托盘、游戏开始最小化)
@@ -872,13 +879,17 @@ impl SettingsView {
                         "已配置上传"
                     };
                     if f.lcu_realtime_enabled {
-                        format!("{} / 云端未连接", upload_st)
+                        format!("{} / {}", upload_st, self.cloud_status.label())
                     } else {
                         upload_st.to_string()
                     }
                 }),
                 move |_ev, win, app| {
-                    act_toggle_cloud(SettingsAction::ToggleCollapse("upload_and_signalr"), win, app)
+                    act_toggle_cloud(
+                        SettingsAction::ToggleCollapse("upload_and_signalr"),
+                        win,
+                        app,
+                    )
                 },
                 div()
                     .flex()
@@ -888,19 +899,7 @@ impl SettingsView {
                     .child(setting_row(
                         "服务器 API 地址:",
                         None,
-                        clearable_input_box(
-                            "http://example.com",
-                            if g.upload_api_url.is_empty() {
-                                "http://example.com"
-                            } else {
-                                &g.upload_api_url
-                            },
-                            false,
-                            300.0,
-                            move |_ev, win, app| {
-                                act_clear_upload(SettingsAction::SetUploadApiUrl("".into()), win, app)
-                            },
-                        ),
+                        self.f_input(0, "f-upload", "http://example.com", on_action.clone()),
                     ))
                     // 2. LCU 实时服务开关
                     .child(setting_row(
@@ -917,19 +916,7 @@ impl SettingsView {
                     .child(setting_row(
                         "userid:",
                         None,
-                        clearable_input_box(
-                            "留空默认使用 lcu_user_001",
-                            if g.signalr_user_id.is_empty() {
-                                "留空默认使用 lcu_user_001"
-                            } else {
-                                &g.signalr_user_id
-                            },
-                            false,
-                            300.0,
-                            move |_ev, win, app| {
-                                act_clear_uid(SettingsAction::SetSignalrUser("".into()), win, app)
-                            },
-                        ),
+                        self.f_input(1, "f-user", "留空默认使用 lcu_user_001", on_action.clone()),
                     )),
             ))
             // 隐藏菜单折叠卡片 (F-V04)
@@ -939,11 +926,14 @@ impl SettingsView {
                 None,
                 "隐藏菜单",
                 "在侧边栏中隐藏选中的菜单入口",
-                Some(if f.hide_tft || f.hide_saved_players {
+                Some(
+                    if f.hide_tft || f.hide_saved_players {
                     "已启用"
                 } else {
                     "未启用"
-                }.to_string()),
+                    }
+                    .to_string(),
+                ),
                 move |_ev, win, app| {
                     act_toggle_hide(SettingsAction::ToggleCollapse("hidemenu"), win, app)
                 },
@@ -980,11 +970,14 @@ impl SettingsView {
                 None,
                 "多杀与超神自动截图",
                 "多杀或超神时自动截图。游戏视频设置须为「无边框」或「窗口化」以防黑屏",
-                Some(if f.enable_screenshot_on_multikill {
+                Some(
+                    if f.enable_screenshot_on_multikill {
                     "已启用"
                 } else {
                     "未启用"
-                }.to_string()),
+                    }
+                    .to_string(),
+                ),
                 move |_ev, win, app| {
                     act_toggle_shot(SettingsAction::ToggleCollapse("screenshot"), win, app)
                 },
@@ -998,7 +991,11 @@ impl SettingsView {
                         div()
                             .cursor_pointer()
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                act_shot_switch(SettingsAction::ToggleScreenshotOnMultikill, win, app)
+                                act_shot_switch(
+                                    SettingsAction::ToggleScreenshotOnMultikill,
+                                    win,
+                                    app,
+                                )
                             })
                             .child(Switch::new(f.enable_screenshot_on_multikill)),
                     ))
@@ -1018,25 +1015,33 @@ impl SettingsView {
                                     "cb-triple".into(),
                                     "三杀",
                                     f.screenshot_on_multikill_levels.contains(&3),
-                                    move |_ev, win, app| act_lvl3(SettingsAction::ToggleScreenshotLevel(3), win, app),
+                                    move |_ev, win, app| {
+                                        act_lvl3(SettingsAction::ToggleScreenshotLevel(3), win, app)
+                                    },
                                 ))
                                 .child(checkbox(
                                     "cb-quadra".into(),
                                     "四杀",
                                     f.screenshot_on_multikill_levels.contains(&4),
-                                    move |_ev, win, app| act_lvl4(SettingsAction::ToggleScreenshotLevel(4), win, app),
+                                    move |_ev, win, app| {
+                                        act_lvl4(SettingsAction::ToggleScreenshotLevel(4), win, app)
+                                    },
                                 ))
                                 .child(checkbox(
                                     "cb-penta".into(),
                                     "五杀",
                                     f.screenshot_on_multikill_levels.contains(&5),
-                                    move |_ev, win, app| act_lvl5(SettingsAction::ToggleScreenshotLevel(5), win, app),
+                                    move |_ev, win, app| {
+                                        act_lvl5(SettingsAction::ToggleScreenshotLevel(5), win, app)
+                                    },
                                 ))
                                 .child(checkbox(
                                     "cb-godlike".into(),
                                     "超神",
                                     f.screenshot_on_multikill_levels.contains(&8),
-                                    move |_ev, win, app| act_lvl8(SettingsAction::ToggleScreenshotLevel(8), win, app),
+                                    move |_ev, win, app| {
+                                        act_lvl8(SettingsAction::ToggleScreenshotLevel(8), win, app)
+                                    },
                                 )),
                         ))
                         .child(setting_row(
@@ -1047,38 +1052,34 @@ impl SettingsView {
                                 .items_center()
                                 .gap(px(8.0))
                                 .flex_1()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .h(px(28.0))
-                                        .px(px(10.0))
-                                        .rounded_md()
-                                        .border_1()
-                                        .border_color(Theme::CARD_BORDER)
-                                        .bg(Theme::CARD_BG)
-                                        .flex()
-                                        .items_center()
-                                        .child(
-                                            div()
-                                                .text_size(px(12.0))
-                                                .text_color(if f.screenshot_save_path.is_empty() {
-                                                    Theme::TEXT_MUTED
-                                                } else {
-                                                    Theme::TEXT_PRIMARY
-                                                })
-                                                .child(if f.screenshot_save_path.is_empty() {
-                                                    "默认保存在系统「图片」目录下的 Yuumi_Screenshots 文件夹".to_string()
-                                                } else {
-                                                    f.screenshot_save_path.clone()
-                                                }),
-                                        ),
+                                .child(self.f_input(
+                                    3,
+                                    "f-screenshot",
+                                    "默认保存至系统图片目录",
+                                    on_action.clone(),
+                                ))
+                                .child(action_button(
+                                    "浏览文件夹",
+                                    false,
+                                    move |_ev, win, app| {
+                                        act_shot_pick(
+                                            SettingsAction::SelectScreenshotFolder,
+                                            win,
+                                            app,
                                 )
-                                .child(action_button("浏览文件夹", false, move |_ev, win, app| {
-                                    act_shot_pick(SettingsAction::SelectScreenshotFolder, win, app)
-                                }))
-                                .child(action_button("打开截图文件夹", false, move |_ev, win, app| {
-                                    act_shot_open(SettingsAction::OpenScreenshotFolder, win, app)
-                                })),
+                                    },
+                                ))
+                                .child(action_button(
+                                    "打开截图文件夹",
+                                    false,
+                                    move |_ev, win, app| {
+                                        act_shot_open(
+                                            SettingsAction::OpenScreenshotFolder,
+                                            win,
+                                            app,
+                                        )
+                                    },
+                                )),
                         ))
                     }),
             ))
@@ -1229,24 +1230,52 @@ impl SettingsView {
                                     .flex_col()
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("浅色", p.theme_mode == "Light", move |_ev, win, app| {
-                                            act(SettingsAction::SetThemeMode("Light".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "浅色",
+                                            p.theme_mode == "Light",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetThemeMode("Light".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     })
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("深色", p.theme_mode == "Dark", move |_ev, win, app| {
-                                            act(SettingsAction::SetThemeMode("Dark".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "深色",
+                                            p.theme_mode == "Dark",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetThemeMode("Dark".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     })
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("跟随系统", p.theme_mode == "Auto", move |_ev, win, app| {
-                                            act(SettingsAction::SetThemeMode("Auto".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "跟随系统",
+                                            p.theme_mode == "Auto",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetThemeMode("Auto".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     }),
                                 move |_ev, win, app| {
-                                    act_toggle_theme_dd(SettingsAction::ToggleDropdown("theme_mode"), win, app)
+                                    act_toggle_theme_dd(
+                                        SettingsAction::ToggleDropdown("theme_mode"),
+                                        win,
+                                        app,
+                                    )
                                 },
                             ),
                         )),
@@ -1290,14 +1319,13 @@ impl SettingsView {
                             },
                         ),
                     ))
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .child(action_button("重置默认颜色", false, move |_ev, win, app| {
+                    .child(div().flex().justify_end().child(action_button(
+                        "重置默认颜色",
+                        false,
+                        move |_ev, win, app| {
                                 act_reset_tcol(SettingsAction::ResetThemeColor, win, app)
-                            })),
-                    ),
+                        },
+                    ))),
             ))
             // 2. 战绩卡片颜色折叠项 (F-V06)
             .child(collapse_card(
@@ -1383,14 +1411,13 @@ impl SettingsView {
                             },
                         ),
                     ))
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .child(action_button("重置默认颜色", false, move |_ev, win, app| {
+                    .child(div().flex().justify_end().child(action_button(
+                        "重置默认颜色",
+                        false,
+                        move |_ev, win, app| {
                                 act_reset_ccol(SettingsAction::ResetCardColors, win, app)
-                            })),
-                    ),
+                        },
+                    ))),
             ))
             // 3. 死亡数字颜色折叠项 (F-V06)
             .child(collapse_card(
@@ -1453,14 +1480,13 @@ impl SettingsView {
                             },
                         ),
                     ))
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .child(action_button("重置默认颜色", false, move |_ev, win, app| {
+                    .child(div().flex().justify_end().child(action_button(
+                        "重置默认颜色",
+                        false,
+                        move |_ev, win, app| {
                                 act_reset_dcol(SettingsAction::ResetDeathsColors, win, app)
-                            })),
-                    ),
+                        },
+                    ))),
             ))
             // 界面缩放与语言选择 (直显卡 F-V05)
             .child(
@@ -1482,30 +1508,66 @@ impl SettingsView {
                                     .flex_col()
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("跟随系统", p.dpi_scale == "Auto", move |_ev, win, app| {
-                                            act(SettingsAction::SetDpiScale("Auto".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "跟随系统",
+                                            p.dpi_scale == "Auto",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetDpiScale("Auto".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     })
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("100%", p.dpi_scale == "100", move |_ev, win, app| {
-                                            act(SettingsAction::SetDpiScale("100".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "100%",
+                                            p.dpi_scale == "100",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetDpiScale("100".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     })
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("125%", p.dpi_scale == "125", move |_ev, win, app| {
-                                            act(SettingsAction::SetDpiScale("125".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "125%",
+                                            p.dpi_scale == "125",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetDpiScale("125".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     })
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("150%", p.dpi_scale == "150", move |_ev, win, app| {
-                                            act(SettingsAction::SetDpiScale("150".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "150%",
+                                            p.dpi_scale == "150",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetDpiScale("150".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     }),
                                 move |_ev, win, app| {
-                                    act_toggle_scale_dd(SettingsAction::ToggleDropdown("dpi_scale"), win, app)
+                                    act_toggle_scale_dd(
+                                        SettingsAction::ToggleDropdown("dpi_scale"),
+                                        win,
+                                        app,
+                                    )
                                 },
                             ),
                         ))
@@ -1523,30 +1585,66 @@ impl SettingsView {
                                     .flex_col()
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("跟随系统", p.language == "Auto", move |_ev, win, app| {
-                                            act(SettingsAction::SetLanguage("Auto".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "跟随系统",
+                                            p.language == "Auto",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetLanguage("Auto".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     })
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("简体中文", p.language == "zh_CN", move |_ev, win, app| {
-                                            act(SettingsAction::SetLanguage("zh_CN".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "简体中文",
+                                            p.language == "zh_CN",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetLanguage("zh_CN".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     })
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("繁體中文", p.language == "zh_TW", move |_ev, win, app| {
-                                            act(SettingsAction::SetLanguage("zh_TW".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "繁體中文",
+                                            p.language == "zh_TW",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetLanguage("zh_TW".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     })
                                     .child({
                                         let act = on_action.clone();
-                                        select_dropdown_item("English", p.language == "en_US", move |_ev, win, app| {
-                                            act(SettingsAction::SetLanguage("en_US".into()), win, app)
-                                        })
+                                        select_dropdown_item(
+                                            "English",
+                                            p.language == "en_US",
+                                            move |_ev, win, app| {
+                                                act(
+                                                    SettingsAction::SetLanguage("en_US".into()),
+                                                    win,
+                                                    app,
+                                                )
+                                            },
+                                        )
                                     }),
                                 move |_ev, win, app| {
-                                    act_toggle_lang_dd(SettingsAction::ToggleDropdown("language"), win, app)
+                                    act_toggle_lang_dd(
+                                        SettingsAction::ToggleDropdown("language"),
+                                        win,
+                                        app,
+                                    )
                                 },
                             ),
                         )),
@@ -1565,10 +1663,7 @@ impl SettingsView {
         let act_switch = on_action.clone();
 
         Card::new().rounded(px(12.0)).overflow_hidden().child(
-            div()
-                .flex()
-                .flex_col()
-                .child(settings_card_item(
+            div().flex().flex_col().child(settings_card_item(
                     "检查更新",
                     Some(if is_port {
                         "便携版通过 zip 覆盖方式自动更新，更新后自动重启"
@@ -1580,13 +1675,19 @@ impl SettingsView {
                         .flex()
                         .items_center()
                         .gap(px(10.0))
-                        .child(action_button("检查更新", false, move |_ev, win, app| {
-                            act_check(SettingsAction::CheckUpdate, win, app)
-                        }))
+                    .child(action_button(
+                        "检查更新",
+                        false,
+                        move |_ev, win, app| act_check(SettingsAction::CheckUpdate, win, app),
+                    ))
                         .when(is_port, |this| {
-                            this.child(action_button("前往 GitHub 下载", false, move |_ev, win, app| {
+                        this.child(action_button(
+                            "前往 GitHub 下载",
+                            false,
+                            move |_ev, win, app| {
                                 act_release(SettingsAction::GoToReleases, win, app)
-                            }))
+                            },
+                        ))
                         })
                         .child(
                             div()
@@ -1609,7 +1710,6 @@ impl SettingsView {
         let open_proxy = self.open_sections.contains("httpproxy");
         let act_toggle = on_action.clone();
         let act_switch = on_action.clone();
-        let act_clear = on_action.clone();
 
         collapse_card(
             "settings-card-proxy".into(),
@@ -1617,35 +1717,22 @@ impl SettingsView {
             None,
             "软件 HTTP 代理",
             "软件更新、TFT 数据、OP.GG 及 GitHub 服务访问走此 HTTP 代理通道",
-            Some(if g.enable_http_proxy {
+            Some(
+                if g.enable_http_proxy {
                 "已启用"
             } else {
                 "未启用"
-            }.to_string()),
-            move |_ev, win, app| {
-                act_toggle(SettingsAction::ToggleCollapse("httpproxy"), win, app)
-            },
+                }
+                .to_string(),
+            ),
+            move |_ev, win, app| act_toggle(SettingsAction::ToggleCollapse("httpproxy"), win, app),
             div()
                 .w_full()
                 .flex()
                 .items_center()
                 .justify_between()
                 .gap(px(16.0))
-                .child(
-                    clearable_input_box(
-                        "127.0.0.1:7897",
-                        if g.http_proxy_addr.is_empty() {
-                            "127.0.0.1:7897"
-                        } else {
-                            &g.http_proxy_addr
-                        },
-                        !g.enable_http_proxy,
-                        300.0,
-                        move |_ev, win, app| {
-                            act_clear(SettingsAction::SetHttpProxyAddr("".into()), win, app)
-                        },
-                    ),
-                )
+                .child(self.f_input(2, "f-proxy", "127.0.0.1:7897", on_action.clone()))
                 .child(
                     div()
                         .cursor_pointer()
@@ -1737,6 +1824,7 @@ impl SettingsView {
         F: Fn(SettingsAction, &mut Window, &mut App) + 'static + Clone,
     {
         let act_close = on_action.clone();
+        let act_refresh = on_action.clone();
 
         div()
             .id("changelog-modal-backdrop")
@@ -1772,25 +1860,12 @@ impl SettingsView {
                             .items_center()
                             .justify_between()
                             .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(10.0))
-                                    .child(
+                                div().flex().items_center().gap(px(10.0)).child(
                                         div()
                                             .text_size(px(15.0))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(Theme::TEXT_PRIMARY)
                                             .child("更新日志"),
-                                    )
-                                    .child(
-                                        Badge::new("v2.5.0").variant(BadgeVariant::Primary),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(12.0))
-                                            .text_color(Theme::TEXT_MUTED)
-                                            .child("2025/03/10"),
                                     ),
                             )
                             .child(
@@ -1803,7 +1878,9 @@ impl SettingsView {
                                     .justify_center()
                                     .text_size(px(14.0))
                                     .text_color(Theme::TEXT_MUTED)
-                                    .hover(|s| s.bg(Theme::HOVER_BG).text_color(Theme::TEXT_PRIMARY))
+                                    .hover(|s| {
+                                        s.bg(Theme::HOVER_BG).text_color(Theme::TEXT_PRIMARY)
+                                    })
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         act_close(SettingsAction::ToggleChangelog, win, app)
                                     })
@@ -1820,41 +1897,19 @@ impl SettingsView {
                             .flex()
                             .flex_col()
                             .gap(px(14.0))
-                            .child(
+                            .child(action_button("刷新", false, move |_, win, app| {
+                                act_refresh(SettingsAction::RefreshChangelog, win, app)
+                            }))
+                            .when(self.release_loading, |d| d.child("正在加载更新日志…"))
+                            .when_some(self.release_error.clone(), |d, error| d.child(error))
+                            .children(self.release_notes.iter().map(|release| {
                                 div()
-                                    .text_size(px(13.5))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child("v2.5.0 原生 GPUI 重构版"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(12.5))
-                                    .line_height(relative(1.6))
-                                    .text_color(Theme::TEXT_SECONDARY)
-                                    .child("• 采用 Rust + GPUI 深度重构，渲染性能显著提升，内存占用相比 Web 架构降低 70%"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(12.5))
-                                    .line_height(relative(1.6))
-                                    .text_color(Theme::TEXT_SECONDARY)
-                                    .child("• 纯白水晶极光设计语言，对齐 Windows 11 云母半透特效"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(12.5))
-                                    .line_height(relative(1.6))
-                                    .text_color(Theme::TEXT_SECONDARY)
-                                    .child("• 1:1 像素级复刻 Vue 原版设置项、客户端路径、云服务与个性化配置"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(12.5))
-                                    .line_height(relative(1.6))
-                                    .text_color(Theme::TEXT_SECONDARY)
-                                    .child("• 优化自动选用英雄与召唤师技能配置流程，提升选人阶段响应速度"),
-                            ),
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(6.0))
+                                    .child(format!("{}  {}", release.tag, release.published_at))
+                                    .child(release.body.clone())
+                            })),
                     ),
             )
     }

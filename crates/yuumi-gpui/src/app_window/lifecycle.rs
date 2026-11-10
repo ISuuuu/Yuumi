@@ -8,6 +8,7 @@ impl MainWindow {
                 if let ConnectionStatus::Connected { summoner, .. } = &status {
                     if let Some(s) = summoner.as_ref() {
                         self.own_summoner = Some(s.clone());
+                        self.cloud_tasks.upload_matches(s.puuid.clone(), Vec::new(), false);
                         if !self.career_view.is_viewing_other {
                             self.career_view.summoner = Some(s.clone());
                         }
@@ -20,6 +21,9 @@ impl MainWindow {
                 if matches!(status, ConnectionStatus::Disconnected) {
                     // 客户端断开：立即收起悬浮窗，避免残留空窗
                     self.bench_session = None;
+                    self.cloud_tasks.set_in_game(false);
+                    self.cloud_game_id = None;
+                    self.cloud_match_played = false;
                     self.game_info_loading = false;
                     self.close_bench_overlay(cx);
                 }
@@ -131,6 +135,24 @@ impl MainWindow {
             LiveLcuEvent::GamePhaseChanged(phase) => {
                 log::info!("[MainWindow] 接收到游戏阶段更新: {:?}", phase);
                 self.current_phase = phase.as_str().to_string();
+                let in_game = matches!(
+                    phase,
+                    GamePhase::GameStart | GamePhase::InProgress | GamePhase::Reconnect
+                );
+                self.cloud_tasks.set_in_game(in_game);
+                if in_game {
+                    self.cloud_match_played = true;
+                } else if matches!(phase.as_str(), "ChampSelect" | "ReadyCheck") {
+                    self.cloud_match_played = false;
+                    self.cloud_game_id = None;
+                } else if matches!(phase.as_str(), "EndOfGame" | "Lobby" | "None")
+                    && std::mem::take(&mut self.cloud_match_played)
+                {
+                    let id = self.cloud_game_id.take();
+                    if let Some(player) = self.own_summoner.as_ref() {
+                        self.cloud_tasks.upload_finished(player.puuid.clone(), id);
+                    }
+                }
                 if !matches!(
                     self.current_phase.as_str(),
                     "ChampSelect" | "GameStart" | "InProgress" | "Reconnect"
@@ -229,6 +251,12 @@ impl MainWindow {
                     .collect();
                 prewarm_assets(asset_paths, cx);
 
+                if !info.is_demo
+                    && self.cloud_match_played
+                    && matches!(self.current_phase.as_str(), "GameStart" | "InProgress" | "Reconnect" | "PreEndOfGame")
+                {
+                    self.cloud_game_id = info.game_id.filter(|id| *id > 0).or(self.cloud_game_id);
+                }
                 self.game_info = Some(info);
                 self.game_info_loading = false;
                 cx.notify();
@@ -496,6 +524,11 @@ impl MainWindow {
     /// 将全局配置同步进磁盘、Agent 运行时与悬浮窗
     pub(super) fn persist_config(&mut self, cx: &mut Context<Self>) {
         self.automation = self.app_config.to_automation_settings();
+        self.search_view.has_upload_api_url =
+            !self.app_config.general.upload_api_url.trim().is_empty();
+        self.search_view.upload_enabled = self.app_config.functions.upload_enabled;
+        self.cloud_tasks.apply(&self.app_config);
+        services::logging::set_level(self.app_config.general.log_level);
 
         let _ = self
             .live_service

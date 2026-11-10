@@ -110,6 +110,60 @@ impl MainWindow {
                     !self.app_config.general.enable_game_start_minimize;
                 self.persist_config(cx);
             }
+            SettingsAction::EditFInput(key, value) => {
+                let index = match key {
+                    "f-upload" => 0,
+                    "f-user" => 1,
+                    "f-proxy" => 2,
+                    "f-screenshot" => 3,
+                    _ => return,
+                };
+                self.settings_view.f_inputs[index] = value;
+                cx.notify();
+            }
+            SettingsAction::SaveFInput(key) => {
+                let index = match key {
+                    "f-upload" => 0,
+                    "f-user" => 1,
+                    "f-proxy" => 2,
+                    "f-screenshot" => 3,
+                    _ => return,
+                };
+                let value = self.settings_view.f_inputs[index].trim().to_string();
+                if index == 0
+                    && !value.is_empty()
+                    && (value.chars().any(char::is_whitespace)
+                        || value.strip_prefix("http://").or_else(|| value.strip_prefix("https://"))
+                            .and_then(|rest| rest.split('/').next())
+                            .is_none_or(|host| host.is_empty()))
+                {
+                    self.settings_view
+                        .set_feedback("请输入有效的 HTTP 或 HTTPS 上传地址", true);
+                    cx.notify();
+                    return;
+                }
+                if index == 2
+                    && !value.is_empty()
+                    && (value.chars().any(char::is_whitespace)
+                        || value.rsplit_once(':').is_none_or(|(host, port)| {
+                            host.is_empty() || port.parse::<u16>().is_err() || port == "0"
+                        }))
+                {
+                    self.settings_view
+                        .set_feedback("请输入有效的代理地址（例如 127.0.0.1:7897）", true);
+                    cx.notify();
+                    return;
+                }
+                self.settings_view.f_inputs[index] = value.clone();
+                match index {
+                    0 => self.app_config.general.upload_api_url = value,
+                    1 => self.app_config.general.signalr_user_id = value,
+                    2 => self.app_config.general.http_proxy_addr = value,
+                    3 => self.app_config.functions.screenshot_save_path = value,
+                    _ => unreachable!(),
+                }
+                self.persist_config(cx);
+            }
             SettingsAction::SetUploadApiUrl(url) => {
                 self.app_config.general.upload_api_url = url;
                 self.persist_config(cx);
@@ -172,29 +226,29 @@ impl MainWindow {
             }
             SettingsAction::SelectScreenshotFolder => {
                 if let Some(folder) = services::select_folder() {
+                    self.settings_view.f_inputs[3] = folder.clone();
                     self.app_config.functions.screenshot_save_path = folder;
                     self.persist_config(cx);
                 }
             }
             SettingsAction::OpenScreenshotFolder => {
                 let path = self.app_config.functions.screenshot_save_path.clone();
-                std::thread::spawn(move || {
-                    let p = if path.is_empty() {
-                        yuumi_core::runtime::app_data_dir().join("screenshots")
-                    } else {
-                        std::path::PathBuf::from(path)
-                    };
+                std::thread::spawn(move || match services::screenshot::screenshot_dir(&path) {
+                    Ok(p) => {
                     let _ = services::open_folder(p);
+                    }
+                    Err(e) => log::error!("打开截图目录失败: {e}"),
                 });
             }
             SettingsAction::SetLogLevel(lvl) => {
                 self.settings_view.open_log_level_dropdown = false;
                 self.app_config.general.log_level = lvl;
+                services::logging::set_level(lvl);
                 self.persist_config(cx);
             }
             SettingsAction::OpenLogFolder => {
                 std::thread::spawn(|| {
-                    let _ = services::open_log_folder();
+                    let _ = services::open_folder(services::logging::log_dir());
                 });
             }
             SettingsAction::ToggleMica => {
@@ -269,9 +323,7 @@ impl MainWindow {
                 self.persist_config(cx);
             }
             SettingsAction::CheckUpdate => {
-                self.settings_view
-                    .set_feedback("当前已是最新版本 (v2.5.0)", false);
-                cx.notify();
+                self.check_updates(true, cx);
             }
             SettingsAction::ToggleCheckUpdate => {
                 self.app_config.general.enable_check_update =
@@ -300,8 +352,12 @@ impl MainWindow {
             }
             SettingsAction::ToggleChangelog => {
                 self.settings_view.show_changelog = !self.settings_view.show_changelog;
+                if self.settings_view.show_changelog {
+                    self.load_release_notes(false, cx);
+                }
                 cx.notify();
             }
+            SettingsAction::RefreshChangelog => self.load_release_notes(true, cx),
             SettingsAction::OpenRepo => {
                 #[cfg(target_os = "windows")]
                 let _ = std::process::Command::new("cmd")

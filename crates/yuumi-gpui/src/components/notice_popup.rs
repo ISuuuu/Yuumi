@@ -8,8 +8,8 @@ use crate::theme::Theme;
 use gpui::*;
 
 pub fn notice_popup(
-    title: &'static str,
-    content: &'static str,
+    title: String,
+    content: String,
     on_close: impl Fn(&mut Window, &mut App) + 'static + Clone,
 ) -> impl IntoElement {
     let close_cb = on_close;

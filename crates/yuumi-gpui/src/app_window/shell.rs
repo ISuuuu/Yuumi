@@ -200,8 +200,8 @@ impl Render for MainWindow {
                         .right(px(20.0))
                         .bottom(px(20.0))
                         .child(notice_popup(
-                            "版本更新与运行公告",
-                            "当前版本已完整复刻 Vue 纯白水晶极光界面，Direct3D 11 原生极速渲染，内存与启动性能优化完毕。",
+                            self.settings_view.release_notes.first().map(|r| format!("版本公告 {}", r.tag)).unwrap_or_else(|| "版本公告".into()),
+                            self.settings_view.release_notes.first().map(|r| r.body.clone()).unwrap_or_else(|| self.settings_view.release_error.clone().unwrap_or_else(|| "正在读取版本公告…".into())),
                             move |_win, app| {
                                 v.update(app, |this, cx| {
                                     this.toggle_notice_popup(false, cx);
@@ -210,6 +210,7 @@ impl Render for MainWindow {
                         )),
                 )
             })
+            .child(self.render_update_surface(&view_entity))
             // 4. OP.GG 入口提示（独立窗口已在原生窗口层打开，这里仅承载临时提示）
             .when_some(self.opgg_hint.clone(), |el, hint| {
                 el.child(
@@ -233,6 +234,7 @@ impl Render for MainWindow {
 impl MainWindow {
     pub(super) fn toggle_notice_popup(&mut self, open: bool, cx: &mut Context<Self>) {
         self.notice_popup_open = open;
+        if open { self.load_release_notes(false, cx); }
         cx.notify();
     }
 

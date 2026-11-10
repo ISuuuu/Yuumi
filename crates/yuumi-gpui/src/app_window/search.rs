@@ -2,6 +2,19 @@
 use super::*;
 
 impl MainWindow {
+    fn upload_current_search_page(&self) {
+        let Some(owner) = self.own_summoner.as_ref() else {
+            return;
+        };
+        if !self.app_config.functions.upload_enabled
+            || self.search_view.current_summoner_puuid.as_deref() != Some(owner.puuid.as_str())
+        {
+            return;
+        }
+        let (items, _, _) = self.search_view.paged_filtered_matches();
+        let ids = items.iter().map(|item| item.display.game_id).collect();
+        self.cloud_tasks.upload_matches(owner.puuid.clone(), ids, true);
+    }
     /// 控制战绩查询页队列下拉的开合
     pub(super) fn set_search_queue_menu(&mut self, open: bool, cx: &mut Context<Self>) {
         self.search_view.queue_menu_open = open;
@@ -91,6 +104,7 @@ impl MainWindow {
                                     summoner.summoner_id.unwrap_or(0),
                                     items,
                                 );
+                                this.upload_current_search_page();
                                 if let Some(gid) = selected_game_id {
                                     this.search_view.selected_game_id = Some(gid);
                                 }
@@ -257,6 +271,7 @@ impl MainWindow {
                 v.update(app, |this, cx| {
                     this.search_view.active_queue_filter = qid;
                     this.search_view.current_page = 1;
+                    this.upload_current_search_page();
                     let (paged, _, _) = this.search_view.paged_filtered_matches();
                     if let Some(first) = paged.first() {
                         let gid = first.display.game_id;
@@ -324,11 +339,13 @@ impl MainWindow {
             move |_window, app| {
                 view_prev.update(app, |this, cx| {
                     this.handle_search_prev_page(cx);
+                    this.upload_current_search_page();
                 });
             },
             move |_window, app| {
                 view_next.update(app, |this, cx| {
                     this.handle_search_next_page(cx);
+                    this.upload_current_search_page();
                 });
             },
             move |_window, app| {
@@ -351,7 +368,11 @@ impl MainWindow {
             },
             move |val, _window, app| {
                 view_upload.update(app, |this, cx| {
-                    this.search_view.upload_enabled = val;
+                    this.app_config.functions.upload_enabled = val;
+                    this.persist_config(cx);
+                    if val {
+                        this.upload_current_search_page();
+                    }
                     cx.notify();
                 });
             },
