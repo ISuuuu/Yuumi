@@ -49,6 +49,7 @@ use yuumi_core::parsers::summoner::SummonerInfo;
 
 mod career;
 mod game_info;
+mod f_updates;
 mod lifecycle;
 mod saved_players;
 mod search;
@@ -131,6 +132,9 @@ pub struct MainWindow {
     tray: Option<TrayManager>,
     overlay_window: Option<WindowHandle<BenchOverlayView>>,
     live_service: LiveLcuService,
+    cloud_tasks: services::cloud_tasks::CloudTasks,
+    cloud_game_id: Option<u64>,
+    cloud_match_played: bool,
     connection_status: ConnectionStatus,
     /// 全局配置（对齐 %APPDATA%/Yuumi/config.json，修改即回写）
     app_config: AppConfig,
@@ -143,6 +147,7 @@ pub struct MainWindow {
     /// 主视口全局滚动跟踪句柄（用于监听滚动到底部与回到顶部）
     main_scroll_handle: ScrollHandle,
     /// 是否有版本更新（用于在侧栏设置图标显示红点）
+    f_update: f_updates::UpdateFlow,
     has_update: bool,
     /// 公告弹窗是否打开
     notice_popup_open: bool,
@@ -179,9 +184,12 @@ impl MainWindow {
         let automation = app_config.to_automation_settings();
         let tools_view = ToolsView::new();
 
-        let search_view = SearchView::new(cx).with_matches(matches.clone());
+        let mut search_view = SearchView::new(cx).with_matches(matches.clone());
+        search_view.has_upload_api_url = !app_config.general.upload_api_url.trim().is_empty();
+        search_view.upload_enabled = app_config.functions.upload_enabled;
         let saved_players_view = SavedPlayersView::new(cx);
-        let settings_view = SettingsView::new();
+        let mut settings_view = SettingsView::new();
+        settings_view.bind_f_inputs(&app_config, cx);
         let home_view = HomeView::new();
         let tray = match TrayManager::new(app_config.functions.hide_tft) {
             Ok(tray) => Some(tray),
@@ -211,6 +219,20 @@ impl MainWindow {
         let asset_cache = std::sync::Arc::new(yuumi_core::lcu::asset_cache::AssetCache::default());
         asset_loader::init_global_asset_loader(asset_cache.clone());
         let live_service = LiveLcuService::new(asset_cache);
+        let mut cloud_tasks = services::cloud_tasks::CloudTasks::new(live_service.clone());
+        let mut cloud_status = cloud_tasks.subscribe_status();
+        cloud_tasks.apply(&app_config);
+        cx.spawn(async move |entity, cx| {
+            loop {
+                let status = *cloud_status.borrow_and_update();
+                if entity.update(cx, |view, cx| {
+                    view.settings_view.cloud_status = status;
+                    cx.notify();
+                }).is_err() || cloud_status.changed().await.is_err() {
+                    break;
+                }
+            }
+        }).detach();
 
         // 启动即把持久化配置灌入 Agent 运行时，避免默认值覆盖用户选择
         let _ = live_service
@@ -251,6 +273,12 @@ impl MainWindow {
         })
         .detach();
 
+        // 启动即静默检查版本更新（手动检查走设置页）
+        cx.spawn(async move |entity, cx| {
+            let _ = entity.update(cx, |view, cx| view.check_updates(false, cx));
+        })
+        .detach();
+
         // 启动即保持空态，真实战绩到达后由事件统一预热资源并重绘
         let own_matches = matches.clone();
         let own_stats = stats.clone();
@@ -282,12 +310,16 @@ impl MainWindow {
             tray,
             overlay_window: None,
             live_service,
+            cloud_tasks,
+            cloud_game_id: None,
+            cloud_match_played: false,
             connection_status: ConnectionStatus::Disconnected,
             app_config,
             automation,
             bench_session: None,
             game_assets: None,
             main_scroll_handle: ScrollHandle::new(),
+            f_update: f_updates::UpdateFlow::default(),
             has_update: false,
             notice_popup_open: false,
             notice_content: None,

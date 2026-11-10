@@ -79,6 +79,7 @@ pub enum LiveLcuEvent {
 pub struct LiveLcuService {
     pub status: Arc<watch::Sender<ConnectionStatus>>,
     pub event_tx: broadcast::Sender<LiveLcuEvent>,
+    cloud_events: broadcast::Sender<LcuWsEvent>,
     pub supervisor: Arc<AgentSupervisor>,
     pub lifecycle: Arc<LifecycleManager>,
     pub asset_cache: Arc<AssetCache>,
@@ -106,12 +107,14 @@ impl LiveLcuService {
     pub fn new(asset_cache: Arc<AssetCache>) -> Self {
         let (status_tx, _) = watch::channel(ConnectionStatus::Disconnected);
         let (event_tx, _) = broadcast::channel(128);
+        let (cloud_events, _) = broadcast::channel(64);
         let (match_tx, _) = watch::channel(AutoMatchConfig::default());
         let (bp_tx, _) = watch::channel(AutoBpConfig::default());
 
         Self {
             status: Arc::new(status_tx),
             event_tx,
+            cloud_events,
             supervisor: Arc::new(AgentSupervisor::new()),
             lifecycle: Arc::new(LifecycleManager::new()),
             asset_cache,
@@ -131,6 +134,10 @@ impl LiveLcuService {
 
     pub fn subscribe_events(&self) -> broadcast::Receiver<LiveLcuEvent> {
         self.event_tx.subscribe()
+    }
+
+    pub fn subscribe_cloud_events(&self) -> broadcast::Receiver<LcuWsEvent> {
+        self.cloud_events.subscribe()
     }
 
     pub fn subscribe_status(&self) -> watch::Receiver<ConnectionStatus> {
@@ -313,6 +320,9 @@ impl LiveLcuService {
 
     /// 将 WS 事件分发给后台 Agent Worker，并向 UI 广播领域事件
     async fn handle_ws_event(&self, event: LcuWsEvent) {
+        if self.cloud_events.receiver_count() > 0 && yuumi_core::signalr::forwards_event(&event.uri) {
+            let _ = self.cloud_events.send(event.clone());
+        }
         let dispatcher = {
             let guard = self.agent_runtime.read().await;
             guard.as_ref().map(|runtime| runtime.dispatcher())

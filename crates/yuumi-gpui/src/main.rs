@@ -26,6 +26,7 @@ use app_window::{main_window_bounds, MainWindow};
 pub use app_window::{BENCH_WINDOW_TITLE, MAIN_WINDOW_TITLE};
 
 fn main() {
+    if yuumi_core::update::run_portable_helper_if_requested() { return; }
     // 显式安装全局默认 CryptoProvider，防止 rustls 0.23+ 多 provider 特性冲突
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -57,7 +58,10 @@ fn main() {
     };
 
     // 2. 初始化平台日志系统（输出到标准错误与调试输出）
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    yuumi_core::runtime::init();
+    if let Err(error) = services::logging::init(yuumi_core::config::AppConfig::load().general.log_level) {
+        eprintln!("日志初始化失败: {error}");
+    }
     log::info!("Yuumi GPUI 原生 Direct3D 11/DirectWrite 渲染宿主正在启动...");
 
     // 3. 创建 GPUI 原生应用程序宿主（挂载内嵌图标与 Logo 资源）

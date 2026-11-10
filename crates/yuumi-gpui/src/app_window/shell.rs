@@ -257,6 +257,7 @@ impl Render for MainWindow {
                         )),
                 )
             })
+            .child(self.render_update_surface(&view_entity))
             // 4. OP.GG 入口提示（独立窗口已在原生窗口层打开，这里仅承载临时提示）
             .when_some(self.opgg_hint.clone(), |el, hint| {
                 el.child(
