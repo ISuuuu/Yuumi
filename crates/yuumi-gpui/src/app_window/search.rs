@@ -5,15 +5,18 @@ use crate::match_model::ReplayState;
 impl MainWindow {
     fn upload_current_search_page(&self) {
         let Some(owner) = self.own_summoner.as_ref() else {
+            log::debug!("[Upload] 跳过：本机召唤师未连接");
             return;
         };
         if !self.app_config.functions.upload_enabled
             || self.search_view.current_summoner_puuid.as_deref() != Some(owner.puuid.as_str())
         {
+            log::debug!("[Upload] 跳过：未勾选上传或当前查询非本人战绩");
             return;
         }
         let (items, _, _) = self.search_view.paged_filtered_matches();
-        let ids = items.iter().map(|item| item.display.game_id).collect();
+        let ids: Vec<u64> = items.iter().map(|item| item.display.game_id).collect();
+        log::info!("[Upload] 查询触发批量上传: {} 场对局", ids.len());
         self.cloud_tasks.upload_matches(owner.puuid.clone(), ids, true);
     }
     /// 控制战绩查询页队列下拉的开合

@@ -140,6 +140,7 @@ impl CloudTasks {
     fn schedule_upload(&self, owner: String, ids: Vec<u64>, batch: bool, finished: bool) {
         let options = self.options.subscribe();
         let Some(url) = options.borrow().upload_url.clone() else {
+            log::debug!("[Upload] 未配置有效的上传地址，跳过上传任务");
             return;
         };
         if owner.is_empty() {
@@ -185,7 +186,7 @@ impl Drop for CloudTasks {
 
 fn configured_upload(config: &AppConfig) -> Option<String> {
     let address = config.general.upload_api_url.trim();
-    if !config.functions.upload_enabled || address.is_empty() {
+    if address.is_empty() {
         return None;
     }
     let address = if address.contains("://") {
@@ -306,6 +307,7 @@ async fn upload(
             }
         }
         if ids.is_empty() {
+            log::info!("[Upload] 未能定位刚结束的对局，仅重试待传队列");
             return queue.retry_pending(url).await.map(|_| ());
         }
     }
@@ -324,10 +326,12 @@ async fn upload(
         }
     }
     if batch {
-        queue.upload_batch(url, &payloads).await?;
+        let (success, failed) = queue.upload_batch(url, &payloads).await?;
+        log::info!("[Upload] 批量上传完成: 成功={} 失败={}", success, failed);
     } else {
         for payload in payloads {
-            queue.enqueue(url, payload).await?;
+            let outcome = queue.enqueue(url, payload).await?;
+            log::info!("[Upload] 对局上传完成: {outcome}");
         }
         queue.retry_pending(url).await?;
     }
@@ -432,15 +436,18 @@ mod tests {
     #[test]
     fn upload_scope_uses_canonical_target() {
         let mut config = AppConfig::default();
-        config.functions.upload_enabled = true;
         config.general.upload_api_url = "HTTP://Example.com:80/api/lol/upload/".into();
         assert_eq!(
             configured_upload(&config).as_deref(),
             Some("http://example.com")
         );
+        // 上传开关（functions.upload_enabled）只门禁查询页触发路径，
+        // 游戏结束自动上传仅依赖 URL 配置（对齐 Vue 原版 UploadTrigger）。
         config.functions.upload_enabled = false;
-        assert!(configured_upload(&config).is_none());
-        config.functions.upload_enabled = true;
+        assert_eq!(
+            configured_upload(&config).as_deref(),
+            Some("http://example.com")
+        );
         config.general.upload_api_url = "http://user:password@example.com".into();
         assert!(configured_upload(&config).is_none());
     }

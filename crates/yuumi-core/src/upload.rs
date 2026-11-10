@@ -626,7 +626,11 @@ impl UploadQueue {
             return Ok("exists".into());
         }
         let json = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
-        self.open()?.execute("INSERT INTO pending_uploads(game_id,payload) VALUES(?1,?2) ON CONFLICT(game_id) DO UPDATE SET payload=excluded.payload", rusqlite::params![id as i64,json]).map_err(|e| e.to_string())?;
+        {
+            let conn = self.open()?;
+            conn.execute("INSERT INTO pending_uploads(game_id,payload) VALUES(?1,?2) ON CONFLICT(game_id) DO UPDATE SET payload=excluded.payload", rusqlite::params![id as i64,json]).map_err(|e| e.to_string())?;
+            prune_pending(&conn)?;
+        }
         self.send_pending(base_url, &payload).await
     }
     async fn send_pending(
@@ -656,34 +660,80 @@ impl UploadQueue {
         }
         result
     }
+    /// 发送单条载荷：30 秒预算内最多尝试 6 次（对齐旧版 `post_payload_to_api`）。
+    /// 4xx 客户端错误（参数/鉴权等）重试无意义，当场直接放弃（仍会落盘等待人工/后续触发）。
     async fn post_single(&self, base_url: &str, payload: &UploadPayload) -> Result<String, String> {
-        let response = self
-            .client
-            .post(upload_url(base_url, false))
-            .json(payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(format!("HTTP {status}"));
-        }
-        let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        if json.get("success").and_then(|v| v.as_bool()) != Some(true) {
-            return Err(json
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("服务器处理失败")
-                .to_string());
-        }
-        Ok(
-            if json.pointer("/data/isNewMatch").and_then(|v| v.as_bool()) == Some(true) {
-                "new"
-            } else {
-                "exists"
+        const UPLOAD_RETRY_BUDGET: Duration = Duration::from_secs(30);
+        let deadline = tokio::time::Instant::now() + UPLOAD_RETRY_BUDGET;
+        let mut last_err = String::new();
+        for attempt in 0..=5u32 {
+            // 预算耗尽后立即返回 Err，让调用方落盘而非被外层超时打断
+            if tokio::time::Instant::now() >= deadline {
+                last_err = format!("重试预算耗尽: {last_err}");
+                break;
             }
-            .into(),
-        )
+            let response = self
+                .client
+                .post(upload_url(base_url, false))
+                .json(payload)
+                .send()
+                .await;
+            match response {
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_client_error() {
+                        return Err(format!(
+                            "对局 {} 上传被拒绝: HTTP {} (客户端错误不重试)",
+                            payload.match_info.match_id, status
+                        ));
+                    }
+                    if status.is_success() {
+                        match response.json::<serde_json::Value>().await {
+                            Ok(json) => {
+                                if json.get("success").and_then(|v| v.as_bool()) == Some(true) {
+                                    return Ok(
+                                        if json.pointer("/data/isNewMatch").and_then(|v| v.as_bool())
+                                            == Some(true)
+                                        {
+                                            "new"
+                                        } else {
+                                            "exists"
+                                        }
+                                        .into(),
+                                    );
+                                }
+                                last_err = json
+                                    .get("message")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("服务器处理失败")
+                                    .to_string();
+                            }
+                            Err(_) => last_err = "解析响应失败".into(),
+                        }
+                    } else {
+                        last_err = format!("HTTP {status}");
+                    }
+                }
+                Err(e) => last_err = format!("请求失败: {e}"),
+            }
+            if attempt < 5 {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                log::warn!(
+                    "[Upload] 对局 {} 上传失败 ({}), 重试 {}/5",
+                    payload.match_info.match_id,
+                    last_err,
+                    attempt + 1
+                );
+                tokio::time::sleep(Duration::from_secs(1).min(remaining)).await;
+            }
+        }
+        Err(format!(
+            "对局 {} 上传失败: {last_err}",
+            payload.match_info.match_id
+        ))
     }
     /// 重试持久化记录，最多自动尝试十次；无地址时不会发送请求。
     pub async fn retry_pending(&self, base_url: &str) -> Result<usize, String> {
@@ -713,7 +763,9 @@ impl UploadQueue {
         };
         let mut success = 0;
         for payload in payloads {
-            if self.send_pending(base_url, &payload).await.is_ok() {
+            if let Err(e) = self.send_pending(base_url, &payload).await {
+                log::warn!("[Upload] 待传对局 {} 重试失败: {e}", payload.match_info.match_id);
+            } else {
                 success += 1;
             }
         }
@@ -740,11 +792,15 @@ impl UploadQueue {
             .cloned()
             .collect();
         for chunk in pending.chunks(10) {
-            for p in chunk {
-                if p.match_info.match_id == 0 {
-                    return Err("对局 ID 无效".into());
+            {
+                let conn = self.open()?;
+                for p in chunk {
+                    if p.match_info.match_id == 0 {
+                        return Err("对局 ID 无效".into());
+                    }
+                    conn.execute("INSERT INTO pending_uploads(game_id,payload) VALUES(?1,?2) ON CONFLICT(game_id) DO UPDATE SET payload=excluded.payload", rusqlite::params![p.match_info.match_id as i64, serde_json::to_string(p).map_err(|e| e.to_string())?]).map_err(|e| e.to_string())?;
                 }
-                self.open()?.execute("INSERT INTO pending_uploads(game_id,payload) VALUES(?1,?2) ON CONFLICT(game_id) DO UPDATE SET payload=excluded.payload", rusqlite::params![p.match_info.match_id as i64, serde_json::to_string(p).map_err(|e| e.to_string())?]).map_err(|e| e.to_string())?;
+                prune_pending(&conn)?;
             }
             let response = self
                 .client
@@ -788,6 +844,19 @@ impl UploadQueue {
         }
         Ok((success, failed))
     }
+}
+
+/// 保留最新 100 条待传记录，清理更旧的行（对齐旧版 add_or_update_pending_upload 的清理策略；
+/// game_id 为 INTEGER PRIMARY KEY 即 rowid 别名，按 rowid DESC 即插入顺序倒序）。
+fn prune_pending(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM pending_uploads WHERE game_id NOT IN (
+            SELECT game_id FROM pending_uploads ORDER BY rowid DESC LIMIT 100
+        )",
+        [],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
 }
 
 fn ensure_membership(detail: &GameDetail, puuid: &str) -> Result<(), String> {
@@ -915,16 +984,69 @@ mod tests {
         });
         (format!("http://{addr}"), handle)
     }
+    /// 持续返回指定状态并接受全部连接；记录首个请求与请求总数，
+    /// 由调用方在断言后 abort 任务（无限循环 accept，JoinHandle 永不自然结束）。
+    async fn loop_server(
+        status_line: &str,
+        body: &str,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        std::sync::Arc<tokio::sync::Mutex<String>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("address");
+        let response = format!(
+            "HTTP/1.1 {status_line}\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{body}",
+            body.len()
+        );
+        let count = std::sync::Arc::new(AtomicUsize::new(0));
+        let first_request = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
+        let counter = count.clone();
+        let first = first_request.clone();
+        let handle = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut data = Vec::new();
+                let mut buf = [0; 4096];
+                loop {
+                    match stream.read(&mut buf).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            data.extend_from_slice(&buf[..n]);
+                            if data.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
+                            }
+                        }
+                    }
+                }
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut first = first.lock().await;
+                if first.is_empty() {
+                    *first = String::from_utf8_lossy(&data).to_string();
+                }
+                drop(first);
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+        (format!("http://{addr}"), count, first_request, handle)
+    }
     #[tokio::test]
     async fn failed_upload_survives_restart_and_retries() {
         let path = db_path();
         let queue = UploadQueue::new(path.clone()).expect("queue");
-        let (url, request) = server("500 Error", "{}").await;
+        // 500 服务器 + 重试预算：当场重试 6 次后仍失败，落盘等待后续触发
+        let (url, count, first_request, handle) = loop_server("500 Error", "{}").await;
         assert!(queue.enqueue(&url, payload(42)).await.is_err());
-        assert!(request
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 6);
+        assert!(first_request
+            .lock()
             .await
-            .expect("request")
             .starts_with("POST /api/lol/upload "));
+        handle.abort();
         drop(queue);
         let queue = UploadQueue::new(path.clone()).expect("restart");
         assert_eq!(queue.retry_pending("").await.expect("disabled"), 0);
@@ -936,6 +1058,41 @@ mod tests {
         assert_eq!(queue.retry_pending(&url).await.expect("empty"), 0);
         drop(queue);
         std::fs::remove_file(path).expect("cleanup");
+    }
+    #[tokio::test]
+    async fn client_error_is_not_retried_immediately() {
+        let path = db_path();
+        let queue = UploadQueue::new(path.clone()).expect("queue");
+        // 4xx 客户端错误当场放弃：只发一次请求，不进入重试预算
+        let (url, count, _first, handle) = loop_server("400 Bad Request", "{}").await;
+        assert!(queue.enqueue(&url, payload(42)).await.is_err());
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        handle.abort();
+        drop(queue);
+        std::fs::remove_file(path).expect("cleanup");
+    }
+    #[test]
+    fn pending_uploads_capped_at_100() {
+        let conn = rusqlite::Connection::open_in_memory().expect("db");
+        conn.execute_batch("CREATE TABLE pending_uploads (game_id INTEGER PRIMARY KEY, payload TEXT NOT NULL, retry_count INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '')")
+            .expect("schema");
+        for id in 1..=105i64 {
+            conn.execute(
+                "INSERT INTO pending_uploads(game_id,payload) VALUES(?1,'{}')",
+                rusqlite::params![id],
+            )
+            .expect("insert");
+        }
+        prune_pending(&conn).expect("prune");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pending_uploads", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(count, 100);
+        // 保留最新的 100 条（rowid 最大），最旧的 1~5 被清理
+        let min_id: i64 = conn
+            .query_row("SELECT MIN(game_id) FROM pending_uploads", [], |r| r.get(0))
+            .expect("min");
+        assert_eq!(min_id, 6);
     }
     #[test]
     fn membership_requires_current_player() {
