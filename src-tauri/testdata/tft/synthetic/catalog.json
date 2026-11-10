@@ -1,0 +1,65 @@
+{
+  "setData": [
+    {
+      "champions": [
+        {
+          "apiName": "TFT17_Aatrox",
+          "name": "亚托克斯",
+          "squareIcon": "ASSETS/Characters/TFT17_Aatrox/Skins/Base/Images/TFT17_Aatrox_square.TFT_Set17.tex"
+        },
+        {
+          "apiName": "TFT17_Jinx",
+          "name": "金克丝",
+          "squareIcon": "ASSETS/Characters/TFT17_Jinx/Skins/Base/Images/TFT17_Jinx_square.tex"
+        }
+      ],
+      "traits": [
+        {
+          "apiName": "TFT17_DarkStar_Trait",
+          "name": "暗星",
+          "icon": "ASSETS/UX/TraitIcons/TFT17_Trait_DarkStar.tex"
+        },
+        {
+          "apiName": "TFT17_Sniper_Trait",
+          "name": "狙击手",
+          "icon": "ASSETS/UX/TraitIcons/TFT17_Trait_Sniper.tex"
+        }
+      ]
+    }
+  ],
+  "items": [
+    {
+      "apiName": "TFT_Item_InfinityEdge",
+      "name": "无尽之刃",
+      "icon": "ASSETS/Items/TFT17_Item_InfinityEdge.tex"
+    },
+    {
+      "apiName": "TFT_Item_GiantSlayer",
+      "name": "巨人杀手",
+      "icon": "ASSETS/Items/TFT17_Item_GiantSlayer.tex"
+    }
+  ],
+  "augments": [
+    {
+      "apiName": "TFT17_Augment_One",
+      "name": "银色强化",
+      "icon": "ASSETS/Augments/TFT17_Augment_One_silver.tex",
+      "desc": "你的队伍获得 <tftkeyword>10%</tftkeyword> 攻击速度。",
+      "effects": {}
+    },
+    {
+      "apiName": "TFT17_Augment_Two",
+      "name": "金色强化",
+      "icon": "ASSETS/Augments/TFT17_Augment_Two_gold.tex",
+      "desc": "获得 @Gold@ 金币。",
+      "effects": { "Gold": 12 }
+    },
+    {
+      "apiName": "TFT17_Augment_Three",
+      "name": "棱彩强化",
+      "icon": "ASSETS/Augments/TFT17_Augment_Three_prismatic.tex",
+      "desc": "提供一件装备。",
+      "effects": {}
+    }
+  ]
+}

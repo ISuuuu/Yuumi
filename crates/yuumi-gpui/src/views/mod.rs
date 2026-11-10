@@ -4,6 +4,7 @@ pub mod home;
 pub mod saved_players;
 pub mod search;
 pub mod settings;
+pub mod tft;
 pub mod tools;
 
 pub use career::CareerView;
@@ -12,6 +13,7 @@ pub use home::HomeView;
 pub use saved_players::SavedPlayersView;
 pub use search::SearchView;
 pub use settings::SettingsView;
+pub use tft::{TftAction, TftTab, TftView};
 pub use tools::ToolsView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

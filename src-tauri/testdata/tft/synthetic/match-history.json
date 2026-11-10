@@ -1,0 +1,66 @@
+{
+  "games": {
+    "gameId": 7000000001,
+    "games": [
+      {
+        "gameId": 7000000001,
+        "gameCreation": 1730000000000,
+        "game_length": 1875,
+        "queueId": 1100,
+        "participantIdentities": [
+          { "participantId": 1, "player": { "puuid": "self-puuid", "gameName": "Yuumi", "tagLine": "0001" } },
+          { "participantId": 2, "player": { "puuid": "p2-puuid", "gameName": "玩家二", "tagLine": "0002" } }
+        ],
+        "participants": [
+          {
+            "participantId": 1,
+            "puuid": "self-puuid",
+            "placement": 1,
+            "level": 9,
+            "goldLeft": 7,
+            "totalDamageToPlayers": 128,
+            "companion": { "skin_ID": 1234 },
+            "units": [
+              {
+                "character_id": "TFT17_Aatrox",
+                "rarity": 3,
+                "tier": 2,
+                "itemNames": ["TFT_Item_InfinityEdge", "TFT_Item_GiantSlayer"]
+              },
+              {
+                "character_id": "TFT17_Jinx",
+                "rarity": 2,
+                "tier": 3,
+                "itemNames": ["TFT_Item_GuinsoosRageblade", null]
+              }
+            ],
+            "traits": [
+              { "name": "TFT17_DarkStar_Trait", "num_units": 5, "tier_current": 2, "style": 2 },
+              { "name": "TFT17_Sniper_Trait", "num_units": 2, "tier_current": 1, "style": 1 },
+              { "name": "TFT17_Unused_Trait", "num_units": 0, "tier_current": 0 }
+            ],
+            "augments": ["TFT17_Augment_One", "TFT17_Augment_Two", "TFT17_Augment_Three"]
+          },
+          {
+            "participantId": 2,
+            "puuid": "p2-puuid",
+            "placement": 2,
+            "level": 8,
+            "goldLeft": 0,
+            "totalDamageToPlayers": 96,
+            "units": null,
+            "traits": null,
+            "augments": null
+          }
+        ]
+      },
+      {
+        "gameId": 7000000002,
+        "gameCreation": 1730100000000,
+        "gameDuration": 1500,
+        "queueId": 1090,
+        "json": "{\"gameId\":7000000002,\"queueId\":1090,\"participants\":[{\"puuid\":\"self-puuid\",\"placement\":6,\"level\":8,\"goldLeft\":2,\"units\":[],\"traits\":[],\"augments\":[]}]}"
+      }
+    ]
+  }
+}

@@ -4,6 +4,8 @@ use super::*;
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _is_overlay_open = self.overlay_window.is_some();
+        // 记录主窗所在区域：OP.GG 独立窗按主窗所在屏幕定位（对照 Vue 跟随主窗口）
+        self.main_window_bounds = Some(window.bounds());
         let connected = matches!(self.connection_status, ConnectionStatus::Connected { .. });
         let phase = if connected {
             phase_label(self.current_phase.as_str())
@@ -43,7 +45,7 @@ impl Render for MainWindow {
             Route::SavedPlayers => self.render_saved_players_route(viewport, window, cx),
             Route::Tools => self.render_tools_route(viewport, window, cx),
             Route::Settings => self.render_settings_route(viewport, window, cx),
-            Route::Tft => render_tft_placeholder(viewport),
+            Route::Tft => self.render_tft_route(viewport, window, cx),
         };
 
         div()
@@ -248,6 +250,8 @@ impl MainWindow {
                 self.reload_saved_players(cx);
             } else if self.current_route == Route::Home {
                 self.home_view.reload_paths();
+            } else if self.current_route == Route::Tft {
+                self.ensure_tft_data(cx);
             }
         }
         cx.notify();
@@ -315,31 +319,4 @@ impl MainWindow {
             },
         ))
     }
-}
-
-/// 云顶之弈占位视图（模块接入准备中）
-fn render_tft_placeholder(el: Stateful<Div>) -> Stateful<Div> {
-    el.child(
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .gap(px(12.0))
-            .child(div().text_size(px(40.0)).child("♟️"))
-            .child(
-                div()
-                    .text_size(px(16.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(Theme::TEXT_PRIMARY)
-                    .child("云顶之弈助手"),
-            )
-            .child(
-                div()
-                    .text_size(px(13.0))
-                    .text_color(Theme::TEXT_MUTED)
-                    .child("TFT 战绩、推荐阵容与海克斯分析模块接入准备中"),
-            ),
-    )
 }
