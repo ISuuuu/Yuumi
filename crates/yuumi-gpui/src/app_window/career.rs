@@ -13,8 +13,9 @@ impl MainWindow {
 
     pub(super) fn refresh_career(&mut self, _cx: &mut Context<Self>) {
         let live = self.live_service.clone();
+        let limit = self.app_config.functions.career_games_number as usize;
         yuumi_core::runtime::spawn_background(async move {
-            live.refresh_career_data().await;
+            live.refresh_career_data_with_limit(limit).await;
         });
     }
 
@@ -280,6 +281,7 @@ impl MainWindow {
 
         let live = self.live_service.clone();
         let target_name = name.clone();
+        let limit = (self.app_config.functions.career_games_number as usize).clamp(1, 100);
         cx.spawn(async move |entity, cx| {
             if let Some(client) = live.get_client().await {
                 let assets_opt = live.get_game_data_assets().await;
@@ -305,15 +307,17 @@ impl MainWindow {
                     });
                 }
                 if let Some(assets) = assets_opt {
-                    if let Ok(matches) = yuumi_core::parsers::match_parser::fetch_match_history(
+                    let end_idx = (limit as u32).saturating_sub(1);
+                    if let Ok(mut matches) = yuumi_core::parsers::match_parser::fetch_match_history(
                         &client,
                         &puuid,
                         Some(0),
-                        Some(19),
+                        Some(end_idx),
                         &assets,
                     )
                     .await
                     {
+                        matches.truncate(limit);
                         let items: Vec<MatchItem> =
                             matches.into_iter().map(MatchItem::new).collect();
                         let _ = entity.update(cx, |this, cx| {

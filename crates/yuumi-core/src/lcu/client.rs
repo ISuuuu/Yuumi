@@ -3,7 +3,7 @@
 use base64::Engine;
 use serde_json::Value;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
@@ -61,9 +61,26 @@ fn agent_semaphore() -> &'static Semaphore {
     SEM.get_or_init(|| Semaphore::new(AGENT_CONCURRENCY))
 }
 
-fn default_shared_semaphore() -> &'static Semaphore {
-    static SEM: OnceLock<Semaphore> = OnceLock::new();
-    SEM.get_or_init(|| Semaphore::new(10))
+static SHARED_SEMAPHORE_HOLDER: OnceLock<RwLock<Arc<Semaphore>>> = OnceLock::new();
+
+fn shared_semaphore_holder() -> &'static RwLock<Arc<Semaphore>> {
+    SHARED_SEMAPHORE_HOLDER.get_or_init(|| RwLock::new(Arc::new(Semaphore::new(10))))
+}
+
+/// 动态设置 LCU API 并发限制（1..=32）
+pub fn set_api_concurrency(limit: usize) {
+    let clamped = limit.clamp(1, 32);
+    if let Ok(mut lock) = shared_semaphore_holder().write() {
+        *lock = Arc::new(Semaphore::new(clamped));
+        log::info!("[LcuClient] API 并发限制已更新为 {}", clamped);
+    }
+}
+
+pub fn current_shared_semaphore() -> Arc<Semaphore> {
+    shared_semaphore_holder()
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_else(|_| Arc::new(Semaphore::new(10)))
 }
 
 fn cdn_client() -> &'static reqwest::Client {
@@ -130,10 +147,13 @@ impl LcuClient {
         let mut last_err = String::new();
 
         for attempt in 1..=MAX_RETRIES {
-            let wait = if agent_lane {
-                agent_semaphore().acquire()
-            } else {
-                default_shared_semaphore().acquire()
+            let shared_sem = current_shared_semaphore();
+            let wait = async {
+                if agent_lane {
+                    agent_semaphore().acquire().await
+                } else {
+                    shared_sem.acquire().await
+                }
             };
 
             let permit = match tokio::time::timeout(ACQUIRE_TIMEOUT, wait).await {

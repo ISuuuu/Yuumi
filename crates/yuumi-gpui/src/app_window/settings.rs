@@ -14,11 +14,14 @@ impl MainWindow {
                 cx.notify();
             }
             SettingsAction::SetApiConcurrency(val) => {
-                self.app_config.functions.api_concurrency_number = val;
+                let clamped = val.clamp(1, 10);
+                self.app_config.functions.api_concurrency_number = clamped;
+                yuumi_core::lcu::client::set_api_concurrency(clamped as usize);
                 self.persist_config(cx);
             }
             SettingsAction::SetCareerGames(val) => {
-                self.app_config.functions.career_games_number = val;
+                let clamped = val.clamp(1, 100);
+                self.app_config.functions.career_games_number = clamped;
                 self.persist_config(cx);
             }
             SettingsAction::ToggleGameInfoFilter => {
@@ -50,6 +53,7 @@ impl MainWindow {
                 if let Some(path) = services::detect_lol_path() {
                     if !self.app_config.general.lol_path.contains(&path) {
                         self.app_config.general.lol_path.push(path.clone());
+                        self.home_view.reload_paths();
                         self.persist_config(cx);
                     }
                     self.settings_view
@@ -64,6 +68,7 @@ impl MainWindow {
                 if let Some(path) = services::select_folder() {
                     if !self.app_config.general.lol_path.contains(&path) {
                         self.app_config.general.lol_path.push(path.clone());
+                        self.home_view.reload_paths();
                         self.persist_config(cx);
                     }
                     self.settings_view
@@ -75,6 +80,7 @@ impl MainWindow {
                 let wegame_marker = yuumi_core::config::WEGAME_MARKER.to_string();
                 if !self.app_config.general.lol_path.contains(&wegame_marker) {
                     self.app_config.general.lol_path.push(wegame_marker);
+                    self.home_view.reload_paths();
                     self.persist_config(cx);
                 }
                 self.settings_view
@@ -84,6 +90,7 @@ impl MainWindow {
             SettingsAction::RemoveLolPath(idx) => {
                 if idx < self.app_config.general.lol_path.len() {
                     self.app_config.general.lol_path.remove(idx);
+                    self.home_view.reload_paths();
                     self.persist_config(cx);
                 }
             }
@@ -94,11 +101,25 @@ impl MainWindow {
             }
             SettingsAction::ClearCache => {
                 let client_path = self.app_config.general.lol_path.first().cloned();
-                std::thread::spawn(move || {
-                    let _ = services::clear_game_cache(client_path.as_deref());
-                });
-                self.settings_view.set_feedback("缓存清理完成", false);
+                self.settings_view.set_feedback("正在清理缓存...", false);
                 cx.notify();
+                cx.spawn(async move |entity, cx| {
+                    let res = cx
+                        .background_executor()
+                        .spawn(async move { services::clear_game_cache(client_path.as_deref()) })
+                        .await;
+                    let _ = entity.update(cx, |this, cx| {
+                        match res {
+                            Ok(msg) => this.settings_view.set_feedback(msg, false),
+                            Err(e) => {
+                                this.settings_view
+                                    .set_feedback(format!("清理失败: {}", e), true)
+                            }
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             SettingsAction::ToggleCloseToTray => {
                 let cur = self.app_config.general.enable_close_to_tray.unwrap_or(true);
@@ -198,9 +219,14 @@ impl MainWindow {
                 });
             }
             SettingsAction::ToggleMica => {
-                self.app_config.personalization.mica_enabled =
-                    !self.app_config.personalization.mica_enabled;
+                let new_val = !self.app_config.personalization.mica_enabled;
+                self.app_config.personalization.mica_enabled = new_val;
                 self.persist_config(cx);
+                if new_val {
+                    if let Some(hwnd) = platform::find_main_window_hwnd() {
+                        platform::apply_mica_or_acrylic(hwnd);
+                    }
+                }
             }
             SettingsAction::SetThemeMode(mode) => {
                 self.settings_view.open_theme_mode_dropdown = false;

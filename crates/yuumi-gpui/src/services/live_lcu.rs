@@ -388,8 +388,13 @@ impl LiveLcuService {
         }
     }
 
-    /// 刷新当前登录召唤师的生涯数据（最近 20 场战绩、英雄熟练度、战利品与精粹）
+    /// 刷新当前登录召唤师的生涯数据（默认最近 20 场战绩）
     pub async fn refresh_career_data(&self) {
+        self.refresh_career_data_with_limit(CAREER_MATCH_LIMIT).await;
+    }
+
+    /// 刷新当前登录召唤师的生涯数据，指定拉取的战绩场数上限（1..=100）
+    pub async fn refresh_career_data_with_limit(&self, limit: usize) {
         let client_opt = self.client.read().await.clone();
         let Some(client) = client_opt else {
             log::warn!("[LiveLcu] 无法刷新生涯数据: LCU client 未连接");
@@ -413,21 +418,25 @@ impl LiveLcuService {
         };
 
         log::info!(
-            "[LiveLcu] 开始并发拉取召唤师 [{}] 的生涯对局历史、熟练度与战利品...",
-            summoner.full_name()
+            "[LiveLcu] 开始并发拉取召唤师 [{}] 的生涯对局历史 (限 {} 场)、熟练度与战利品...",
+            summoner.full_name(),
+            limit
         );
 
-        // 并发拉取战绩 (近 20 场，endIndex 为闭区间故取 19)
+        let fetch_limit = limit.clamp(1, 100);
+        let end_idx = (fetch_limit as u32).saturating_sub(1);
+
+        // 并发拉取战绩 (endIndex 为闭区间故取 fetch_limit - 1)
         let c_matches = client.clone();
         let puuid_clone = summoner.puuid.clone();
         let assets_clone = assets.clone();
         let this_matches = self.clone();
         let matches_task = tokio::spawn(async move {
-            match fetch_match_history(&c_matches, &puuid_clone, Some(0), Some(19), &assets_clone)
+            match fetch_match_history(&c_matches, &puuid_clone, Some(0), Some(end_idx), &assets_clone)
                 .await
             {
                 Ok(mut matches) => {
-                    matches.truncate(CAREER_MATCH_LIMIT);
+                    matches.truncate(fetch_limit);
                     log::info!("[LiveLcu] 成功拉取当前召唤师战绩: count={}", matches.len());
                     // 同步缓存本人近期战绩，供宿命对局判定复用
                     *this_matches.recent_matches.write().await = matches.clone();

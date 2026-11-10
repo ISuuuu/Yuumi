@@ -808,6 +808,16 @@ fn client_for(proxy: &ProxyConfig) -> reqwest::Client {
     client
 }
 
+/// 代理抓取 GitHub 文本资源（公告、版本信息等）
+pub async fn fetch_github_text(url: &str, proxy: &ProxyConfig) -> Result<String, String> {
+    let client = client_for(proxy);
+    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP 状态码: {}", resp.status()));
+    }
+    resp.text().await.map_err(|e| e.to_string())
+}
+
 /// 带缓存与传输层重试的 GET + 类型化校验
 async fn get_typed<T>(
     url: &str,

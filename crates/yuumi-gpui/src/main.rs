@@ -87,11 +87,18 @@ fn main() {
             .open_window(window_options, |_window, cx| cx.new(MainWindow::new))
             .expect("创建 Yuumi GPUI 主窗口失败");
 
+        // 读取持久化配置以按需应用 Mica 与全局 API 并发限制
+        let config = yuumi_core::config::AppConfig::load();
+        yuumi_core::lcu::client::set_api_concurrency(config.functions.api_concurrency_number as usize);
+        let mica_enabled = config.personalization.mica_enabled;
+
         // 异步应用 Windows 11 Mica / DwmExtendFrameIntoClientArea 亚克力极光特效与圆角
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(60));
             if let Some(hwnd) = platform::find_main_window_hwnd() {
-                platform::apply_mica_or_acrylic(hwnd);
+                if mica_enabled {
+                    platform::apply_mica_or_acrylic(hwnd);
+                }
                 platform::set_window_rounded_corners(hwnd);
             } else {
                 log::warn!("[Platform] 未找到主窗口 HWND，跳过 Mica/圆角设置");
