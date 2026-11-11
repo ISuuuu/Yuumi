@@ -1012,7 +1012,8 @@ impl SavedPlayersView {
         let on_action_cancel = on_action.clone();
 
         div()
-            .p(px(14.0))
+            .px(px(14.0))
+            .py(px(10.0))
             .rounded_lg()
             // Vue .player-card 的 --card-bg 预合成到页面底色，Mica 开关前后保持一致；
             // 展开后的相遇记录浅灰底继续叠在这层之上
@@ -1024,7 +1025,7 @@ impl SavedPlayersView {
                 div()
                     .flex()
                     .flex_col()
-                    .gap_3()
+                    .gap(px(8.0))
                     // 玩家卡片主区域（点击整行展开/收起相遇记录）
                     .child(
                         div()
@@ -1200,7 +1201,7 @@ impl SavedPlayersView {
                                             ),
                                     ),
                             )
-                            // 右侧：最后相遇时间 + 折叠箭头
+                            // 右侧：最后相遇时间 + 三个操作按钮 + 折叠箭头
                             .child(
                                 div()
                                     .flex()
@@ -1212,6 +1213,113 @@ impl SavedPlayersView {
                                             .text_color(Theme::TEXT_MUTED())
                                             .child(format_time(p.last_met_timestamp)),
                                     )
+                                    // 三个操作按钮：置顶 + 编辑标记 + 删除（与主区域同一行）
+                                    .child({
+                                        let p_puuid_pin = p_puuid_pin.clone();
+                                        let p_puuid_edit = p_puuid_edit.clone();
+                                        let p_puuid_delete = p_puuid_delete.clone();
+                                        let on_action_pin = on_action_pin.clone();
+                                        let on_action_edit = on_action_edit.clone();
+                                        let on_action_delete = on_action_delete.clone();
+                                        let is_pinned = p.is_pinned;
+
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_1p5()
+                                            .child(
+                                                div()
+                                                    .px_2p5()
+                                                    .py_0p5()
+                                                    .rounded_sm()
+                                                    .border_1()
+                                                    .border_color(if is_pinned {
+                                                        Theme::GOLD().opacity(0.6)
+                                                    } else {
+                                                        Theme::CARD_BORDER()
+                                                    })
+                                                    .bg(if is_pinned {
+                                                        Theme::GOLD().opacity(0.12)
+                                                    } else {
+                                                        Theme::CARD_BG()
+                                                    })
+                                                    .text_color(if is_pinned {
+                                                        Theme::GOLD()
+                                                    } else {
+                                                        Theme::TEXT_MUTED()
+                                                    })
+                                                    .text_xs()
+                                                    .cursor_pointer()
+                                                    .hover(|s| {
+                                                        s.bg(Theme::CARD_BG_HOVER())
+                                                            .border_color(Theme::GOLD())
+                                                            .text_color(Theme::GOLD())
+                                                    })
+                                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                        app.stop_propagation();
+                                                        on_action_pin(
+                                                            SavedPlayersAction::TogglePin(p_puuid_pin.clone()),
+                                                            win,
+                                                            app,
+                                                        );
+                                                    })
+                                                    .child(if is_pinned {
+                                                        "★ 已置顶"
+                                                    } else {
+                                                        "☆ 置顶"
+                                                    }),
+                                            )
+                                            .child(
+                                                div()
+                                                    .px_2p5()
+                                                    .py_0p5()
+                                                    .rounded_sm()
+                                                    .border_1()
+                                                    .border_color(Theme::CARD_BORDER())
+                                                    .bg(Theme::CARD_BG())
+                                                    .text_color(Theme::TEXT_MUTED())
+                                                    .text_xs()
+                                                    .cursor_pointer()
+                                                    .hover(|s| {
+                                                        s.bg(Theme::CARD_BG_HOVER())
+                                                            .border_color(Theme::AURORA_CYAN())
+                                                            .text_color(Theme::ACCENT_PRIMARY())
+                                                    })
+                                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                        app.stop_propagation();
+                                                        on_action_edit(
+                                                            SavedPlayersAction::StartEdit(p_puuid_edit.clone()),
+                                                            win,
+                                                            app,
+                                                        );
+                                                    })
+                                                    .child("编辑标记"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .px_2p5()
+                                                    .py_0p5()
+                                                    .rounded_sm()
+                                                    .border_1()
+                                                    .border_color(Theme::LOSS_BORDER().opacity(0.5))
+                                                    .bg(Theme::CARD_BG())
+                                                    .text_color(Theme::LOSS_TEXT())
+                                                    .text_xs()
+                                                    .cursor_pointer()
+                                                    .hover(|s| {
+                                                        s.bg(Theme::LOSS_BG()).border_color(Theme::LOSS_BORDER())
+                                                    })
+                                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                        app.stop_propagation();
+                                                        on_action_delete(
+                                                            SavedPlayersAction::AskDelete(p_puuid_delete.clone()),
+                                                            win,
+                                                            app,
+                                                        );
+                                                    })
+                                                    .child("删除"),
+                                            )
+                                    })
                                     .child(
                                         div()
                                             .text_xs()
@@ -1220,8 +1328,8 @@ impl SavedPlayersView {
                                     ),
                             ),
                     )
-                    // 卡片下方编辑区域
-                    .child(div().flex().justify_end().child(if is_editing {
+                    // 卡片下方编辑区域（仅在编辑状态下展示，非编辑态不占额外行空间）
+                    .when(is_editing, |this| this.child(div().flex().justify_end().pt_1().child({
                         let is_tag_focused = self.edit_tag_focus_handle.is_focused(window);
                         let edit_tag_h = self.edit_tag_focus_handle.clone();
                         let on_action_tag_key = on_action.clone();
@@ -1284,103 +1392,7 @@ impl SavedPlayersView {
                                     .child("取消"),
                             )
                             .into_any_element()
-                    } else {
-                        // 非编辑态：置顶 + 编辑标记 + 删除按钮
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .px_3()
-                                    .py_1()
-                                    .rounded_sm()
-                                    .border_1()
-                                    .border_color(if p.is_pinned {
-                                        Theme::GOLD().opacity(0.6)
-                                    } else {
-                                        Theme::CARD_BORDER()
-                                    })
-                                    .bg(if p.is_pinned {
-                                        Theme::GOLD().opacity(0.12)
-                                    } else {
-                                        Theme::CARD_BG()
-                                    })
-                                    .text_color(if p.is_pinned {
-                                        Theme::GOLD()
-                                    } else {
-                                        Theme::TEXT_MUTED()
-                                    })
-                                    .text_xs()
-                                    .cursor_pointer()
-                                    .hover(|s| {
-                                        s.bg(Theme::CARD_BG_HOVER())
-                                            .border_color(Theme::GOLD())
-                                            .text_color(Theme::GOLD())
-                                    })
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        on_action_pin(
-                                            SavedPlayersAction::TogglePin(p_puuid_pin.clone()),
-                                            win,
-                                            app,
-                                        );
-                                    })
-                                    .child(if p.is_pinned {
-                                        "★ 已置顶"
-                                    } else {
-                                        "☆ 置顶"
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .px_3()
-                                    .py_1()
-                                    .rounded_sm()
-                                    .border_1()
-                                    .border_color(Theme::CARD_BORDER())
-                                    .bg(Theme::CARD_BG())
-                                    .text_color(Theme::TEXT_MUTED())
-                                    .text_xs()
-                                    .cursor_pointer()
-                                    .hover(|s| {
-                                        s.bg(Theme::CARD_BG_HOVER())
-                                            .border_color(Theme::AURORA_CYAN())
-                                            .text_color(Theme::ACCENT_PRIMARY())
-                                    })
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        on_action_edit(
-                                            SavedPlayersAction::StartEdit(p_puuid_edit.clone()),
-                                            win,
-                                            app,
-                                        );
-                                    })
-                                    .child("编辑标记"),
-                            )
-                            .child(
-                                div()
-                                    .px_3()
-                                    .py_1()
-                                    .rounded_sm()
-                                    .border_1()
-                                    .border_color(Theme::LOSS_BORDER().opacity(0.5))
-                                    .bg(Theme::CARD_BG())
-                                    .text_color(Theme::LOSS_TEXT())
-                                    .text_xs()
-                                    .cursor_pointer()
-                                    .hover(|s| {
-                                        s.bg(Theme::LOSS_BG()).border_color(Theme::LOSS_BORDER())
-                                    })
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        on_action_delete(
-                                            SavedPlayersAction::AskDelete(p_puuid_delete.clone()),
-                                            win,
-                                            app,
-                                        );
-                                    })
-                                    .child("删除"),
-                            )
-                            .into_any_element()
-                    }))
+                    })))
                     // P04: 相遇记录展开层
                     .when(is_expanded, |this| {
                         this.child(self.render_encounter_section(on_action.clone()))
@@ -1394,7 +1406,7 @@ impl SavedPlayersView {
         F: Fn(SavedPlayersAction, &mut Window, &mut App) + 'static + Clone,
     {
         div()
-            .pt_2p5()
+            .pt(px(8.0))
             .border_t_1()
             .border_dashed()
             .border_color(Theme::CARD_BORDER())
@@ -1403,14 +1415,14 @@ impl SavedPlayersView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .py_4()
+                    .py_2()
                     .text_xs()
                     .text_color(Theme::TEXT_MUTED())
                     .child("正在加载相遇记录...")
                     .into_any_element()
             } else if self.expanded_games.is_empty() {
                 div()
-                    .py_3()
+                    .py_2()
                     .text_xs()
                     .text_color(Theme::TEXT_MUTED())
                     .child("暂无详细相遇记录")
@@ -1422,14 +1434,14 @@ impl SavedPlayersView {
                 div()
                     .flex()
                     .flex_col()
-                    .gap_1p5()
+                    .gap(px(3.0))
                     .children(self.expanded_games.iter().map(|game| {
                         div()
                             .flex()
                             .items_center()
                             .justify_between()
                             .px_2p5()
-                            .py_1p5()
+                            .py(px(2.5))
                             .rounded_sm()
                             .bg(Theme::HOVER_BG())
                             .child(
@@ -1447,10 +1459,10 @@ impl SavedPlayersView {
                     }))
                     .when(has_more_games, |this| {
                         this.child(
-                            div().flex().justify_center().pt_2().child(
+                            div().flex().justify_center().pt(px(4.0)).child(
                                 div()
                                     .px_3()
-                                    .py_1()
+                                    .py_0p5()
                                     .rounded_sm()
                                     .border_1()
                                     .border_color(Theme::CARD_BORDER())
