@@ -163,6 +163,14 @@ impl LiveLcuService {
         self.auto_bp_cfg.send_replace(cfg);
     }
 
+    /// 重置大厅创建状态并尝试建房（配置变更或用户手动触发时）
+    pub async fn reset_lobby_state(&self) {
+        let guard = self.agent_runtime.read().await;
+        if let Some(runtime) = guard.as_ref() {
+            runtime.dispatcher().dispatch_reset_lobby();
+        }
+    }
+
     /// 获取当前的 LcuClient（若已连接）
     pub async fn get_client(&self) -> Option<yuumi_core::lcu::client::LcuClient> {
         self.client.read().await.clone()
@@ -283,11 +291,23 @@ impl LiveLcuService {
                             self.auto_match_cfg.clone(),
                             self.auto_bp_cfg.clone(),
                         );
+                        let dispatcher = runtime.dispatcher();
                         *self.agent_runtime.write().await = Some(runtime);
 
+                        // 获取初始游戏阶段并分发给 Agent、Lifecycle 与 UI
+                        let initial_phase = match client.get("/lol-gameflow/v1/gameflow-phase").await {
+                            Ok(serde_json::Value::String(p)) => p,
+                            _ => "None".to_string(),
+                        };
+                        log::info!("[LiveLcu] 获取到初始游戏阶段: {}", initial_phase);
+                        *self.current_phase.write().await = initial_phase.clone();
+                        let initial_game_phase = GamePhase::from(initial_phase.as_str());
+                        let _ = self.lifecycle.on_phase_changed(&initial_phase).await;
+                        dispatcher.dispatch_match(MatchAgentEvent::PhaseChanged(initial_phase.clone()));
+                        let _ = self.event_tx.send(LiveLcuEvent::GamePhaseChanged(initial_game_phase));
+
                         // 重连后若正处于对局，补拉当前 10 人对局信息
-                        let phase = self.get_current_phase().await;
-                        self.schedule_game_info_refresh(phase, Duration::ZERO).await;
+                        self.schedule_game_info_refresh(initial_phase, Duration::ZERO).await;
 
                         // 建立 WebSocket 连接
                         let ws_handle = start_ws(info.port, info.token.clone());

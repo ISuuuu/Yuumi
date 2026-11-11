@@ -20,7 +20,7 @@ const RECONNECT_MAX_ATTEMPTS: u32 = 5;
 const RECONNECT_BASE_BACKOFF: Duration = Duration::from_millis(500);
 
 /// 自动建房重试轮数与间隔
-const LOBBY_CREATE_MAX_ATTEMPTS: u32 = 5;
+const LOBBY_CREATE_MAX_ATTEMPTS: u32 = 12;
 const LOBBY_CREATE_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 /// 建房成功后 LCU 可能瞬时闪回 None，此窗口内的 None 不重复建房
 const LOBBY_FLICKER_WINDOW: Duration = Duration::from_millis(2000);
@@ -213,6 +213,18 @@ pub async fn handle_phase_change(
             }
         }
         GamePhase::None => {
+            let within_flicker = match state.lobby.lock() {
+                Ok(flags) => flags
+                    .last_create
+                    .map(|t| t.elapsed() < LOBBY_FLICKER_WINDOW)
+                    .unwrap_or(false),
+                Err(_) => false,
+            };
+            if !within_flicker {
+                if let Ok(mut flags) = state.lobby.lock() {
+                    flags.created = false;
+                }
+            }
             if config.auto_create_lobby {
                 try_create_lobby(client, config.default_game_mode, state.lobby.clone());
             }
@@ -265,6 +277,29 @@ pub async fn handle_ready_check(
 
     state.ready_check_accepted = true;
     spawn_auto_accept(client, config.auto_accept_delay, supervisor, lifecycle).await;
+}
+
+/// 重置大厅创建状态并尝试建房（配置变更或用户手动触发时调用）
+pub async fn handle_reset_lobby_state(
+    client: &LcuClient,
+    config: &AutoMatchConfig,
+    lifecycle: &Arc<LifecycleManager>,
+    state: &mut AutoMatchState,
+) {
+    log::info!("[Agent] 收到重置大厅创建状态请求");
+    if let Ok(mut flags) = state.lobby.lock() {
+        flags.created = false;
+        flags.running = false;
+    }
+    let phase = lifecycle.snapshot().await.phase;
+    let is_idle = phase == GamePhase::None
+        || matches!(
+            client.get("/lol-gameflow/v1/gameflow-phase").await,
+            Ok(serde_json::Value::String(ref p)) if p == "None" || p.is_empty()
+        );
+    if is_idle && config.auto_create_lobby {
+        try_create_lobby(client, config.default_game_mode, state.lobby.clone());
+    }
 }
 
 /// 结算荣誉投票：为可点赞队友投出有效票后提交投票
@@ -599,12 +634,13 @@ fn try_create_lobby(client: &LcuClient, queue_id: u32, flags: Arc<Mutex<LobbyFla
     }
 
     let client = client.clone();
+    let flags_clone = flags.clone();
     tokio::spawn(async move {
         for attempt in 1..=LOBBY_CREATE_MAX_ATTEMPTS {
             // 已在有效房间内：不再创建，避免把玩家踢出小队
             if client.get("/lol-lobby/v2/lobby").await.is_ok() {
                 log::info!("[Agent] 当前已在房间内，跳过自动建房");
-                if let Ok(mut f) = flags.lock() {
+                if let Ok(mut f) = flags_clone.lock() {
                     f.created = true;
                     f.running = false;
                     f.last_create = Some(Instant::now());
@@ -620,7 +656,7 @@ fn try_create_lobby(client: &LcuClient, queue_id: u32, flags: Arc<Mutex<LobbyFla
             );
             if !still_idle {
                 log::info!("[Agent] 阶段已变化，放弃自动建房");
-                if let Ok(mut f) = flags.lock() {
+                if let Ok(mut f) = flags_clone.lock() {
                     f.created = true;
                     f.running = false;
                 }
@@ -630,18 +666,47 @@ fn try_create_lobby(client: &LcuClient, queue_id: u32, flags: Arc<Mutex<LobbyFla
             let body = serde_json::json!({ "queueId": queue_id });
             match client.post("/lol-lobby/v2/lobby", Some(body)).await {
                 Ok(_) => {
-                    log::info!("[Agent] 自动创建房间成功 (queueId={})", queue_id);
-                    if let Ok(mut f) = flags.lock() {
-                        f.created = true;
-                        f.running = false;
+                    log::info!(
+                        "[Agent] 自动创建房间请求已发送 (queueId={})，第 {} 次尝试",
+                        queue_id,
+                        attempt
+                    );
+                    if let Ok(mut f) = flags_clone.lock() {
                         f.last_create = Some(Instant::now());
                     }
-                    return;
+
+                    // 等待 1 秒确认大厅稳定，未被客户端启动时初始路由冲掉
+                    sleep(Duration::from_millis(1000)).await;
+
+                    let phase = client.get("/lol-gameflow/v1/gameflow-phase").await;
+                    let is_in_lobby = match phase {
+                        Ok(serde_json::Value::String(ref p)) => p == "Lobby",
+                        _ => false,
+                    };
+                    let lobby_exists = client.get("/lol-lobby/v2/lobby").await.is_ok();
+
+                    if is_in_lobby || lobby_exists {
+                        log::info!(
+                            "[Agent] 自动创建房间成功并已确认处于大厅 (queueId={})",
+                            queue_id
+                        );
+                        if let Ok(mut f) = flags_clone.lock() {
+                            f.created = true;
+                            f.running = false;
+                            f.last_create = Some(Instant::now());
+                        }
+                        return;
+                    } else {
+                        log::warn!("[Agent] 自动创建房间后未稳定在大厅（可能被客户端重置），准备重试");
+                        if let Ok(mut f) = flags_clone.lock() {
+                            f.last_create = None;
+                        }
+                    }
                 }
                 Err(e) => {
-                    if e.contains("[409]") {
+                    if e.contains("[409]") || e.contains("409") {
                         log::info!("[Agent] 建房返回 409，视为已在房间内");
-                        if let Ok(mut f) = flags.lock() {
+                        if let Ok(mut f) = flags_clone.lock() {
                             f.created = true;
                             f.running = false;
                             f.last_create = Some(Instant::now());
@@ -662,7 +727,8 @@ fn try_create_lobby(client: &LcuClient, queue_id: u32, flags: Arc<Mutex<LobbyFla
             }
         }
 
-        if let Ok(mut f) = flags.lock() {
+        if let Ok(mut f) = flags_clone.lock() {
+            f.created = false;
             f.running = false;
         }
         log::warn!("[Agent] 自动建房 {} 次尝试均失败", LOBBY_CREATE_MAX_ATTEMPTS);
@@ -1088,5 +1154,43 @@ mod tests {
         assert_eq!(supervisor.running_task_count().await, first);
 
         supervisor.cancel_all().await;
+    }
+
+    #[tokio::test]
+    async fn test_lobby_flags_lifecycle_and_reset() {
+        let client = LcuClient::new(1234, 2999, "mock".to_string(), None).unwrap();
+        let config = AutoMatchConfig::default();
+        let supervisor = AgentSupervisor::new();
+        let lifecycle = Arc::new(LifecycleManager::new());
+        let mut state = AutoMatchState::new();
+
+        // 1. 进入 Lobby 阶段，标记 created = true
+        handle_phase_change(
+            &client,
+            "Lobby",
+            &config,
+            &supervisor,
+            &lifecycle,
+            &mut state,
+        )
+        .await;
+        assert!(state.lobby.lock().unwrap().created);
+
+        // 2. 超出防抖时间进入 None，created 重置为 false
+        handle_phase_change(
+            &client,
+            "None",
+            &config,
+            &supervisor,
+            &lifecycle,
+            &mut state,
+        )
+        .await;
+        assert!(!state.lobby.lock().unwrap().created);
+
+        // 3. 模拟建房标记为已创建后，调用 handle_reset_lobby_state 重置
+        state.lobby.lock().unwrap().created = true;
+        handle_reset_lobby_state(&client, &config, &lifecycle, &mut state).await;
+        assert!(!state.lobby.lock().unwrap().created);
     }
 }

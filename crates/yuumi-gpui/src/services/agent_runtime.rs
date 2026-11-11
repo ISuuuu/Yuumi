@@ -21,7 +21,8 @@ use yuumi_core::agents::{
     auto_bp::{handle_champ_select_session, ChampSelectSession},
     auto_match::{
         handle_honor_ballot, handle_invitations, handle_phase_change, handle_ready_check,
-        handle_tag_reminders, AutoMatchState, HonorBallot, ReadyCheckData, ReceivedInvitation,
+        handle_reset_lobby_state, handle_tag_reminders, AutoMatchState, HonorBallot, ReadyCheckData,
+        ReceivedInvitation,
     },
     config::{AutoBpConfig, AutoMatchConfig},
     lifecycle::LifecycleManager,
@@ -51,6 +52,8 @@ pub enum MatchAgentEvent {
     ReceivedInvitations(Vec<ReceivedInvitation>),
     /// [D04-e] 选人阶段带标记玩家映射（puuid → 标签），由 WS 分派点从路人集只读构造
     TagReminders(HashMap<String, String>),
+    /// 重置大厅创建状态并尝试建房（配置变更或用户手动触发时）
+    ResetLobbyState,
 }
 
 /// 投递给 `auto_bp` Worker 的事件
@@ -96,6 +99,11 @@ impl AgentDispatcher {
                 false
             }
         }
+    }
+
+    /// 触发重置大厅创建状态并尝试建房
+    pub fn dispatch_reset_lobby(&self) -> bool {
+        self.dispatch_match(MatchAgentEvent::ResetLobbyState)
     }
 }
 
@@ -241,6 +249,13 @@ async fn run_match_worker(
                         &lifecycle,
                         &mut state,
                     ),
+                )
+                .await;
+            }
+            MatchAgentEvent::ResetLobbyState => {
+                run_guarded(
+                    "reset-lobby-state",
+                    handle_reset_lobby_state(&client, &cfg, &lifecycle, &mut state),
                 )
                 .await;
             }

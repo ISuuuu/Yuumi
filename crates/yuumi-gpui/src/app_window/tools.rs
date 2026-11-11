@@ -215,10 +215,20 @@ impl MainWindow {
                 self.app_config.functions.enable_auto_create_lobby =
                     !self.app_config.functions.enable_auto_create_lobby;
                 self.persist_config(cx);
+                let live = self.live_service.clone();
+                cx.spawn(async move |_entity, _cx| {
+                    live.reset_lobby_state().await;
+                })
+                .detach();
             }
             ToolsAction::SetDefaultGameMode(mode) => {
                 self.app_config.functions.default_game_mode = mode;
                 self.persist_config(cx);
+                let live = self.live_service.clone();
+                cx.spawn(async move |_entity, _cx| {
+                    live.reset_lobby_state().await;
+                })
+                .detach();
             }
             ToolsAction::CreateLobbyNow => {
                 let live = self.live_service.clone();
