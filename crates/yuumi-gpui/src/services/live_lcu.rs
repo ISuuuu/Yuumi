@@ -306,6 +306,34 @@ impl LiveLcuService {
                         dispatcher.dispatch_match(MatchAgentEvent::PhaseChanged(initial_phase.clone()));
                         let _ = self.event_tx.send(LiveLcuEvent::GamePhaseChanged(initial_game_phase));
 
+                        // 处于选人阶段时，主动拉取一次会话以激活 BP Agent 与 UI
+                        if initial_phase == "ChampSelect" {
+                            if let Ok(val) = client.get("/lol-champ-select/v1/session").await {
+                                if let Ok(session) = serde_json::from_value::<
+                                    yuumi_core::agents::auto_bp::ChampSelectSession,
+                                >(val)
+                                {
+                                    dispatcher.dispatch_bp(
+                                        super::agent_runtime::BpAgentEvent::ChampSelect(
+                                            Box::new(session.clone()),
+                                        ),
+                                    );
+                                    let _ = self.event_tx.send(LiveLcuEvent::ChampSelectUpdated(session));
+                                }
+                            }
+                        } else if initial_phase == "ReadyCheck" {
+                            if let Ok(val) = client.get("/lol-matchmaking/v1/ready-check").await {
+                                if let Ok(ready) = serde_json::from_value::<
+                                    yuumi_core::agents::auto_match::ReadyCheckData,
+                                >(val)
+                                {
+                                    dispatcher.dispatch_match(
+                                        super::agent_runtime::MatchAgentEvent::ReadyCheck(ready),
+                                    );
+                                }
+                            }
+                        }
+
                         // 重连后若正处于对局，补拉当前 10 人对局信息
                         self.schedule_game_info_refresh(initial_phase, Duration::ZERO).await;
 
@@ -490,6 +518,31 @@ impl LiveLcuService {
                         d.dispatch_match(MatchAgentEvent::ReceivedInvitations(invitations));
                     }
                 }
+            }
+            // 当前登录召唤师信息就绪或切换账号：同步状态并触发生涯战绩刷新
+            "/lol-summoner/v1/current-summoner" => {
+                let this = self.clone();
+                tokio::spawn(async move {
+                    if let Some(client) = this.get_client().await {
+                        if let Ok(s) = fetch_current_summoner(&client).await {
+                            log::info!(
+                                "[LiveLcu] 收到当前召唤师更新: {} (puuid: {})",
+                                s.full_name(),
+                                s.puuid
+                            );
+                            let current_status = this.status.borrow().clone();
+                            if let ConnectionStatus::Connected { info, .. } = current_status {
+                                let new_status = ConnectionStatus::Connected {
+                                    info,
+                                    summoner: Box::new(Some(s)),
+                                };
+                                let _ = this.status.send(new_status.clone());
+                                let _ = this.event_tx.send(LiveLcuEvent::ConnectionChanged(new_status));
+                            }
+                            this.refresh_career_data().await;
+                        }
+                    }
+                });
             }
             _ => {}
         }

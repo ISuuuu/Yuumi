@@ -158,6 +158,14 @@ pub async fn handle_phase_change(
     ) {
         supervisor.cancel(&TaskKind::AutoPlayAgain).await;
     }
+    // 离开 ChampSelect：取消选人期间派生的锁定、禁用与报边任务
+    if current != GamePhase::ChampSelect {
+        supervisor.cancel(&TaskKind::AutoPickLock).await;
+        supervisor.cancel(&TaskKind::AutoBanLock).await;
+        supervisor
+            .cancel(&TaskKind::Other("AramTeamSide".to_string()))
+            .await;
+    }
     // 进入新对局：复位本局点赞标记
     if current == GamePhase::InProgress {
         state.honored = false;
@@ -272,6 +280,7 @@ pub async fn handle_ready_check(
         return;
     }
     if !is_in_progress {
+        state.ready_check_accepted = false;
         return;
     }
 

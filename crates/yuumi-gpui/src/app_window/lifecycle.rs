@@ -39,6 +39,25 @@ impl MainWindow {
                     if !was_connected && self.current_route == Route::Home {
                         self.switch_route(Route::Career, cx);
                     }
+                    // 客户端连接建立后：自动检测 LOL 安装路径（若尚未配置）并回读设置只读锁定开关
+                    if self.app_config.general.lol_path.is_empty()
+                        || self
+                            .app_config
+                            .general
+                            .lol_path
+                            .iter()
+                            .all(|p| p == yuumi_core::config::WEGAME_MARKER)
+                    {
+                        if let Some(detected) = services::detect_lol_path() {
+                            if !self.app_config.general.lol_path.contains(&detected) {
+                                self.app_config.general.lol_path.insert(0, detected);
+                                self.home_view.reload_paths();
+                                let _ = self.app_config.save();
+                            }
+                        }
+                    }
+                    self.tools_view.is_game_settings_locked =
+                        services::game_settings_readonly_state(&self.app_config.general.lol_path);
                 }
                 if matches!(status, ConnectionStatus::Disconnected) {
                     // 客户端断开：立即收起悬浮窗，避免残留空窗
