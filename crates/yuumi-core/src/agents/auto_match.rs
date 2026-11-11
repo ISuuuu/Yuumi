@@ -493,7 +493,7 @@ async fn spawn_auto_accept(
         .await;
 }
 
-/// 自动重连：仅在 Reconnect 阶段有效，403 视为「接口尚未开放」按指数退避重试
+/// 自动重连：仅在 Reconnect 阶段有效，并在发起重连前校验进程存活与阶段权威性，避免对局结束误拉起
 async fn spawn_auto_reconnect(
     client: &LcuClient,
     supervisor: &AgentSupervisor,
@@ -522,6 +522,11 @@ async fn spawn_auto_reconnect(
                             "[Agent] 自动重连放弃: 阶段为 {:?}",
                             snapshot.phase
                         );
+                        return;
+                    }
+
+                    // 发起请求前向 LCU 主动二次校验当前阶段并检查游戏进程存活，防止对局结束结算闪现误拉起
+                    if !is_reconnect_still_valid(&client).await {
                         return;
                     }
 
@@ -567,6 +572,80 @@ async fn spawn_auto_reconnect(
             },
         )
         .await;
+}
+
+/// 在发起重连请求前，主动查询 LCU 当前权威状态与游戏进程存活情况，确认仍处于断线重连态。
+/// 规避对局结束 Alt+F4 退出或自然结算退出时 WebSocket 事件积压或服务端结算延迟导致的误拉起。
+async fn is_reconnect_still_valid(client: &LcuClient) -> bool {
+    // 1. 游戏进程已退出 → 对局必然已结束（或用户主动退出），不重连。
+    //    Alt+F4 主动退出或对局正常结束退出后游戏进程立即消失，LCU 却仍会短暂停留在 Reconnect 阶段等待
+    //    服务端结算写入（实测 2~4s 后才推进到 WaitingForStats），此时发起重连
+    //    会把游戏进程重新拉起并卡在加载页或报错。真实网络掉线时游戏进程仍在运行，
+    //    因此「进程缺失」是区分主动退出/对局结束与真实掉线的可靠判据。
+    if !is_game_process_alive().await {
+        log::info!("[Agent] 游戏进程已退出，判定对局已结束，取消自动重连");
+        return false;
+    }
+
+    // 2. 主动拉取 gameflow-phase
+    if let Ok(value) = client.get("/lol-gameflow/v1/gameflow-phase").await {
+        if let Some(phase) = value.as_str() {
+            if phase != "Reconnect" {
+                log::info!(
+                    "[Agent] 主动查询 LCU 阶段为 {}，已脱离断线重连状态，取消自动重连",
+                    phase
+                );
+                return false;
+            }
+        }
+    }
+
+    // 3. 主动拉取 gameflow session 中的 phase 字段
+    if let Ok(session) = client.get("/lol-gameflow/v1/session").await {
+        if let Some(session_phase) = session.get("phase").and_then(|v| v.as_str()) {
+            if session_phase != "Reconnect" {
+                log::info!(
+                    "[Agent] Gameflow session 权威阶段为 {}，非重连状态，取消自动重连",
+                    session_phase
+                );
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+/// 判断对局游戏进程（League of Legends.exe）是否仍在运行。
+/// 网络掉线时游戏进程存活，重连才有意义；对局结束或主动退出后进程消失，
+/// 此时客户端的 Reconnect 只是等待结算写入的残留态。
+async fn is_game_process_alive() -> bool {
+    if !detect_game_process().await {
+        return false;
+    }
+    // 进程仍在时复核一次：对局结束/退出后 Windows 回收进程可能滞后数百毫秒，
+    // 单次采样有可能在退出瞬间读到残留进程，把「已退出」误判为「仍在游戏中」。
+    sleep(Duration::from_millis(300)).await;
+    detect_game_process().await
+}
+
+/// 单次枚举系统进程，判断对局客户端是否在运行。
+async fn detect_game_process() -> bool {
+    let detected = tokio::task::spawn_blocking(|| {
+        use sysinfo::System;
+        let mut sys = System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        sys.processes().values().any(|p| {
+            p.name()
+                .to_string_lossy()
+                .to_lowercase()
+                .starts_with("league of legends")
+        })
+    })
+    .await;
+
+    // 进程枚举任务异常时保守放行，避免误禁真实掉线的自动重连
+    detected.unwrap_or(true)
 }
 
 /// 延迟再来一局：延迟后校验代际与阶段，仍在结算流程才发出请求

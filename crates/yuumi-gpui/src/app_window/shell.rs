@@ -12,15 +12,24 @@ impl Render for MainWindow {
         } else {
             None
         };
-        let map_side_label = if let Some(info) = &self.game_info {
-            match info.user_side {
-                Some(yuumi_core::gameflow::team_builder::MapSide::Blue) => {
-                    Some(crate::i18n::t("titlebar.blueSide"))
+        let is_active_game = connected
+            && matches!(
+                self.current_phase.as_str(),
+                "ChampSelect" | "GameStart" | "InProgress" | "Reconnect"
+            );
+        let map_side_label = if is_active_game {
+            if let Some(info) = &self.game_info {
+                match info.user_side {
+                    Some(yuumi_core::gameflow::team_builder::MapSide::Blue) => {
+                        Some(crate::i18n::t("titlebar.blueSide"))
+                    }
+                    Some(yuumi_core::gameflow::team_builder::MapSide::Red) => {
+                        Some(crate::i18n::t("titlebar.redSide"))
+                    }
+                    _ => None,
                 }
-                Some(yuumi_core::gameflow::team_builder::MapSide::Red) => {
-                    Some(crate::i18n::t("titlebar.redSide"))
-                }
-                _ => None,
+            } else {
+                None
             }
         } else {
             None

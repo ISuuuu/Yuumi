@@ -281,72 +281,7 @@ impl MainWindow {
                     phase,
                     GamePhase::PreEndOfGame | GamePhase::EndOfGame | GamePhase::WaitingForStats
                 ) {
-                    if let Some(ref info) = self.game_info {
-                        // 演示快照与真实结算写入严格隔离！
-                        if !info.is_demo {
-                            if let Some(ref s) = self.saved_players_view.storage {
-                                let self_puuid = self
-                                    .career_view
-                                    .summoner
-                                    .as_ref()
-                                    .map(|sum| sum.puuid.as_str())
-                                    .unwrap_or("");
-                                let game_id = info.game_id.unwrap_or(0);
-                                let queue_type = info.queue_id.to_string();
-
-                                // 重复结算事件按 gameId 拦截去重
-                                let is_already_recorded = self
-                                    .last_recorded_encounter_game_id
-                                    .map(|id| id == game_id)
-                                    .unwrap_or(false);
-
-                                if !is_already_recorded && !self_puuid.is_empty() && game_id > 0 {
-                                    let players_to_record: Vec<
-                                        yuumi_core::storage::GamePlayerRecord,
-                                    > = info
-                                        .players()
-                                        .filter(|p| !p.is_local_player && !p.puuid.is_empty())
-                                        .map(|p| yuumi_core::storage::GamePlayerRecord {
-                                            puuid: p.puuid.clone(),
-                                            summoner_name: p.summoner_name.clone(),
-                                            tag_line: if p.tag_line.is_empty() {
-                                                None
-                                            } else {
-                                                Some(p.tag_line.clone())
-                                            },
-                                            profile_icon_id: 0,
-                                            champion_id: p.champion_id,
-                                        })
-                                        .collect();
-
-                                    if !players_to_record.is_empty() {
-                                        match s.record_encounters(
-                                            &players_to_record,
-                                            self_puuid,
-                                            game_id,
-                                            &queue_type,
-                                        ) {
-                                            Ok(rec) => {
-                                                log::info!(
-                                                    "[MainWindow] 对局结束自动记录相遇玩家: 共 {} 人",
-                                                    rec
-                                                );
-                                                self.last_recorded_encounter_game_id =
-                                                    Some(game_id);
-                                                self.saved_players_view.reload(Some(self_puuid));
-                                            }
-                                            Err(e) => {
-                                                log::warn!(
-                                                    "[MainWindow] 自动记录相遇玩家失败: {}",
-                                                    e
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    self.try_record_encounters();
                 }
                 cx.notify();
             }
@@ -385,6 +320,7 @@ impl MainWindow {
                 }
                 self.game_info = Some(info);
                 self.game_info_loading = false;
+                self.try_record_encounters();
                 cx.notify();
             }
             LiveLcuEvent::ChampSelectUpdated(session) => {
@@ -835,6 +771,85 @@ impl MainWindow {
         // 悬浮窗开关变更需立即生效
         self.sync_bench_overlay(cx);
         cx.notify();
+    }
+
+    /// 对局结束（结算阶段）：若存在 10 人快照且未记录过本局，自动持久化记录同局相遇玩家
+    pub(super) fn try_record_encounters(&mut self) {
+        if !matches!(
+            self.current_phase.as_str(),
+            "PreEndOfGame" | "EndOfGame" | "WaitingForStats"
+        ) {
+            return;
+        }
+
+        let Some(ref info) = self.game_info else {
+            return;
+        };
+
+        if info.is_demo || (1090..=1200).contains(&info.queue_id) {
+            return;
+        }
+
+        let Some(ref s) = self.saved_players_view.storage else {
+            return;
+        };
+
+        // 优先使用登录账号自身 PUUID，避免查看他人生涯时写入错位
+        let self_puuid = self
+            .own_summoner
+            .as_ref()
+            .map(|sum| sum.puuid.as_str())
+            .or_else(|| {
+                self.career_view
+                    .summoner
+                    .as_ref()
+                    .filter(|_| !self.career_view.is_viewing_other)
+                    .map(|sum| sum.puuid.as_str())
+            })
+            .unwrap_or("");
+
+        let game_id = info.game_id.unwrap_or(0);
+        let queue_type = info.queue_id.to_string();
+
+        let is_already_recorded = self
+            .last_recorded_encounter_game_id
+            .map(|id| id == game_id)
+            .unwrap_or(false);
+
+        if !is_already_recorded && !self_puuid.is_empty() && game_id > 0 {
+            let players_to_record: Vec<yuumi_core::storage::GamePlayerRecord> = info
+                .players()
+                .filter(|p| !p.is_local_player && !p.puuid.is_empty())
+                .map(|p| yuumi_core::storage::GamePlayerRecord {
+                    puuid: p.puuid.clone(),
+                    summoner_name: p.summoner_name.clone(),
+                    tag_line: if p.tag_line.is_empty() {
+                        None
+                    } else {
+                        Some(p.tag_line.clone())
+                    },
+                    profile_icon_id: p.profile_icon_id,
+                    champion_id: p.champion_id,
+                })
+                .collect();
+
+            if !players_to_record.is_empty() {
+                match s.record_encounters(&players_to_record, self_puuid, game_id, &queue_type) {
+                    Ok(rec) => {
+                        log::info!(
+                            "[MainWindow] 对局结束自动记录相遇玩家: 共 {} 人 (game_id={})",
+                            rec,
+                            game_id
+                        );
+                        self.last_recorded_encounter_game_id = Some(game_id);
+                        self.saved_players_view.reload(Some(self_puuid));
+                    }
+                    Err(e) => {
+                        log::warn!("[MainWindow] 自动记录相遇玩家失败: {}", e);
+                    }
+                }
+            }
+        }
     }
 }
 

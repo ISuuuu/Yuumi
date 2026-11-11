@@ -150,6 +150,107 @@ pub fn rank_display(tier: &str, division: &str, league_points: u32) -> String {
 
 // ─── 会话参与者 ───
 
+/// 宽容反序列化：兼容 LCU 在 `teamParticipantId` / `partyId` 上返回字符串、数字或 null
+fn deserialize_opt_string_or_number<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct OptStringOrNumberVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for OptStringOrNumberVisitor {
+        type Value = Option<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string, integer, or null")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_some<D2>(self, deserializer: D2) -> Result<Self::Value, D2::Error>
+        where
+            D2: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(self)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if v.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(v.to_string()))
+            }
+        }
+
+        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if v.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(v))
+            }
+        }
+
+        fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(Some(v.to_string()))
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(Some(v.to_string()))
+        }
+
+        fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(Some((v as i64).to_string()))
+        }
+    }
+
+    deserializer.deserialize_option(OptStringOrNumberVisitor)
+}
+
+/// 宽容反序列化：将 null 或缺失字段均转为默认值（避免 LCU 返回 `"teamTwo": null` 时整包失败）
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Default + serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
+
+/// 宽容反序列化：对局 ID 允许 null、0 或负数并归一化为 `Option<u64>`
+fn deserialize_opt_u64_lenient<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<i64>::deserialize(deserializer)?;
+    Ok(opt.and_then(|v| if v > 0 { Some(v as u64) } else { None }))
+}
+
 /// 选人 / 对局会话中的单名参与者（LCU 原始字段）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,14 +275,20 @@ pub struct SessionPlayer {
     pub tag_line: Option<String>,
     #[serde(default)]
     pub summoner_name: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_opt_string_or_number")]
     pub team_participant_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_opt_string_or_number")]
     pub party_id: Option<String>,
     #[serde(default)]
     pub bot: Option<bool>,
     #[serde(default)]
     pub is_bot: Option<bool>,
+    #[serde(default)]
+    pub bot_champion_id: Option<i32>,
+    #[serde(default)]
+    pub bot_name: Option<String>,
+    #[serde(default)]
+    pub profile_icon_id: Option<i32>,
 }
 
 impl SessionPlayer {
@@ -198,11 +305,13 @@ impl SessionPlayer {
         self.summoner_id.filter(|&id| id != 0)
     }
 
-    /// 当前英雄 ID（未锁定时回退到预选英雄）
+    /// 当前英雄 ID（未锁定时回退到人机英雄或预选英雄）
     pub fn resolved_champion_id(&self) -> i32 {
         let picked = self.champion_id.unwrap_or(0);
         if picked > 0 {
             picked
+        } else if let Some(bot_cid) = self.bot_champion_id.filter(|&c| c > 0) {
+            bot_cid
         } else {
             self.champion_pick_intent.unwrap_or(0)
         }
@@ -223,6 +332,7 @@ impl SessionPlayer {
             .as_deref()
             .or(self.summoner_name.as_deref())
             .or(self.game_name.as_deref())
+            .or(self.bot_name.as_deref())
             .unwrap_or("")
             .trim();
 
@@ -233,7 +343,9 @@ impl SessionPlayer {
     }
 
     pub fn is_bot(&self) -> bool {
-        self.bot.unwrap_or(false) || self.is_bot.unwrap_or(false)
+        self.bot.unwrap_or(false)
+            || self.is_bot.unwrap_or(false)
+            || self.bot_champion_id.unwrap_or(0) > 0
     }
 
     fn team_participant_key(&self) -> Option<String> {
@@ -248,9 +360,9 @@ impl SessionPlayer {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChampSelectSnapshot {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub my_team: Vec<SessionPlayer>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub their_team: Vec<SessionPlayer>,
     #[serde(default)]
     pub local_player_cell_id: Option<i64>,
@@ -265,18 +377,20 @@ pub struct GameflowQueueInfo {
     pub id: Option<i32>,
     #[serde(default)]
     pub game_mode: Option<String>,
+    #[serde(default)]
+    pub is_custom: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameflowGameData {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_opt_u64_lenient")]
     pub game_id: Option<u64>,
     #[serde(default)]
     pub queue: Option<GameflowQueueInfo>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub team_one: Vec<SessionPlayer>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub team_two: Vec<SessionPlayer>,
 }
 
@@ -299,21 +413,52 @@ pub struct GameInfoSource {
     pub blue: Vec<SessionPlayer>,
     pub red: Vec<SessionPlayer>,
     pub local_player_cell_id: Option<i64>,
+    pub detected_side: Option<MapSide>,
 }
 
 impl GameInfoSource {
-    /// 从选人会话构建（myTeam 作为我方一侧，theirTeam 作为敌方一侧）
-    pub fn from_champ_select(snapshot: &ChampSelectSnapshot) -> Option<Self> {
+    /// 从选人会话构建（依据 pin-drop 阵营或 cellId 区分蓝方/红方，不再硬编码 myTeam 为蓝方）
+    pub fn from_champ_select(
+        snapshot: &ChampSelectSnapshot,
+        pin_drop_side: Option<MapSide>,
+    ) -> Option<Self> {
         if snapshot.my_team.is_empty() && snapshot.their_team.is_empty() {
             return None;
         }
+        let user_side = pin_drop_side.unwrap_or_else(|| {
+            if let Some(cell_id) = snapshot.local_player_cell_id {
+                if cell_id >= 5 {
+                    return MapSide::Red;
+                } else {
+                    return MapSide::Blue;
+                }
+            }
+            let has_red = snapshot.my_team.iter().any(|p| p.cell_id.unwrap_or(-1) >= 5);
+            let has_blue = snapshot.my_team.iter().any(|p| {
+                let cid = p.cell_id.unwrap_or(-1);
+                (0..5).contains(&cid)
+            });
+            if has_red && !has_blue {
+                MapSide::Red
+            } else {
+                MapSide::Blue
+            }
+        });
+
+        let (blue, red) = if user_side == MapSide::Red {
+            (snapshot.their_team.clone(), snapshot.my_team.clone())
+        } else {
+            (snapshot.my_team.clone(), snapshot.their_team.clone())
+        };
+
         Some(Self {
             phase: "ChampSelect".to_string(),
             queue_id: snapshot.queue_id.unwrap_or(0),
             game_id: None,
-            blue: snapshot.my_team.clone(),
-            red: snapshot.their_team.clone(),
+            blue,
+            red,
             local_player_cell_id: snapshot.local_player_cell_id,
+            detected_side: Some(user_side),
         })
     }
 
@@ -330,6 +475,7 @@ impl GameInfoSource {
             blue: game_data.team_one.clone(),
             red: game_data.team_two.clone(),
             local_player_cell_id: None,
+            detected_side: None,
         })
     }
 
@@ -339,6 +485,7 @@ impl GameInfoSource {
             self.phase.clone(),
             self.game_id.unwrap_or(0).to_string(),
             self.queue_id.to_string(),
+            self.detected_side.map(|s| s.as_str()).unwrap_or("none").to_string(),
         ];
         for group in [&self.blue, &self.red] {
             let slots: Vec<String> = group
@@ -1209,32 +1356,26 @@ fn snapshot_of(player: &SessionPlayer) -> SnapshotParticipant<'_> {
     }
 }
 
-/// 阵营绑定：对局阶段按真实 teamOne/teamTwo 判定，选人阶段按 myTeam 归为我方
+/// 阵营绑定：对局阶段优先按真实 teamOne/teamTwo 匹配；选人或脱敏阶段采用 detected_side 兜底
 fn bind_team_side(
     source: &GameInfoSource,
     self_puuid: &str,
     self_summoner_id: Option<i64>,
 ) -> (MapSide, bool) {
+    let is_champ_select = source.phase == "ChampSelect";
     let blue_snapshots: Vec<SnapshotParticipant> = source.blue.iter().map(snapshot_of).collect();
     let red_snapshots: Vec<SnapshotParticipant> = source.red.iter().map(snapshot_of).collect();
-
-    // 选人阶段 myTeam 固定占据 0..4 槽位，尚无真实阵营信息
-    let is_champ_select = source.phase == "ChampSelect";
-    let champ_select_snapshot: &[SnapshotParticipant] = if is_champ_select {
-        &blue_snapshots
-    } else {
-        &[]
-    };
 
     let ctx = TeamBuildContext {
         current_summoner_id: self_summoner_id,
         current_summoner_puuid: Some(self_puuid),
-        map_side: None,
-        champ_select_team_snapshot: champ_select_snapshot,
+        map_side: source.detected_side,
+        champ_select_team_snapshot: &[],
     };
 
     let (side, matched) = resolve_team_side(&blue_snapshots, &red_snapshots, &ctx);
-    (side.unwrap_or(MapSide::Blue), matched && !is_champ_select)
+    let resolved = source.detected_side.or(side).unwrap_or(MapSide::Blue);
+    (resolved, matched && !is_champ_select)
 }
 
 /// 构建单名玩家的对局信息（共享上下文集中传入，避免参数过长）
@@ -1387,7 +1528,7 @@ fn build_player(
         is_local_player,
         is_bot: session.is_bot(),
         summoner_level: 0,
-        profile_icon_id: 0,
+        profile_icon_id: session.profile_icon_id.unwrap_or(0),
         matches: recent.to_vec(),
         top_champions,
         saved_tag,
@@ -1591,6 +1732,72 @@ pub async fn fetch_live_game_info(
     )
 }
 
+/// 尝试从游戏引擎 LiveClientData (2999 端口) 探测当前玩家阵营（ORDER -> 蓝方, CHAOS -> 红方）
+pub async fn detect_liveclient_map_side() -> Option<MapSide> {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client = CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .no_proxy()
+            .timeout(std::time::Duration::from_millis(1500))
+            .build()
+            .unwrap_or_default()
+    });
+
+    let active_name = client
+        .get("https://127.0.0.1:2999/liveclientdata/activeplayername")
+        .send()
+        .await
+        .ok()?
+        .json::<String>()
+        .await
+        .ok()?;
+
+    if active_name.is_empty() {
+        return None;
+    }
+
+    let players = client
+        .get("https://127.0.0.1:2999/liveclientdata/playerlist")
+        .send()
+        .await
+        .ok()?
+        .json::<Vec<serde_json::Value>>()
+        .await
+        .ok()?;
+
+    let matches: Vec<&str> = players
+        .iter()
+        .filter(|p| {
+            p.get("riotIdGameName")
+                .and_then(|v| v.as_str())
+                .map(|n| n == active_name)
+                .unwrap_or(false)
+                || p.get("summonerName")
+                    .and_then(|v| v.as_str())
+                    .map(|n| n == active_name)
+                    .unwrap_or(false)
+                || p.get("riotId")
+                    .and_then(|v| v.as_str())
+                    .map(|n| n == active_name)
+                    .unwrap_or(false)
+        })
+        .filter_map(|p| p.get("team").and_then(|v| v.as_str()))
+        .collect();
+
+    if !matches.is_empty() {
+        let first_team = matches[0];
+        if matches.iter().all(|&t| t == first_team) {
+            if first_team.eq_ignore_ascii_case("ORDER") {
+                return Some(MapSide::Blue);
+            } else if first_team.eq_ignore_ascii_case("CHAOS") {
+                return Some(MapSide::Red);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1608,7 +1815,7 @@ mod tests {
     fn champ_select_source() -> GameInfoSource {
         let snapshot: ChampSelectSnapshot =
             serde_json::from_str(CHAMP_SELECT_FIXTURE).expect("选人快照应能反序列化");
-        GameInfoSource::from_champ_select(&snapshot).expect("选人快照应包含双方玩家")
+        GameInfoSource::from_champ_select(&snapshot, None).expect("选人快照应包含双方玩家")
     }
 
     fn gameflow_source() -> GameInfoSource {
@@ -1948,5 +2155,69 @@ mod tests {
             assert!(placed_ranked_entry(&unranked).is_none(), "tier={:?} 应视为未定级", tier);
         }
         assert!(placed_ranked_entry(&RankedStats::default()).is_none());
+    }
+
+    #[test]
+    fn champ_select_red_side_via_pin_drop_or_cell_id() {
+        let mut snapshot: ChampSelectSnapshot =
+            serde_json::from_str(CHAMP_SELECT_FIXTURE).expect("选人快照应能反序列化");
+        // ARAM 等场景下 myTeam cellId 可能为 0..4，但 pin-drop 告知为红色方
+        let source_pin = GameInfoSource::from_champ_select(&snapshot, Some(MapSide::Red))
+            .expect("选人快照应有效");
+        let info_pin = build_live_game_info(
+            &source_pin,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &HashMap::new(),
+            &GameDataAssets::default(),
+        );
+        assert_eq!(info_pin.user_side, Some(MapSide::Red));
+        assert!(info_pin.red_team.iter().any(|p| p.puuid == SELF_PUUID));
+        assert!(info_pin.blue_team.iter().any(|p| p.puuid == "puuid-enemy-top"));
+
+        // 无 pin-drop 时依据 localPlayerCellId >= 5 判定为红方
+        snapshot.local_player_cell_id = Some(6);
+        let source_cell = GameInfoSource::from_champ_select(&snapshot, None)
+            .expect("选人快照应有效");
+        let info_cell = build_live_game_info(
+            &source_cell,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &HashMap::new(),
+            &GameDataAssets::default(),
+        );
+        assert_eq!(info_cell.user_side, Some(MapSide::Red));
+        assert!(info_cell.red_team.iter().any(|p| p.puuid == SELF_PUUID));
+    }
+
+    #[test]
+    fn gameflow_snapshot_accepts_numeric_tpid_and_null_teams() {
+        let payload = serde_json::json!({
+            "gameData": {
+                "gameId": 123456789,
+                "queue": { "id": 450, "gameMode": "ARAM", "isCustom": false },
+                "teamOne": [
+                    {
+                        "cellId": 0,
+                        "championId": 1,
+                        "summonerId": 1001,
+                        "puuid": "puuid-self-top",
+                        "displayName": "悠米本米#GPUI",
+                        "teamParticipantId": 0,
+                        "partyId": 987654
+                    }
+                ],
+                "teamTwo": null
+            }
+        });
+        let snapshot: GameflowSessionSnapshot =
+            serde_json::from_value(payload).expect("数字 teamParticipantId/partyId 与 null teamTwo 应能反序列化");
+        let gd = snapshot.game_data.expect("gameData 应存在");
+        assert_eq!(gd.team_one.len(), 1);
+        assert_eq!(gd.team_one[0].team_participant_id.as_deref(), Some("0"));
+        assert_eq!(gd.team_one[0].party_id.as_deref(), Some("987654"));
+        assert!(gd.team_two.is_empty());
     }
 }

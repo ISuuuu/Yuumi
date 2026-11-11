@@ -12,6 +12,7 @@ use yuumi_core::agents::{
     lifecycle::{GamePhase, LifecycleManager},
     supervisor::AgentSupervisor,
 };
+use yuumi_core::gameflow::team_builder::MapSide;
 use yuumi_core::lcu::{
     asset_cache::AssetCache,
     game_data::{fetch_game_data_assets, GameDataAssets},
@@ -19,8 +20,8 @@ use yuumi_core::lcu::{
     ws::{start_ws, LcuWsEvent, LcuWsHandle},
 };
 use yuumi_core::parsers::game_info::{
-    fetch_live_game_info, fetch_ranked_stats, ChampSelectSnapshot, GameInfoSource,
-    GameflowSessionSnapshot, LiveGameInfo, RankedStats,
+    detect_liveclient_map_side, fetch_live_game_info, fetch_ranked_stats, ChampSelectSnapshot,
+    GameInfoSource, GameflowSessionSnapshot, LiveGameInfo, RankedStats,
 };
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
 use yuumi_core::parsers::loot_actions::{
@@ -429,6 +430,19 @@ impl LiveLcuService {
                             .await;
                     }
                     GamePhase::PreEndOfGame | GamePhase::WaitingForStats | GamePhase::EndOfGame => {
+                        // 若对局进行期间未及时拿到带 gameId 的 10 人快照，结算阶段兜底补拉一次以便记录路人集
+                        let missing_game_id = self
+                            .game_info
+                            .read()
+                            .await
+                            .as_ref()
+                            .and_then(|g| g.game_id)
+                            .unwrap_or(0)
+                            == 0;
+                        if missing_game_id {
+                            self.schedule_game_info_refresh(phase_str, Duration::ZERO)
+                                .await;
+                        }
                         // 对局结束：延迟刷新生涯战绩，10 人快照保留
                         let this = self.clone();
                         tokio::spawn(async move {
@@ -820,16 +834,90 @@ impl LiveLcuService {
             return;
         };
 
-        let source = match phase {
-            "ChampSelect" => match client.get("/lol-champ-select/v1/session").await {
-                Ok(value) => serde_json::from_value::<ChampSelectSnapshot>(value)
-                    .ok()
-                    .and_then(|snapshot| GameInfoSource::from_champ_select(&snapshot)),
-                Err(e) => {
-                    log::debug!("[LiveLcu] 读取选人会话失败: {}", e);
-                    None
+        let mut source = match phase {
+            "ChampSelect" => {
+                let mut pin_side = fetch_pin_drop_side(&client).await;
+                if pin_side.is_none() {
+                    let prev_in_champ_select = self
+                        .game_info
+                        .read()
+                        .await
+                        .as_ref()
+                        .is_some_and(|g| g.phase == "ChampSelect");
+                    if !prev_in_champ_select {
+                        sleep(Duration::from_millis(400)).await;
+                        pin_side = fetch_pin_drop_side(&client).await;
+                    }
                 }
-            },
+                match client.get("/lol-champ-select/v1/session").await {
+                    Ok(value) => match serde_json::from_value::<ChampSelectSnapshot>(value) {
+                        Ok(snapshot) => GameInfoSource::from_champ_select(&snapshot, pin_side),
+                        Err(e) => {
+                            log::warn!("[LiveLcu] 解析选人会话失败: {}", e);
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        log::debug!("[LiveLcu] 读取选人会话失败: {}", e);
+                        None
+                    }
+                }
+            }
+            "GameStart" | "InProgress" | "Reconnect" => {
+                // 对局刚开始时，LCU gameflow session 可能只填充了一侧队伍；若单边为空则短暂重试
+                let mut session_val = None;
+                for attempt in 0..3 {
+                    if attempt > 0 {
+                        sleep(Duration::from_millis(800)).await;
+                    }
+                    match client.get("/lol-gameflow/v1/session").await {
+                        Ok(value) => {
+                            let t1_len = value
+                                .pointer("/gameData/teamOne")
+                                .and_then(|v| v.as_array())
+                                .map(|a| a.len())
+                                .unwrap_or(0);
+                            let t2_len = value
+                                .pointer("/gameData/teamTwo")
+                                .and_then(|v| v.as_array())
+                                .map(|a| a.len())
+                                .unwrap_or(0);
+                            let is_custom = value
+                                .pointer("/gameData/queue/isCustom")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            session_val = Some(value);
+                            if is_custom || (t1_len > 0 && t2_len > 0) {
+                                break;
+                            }
+                            log::debug!(
+                                "[LiveLcu] 对局会话队伍尚不完整 (t1={}, t2={})，第 {}/3 次等待",
+                                t1_len,
+                                t2_len,
+                                attempt + 1
+                            );
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                "[LiveLcu] 读取对局会话失败 (第 {}/3 次): {}",
+                                attempt + 1,
+                                e
+                            );
+                        }
+                    }
+                }
+
+                match session_val {
+                    Some(value) => match serde_json::from_value::<GameflowSessionSnapshot>(value) {
+                        Ok(snapshot) => GameInfoSource::from_gameflow(phase, &snapshot),
+                        Err(e) => {
+                            log::warn!("[LiveLcu] 解析对局会话失败: {}", e);
+                            None
+                        }
+                    },
+                    None => None,
+                }
+            }
             _ => match client.get("/lol-gameflow/v1/session").await {
                 Ok(value) => serde_json::from_value::<GameflowSessionSnapshot>(value)
                     .ok()
@@ -841,24 +929,53 @@ impl LiveLcuService {
             },
         };
 
-        let Some(source) = source else {
+        let Some(ref mut src) = source else {
             log::debug!("[LiveLcu] 当前阶段（{}）暂无可用对局会话", phase);
             return;
         };
 
-        let key = source.refresh_key();
-        if self.game_info.read().await.is_some() && *self.last_game_info_key.read().await == key {
-            return;
-        }
-
-        let assets = self.get_game_data_assets().await;
-        let summoner = fetch_current_summoner(&client).await.ok();
-        let (Some(assets), Some(summoner)) = (assets, summoner) else {
-            log::debug!("[LiveLcu] 召唤师或资源字典未就绪，跳过对局信息拉取");
+        let assets = self
+            .get_game_data_assets()
+            .await
+            .unwrap_or_else(|| Arc::new(GameDataAssets::default()));
+        let summoner = match fetch_current_summoner(&client).await {
+            Ok(s) => Some(s),
+            Err(_) => match &*self.status.borrow() {
+                ConnectionStatus::Connected { summoner, .. } => (**summoner).clone(),
+                _ => None,
+            },
+        };
+        let Some(summoner) = summoner else {
+            log::debug!("[LiveLcu] 召唤师信息未就绪，跳过对局信息拉取");
             return;
         };
 
         let self_summoner_id = summoner.summoner_id.and_then(|id| i64::try_from(id).ok());
+
+        // 对局阶段若 teamOne/teamTwo 均未能直接匹配本人（如脱敏排位或极简会话），尝试 2999 端口与历史阵营兜底
+        if src.phase != "ChampSelect" && src.detected_side.is_none() {
+            let matched_direct = src.blue.iter().chain(src.red.iter()).any(|p| {
+                p.resolved_puuid() == Some(summoner.puuid.as_str())
+                    || (self_summoner_id.is_some()
+                        && p.resolved_summoner_id() == self_summoner_id)
+            });
+            if !matched_direct {
+                let fallback_side = match detect_liveclient_map_side().await {
+                    Some(side) => Some(side),
+                    None => self.game_info.read().await.as_ref().and_then(|g| g.user_side),
+                };
+                if let Some(side) = fallback_side {
+                    src.detected_side = Some(side);
+                }
+            }
+        }
+
+        let key = src.refresh_key();
+        if self.game_info.read().await.is_some() && *self.last_game_info_key.read().await == key {
+            return;
+        }
+
+        let source = source.unwrap();
         let recent = self.get_recent_matches().await;
 
         log::info!(
@@ -869,7 +986,7 @@ impl LiveLcuService {
         );
         let _ = self.event_tx.send(LiveLcuEvent::GameInfoLoading);
 
-        let info = fetch_live_game_info(
+        let mut info = fetch_live_game_info(
             &client,
             &summoner.puuid,
             self_summoner_id,
@@ -879,16 +996,48 @@ impl LiveLcuService {
         )
         .await;
 
+        // 对局进行中精简防丢：若当前 session 只剩单边队伍，而同局先前已记录完整敌我数据，保留先前非空队伍
+        if let Some(prev) = self.game_info.read().await.as_ref() {
+            let prev_is_same_match = prev.phase != "ChampSelect"
+                && info.game_id.is_some()
+                && info.game_id == prev.game_id;
+            if prev_is_same_match {
+                if info.blue_team.is_empty() && !prev.blue_team.is_empty() {
+                    log::info!("[LiveLcu] 继承先前蓝方队伍 ({} 人)", prev.blue_team.len());
+                    info.blue_team = prev.blue_team.clone();
+                }
+                if info.red_team.is_empty() && !prev.red_team.is_empty() {
+                    log::info!("[LiveLcu] 继承先前红方队伍 ({} 人)", prev.red_team.len());
+                    info.red_team = prev.red_team.clone();
+                }
+            }
+        }
+
         log::info!(
-            "[LiveLcu] 对局信息就绪: {} vs {}",
+            "[LiveLcu] 对局信息就绪: {} vs {} (user_side={:?})",
             info.blue_team.len(),
-            info.red_team.len()
+            info.red_team.len(),
+            info.user_side
         );
 
         let info = Arc::new(info);
         *self.last_game_info_key.write().await = key;
         *self.game_info.write().await = Some(info.clone());
         let _ = self.event_tx.send(LiveLcuEvent::GameInfoUpdated(info));
+    }
+}
+
+/// 从选人 pin-drop-notification 读取实时红蓝阵营
+async fn fetch_pin_drop_side(client: &yuumi_core::lcu::client::LcuClient) -> Option<MapSide> {
+    let data = client
+        .get("/lol-champ-select/v1/pin-drop-notification")
+        .await
+        .ok()?;
+    let side = data.get("mapSide").and_then(|v| v.as_str())?;
+    match side.trim().to_ascii_lowercase().as_str() {
+        "blue" => Some(MapSide::Blue),
+        "red" => Some(MapSide::Red),
+        _ => None,
     }
 }
 
