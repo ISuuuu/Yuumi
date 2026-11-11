@@ -73,79 +73,67 @@ impl AssetLoader {
     pub fn get_builtin_image_bytes(path: &str) -> Option<&'static [u8]> {
         let p = path.trim_start_matches('/');
         match p {
-            "images/kills.png" => Some(include_bytes!("../../../public/images/kills.png")),
-            "images/tower-100.png" => Some(include_bytes!("../../../public/images/tower-100.png")),
-            "images/tower-200.png" => Some(include_bytes!("../../../public/images/tower-200.png")),
+            "images/kills.png" => Some(include_bytes!("../assets/images/kills.png")),
+            "images/tower-100.png" => Some(include_bytes!("../assets/images/tower-100.png")),
+            "images/tower-200.png" => Some(include_bytes!("../assets/images/tower-200.png")),
             "images/inhibitor-100.png" => {
-                Some(include_bytes!("../../../public/images/inhibitor-100.png"))
+                Some(include_bytes!("../assets/images/inhibitor-100.png"))
             }
             "images/inhibitor-200.png" => {
-                Some(include_bytes!("../../../public/images/inhibitor-200.png"))
+                Some(include_bytes!("../assets/images/inhibitor-200.png"))
             }
-            "images/baron-100.png" => Some(include_bytes!("../../../public/images/baron-100.png")),
-            "images/baron-200.png" => Some(include_bytes!("../../../public/images/baron-200.png")),
-            "images/dragon-100.png" => {
-                Some(include_bytes!("../../../public/images/dragon-100.png"))
-            }
-            "images/dragon-200.png" => {
-                Some(include_bytes!("../../../public/images/dragon-200.png"))
-            }
-            "images/herald-100.png" => {
-                Some(include_bytes!("../../../public/images/herald-100.png"))
-            }
-            "images/herald-200.png" => {
-                Some(include_bytes!("../../../public/images/herald-200.png"))
-            }
-            "images/sr-victory.png" => {
-                Some(include_bytes!("../../../public/images/sr-victory.png"))
-            }
-            "images/sr-defeat.png" => Some(include_bytes!("../../../public/images/sr-defeat.png")),
-            "images/ha-victory.png" => {
-                Some(include_bytes!("../../../public/images/ha-victory.png"))
-            }
-            "images/ha-defeat.png" => Some(include_bytes!("../../../public/images/ha-defeat.png")),
+            "images/baron-100.png" => Some(include_bytes!("../assets/images/baron-100.png")),
+            "images/baron-200.png" => Some(include_bytes!("../assets/images/baron-200.png")),
+            "images/dragon-100.png" => Some(include_bytes!("../assets/images/dragon-100.png")),
+            "images/dragon-200.png" => Some(include_bytes!("../assets/images/dragon-200.png")),
+            "images/herald-100.png" => Some(include_bytes!("../assets/images/herald-100.png")),
+            "images/herald-200.png" => Some(include_bytes!("../assets/images/herald-200.png")),
+            "images/sr-victory.png" => Some(include_bytes!("../assets/images/sr-victory.png")),
+            "images/sr-defeat.png" => Some(include_bytes!("../assets/images/sr-defeat.png")),
+            "images/ha-victory.png" => Some(include_bytes!("../assets/images/ha-victory.png")),
+            "images/ha-defeat.png" => Some(include_bytes!("../assets/images/ha-defeat.png")),
             "images/arena-victory.png" => {
-                Some(include_bytes!("../../../public/images/arena-victory.png"))
+                Some(include_bytes!("../assets/images/arena-victory.png"))
             }
             "images/arena-defeat.png" => {
-                Some(include_bytes!("../../../public/images/arena-defeat.png"))
+                Some(include_bytes!("../assets/images/arena-defeat.png"))
             }
             "images/other-victory.png" => {
-                Some(include_bytes!("../../../public/images/other-victory.png"))
+                Some(include_bytes!("../assets/images/other-victory.png"))
             }
             "images/other-defeat.png" => {
-                Some(include_bytes!("../../../public/images/other-defeat.png"))
+                Some(include_bytes!("../assets/images/other-defeat.png"))
             }
             "assets/ranked-icons/iron.png" => {
-                Some(include_bytes!("../../../src/assets/ranked-icons/iron.png"))
+                Some(include_bytes!("../assets/ranked-icons/iron.png"))
             }
-            "assets/ranked-icons/bronze.png" => Some(include_bytes!(
-                "../../../src/assets/ranked-icons/bronze.png"
-            )),
-            "assets/ranked-icons/silver.png" => Some(include_bytes!(
-                "../../../src/assets/ranked-icons/silver.png"
-            )),
+            "assets/ranked-icons/bronze.png" => {
+                Some(include_bytes!("../assets/ranked-icons/bronze.png"))
+            }
+            "assets/ranked-icons/silver.png" => {
+                Some(include_bytes!("../assets/ranked-icons/silver.png"))
+            }
             "assets/ranked-icons/gold.png" => {
-                Some(include_bytes!("../../../src/assets/ranked-icons/gold.png"))
+                Some(include_bytes!("../assets/ranked-icons/gold.png"))
             }
-            "assets/ranked-icons/platinum.png" => Some(include_bytes!(
-                "../../../src/assets/ranked-icons/platinum.png"
-            )),
-            "assets/ranked-icons/emerald.png" => Some(include_bytes!(
-                "../../../src/assets/ranked-icons/emerald.png"
-            )),
-            "assets/ranked-icons/diamond.png" => Some(include_bytes!(
-                "../../../src/assets/ranked-icons/diamond.png"
-            )),
-            "assets/ranked-icons/master.png" => Some(include_bytes!(
-                "../../../src/assets/ranked-icons/master.png"
-            )),
-            "assets/ranked-icons/grandmaster.png" => Some(include_bytes!(
-                "../../../src/assets/ranked-icons/grandmaster.png"
-            )),
-            "assets/ranked-icons/challenger.png" => Some(include_bytes!(
-                "../../../src/assets/ranked-icons/challenger.png"
-            )),
+            "assets/ranked-icons/platinum.png" => {
+                Some(include_bytes!("../assets/ranked-icons/platinum.png"))
+            }
+            "assets/ranked-icons/emerald.png" => {
+                Some(include_bytes!("../assets/ranked-icons/emerald.png"))
+            }
+            "assets/ranked-icons/diamond.png" => {
+                Some(include_bytes!("../assets/ranked-icons/diamond.png"))
+            }
+            "assets/ranked-icons/master.png" => {
+                Some(include_bytes!("../assets/ranked-icons/master.png"))
+            }
+            "assets/ranked-icons/grandmaster.png" => {
+                Some(include_bytes!("../assets/ranked-icons/grandmaster.png"))
+            }
+            "assets/ranked-icons/challenger.png" => {
+                Some(include_bytes!("../assets/ranked-icons/challenger.png"))
+            }
             _ => None,
         }
     }

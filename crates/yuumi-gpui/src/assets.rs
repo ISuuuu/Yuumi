@@ -54,8 +54,8 @@ impl AssetSource for Assets {
     }
 }
 
-/// 应用 Logo（复用仓库内的 `public/logo.png`，避免二进制资源重复入库）
-const LOGO_PNG: &[u8] = include_bytes!("../../../public/logo.png");
+/// 应用 Logo
+const LOGO_PNG: &[u8] = include_bytes!("../assets/logo.png");
 
 /// OP.GG 品牌徽标（原色 PNG）
 ///

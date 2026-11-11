@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "crates/yuumi-core",
+    "crates/yuumi-gpui",
+]
+resolver = "2"
+
+# 开发构建默认 opt-level=0 时，gpui 的布局/绘制（taffy layout + paint）极慢：
+# 对局信息页一次整页重绘要 330ms，拖动窗口起始那一次重绘就是肉眼可见的卡顿。
+# 这里让依赖（gpui/taffy 等）以 opt-level=2 编译，本地 crate 保持 0，增量编译只需 ~10s。
+[profile.dev]
+opt-level = 0
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# 本地打过补丁的 gpui 0.2.2（crates.io 上无更新版本）：
+# vendor/gpui/src/window.rs 的 bounds_changed 只在尺寸/缩放/显示器变化时重绘，
+# 避免拖动窗口时每次 WM_MOVE 都全量重绘。
+[patch.crates-io]
+gpui = { path = "vendor/gpui" }

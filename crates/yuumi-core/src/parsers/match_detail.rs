@@ -433,11 +433,6 @@ mod tests {
     #[test]
     fn test_parse_real_fixture_top_solo() {
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("src-tauri")
             .join("testdata")
             .join("match")
             .join("real")

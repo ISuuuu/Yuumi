@@ -139,14 +139,14 @@ pub fn parse_fixture_game(game: &LcuMatchGame, assets: &GameDataAssets) -> Optio
 #[cfg(test)]
 pub fn load_mock_matches() -> Vec<MatchItem> {
     let raw_fixtures = [
-        include_str!("../../../src-tauri/testdata/match/real/top-solo.json"),
-        include_str!("../../../src-tauri/testdata/match/real/mid-solo.json"),
-        include_str!("../../../src-tauri/testdata/match/real/jungle-none.json"),
-        include_str!("../../../src-tauri/testdata/match/real/bottom-carry.json"),
-        include_str!("../../../src-tauri/testdata/match/real/bottom-support.json"),
-        include_str!("../../../src-tauri/testdata/match/real/none-duo.json"),
-        include_str!("../../../src-tauri/testdata/match/real/remake.json"),
-        include_str!("../../../src-tauri/testdata/match/real/custom-3100.json"),
+        include_str!("../../yuumi-core/testdata/match/real/top-solo.json"),
+        include_str!("../../yuumi-core/testdata/match/real/mid-solo.json"),
+        include_str!("../../yuumi-core/testdata/match/real/jungle-none.json"),
+        include_str!("../../yuumi-core/testdata/match/real/bottom-carry.json"),
+        include_str!("../../yuumi-core/testdata/match/real/bottom-support.json"),
+        include_str!("../../yuumi-core/testdata/match/real/none-duo.json"),
+        include_str!("../../yuumi-core/testdata/match/real/remake.json"),
+        include_str!("../../yuumi-core/testdata/match/real/custom-3100.json"),
     ];
 
     let mut matches = Vec::new();

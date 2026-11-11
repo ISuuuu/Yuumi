@@ -1529,10 +1529,9 @@ mod tests {
     use super::*;
 
     fn catalog() -> TftCatalog {
-        let raw: Value = serde_json::from_str(include_str!(
-            "../../../../src-tauri/testdata/tft/synthetic/catalog.json"
-        ))
-        .expect("资源字典样本应可解析");
+        let raw: Value =
+            serde_json::from_str(include_str!("../../testdata/tft/synthetic/catalog.json"))
+                .expect("资源字典样本应可解析");
         parse_catalog(&raw)
     }
 
@@ -1582,7 +1581,7 @@ mod tests {
     #[test]
     fn parse_ranked_stats_reads_three_queues() {
         let raw: Value = serde_json::from_str(include_str!(
-            "../../../../src-tauri/testdata/tft/synthetic/ranked-stats.json"
+            "../../testdata/tft/synthetic/ranked-stats.json"
         ))
         .expect("段位样本应可解析");
         let stats = parse_ranked_stats(&raw);
@@ -1599,7 +1598,7 @@ mod tests {
     #[test]
     fn parse_match_summary_computes_stats_and_sorts_participants() {
         let raw: Value = serde_json::from_str(include_str!(
-            "../../../../src-tauri/testdata/tft/synthetic/match-history.json"
+            "../../testdata/tft/synthetic/match-history.json"
         ))
         .expect("战绩样本应可解析");
         let summary = parse_match_summary(&raw, "self-puuid", &catalog()).expect("战绩应可解析");
@@ -1642,7 +1641,7 @@ mod tests {
 
     #[test]
     fn parse_meta_decks_sorts_and_marks_tiers() {
-        let text = include_str!("../../../../src-tauri/testdata/tft/synthetic/meta-decks.json");
+        let text = include_str!("../../testdata/tft/synthetic/meta-decks.json");
         let decks = parse_meta_decks(text, &catalog()).expect("阵容样本应可解析");
 
         assert_eq!(decks.decks.len(), 2);

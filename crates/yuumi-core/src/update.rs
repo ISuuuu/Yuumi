@@ -8,20 +8,19 @@ use std::{collections::HashMap, path::Path, time::Duration};
 const MAX_PACKAGE: usize = 512 * 1024 * 1024;
 pub const RELEASES_URL: &str = "https://api.github.com/repos/ISuuuu/Yuumi/releases";
 
-/// Reuse the Tauri release manifest and signing key unless overridden at build time.
+const DEFAULT_UPDATE_ENDPOINT: &str =
+    "https://github.com/ISuuuu/Yuumi/releases/latest/download/latest.json";
+const DEFAULT_UPDATE_PUBLIC_KEY: &str =
+    "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzQjk5RURCMTE1MTM5MEIKUldRTE9WRVIyNTY1Z3pVZWRIQzh1bythRWZ3bWJsdTdoeS9uUTEvL0ZBa3I1bXZEd1o3cWpRbTYK";
+
+/// Use the default release manifest and signing key unless overridden at build time.
 pub fn gpui_update_channel() -> Result<(String, String), String> {
-    let config: serde_json::Value =
-        serde_json::from_str(include_str!("../../../src-tauri/tauri.conf.json"))
-            .map_err(|e| format!("无法读取默认更新渠道: {e}"))?;
-    let updater = &config["plugins"]["updater"];
     let endpoint = option_env!("YUUMI_GPUI_UPDATE_ENDPOINT")
         .filter(|value| !value.is_empty())
-        .or_else(|| updater["endpoints"][0].as_str())
-        .ok_or("缺少更新清单地址")?;
+        .unwrap_or(DEFAULT_UPDATE_ENDPOINT);
     let key = option_env!("YUUMI_GPUI_UPDATE_PUBLIC_KEY")
         .filter(|value| !value.is_empty())
-        .or_else(|| updater["pubkey"].as_str())
-        .ok_or("缺少可信更新公钥")?;
+        .unwrap_or(DEFAULT_UPDATE_PUBLIC_KEY);
     Ok((endpoint.into(), key.into()))
 }
 

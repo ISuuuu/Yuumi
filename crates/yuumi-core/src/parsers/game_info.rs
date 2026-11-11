@@ -1803,11 +1803,11 @@ mod tests {
     use super::*;
 
     const CHAMP_SELECT_FIXTURE: &str =
-        include_str!("../../../../src-tauri/testdata/session/champ-select-ranked-420.json");
+        include_str!("../../testdata/session/champ-select-ranked-420.json");
     const GAMEFLOW_FIXTURE: &str =
-        include_str!("../../../../src-tauri/testdata/session/gameflow-in-progress-440.json");
+        include_str!("../../testdata/session/gameflow-in-progress-440.json");
     const RANKED_FIXTURE: &str =
-        include_str!("../../../../src-tauri/testdata/session/ranked-stats-solo.json");
+        include_str!("../../testdata/session/ranked-stats-solo.json");
 
     const SELF_PUUID: &str = "puuid-self-top";
     const SELF_SUMMONER_ID: i64 = 1001;

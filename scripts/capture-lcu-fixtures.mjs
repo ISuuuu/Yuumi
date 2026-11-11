@@ -3,7 +3,7 @@
  * 采集真实 LCU 响应作为测试 fixture。
  *
  * 内联最小 JSON 的单元测试发现不了"真实载荷多出一个字段就解析失败"这类问题，
- * 因此解析层的回归测试基于 `src-tauri/testdata/match/` 下的真实响应快照。
+ * 因此解析层的回归测试基于 `crates/yuumi-core/testdata/match/` 下的真实响应快照。
  * 本脚本用于在你自己的机器上重新采集这些快照。
  *
  * 用法（需先启动英雄联盟客户端并登录）：
@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
-const FIXTURE_ROOT = path.join(REPO_ROOT, 'src-tauri', 'testdata', 'match');
+const FIXTURE_ROOT = path.join(REPO_ROOT, 'crates', 'yuumi-core', 'testdata', 'match');
 /** 暂存区：每次抓包先全量覆盖到这里，由人工挑选后迁入 real/ */
 const OUT_DIR = path.join(FIXTURE_ROOT, '_capture');
 
@@ -337,7 +337,7 @@ async function main() {
   console.log('  1. 从 _capture/ 选出覆盖不同 lane/role 组合的样本，重命名为语义名复制到 real/');
   console.log('  2. 在 testdata/match/manifest.json 的 real[] 补文件名与覆盖场景说明');
   console.log('  3. 在 match_parser.rs 的 REAL 常量登记，并跑 dump_real_fixture_results 生成 REAL_EXPECT');
-  console.log('  4. pnpm test:rust 确认全绿');
+  console.log('  4. cargo test 确认全绿');
 }
 
 main().catch((e) => {

@@ -949,46 +949,45 @@ mod tests {
     const REAL: &[Fixture] = &[
         Fixture {
             name: "real/top-solo",
-            raw: include_str!("../../../../src-tauri/testdata/match/real/top-solo.json"),
+            raw: include_str!("../../testdata/match/real/top-solo.json"),
         },
         Fixture {
             name: "real/mid-solo",
-            raw: include_str!("../../../../src-tauri/testdata/match/real/mid-solo.json"),
+            raw: include_str!("../../testdata/match/real/mid-solo.json"),
         },
         Fixture {
             name: "real/jungle-none",
-            raw: include_str!("../../../../src-tauri/testdata/match/real/jungle-none.json"),
+            raw: include_str!("../../testdata/match/real/jungle-none.json"),
         },
         Fixture {
             name: "real/bottom-carry",
-            raw: include_str!("../../../../src-tauri/testdata/match/real/bottom-carry.json"),
+            raw: include_str!("../../testdata/match/real/bottom-carry.json"),
         },
         Fixture {
             name: "real/bottom-support",
-            raw: include_str!("../../../../src-tauri/testdata/match/real/bottom-support.json"),
+            raw: include_str!("../../testdata/match/real/bottom-support.json"),
         },
         Fixture {
             name: "real/none-duo",
-            raw: include_str!("../../../../src-tauri/testdata/match/real/none-duo.json"),
+            raw: include_str!("../../testdata/match/real/none-duo.json"),
         },
         Fixture {
             name: "real/remake",
-            raw: include_str!("../../../../src-tauri/testdata/match/real/remake.json"),
+            raw: include_str!("../../testdata/match/real/remake.json"),
         },
         Fixture {
             name: "real/custom-3100",
-            raw: include_str!("../../../../src-tauri/testdata/match/real/custom-3100.json"),
+            raw: include_str!("../../testdata/match/real/custom-3100.json"),
         },
     ];
 
-    const SYNTHETIC_ARAM: &str =
-        include_str!("../../../../src-tauri/testdata/match/synthetic/aram-450.json");
+    const SYNTHETIC_ARAM: &str = include_str!("../../testdata/match/synthetic/aram-450.json");
     const SYNTHETIC_ARENA: &str =
-        include_str!("../../../../src-tauri/testdata/match/synthetic/arena-1700.json");
+        include_str!("../../testdata/match/synthetic/arena-1700.json");
     const SYNTHETIC_RANKED: &str =
-        include_str!("../../../../src-tauri/testdata/match/synthetic/ranked-420.json");
+        include_str!("../../testdata/match/synthetic/ranked-420.json");
     const SYNTHETIC_MINIMAL: &str =
-        include_str!("../../../../src-tauri/testdata/match/synthetic/minimal-420.json");
+        include_str!("../../testdata/match/synthetic/minimal-420.json");
 
     fn load_fixture(raw: &str) -> LcuMatchGame {
         let response: LcuMatchHistoryResponse =
