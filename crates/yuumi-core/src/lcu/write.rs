@@ -227,7 +227,7 @@ pub async fn apply_item_set(
 
     if let Some(object) = root.as_object_mut() {
         object.insert("itemSets".to_string(), Value::Array(item_sets));
-        if object.get("accountId").map_or(true, Value::is_null) {
+        if object.get("accountId").is_none_or(Value::is_null) {
             object.insert("accountId".to_string(), json!(account_id));
         }
         object.insert(

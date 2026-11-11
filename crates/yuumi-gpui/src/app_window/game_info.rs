@@ -4,9 +4,39 @@ use super::*;
 impl MainWindow {
     /// 加载高保真对局演示预览数据（优先真实快照，兜底演示）
     pub(super) fn load_game_info_demo(&mut self, cx: &mut Context<Self>) {
-        self.game_info = Some(std::sync::Arc::new(
+        let info = std::sync::Arc::new(
             yuumi_core::parsers::game_info::LiveGameInfo::load_snapshot_or_demo(),
-        ));
+        );
+        // P0-2：演示看板的英雄图标预热（列头/概览卡/常用英雄/历史战绩卡，路径与渲染同源）
+        let mut asset_paths: Vec<String> = Vec::new();
+        for p in info.players() {
+            if p.champion_id > 0 {
+                asset_paths.push(format!(
+                    "/lol-game-data/assets/v1/champion-icons/{}.png",
+                    p.champion_id
+                ));
+            }
+            for c in &p.top_champions {
+                if c.champion_id > 0 {
+                    asset_paths.push(format!(
+                        "/lol-game-data/assets/v1/champion-icons/{}.png",
+                        c.champion_id
+                    ));
+                }
+            }
+            for m in &p.matches {
+                if m.champion_id > 0 {
+                    asset_paths.push(format!(
+                        "/lol-game-data/assets/v1/champion-icons/{}.png",
+                        m.champion_id
+                    ));
+                }
+            }
+        }
+        asset_paths.sort();
+        asset_paths.dedup();
+        self.game_info = Some(info);
+        prewarm_assets(asset_paths, cx);
         cx.notify();
     }
 
@@ -74,12 +104,14 @@ impl MainWindow {
                     this.switch_game_info_team_tab(tab, cx);
                 });
             },
-            move |puuid, _window, app| {
+            move |target, _window, app| {
                 view_career_cb.update(app, |this, cx| {
-                    if let Some(p) = puuid {
-                        this.view_other_career(p, String::new(), String::new(), cx);
-                    } else {
-                        this.back_to_my_career(cx);
+                    // P0-4：对局信息点击玩家时携带显示名，puuid 查询失败可按名回退
+                    match target {
+                        Some((puuid, name)) => {
+                            this.view_other_career(puuid, name, String::new(), cx);
+                        }
+                        None => this.back_to_my_career(cx),
                     }
                 });
             },

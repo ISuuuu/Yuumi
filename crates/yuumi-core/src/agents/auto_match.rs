@@ -231,10 +231,8 @@ pub async fn handle_phase_change(
                 flags.created = true;
             }
         }
-        GamePhase::ChampSelect => {
-            if config.aram_team_side {
-                spawn_aram_team_side(client, config.aram_team_side_visible, supervisor).await;
-            }
+        GamePhase::ChampSelect if config.aram_team_side => {
+            spawn_aram_team_side(client, config.aram_team_side_visible, supervisor).await;
         }
         _ => {}
     }

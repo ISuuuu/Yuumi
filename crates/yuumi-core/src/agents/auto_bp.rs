@@ -985,8 +985,10 @@ mod tests {
 
     #[test]
     fn test_candidates_prefer_lane_then_default() {
-        let mut config = AutoBpConfig::default();
-        config.pick_champion_ids = vec![1, 2];
+        let mut config = AutoBpConfig {
+            pick_champion_ids: vec![1, 2],
+            ..Default::default()
+        };
         assert_eq!(config.pick_candidates("middle"), vec![1, 2]);
 
         config.pick_champion_ids_mid = vec![7];
@@ -997,9 +999,11 @@ mod tests {
 
     #[test]
     fn test_ban_candidates_include_lane_and_default() {
-        let mut config = AutoBpConfig::default();
-        config.ban_champion_ids = vec![9];
-        config.ban_champion_ids_sup = vec![16];
+        let config = AutoBpConfig {
+            ban_champion_ids: vec![9],
+            ban_champion_ids_sup: vec![16],
+            ..Default::default()
+        };
         assert_eq!(config.ban_candidates("utility"), vec![16, 9]);
         assert_eq!(config.ban_candidates("top"), vec![9]);
     }

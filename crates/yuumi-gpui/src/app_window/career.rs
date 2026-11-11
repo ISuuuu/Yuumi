@@ -348,10 +348,34 @@ impl MainWindow {
         cx.spawn(async move |entity, cx| {
             if let Some(client) = live.get_client().await {
                 let assets_opt = live.get_game_data_assets().await;
-                if let Ok(real_s) =
+                // P0-4：有 puuid 优先按 puuid 查询；失败或无 puuid 且名字非空时回退按名查询
+                let real_summoner = if !puuid.trim().is_empty() {
+                    match yuumi_core::parsers::summoner::fetch_summoner_by_puuid(&client, &puuid)
+                        .await
+                    {
+                        Ok(s) => Some(s),
+                        Err(e) => {
+                            log::warn!("[MainWindow] 按 puuid 查询召唤师失败，回退按名查询: {}", e);
+                            if target_name.trim().is_empty() {
+                                None
+                            } else {
+                                yuumi_core::parsers::summoner::fetch_summoner_by_name(
+                                    &client,
+                                    &target_name,
+                                )
+                                .await
+                                .ok()
+                            }
+                        }
+                    }
+                } else if !target_name.trim().is_empty() {
                     yuumi_core::parsers::summoner::fetch_summoner_by_name(&client, &target_name)
                         .await
-                {
+                        .ok()
+                } else {
+                    None
+                };
+                if let Some(real_s) = real_summoner {
                     let real_icon = real_s.icon_path();
                     let _ = entity.update(cx, |this, cx| {
                         if this.career_view.is_viewing_other {
@@ -388,8 +412,36 @@ impl MainWindow {
                             matches.into_iter().map(MatchItem::new).collect();
                         let _ = entity.update(cx, |this, cx| {
                             if this.career_view.is_viewing_other {
+                                // P0-2：战绩列表图标预热，路径与渲染同源（对齐 MatchHistoryLoaded 入口）
+                                let mut asset_paths = Vec::new();
+                                for m in &items {
+                                    let d = &m.display;
+                                    for url in [
+                                        &d.champion_icon_url,
+                                        &d.spell1_icon_url,
+                                        &d.spell2_icon_url,
+                                        &d.rune_icon_url,
+                                    ] {
+                                        if !url.is_empty() {
+                                            asset_paths.push(url.clone());
+                                        }
+                                    }
+                                    asset_paths.extend(
+                                        d.item_icon_urls.iter().filter(|u| !u.is_empty()).cloned(),
+                                    );
+                                    asset_paths.extend(
+                                        d.augment_icon_urls
+                                            .iter()
+                                            .filter(|u| !u.is_empty())
+                                            .cloned(),
+                                    );
+                                }
+                                // 战绩里英雄/装备高度重复，去重以免打爆 LCU 请求
+                                asset_paths.sort();
+                                asset_paths.dedup();
                                 this.stats = CareerHeaderStats::compute(&items);
                                 this.matches = items;
+                                prewarm_assets(asset_paths, cx);
                                 cx.notify();
                             }
                         });

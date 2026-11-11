@@ -381,6 +381,20 @@ pub struct GameflowQueueInfo {
     pub is_custom: Option<bool>,
 }
 
+/// gameflow `gameData.playerChampionSelections` 中的单条英雄选择记录
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerChampionSelection {
+    #[serde(default)]
+    pub summoner_internal_name: Option<String>,
+    #[serde(default)]
+    pub puuid: Option<String>,
+    #[serde(default)]
+    pub summoner_id: Option<i64>,
+    #[serde(default)]
+    pub champion_id: Option<i32>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameflowGameData {
@@ -392,6 +406,8 @@ pub struct GameflowGameData {
     pub team_one: Vec<SessionPlayer>,
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub team_two: Vec<SessionPlayer>,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub player_champion_selections: Vec<PlayerChampionSelection>,
 }
 
 /// `/lol-gameflow/v1/session` 关注字段
@@ -471,12 +487,18 @@ impl GameInfoSource {
         if game_data.team_one.is_empty() && game_data.team_two.is_empty() {
             return None;
         }
+        let mut blue = game_data.team_one.clone();
+        let mut red = game_data.team_two.clone();
+        // 原因 C 回填：teamOne/teamTwo 成员缺 championId 时，从 playerChampionSelections
+        // 按 puuid 或 summonerId 补全英雄 ID
+        backfill_champion_from_selections(&mut blue, &game_data.player_champion_selections);
+        backfill_champion_from_selections(&mut red, &game_data.player_champion_selections);
         Some(Self {
             phase: phase.to_string(),
             queue_id: game_data.queue.as_ref().and_then(|q| q.id).unwrap_or(0),
             game_id: game_data.game_id,
-            blue: game_data.team_one.clone(),
-            red: game_data.team_two.clone(),
+            blue,
+            red,
             local_player_cell_id: None,
             detected_side: None,
         })
@@ -519,6 +541,39 @@ impl GameInfoSource {
             .filter_map(|p| p.resolved_puuid().map(|s| s.to_string()))
             .filter(|p| seen.insert(p.clone()))
             .collect()
+    }
+}
+
+/// 原因 C：gameflow 成员缺英雄 ID（<=0，含 botChampionId / pickIntent 兜底后仍无值）时，
+/// 从 `playerChampionSelections` 按 puuid 优先、summonerId 次之回填 `championId`。
+pub fn backfill_champion_from_selections(
+    team: &mut [SessionPlayer],
+    selections: &[PlayerChampionSelection],
+) {
+    if selections.is_empty() {
+        return;
+    }
+    let valid_cid = |sel: &PlayerChampionSelection| sel.champion_id.filter(|&c| c > 0);
+
+    for player in team.iter_mut() {
+        if player.resolved_champion_id() > 0 {
+            continue;
+        }
+        let by_puuid = player.resolved_puuid().and_then(|puuid| {
+            selections
+                .iter()
+                .find(|sel| sel.puuid.as_deref().map(str::trim) == Some(puuid))
+                .and_then(&valid_cid)
+        });
+        let by_summoner_id = player.resolved_summoner_id().and_then(|sid| {
+            selections
+                .iter()
+                .find(|sel| sel.summoner_id == Some(sid))
+                .and_then(&valid_cid)
+        });
+        if let Some(cid) = by_puuid.or(by_summoner_id) {
+            player.champion_id = Some(cid);
+        }
     }
 }
 
@@ -681,6 +736,7 @@ impl LiveGameInfo {
         make_demo_instance()
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn make_mock_match(
     queue_id: i32,
     name: &str,
@@ -746,6 +802,7 @@ fn make_mock_match(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_mock_player(
     puuid: &str,
     summoner_id: i64,
@@ -1449,7 +1506,7 @@ fn parse_snapshot_json(content: &str) -> Result<LiveGameInfo, Box<dyn std::error
                     },
                 })
                 .collect();
-            top_champions.sort_by(|a, b| b.count.cmp(&a.count));
+            top_champions.sort_by_key(|c| std::cmp::Reverse(c.count));
             top_champions.truncate(3);
 
             let rank_display = if rank_tier == "未定级" || rank_tier == "--" || rank_tier.is_empty()
@@ -1803,11 +1860,7 @@ fn build_player(
     let mut top_champions: Vec<TopChampion> = champ_counts
         .into_iter()
         .map(|(cid, (total, wins))| {
-            let win_rate = if total > 0 {
-                (wins * 100 / total) as u32
-            } else {
-                0
-            };
+            let win_rate = wins.saturating_mul(100).checked_div(total).unwrap_or(0) as u32;
             let cname = ctx.assets.champions.get(&cid).cloned().unwrap_or_else(|| {
                 if cid > 0 {
                     format!("英雄 {}", cid)
@@ -2092,32 +2145,70 @@ pub async fn fetch_live_game_info(
     )
 }
 
-/// 尝试从游戏引擎 LiveClientData (2999 端口) 探测当前玩家阵营（ORDER -> 蓝方, CHAOS -> 红方）
-pub async fn detect_liveclient_map_side() -> Option<MapSide> {
+// ─── 2999 端口 LiveClientData 兜底 ───
+
+/// 2999 `liveclientdata/playerlist` 中的单个玩家（宽容反序列化，逐条跳过异常条目）
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveClientPlayer {
+    #[serde(default)]
+    pub champion_id: Option<i32>,
+    #[serde(default)]
+    pub champion_name: Option<String>,
+    #[serde(default)]
+    pub raw_champion_name: Option<String>,
+    #[serde(default)]
+    pub summoner_name: Option<String>,
+    #[serde(default)]
+    pub riot_id_game_name: Option<String>,
+    #[serde(default)]
+    pub riot_id_tag_line: Option<String>,
+    #[serde(default)]
+    pub riot_id: Option<String>,
+    #[serde(default)]
+    pub puuid: Option<String>,
+    #[serde(default)]
+    pub summoner_id: Option<i64>,
+    #[serde(default)]
+    pub bot: Option<bool>,
+    #[serde(default)]
+    pub is_bot: Option<bool>,
+    #[serde(default)]
+    pub team: Option<String>,
+}
+
+/// 一次 2999 快照：playerlist + 本机当前玩家名（阵营判定与队伍补全共用同一次拉取）
+#[derive(Debug, Clone, Default)]
+pub struct LiveClientSnapshot {
+    pub players: Vec<LiveClientPlayer>,
+    pub active_name: Option<String>,
+}
+
+/// 2999 LiveClientData 专用 HTTP 客户端（忽略自签证书，进程内复用）
+fn liveclient_http() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    let client = CLIENT.get_or_init(|| {
+    CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .no_proxy()
             .timeout(std::time::Duration::from_millis(1500))
             .build()
             .unwrap_or_default()
-    });
+    })
+}
 
-    let active_name = client
+/// 拉取一次 2999 LiveClientData 快照（playerlist 失败即整体失败；activeplayername 失败仅缺阵营判定输入）
+pub async fn fetch_liveclient_snapshot() -> Option<LiveClientSnapshot> {
+    let client = liveclient_http();
+    let active_name = match client
         .get("https://127.0.0.1:2999/liveclientdata/activeplayername")
         .send()
         .await
-        .ok()?
-        .json::<String>()
-        .await
-        .ok()?;
-
-    if active_name.is_empty() {
-        return None;
-    }
-
-    let players = client
+    {
+        Ok(resp) => resp.json::<String>().await.ok(),
+        Err(_) => None,
+    };
+    let raw_list = client
         .get("https://127.0.0.1:2999/liveclientdata/playerlist")
         .send()
         .await
@@ -2126,36 +2217,340 @@ pub async fn detect_liveclient_map_side() -> Option<MapSide> {
         .await
         .ok()?;
 
-    let matches: Vec<&str> = players
+    let players = raw_list
         .iter()
-        .filter(|p| {
-            p.get("riotIdGameName")
-                .and_then(|v| v.as_str())
-                .map(|n| n == active_name)
-                .unwrap_or(false)
-                || p.get("summonerName")
-                    .and_then(|v| v.as_str())
-                    .map(|n| n == active_name)
-                    .unwrap_or(false)
-                || p.get("riotId")
-                    .and_then(|v| v.as_str())
-                    .map(|n| n == active_name)
-                    .unwrap_or(false)
-        })
-        .filter_map(|p| p.get("team").and_then(|v| v.as_str()))
+        .filter_map(|entry| serde_json::from_value::<LiveClientPlayer>(entry.clone()).ok())
         .collect();
 
-    if !matches.is_empty() {
-        let first_team = matches[0];
-        if matches.iter().all(|&t| t == first_team) {
-            if first_team.eq_ignore_ascii_case("ORDER") {
-                return Some(MapSide::Blue);
-            } else if first_team.eq_ignore_ascii_case("CHAOS") {
-                return Some(MapSide::Red);
-            }
+    Some(LiveClientSnapshot {
+        players,
+        active_name: active_name
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty()),
+    })
+}
+
+/// LiveClient 队伍标识 → 阵营（ORDER -> 蓝方, CHAOS -> 红方）
+fn map_side_from_liveclient_team(team: &str) -> Option<MapSide> {
+    if team.eq_ignore_ascii_case("ORDER") {
+        Some(MapSide::Blue)
+    } else if team.eq_ignore_ascii_case("CHAOS") {
+        Some(MapSide::Red)
+    } else {
+        None
+    }
+}
+
+/// LiveClient 玩家可用于与 activeplayername 匹配的三个名字字段
+fn liveclient_player_names(p: &LiveClientPlayer) -> [Option<&str>; 3] {
+    [
+        p.riot_id_game_name.as_deref(),
+        p.summoner_name.as_deref(),
+        p.riot_id.as_deref(),
+    ]
+}
+
+/// 从 2999 快照判定本机玩家阵营（ORDER -> 蓝方, CHAOS -> 红方）
+pub fn liveclient_map_side(snapshot: &LiveClientSnapshot) -> Option<MapSide> {
+    let active = snapshot
+        .active_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+    let matched_teams: Vec<&str> = snapshot
+        .players
+        .iter()
+        .filter(|p| {
+            liveclient_player_names(p)
+                .into_iter()
+                .flatten()
+                .any(|n| n == active)
+        })
+        .filter_map(|p| p.team.as_deref())
+        .collect();
+    let first = *matched_teams.first()?;
+    if matched_teams.iter().all(|&t| t == first) {
+        map_side_from_liveclient_team(first)
+    } else {
+        None
+    }
+}
+
+/// 解析 LiveClient 玩家的英雄 ID：championId 优先，其次按本地化英雄名反查资源字典
+fn liveclient_champion_id(p: &LiveClientPlayer, assets: &GameDataAssets) -> i32 {
+    if let Some(cid) = p.champion_id.filter(|&c| c > 0) {
+        return cid;
+    }
+    if let Some(name) = p
+        .champion_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let norm = normalize_lookup_name(name);
+        if let Some((cid, _)) = assets
+            .champions
+            .iter()
+            .find(|(_, cn)| normalize_lookup_name(cn) == norm)
+        {
+            return *cid;
         }
     }
-    None
+    // rawChampionName（game_character_displayname_Xxx）为英文内部键，资源字典无对应项，放弃匹配
+    0
+}
+
+/// 把 2999 玩家列表按 ORDER/CHAOS 映射为 (蓝方, 红方) 会话参与者；阵营未知条目丢弃以防串队
+pub fn liveclient_teams(
+    snapshot: &LiveClientSnapshot,
+    assets: &GameDataAssets,
+) -> (Vec<SessionPlayer>, Vec<SessionPlayer>) {
+    let mut blue = Vec::new();
+    let mut red = Vec::new();
+    for p in &snapshot.players {
+        let champion_id = liveclient_champion_id(p, assets);
+        let session = SessionPlayer {
+            champion_id: Some(champion_id),
+            puuid: p.puuid.clone(),
+            summoner_id: p.summoner_id,
+            display_name: p
+                .riot_id_game_name
+                .clone()
+                .or_else(|| p.summoner_name.clone()),
+            summoner_name: p.summoner_name.clone(),
+            game_name: p.riot_id_game_name.clone(),
+            tag_line: p.riot_id_tag_line.clone(),
+            bot: p.bot,
+            is_bot: p.is_bot,
+            ..Default::default()
+        };
+        if session.resolved_puuid().is_none()
+            && session.resolved_summoner_id().is_none()
+            && champion_id <= 0
+            && session.resolved_name_candidates().is_empty()
+        {
+            continue;
+        }
+        match p.team.as_deref().and_then(map_side_from_liveclient_team) {
+            Some(MapSide::Blue) => blue.push(session),
+            Some(MapSide::Red) => red.push(session),
+            None => {}
+        }
+    }
+    (blue, red)
+}
+
+/// 归一化反查名：去 #tag、剔除空白并转小写（对齐 Vue normalizeLookupName）
+pub fn normalize_lookup_name(name: &str) -> String {
+    name.split('#')
+        .next()
+        .unwrap_or(name)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// 占位名检测：空白、"未知"、"召唤师"、"玩家 N"
+fn is_placeholder_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    trimmed.is_empty() || trimmed == "未知" || trimmed == "召唤师" || trimmed.starts_with("玩家")
+}
+
+/// 是否为真实召唤师名：非占位，且不是任何英雄显示名（防脱敏英雄名误撞，对齐 Vue isRealSummonerName）
+fn is_real_summoner_name(name: &str, assets: &GameDataAssets) -> bool {
+    let trimmed = name.trim();
+    if is_placeholder_name(trimmed) {
+        return false;
+    }
+    let norm = normalize_lookup_name(trimmed);
+    if norm.is_empty() {
+        return false;
+    }
+    !assets
+        .champions
+        .values()
+        .any(|cn| normalize_lookup_name(cn) == norm)
+}
+
+impl SessionPlayer {
+    /// 可用于实名匹配的候选名字（display_name / summoner_name / game_name）
+    fn resolved_name_candidates(&self) -> Vec<&str> {
+        [
+            self.display_name.as_deref(),
+            self.summoner_name.as_deref(),
+            self.game_name.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
+    }
+}
+
+/// 强身份匹配：puuid 相等，或真实 summonerId 相等（summonerId 充当 cellId 兜底时不参与比对）
+fn strong_identity_matches(p: &SessionPlayer, lp: &SessionPlayer) -> bool {
+    if let (Some(pp), Some(lp_p)) = (p.resolved_puuid(), lp.resolved_puuid()) {
+        if pp == lp_p {
+            return true;
+        }
+    }
+    let sid = p
+        .resolved_summoner_id()
+        .filter(|&sid| p.cell_id.is_none_or(|cell| sid != cell));
+    let lp_sid = lp
+        .resolved_summoner_id()
+        .filter(|&sid| lp.cell_id.is_none_or(|cell| sid != cell));
+    sid.is_some() && sid == lp_sid
+}
+
+/// 实名归一化名（仅当候选名中存在真实召唤师名时返回）
+fn real_normalized_name(p: &SessionPlayer, assets: &GameDataAssets) -> Option<String> {
+    p.resolved_name_candidates()
+        .into_iter()
+        .find(|name| is_real_summoner_name(name, assets))
+        .map(normalize_lookup_name)
+}
+
+/// 无实名身份（puuid 为空且 summonerId 缺失或充当 cellId 兜底）
+fn is_anonymous_player(p: &SessionPlayer) -> bool {
+    p.resolved_puuid().is_none()
+        && p.resolved_summoner_id()
+            .is_none_or(|sid| p.cell_id.is_some_and(|cell| sid == cell))
+}
+
+/// 把 LiveClient 玩家数据回填进既有槽位（仅在缺失侧回填，实名与身份严禁被占位数据覆写）
+fn absorb_live_player(
+    player: &mut SessionPlayer,
+    lp: &SessionPlayer,
+    assets: &GameDataAssets,
+) -> bool {
+    let mut changed = false;
+    if player.resolved_champion_id() <= 0 && lp.resolved_champion_id() > 0 {
+        player.champion_id = lp.champion_id;
+        changed = true;
+    }
+    if player.resolved_puuid().is_none() && lp.resolved_puuid().is_some() {
+        player.puuid = lp.puuid.clone();
+        changed = true;
+    }
+    if player.resolved_summoner_id().is_none() && lp.resolved_summoner_id().is_some() {
+        player.summoner_id = lp.summoner_id;
+        changed = true;
+    }
+    if player.tag_line.is_none() {
+        player.tag_line = lp.tag_line.clone();
+    }
+    // 名字仅在「本地为占位 + LiveClient 名字真实」时回填，脱敏英雄名/占位名严禁覆写实名
+    let lp_real_name = lp
+        .resolved_name_candidates()
+        .into_iter()
+        .find(|name| is_real_summoner_name(name, assets))
+        .map(str::to_string);
+    if let Some(real_name) = lp_real_name {
+        let current = player
+            .display_name
+            .as_deref()
+            .or(player.summoner_name.as_deref())
+            .unwrap_or("");
+        if is_placeholder_name(current) {
+            player.display_name = Some(real_name.clone());
+            if player.game_name.is_none() {
+                player.game_name = Some(real_name);
+            }
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// 单支队伍的 2999 合并：
+/// 1) 强身份匹配（puuid → summonerId）；2) 双实名名字匹配；3) 匿名占位槽按剩余顺序回填；
+/// 4) 人数不足 5 时追加剩余 LiveClient 玩家（整边缺失的敌方队伍由此补齐）
+fn merge_liveclient_team(
+    team: &mut Vec<SessionPlayer>,
+    live: Vec<SessionPlayer>,
+    assets: &GameDataAssets,
+) -> bool {
+    let mut changed = false;
+    let mut pool: Vec<Option<SessionPlayer>> = live.into_iter().map(Some).collect();
+
+    // 1) 强身份匹配
+    for player in team.iter_mut() {
+        let Some(match_idx) = pool.iter().position(|slot| {
+            slot.as_ref()
+                .is_some_and(|lp| strong_identity_matches(player, lp))
+        }) else {
+            continue;
+        };
+        let Some(lp) = pool[match_idx].take() else {
+            continue;
+        };
+        changed |= absorb_live_player(player, &lp, assets);
+    }
+
+    // 2) 真名匹配（双方都必须是真实召唤师名，脱敏英雄名/占位名严禁参与）
+    for player in team.iter_mut() {
+        let Some(p_name) = real_normalized_name(player, assets) else {
+            continue;
+        };
+        let Some(match_idx) = pool.iter().position(|slot| {
+            slot.as_ref()
+                .is_some_and(|lp| real_normalized_name(lp, assets).is_some_and(|n| n == p_name))
+        }) else {
+            continue;
+        };
+        let Some(lp) = pool[match_idx].take() else {
+            continue;
+        };
+        changed |= absorb_live_player(player, &lp, assets);
+    }
+
+    // 3) 匿名占位槽按剩余顺序回填（对齐 Vue 敌方有序回填策略，匿名槽严禁误撞实名数据）
+    for player in team.iter_mut() {
+        if !is_anonymous_player(player) {
+            continue;
+        }
+        let Some(match_idx) = pool.iter().position(|slot| slot.is_some()) else {
+            break;
+        };
+        let Some(lp) = pool[match_idx].take() else {
+            break;
+        };
+        changed |= absorb_live_player(player, &lp, assets);
+    }
+
+    // 4) 追加未匹配到的 LiveClient 玩家（整边缺失 / 人数不足 5）
+    for lp in pool.into_iter().flatten() {
+        if team.len() >= 5 {
+            break;
+        }
+        team.push(lp);
+        changed = true;
+    }
+
+    changed
+}
+
+/// 原因 D：把 2999 LiveClientData 玩家列表合并进 gameflow 双方队伍，
+/// 补全缺失的玩家（整边为空）与 `champion_id <= 0` 的英雄 ID。返回是否发生修改。
+pub fn merge_liveclient_teams(
+    blue: &mut Vec<SessionPlayer>,
+    red: &mut Vec<SessionPlayer>,
+    live_blue: Vec<SessionPlayer>,
+    live_red: Vec<SessionPlayer>,
+    assets: &GameDataAssets,
+) -> bool {
+    let mut changed = merge_liveclient_team(blue, live_blue, assets);
+    changed |= merge_liveclient_team(red, live_red, assets);
+    changed
+}
+
+/// 尝试从游戏引擎 LiveClientData (2999 端口) 探测当前玩家阵营（ORDER -> 蓝方, CHAOS -> 红方）
+pub async fn detect_liveclient_map_side() -> Option<MapSide> {
+    let snapshot = fetch_liveclient_snapshot().await?;
+    liveclient_map_side(&snapshot)
 }
 
 #[cfg(test)]
@@ -2586,5 +2981,241 @@ mod tests {
         assert_eq!(gd.team_one[0].team_participant_id.as_deref(), Some("0"));
         assert_eq!(gd.team_one[0].party_id.as_deref(), Some("987654"));
         assert!(gd.team_two.is_empty());
+    }
+
+    const GAMEFLOW_MISSING_CHAMPS_FIXTURE: &str =
+        include_str!("../../testdata/session/gameflow-in-progress-450-missing-champions.json");
+
+    #[test]
+    fn gameflow_fixture_backfills_champion_from_selections() {
+        let snapshot: GameflowSessionSnapshot =
+            serde_json::from_str(GAMEFLOW_MISSING_CHAMPS_FIXTURE).expect("fixture 应能反序列化");
+        let source =
+            GameInfoSource::from_gameflow("InProgress", &snapshot).expect("fixture 应有队伍");
+        // 原因 C：championId <= 0 的成员按 puuid / summonerId 从 playerChampionSelections 回填
+        assert_eq!(
+            source.blue[0].champion_id,
+            Some(266),
+            "应按 puuid 回填本人英雄"
+        );
+        assert_eq!(
+            source.blue[1].champion_id,
+            Some(64),
+            "puuid 为空时应按 summonerId 回填"
+        );
+        assert_eq!(source.blue[2].champion_id, Some(0), "无选择记录时保持原值");
+        assert_eq!(source.red[0].champion_id, Some(498));
+        assert_eq!(source.red[1].champion_id, Some(0), "无选择记录时保持原值");
+    }
+
+    fn session_player(
+        puuid: &str,
+        summoner_id: i64,
+        champion_id: i32,
+        display_name: &str,
+    ) -> SessionPlayer {
+        SessionPlayer {
+            puuid: (!puuid.is_empty()).then(|| puuid.to_string()),
+            summoner_id: (summoner_id > 0).then_some(summoner_id),
+            champion_id: (champion_id > 0).then_some(champion_id),
+            display_name: (!display_name.is_empty()).then(|| display_name.to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn merge_assets() -> GameDataAssets {
+        GameDataAssets {
+            champions: HashMap::from([(54, "亚托克斯".to_string()), (103, "九尾妖狐".to_string())]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn merge_liveclient_teams_appends_missing_enemy_side() {
+        let mut blue: Vec<SessionPlayer> = (0..5)
+            .map(|i| {
+                session_player(
+                    &format!("puuid-b{i}"),
+                    100 + i as i64,
+                    266 + i,
+                    &format!("友方{i}"),
+                )
+            })
+            .collect();
+        let mut red: Vec<SessionPlayer> = Vec::new();
+        let live_blue: Vec<SessionPlayer> = (0..5)
+            .map(|i| {
+                session_player(
+                    &format!("puuid-b{i}"),
+                    100 + i as i64,
+                    266 + i,
+                    &format!("友方{i}"),
+                )
+            })
+            .collect();
+        let live_red: Vec<SessionPlayer> = (0..5)
+            .map(|i| {
+                session_player(
+                    &format!("puuid-r{i}"),
+                    200 + i as i64,
+                    54 + i,
+                    &format!("敌方{i}"),
+                )
+            })
+            .collect();
+
+        let changed =
+            merge_liveclient_teams(&mut blue, &mut red, live_blue, live_red, &merge_assets());
+        assert!(changed, "补全敌方整队后应报告变更");
+        assert_eq!(red.len(), 5, "敌方空队应从 CHAOS 侧补齐");
+        assert_eq!(red[0].puuid.as_deref(), Some("puuid-r0"));
+        assert_eq!(red[0].champion_id, Some(54));
+        // 蓝方已完整：不得被改写，也不得追加重复玩家
+        assert_eq!(blue.len(), 5);
+        assert_eq!(blue[0].champion_id, Some(266));
+    }
+
+    #[test]
+    fn merge_liveclient_teams_backfills_placeholder_slots() {
+        let mut team = vec![
+            session_player("puuid-real", 1, 266, "真人"),
+            session_player("", 0, 0, ""),
+            session_player("", 0, 0, ""),
+        ];
+        let live = vec![
+            session_player("puuid-other", 9, 999, "别人"),
+            session_player("puuid-x", 10, 54, "亚托克斯"),
+            session_player("puuid-y", 11, 103, "敌丙"),
+        ];
+
+        let changed = merge_liveclient_teams(
+            &mut team,
+            &mut Vec::new(),
+            live,
+            Vec::new(),
+            &merge_assets(),
+        );
+        assert!(changed);
+        // 实名玩家不得被任何 LiveClient 数据改写
+        assert_eq!(team[0].puuid.as_deref(), Some("puuid-real"));
+        assert_eq!(team[0].champion_id, Some(266));
+        assert_eq!(team[0].display_name.as_deref(), Some("真人"));
+        // 匿名占位 1：按序回填身份、英雄与实名
+        assert_eq!(team[1].puuid.as_deref(), Some("puuid-other"));
+        assert_eq!(team[1].champion_id, Some(999));
+        assert_eq!(team[1].display_name.as_deref(), Some("别人"));
+        // 匿名占位 2：LiveClient 名为脱敏英雄名时仅回填身份与英雄，严禁覆写名字
+        assert_eq!(team[2].puuid.as_deref(), Some("puuid-x"));
+        assert_eq!(team[2].champion_id, Some(54));
+        assert_eq!(team[2].display_name, None);
+        // 剩余 LiveClient 玩家追加进人数不足的队伍
+        assert_eq!(team.len(), 4);
+        assert_eq!(team[3].puuid.as_deref(), Some("puuid-y"));
+    }
+
+    #[test]
+    fn merge_liveclient_teams_matches_by_real_name_only() {
+        let mut team = vec![
+            session_player("puuid-a", 1, 0, "真人甲"),
+            session_player("", 0, 0, "玩家 3"),
+        ];
+        let live = vec![
+            session_player("puuid-b", 2, 103, "真人甲"),
+            session_player("puuid-c", 3, 54, "亚托克斯"),
+        ];
+
+        let changed = merge_liveclient_teams(
+            &mut team,
+            &mut Vec::new(),
+            live,
+            Vec::new(),
+            &merge_assets(),
+        );
+        assert!(changed);
+        // 真名匹配：同名实名玩家获得英雄与身份回填（原有 puuid 保留）
+        assert_eq!(team[0].puuid.as_deref(), Some("puuid-a"));
+        assert_eq!(team[0].champion_id, Some(103));
+        // "玩家 3" 为占位名：亚托克斯是英雄名不可作实名匹配，但匿名槽允许按序回填
+        assert_eq!(team[1].puuid.as_deref(), Some("puuid-c"));
+        assert_eq!(team[1].champion_id, Some(54));
+    }
+
+    #[test]
+    fn liveclient_snapshot_maps_side_and_teams() {
+        let raw = serde_json::json!([
+            {
+                "championId": 266,
+                "riotIdGameName": "悠米本米",
+                "riotId": "悠米本米#GPUI",
+                "summonerName": "悠米本米",
+                "riotIdTagLine": "GPUI",
+                "puuid": "puuid-self",
+                "summonerId": 1001,
+                "team": "ORDER"
+            },
+            {
+                "championId": 0,
+                "championName": "亚托克斯",
+                "riotIdGameName": "敌甲",
+                "puuid": "puuid-e1",
+                "summonerId": 2001,
+                "team": "CHAOS"
+            },
+            { "championId": 103, "riotIdGameName": "歧义名", "puuid": "puuid-x", "team": "ORDER" },
+            { "championId": 64, "riotIdGameName": "歧义名", "puuid": "puuid-y", "team": "CHAOS" },
+            { "riotIdGameName": "无阵营", "puuid": "puuid-z" }
+        ]);
+        let players = raw
+            .as_array()
+            .expect("应为数组")
+            .iter()
+            .filter_map(|entry| serde_json::from_value::<LiveClientPlayer>(entry.clone()).ok())
+            .collect::<Vec<_>>();
+        assert_eq!(players.len(), 5, "全部条目应可宽容反序列化");
+
+        let assets = merge_assets();
+        let snapshot = LiveClientSnapshot {
+            players,
+            active_name: Some("悠米本米".to_string()),
+        };
+
+        assert_eq!(liveclient_map_side(&snapshot), Some(MapSide::Blue));
+
+        let (blue, red) = liveclient_teams(&snapshot, &assets);
+        assert_eq!(blue.len(), 2, "ORDER 玩家进入蓝方，无阵营条目丢弃");
+        assert_eq!(red.len(), 2, "CHAOS 玩家进入红方");
+        assert_eq!(blue[0].puuid.as_deref(), Some("puuid-self"));
+        assert_eq!(blue[0].tag_line.as_deref(), Some("GPUI"));
+        assert_eq!(
+            red[0].champion_id,
+            Some(54),
+            "championName 亚托克斯应反查字典补 ID"
+        );
+        assert_eq!(red[1].champion_id, Some(64));
+
+        // 本机名缺失或跨阵营歧义时不得推断阵营
+        let mut no_active = snapshot.clone();
+        no_active.active_name = None;
+        assert_eq!(liveclient_map_side(&no_active), None);
+        let mut ambiguous = snapshot.clone();
+        ambiguous.active_name = Some("歧义名".to_string());
+        assert_eq!(liveclient_map_side(&ambiguous), None);
+    }
+
+    #[test]
+    fn is_real_summoner_name_rejects_champion_and_placeholder_names() {
+        let assets = merge_assets();
+        assert!(is_real_summoner_name("悠米本米", &assets));
+        assert!(is_real_summoner_name("悠米本米#GPUI", &assets));
+        assert!(
+            !is_real_summoner_name("亚托克斯", &assets),
+            "英雄名严禁参与实名匹配"
+        );
+        assert!(
+            !is_real_summoner_name("玩家 3", &assets),
+            "占位名严禁参与实名匹配"
+        );
+        assert!(!is_real_summoner_name("未知", &assets));
+        assert!(!is_real_summoner_name("", &assets));
     }
 }

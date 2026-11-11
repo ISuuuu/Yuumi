@@ -1268,10 +1268,8 @@ fn deck_badges(raw: &Value) -> Vec<String> {
                 Some(3) => badges.push("难度: 困难".to_string()),
                 _ => {}
             },
-            "honey" => {
-                if value.and_then(Value::as_bool).unwrap_or(false) {
-                    badges.push("黑马上分".to_string());
-                }
+            "honey" if value.and_then(Value::as_bool).unwrap_or(false) => {
+                badges.push("黑马上分".to_string());
             }
             _ => {}
         }

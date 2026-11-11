@@ -1,0 +1,95 @@
+{
+  "gameData": {
+    "gameId": 7099888777,
+    "queue": {
+      "id": 450,
+      "gameMode": "ARAM",
+      "isCustom": false,
+      "type": "MATCHMAKING"
+    },
+    "teamOne": [
+      {
+        "summonerId": 1001,
+        "puuid": "puuid-self-top",
+        "summonerName": "悠米本米",
+        "gameName": "悠米本米",
+        "tagLine": "GPUI",
+        "displayName": "悠米本米#GPUI",
+        "championId": 0,
+        "cellId": 0,
+        "teamParticipantId": "tpid-1",
+        "partyId": "tpid-1"
+      },
+      {
+        "summonerId": 1002,
+        "puuid": "",
+        "summonerName": "队友二号",
+        "gameName": "队友二号",
+        "tagLine": "CN2",
+        "displayName": "队友二号#CN2",
+        "championId": 0,
+        "cellId": 1,
+        "teamParticipantId": "tpid-1",
+        "partyId": "tpid-1"
+      },
+      {
+        "summonerId": 1003,
+        "puuid": "puuid-ally-mid",
+        "summonerName": "队友三号",
+        "gameName": "队友三号",
+        "tagLine": "CN3",
+        "displayName": "队友三号#CN3",
+        "championId": 0,
+        "cellId": 2,
+        "teamParticipantId": "0",
+        "partyId": "0"
+      }
+    ],
+    "teamTwo": [
+      {
+        "summonerId": 2001,
+        "puuid": "puuid-enemy-top",
+        "summonerName": "敌方一号",
+        "gameName": "敌方一号",
+        "tagLine": "KR1",
+        "displayName": "敌方一号#KR1",
+        "championId": 0,
+        "cellId": 5,
+        "teamParticipantId": "0",
+        "partyId": "0"
+      },
+      {
+        "summonerId": 2002,
+        "puuid": "puuid-enemy-jug",
+        "summonerName": "敌方二号",
+        "gameName": "敌方二号",
+        "tagLine": "KR2",
+        "displayName": "敌方二号#KR2",
+        "championId": 0,
+        "cellId": 6,
+        "teamParticipantId": "0",
+        "partyId": "0"
+      }
+    ],
+    "playerChampionSelections": [
+      {
+        "summonerInternalName": "悠米本米",
+        "puuid": "puuid-self-top",
+        "summonerId": 1001,
+        "championId": 266
+      },
+      {
+        "summonerInternalName": "队友二号",
+        "puuid": "",
+        "summonerId": 1002,
+        "championId": 64
+      },
+      {
+        "summonerInternalName": "敌方一号",
+        "puuid": "puuid-enemy-top",
+        "summonerId": 2001,
+        "championId": 498
+      }
+    ]
+  }
+}

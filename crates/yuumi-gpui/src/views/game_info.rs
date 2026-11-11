@@ -95,7 +95,7 @@ impl GameInfoView {
     where
         F1: Fn(GameInfoViewMode, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F2: Fn(GameInfoTeamTab, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
-        F3: Fn(Option<String>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
+        F3: Fn(Option<(String, String)>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F4: Fn(String, Option<String>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F5: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F6: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
@@ -208,7 +208,7 @@ impl GameInfoView {
     where
         F1: Fn(GameInfoViewMode, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F2: Fn(GameInfoTeamTab, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
-        F3: Fn(Option<String>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
+        F3: Fn(Option<(String, String)>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F4: Fn(String, Option<String>, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F6: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
     {
@@ -805,7 +805,7 @@ impl GameInfoView {
         index: usize,
     ) -> gpui::AnyElement
     where
-        F: Fn(Option<String>, &mut Window, &mut App) + 'static + Clone,
+        F: Fn(Option<(String, String)>, &mut Window, &mut App) + 'static + Clone,
     {
         let is_local = player.is_local_player;
         let is_top = player
@@ -943,6 +943,8 @@ impl GameInfoView {
                                         if is_valid_target {
                                             let is_local_player = is_local;
                                             let target_puuid = player_puuid.clone();
+                                            // P0-4：显示名随 puuid 一并传给生涯页，供按名回退
+                                            let target_name = display_name.clone();
                                             let on_career = on_career.clone();
                                             name_el = name_el
                                                 .cursor_pointer()
@@ -954,7 +956,10 @@ impl GameInfoView {
                                                             on_career(None, win, app);
                                                         } else {
                                                             on_career(
-                                                                Some(target_puuid.clone()),
+                                                                Some((
+                                                                    target_puuid.clone(),
+                                                                    target_name.clone(),
+                                                                )),
                                                                 win,
                                                                 app,
                                                             );
@@ -1144,6 +1149,7 @@ impl GameInfoView {
     }
 
     /// 渲染一列玩家战绩流（列头 Header + 垂直 MatchCard 列表） (G07, G08, G10)
+    #[allow(clippy::too_many_arguments)]
     fn render_player_match_column<F>(
         player: &GameInfoPlayer,
         side_accent: Hsla,

@@ -20,8 +20,9 @@ use yuumi_core::lcu::{
     ws::{start_ws, LcuWsEvent, LcuWsHandle},
 };
 use yuumi_core::parsers::game_info::{
-    detect_liveclient_map_side, fetch_live_game_info, fetch_ranked_stats, ChampSelectSnapshot,
-    GameInfoSource, GameflowSessionSnapshot, LiveGameInfo, RankedStats,
+    fetch_live_game_info, fetch_liveclient_snapshot, fetch_ranked_stats, liveclient_map_side,
+    liveclient_teams, merge_liveclient_teams, ChampSelectSnapshot, GameInfoSource,
+    GameflowSessionSnapshot, LiveGameInfo, RankedStats,
 };
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
 use yuumi_core::parsers::loot_actions::{
@@ -961,25 +962,52 @@ impl LiveLcuService {
 
         let self_summoner_id = summoner.summoner_id.and_then(|id| i64::try_from(id).ok());
 
-        // 对局阶段若 teamOne/teamTwo 均未能直接匹配本人（如脱敏排位或极简会话），尝试 2999 端口与历史阵营兜底
-        if src.phase != "ChampSelect" && src.detected_side.is_none() {
-            let matched_direct = src.blue.iter().chain(src.red.iter()).any(|p| {
-                p.resolved_puuid() == Some(summoner.puuid.as_str())
-                    || (self_summoner_id.is_some() && p.resolved_summoner_id() == self_summoner_id)
-            });
-            if !matched_direct {
-                let fallback_side = match detect_liveclient_map_side().await {
-                    Some(side) => Some(side),
-                    None => self
-                        .game_info
-                        .read()
-                        .await
-                        .as_ref()
-                        .and_then(|g| g.user_side),
-                };
-                if let Some(side) = fallback_side {
-                    src.detected_side = Some(side);
+        // 对局阶段 2999 LiveClientData 兜底：补全缺失玩家与英雄 ID（原因 D），
+        // 并复用同一次拉取结果做阵营判定，避免重复请求
+        let matched_direct = src.blue.iter().chain(src.red.iter()).any(|p| {
+            p.resolved_puuid() == Some(summoner.puuid.as_str())
+                || (self_summoner_id.is_some() && p.resolved_summoner_id() == self_summoner_id)
+        });
+        let mut liveclient_snap = None;
+        if src.phase != "ChampSelect" {
+            let needs_completion = src.blue.is_empty()
+                || src.red.is_empty()
+                || src
+                    .blue
+                    .iter()
+                    .chain(src.red.iter())
+                    .any(|p| p.resolved_champion_id() <= 0);
+            let needs_side = src.detected_side.is_none() && !matched_direct;
+            if needs_completion || needs_side {
+                liveclient_snap = fetch_liveclient_snapshot().await;
+                if let Some(snap) = &liveclient_snap {
+                    let (live_blue, live_red) = liveclient_teams(snap, &assets);
+                    if merge_liveclient_teams(
+                        &mut src.blue,
+                        &mut src.red,
+                        live_blue,
+                        live_red,
+                        &assets,
+                    ) {
+                        log::info!("[LiveLcu] 已通过 2999 LiveClientData 补全对局队伍与英雄数据");
+                    }
                 }
+            }
+        }
+
+        // 对局阶段若 teamOne/teamTwo 均未能直接匹配本人（如脱敏排位或极简会话），尝试 2999 端口与历史阵营兜底
+        if src.phase != "ChampSelect" && src.detected_side.is_none() && !matched_direct {
+            let fallback_side = match liveclient_snap.as_ref().and_then(liveclient_map_side) {
+                Some(side) => Some(side),
+                None => self
+                    .game_info
+                    .read()
+                    .await
+                    .as_ref()
+                    .and_then(|g| g.user_side),
+            };
+            if let Some(side) = fallback_side {
+                src.detected_side = Some(side);
             }
         }
 
@@ -1097,7 +1125,7 @@ fn load_tagged_players_map(self_puuid: &str) -> HashMap<String, String> {
             .filter(|r| r.self_puuid.is_empty() || r.self_puuid.as_str() == self_puuid)
             .filter_map(|r| {
                 let tag = r.tag.unwrap_or_default();
-                (!tag.is_empty()).then(|| (r.puuid, tag))
+                (!tag.is_empty()).then_some((r.puuid, tag))
             })
             .collect(),
         Err(e) => {

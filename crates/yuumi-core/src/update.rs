@@ -247,7 +247,7 @@ pub async fn release_changelog(
                 if let Ok(text) = std::fs::read_to_string(cache_path) {
                     if let Ok(entries) = serde_json::from_str::<Vec<ReleaseEntry>>(&text) {
                         let contains_current =
-                            current_version.filter(|s| !s.is_empty()).map_or(true, |v| {
+                            current_version.filter(|s| !s.is_empty()).is_none_or(|v| {
                                 entries.iter().any(|e| {
                                     e.tag.trim_start_matches('v') == v.trim_start_matches('v')
                                 })

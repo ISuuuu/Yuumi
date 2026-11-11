@@ -53,6 +53,21 @@ pub async fn fetch_current_summoner(client: &LcuClient) -> Result<SummonerInfo, 
     serde_json::from_value(val).map_err(|e| format!("解析召唤师失败: {}", e))
 }
 
+/// 根据 PUUID 查询召唤师信息（GET /lol-summoner/v2/summoners/puuid/{puuid}）
+pub async fn fetch_summoner_by_puuid(
+    client: &LcuClient,
+    puuid: &str,
+) -> Result<SummonerInfo, String> {
+    let trimmed = puuid.trim();
+    if trimmed.is_empty() {
+        return Err("PUUID 不能为空".to_string());
+    }
+    let val = client
+        .get(&format!("/lol-summoner/v2/summoners/puuid/{}", trimmed))
+        .await?;
+    serde_json::from_value(val).map_err(|e| format!("解析召唤师失败: {}", e))
+}
+
 /// 根据召唤师名称（纯名或 游戏名#标号）查询召唤师信息
 pub async fn fetch_summoner_by_name(
     client: &LcuClient,

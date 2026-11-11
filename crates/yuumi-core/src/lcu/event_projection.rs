@@ -46,6 +46,11 @@ const SWAP_TRADE_KEYS: &[&str] = &["id", "state"];
 /// gameflow 队列信息（`GameflowQueue`）。
 const GAMEFLOW_QUEUE_KEYS: &[&str] = &["id", "gameMode", "isCustom"];
 
+/// gameflow 对局内英雄选择记录（`PlayerChampionSelection`），
+/// 用于 teamOne/teamTwo 成员缺少 championId 时按 puuid / summonerId 回填英雄。
+const PLAYER_CHAMPION_SELECTION_KEYS: &[&str] =
+    &["summonerInternalName", "puuid", "summonerId", "championId"];
+
 /// gameflow 对局参与者（`GameflowParticipant`）。
 const GAMEFLOW_PARTICIPANT_KEYS: &[&str] = &[
     "summonerId",
@@ -170,6 +175,13 @@ fn project_gameflow_session(data: &Value) -> Value {
         if let Some(value) = pick_all(game_data.get(key), GAMEFLOW_PARTICIPANT_KEYS) {
             projected.insert(key.to_string(), value);
         }
+    }
+
+    if let Some(value) = pick_all(
+        game_data.get("playerChampionSelections"),
+        PLAYER_CHAMPION_SELECTION_KEYS,
+    ) {
+        projected.insert("playerChampionSelections".to_string(), value);
     }
 
     if let Some(value) = game_data.get("gameId") {
@@ -330,6 +342,14 @@ mod tests {
                     "selectedSkinId": 1000
                 }],
                 "teamTwo": [],
+                "playerChampionSelections": [{
+                    "summonerInternalName": "player-1",
+                    "puuid": "p-1",
+                    "summonerId": 1,
+                    "championId": 266,
+                    "obfuscatedPuuid": "xxx",
+                    "spell1Id": 4
+                }],
                 "gameServerAddress": "1.2.3.4",
                 "isSpectating": false
             },
@@ -349,6 +369,14 @@ mod tests {
         assert_eq!(gd["queue"]["id"], json!(420));
         assert_eq!(gd["queue"]["gameMode"], json!("CLASSIC"));
         assert!(gd["queue"].get("type").is_none());
+
+        let sel = &gd["playerChampionSelections"][0];
+        assert_eq!(sel["puuid"], json!("p-1"));
+        assert_eq!(sel["championId"], json!(266));
+        assert_eq!(sel["summonerId"], json!(1));
+        assert_eq!(sel["summonerInternalName"], json!("player-1"));
+        assert!(sel.get("obfuscatedPuuid").is_none());
+        assert!(sel.get("spell1Id").is_none());
 
         let p = &gd["teamOne"][0];
         assert_eq!(p["puuid"], json!("p-1"));
