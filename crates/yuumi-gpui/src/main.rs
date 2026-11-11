@@ -1,5 +1,7 @@
 // MSVC 链接器创建 .lib/.exp 时输出的 "正在创建库" 提示，非代码问题，静默处理
 #![allow(linker_messages)]
+// Release 构建使用 Windows GUI 子系统，防止启动时弹出控制台命令行窗口
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use gpui::prelude::*;
 use gpui::{px, Application, Size, TitlebarOptions, WindowOptions};
