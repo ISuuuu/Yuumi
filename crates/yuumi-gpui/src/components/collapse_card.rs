@@ -43,6 +43,8 @@ pub fn collapse_card(
         .child(
             div()
                 .w_full()
+                .when(open, |s| s.rounded_t(px(11.0)))
+                .when(!open, |s| s.rounded(px(11.0)))
                 .px(px(24.0))
                 .py(px(16.0))
                 .flex()
@@ -122,6 +124,7 @@ pub fn collapse_card(
             this.child(
                 div()
                     .w_full()
+                    .rounded_b(px(11.0))
                     // 对齐 Vue .n-collapse-item__content 的 --hover-bg 浅灰层（父级卡片已是实色）
                     .bg(Theme::HOVER_BG())
                     .border_t_1()

@@ -1640,6 +1640,7 @@ impl SearchView {
             .child(
                 div()
                     .w_full()
+                    .rounded_t(px(7.0))
                     .px(px(16.0))
                     .py(px(8.0))
                     .bg(if win { Theme::WIN_BG() } else { Theme::LOSS_BG() })

@@ -1294,6 +1294,7 @@ impl CareerView {
             .child(
                 div()
                     .flex()
+                    .rounded_t(px(11.0))
                     .items_center()
                     .px(px(16.0))
                     .py(px(6.0))

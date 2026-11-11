@@ -539,6 +539,7 @@ fn render_color_picker(
                                     div()
                                         .absolute()
                                         .inset_0()
+                                        .rounded_md()
                                         .bg(linear_gradient(
                                             90.0,
                                             linear_color_stop(rgba(0xffffffff), 0.0),
@@ -550,6 +551,7 @@ fn render_color_picker(
                                     div()
                                         .absolute()
                                         .inset_0()
+                                        .rounded_md()
                                         .bg(linear_gradient(
                                             180.0,
                                             linear_color_stop(rgba(0x00000000), 0.0),
@@ -636,12 +638,12 @@ fn render_color_picker(
                                         .overflow_hidden()
                                         .cursor_pointer()
                                         .flex()
-                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0xff0000ff), 0.0), linear_color_stop(rgba(0xffff00ff), 1.0))))
+                                        .child(div().flex_1().h_full().rounded_l_md().bg(linear_gradient(90.0, linear_color_stop(rgba(0xff0000ff), 0.0), linear_color_stop(rgba(0xffff00ff), 1.0))))
                                         .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0xffff00ff), 0.0), linear_color_stop(rgba(0x00ff00ff), 1.0))))
                                         .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0x00ff00ff), 0.0), linear_color_stop(rgba(0x00ffffff), 1.0))))
                                         .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0x00ffffff), 0.0), linear_color_stop(rgba(0x0000ffff), 1.0))))
                                         .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0x0000ffff), 0.0), linear_color_stop(rgba(0xff00ffff), 1.0))))
-                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0xff00ffff), 0.0), linear_color_stop(rgba(0xff0000ff), 1.0))))
+                                        .child(div().flex_1().h_full().rounded_r_md().bg(linear_gradient(90.0, linear_color_stop(rgba(0xff00ffff), 0.0), linear_color_stop(rgba(0xff0000ff), 1.0))))
                                         .child(
                                             canvas(
                                                 |bounds, _win, _app| {

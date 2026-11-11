@@ -232,6 +232,7 @@ impl GameInfoView {
                 div()
                     .h(px(44.0))
                     .flex()
+                    .rounded_t(px(11.0))
                     .border_b_1()
                     .border_color(Theme::CARD_BORDER())
                     .bg(Theme::CARD_BG().opacity(0.4))
@@ -243,6 +244,7 @@ impl GameInfoView {
                             .items_center()
                             .justify_center()
                             .cursor_pointer()
+                            .when(is_ally_tab, |s| s.rounded_tl(px(11.0)))
                             .text_size(px(13.0))
                             .font_weight(if is_ally_tab {
                                 FontWeight::BOLD
@@ -278,6 +280,7 @@ impl GameInfoView {
                             .items_center()
                             .justify_center()
                             .cursor_pointer()
+                            .when(!is_ally_tab, |s| s.rounded_tr(px(11.0)))
                             .text_size(px(13.0))
                             .font_weight(if !is_ally_tab {
                                 FontWeight::BOLD
@@ -573,6 +576,7 @@ impl GameInfoView {
                 .w_full()
                 .h(px(44.0))
                 .flex_shrink_0()
+                .rounded_t(px(11.0))
                 .border_b_1()
                 .border_color(Theme::CARD_BORDER())
                 .bg(Theme::CARD_BG().opacity(0.5))
@@ -642,6 +646,7 @@ impl GameInfoView {
             .w_full()
             .h(px(44.0))
             .flex_shrink_0()
+            .rounded_t(px(11.0))
             .border_b_1()
             .border_color(Theme::CARD_BORDER())
             .bg(Theme::CARD_BG().opacity(0.5))

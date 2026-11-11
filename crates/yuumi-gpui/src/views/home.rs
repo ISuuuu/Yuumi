@@ -181,7 +181,7 @@ impl HomeView {
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(Theme::TEXT_PRIMARY())
                     .mb(px(20.0))
-                    .child("已连接至英雄联盟客户端"),
+                    .child("已连接客户端"),
             )
             .child(
                 div()
@@ -271,7 +271,10 @@ impl HomeView {
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(Theme::ACCENT_PRIMARY())
                 .cursor_pointer()
-                .hover(|s| s.bg(Theme::ACCENT_HOVER()).text_color(Theme::TEXT_ON_PRIMARY()))
+                .hover(|s| {
+                    s.bg(Theme::ACCENT_HOVER())
+                        .text_color(Theme::TEXT_ON_PRIMARY())
+                })
                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                     on_launch(win, app);
                 })
