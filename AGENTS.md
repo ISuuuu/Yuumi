@@ -1,7 +1,6 @@
 # Yuumi
 
-Tauri v2 + Vue 3 + TypeScript 桌面应用。
-原版 Python (Seraphine) 项目的 Rust 重构。
+GPUI 原生 Rust 桌面应用（`crates/yuumi-core` + `crates/yuumi-gpui`），基于原版 Tauri v2 + Vue 3 架构进行原生重构。
 
 ## 编码指导原则 (Coding Guidelines)
 
@@ -49,226 +48,205 @@ Tauri v2 + Vue 3 + TypeScript 桌面应用。
 - “修复 Bug” → “编写复现该 Bug 的测试，然后使其通过”
 - “重构 X” → “确保重构前后测试均能通过”
 - **多步骤任务需陈述简短计划**：
-  ```
-  1. [步骤] → 验证: [检查项]
-  2. [步骤] → 验证: [检查项]
-  3. [步骤] → 验证: [检查项]
-  ```
+    ```
+    1. [步骤] → 验证: [检查项]
+    2. [步骤] → 验证: [检查项]
+    3. [步骤] → 验证: [检查项]
+    ```
 - **成功标准**：强大的成功标准能让你独立循环。弱标准（“使其工作”）需要不断澄清。
 
-## Tauri v2 & Vue 3 编码规范 (Tauri & Vue Guidelines)
+## GPUI & Rust 编码规范 (GPUI & Rust Guidelines)
 
-### Rust 后端 (Tauri v2 / Rust)
+### 架构边界与职责划分
 
-- **类型安全边界**：所有与前端交互的 Struct/Enum 必须实现 `serde::Serialize` 和 `serde::Deserialize`。
-- **错误传播与序列化**：
-  - `#[tauri::command]` 如果可能失败，必须返回 `Result<T, String>`。
-  - 严禁随意使用 `unwrap()` 或 `panic!`，应使用 `map_err(|e| e.to_string())` 将 Error 转化为前端友好的 String，并使用系统 `logging.rs` 的 logger 记录完整堆栈。项目未引入 `thiserror` / `anyhow`，需要结构化错误时按 `agents/lifecycle.rs` 的方式手写自定义枚举并实现 `Display` + `std::error::Error`。
-- **LCU 静态资源与自定义协议规范**：
-  - LCU 静态资源（英雄、技能、物品、符文、战利品等图标）由 Rust 端的 `yuumi-asset://` 自定义协议流式返回原始字节，彻底绕开 IPC 与 Base64 传输。
-  - WebView2 仅拦截 http/https 协议，前端图片 URL 使用 wry workaround 前缀 `http://yuumi-asset.localhost/`（host 含协议名），由 wry 自动还原为 `yuumi-asset://localhost/` 后再交给 Rust handler。
-  - `get_lcu_asset` / `get_lcu_assets` 仅作兼容层保留，新功能**严禁**通过 IPC 命令读取图片 Base64。
-- **共享状态管理与死锁防护**：
-  - 只能通过 `tauri::State<'_, AppState>` 访问全局状态，不得使用不安全的全局静态变量。
-  - 在异步 Command 或后台 Task 中获取状态锁时，**严禁跨 `await` 点持有同步锁 (`std::sync::MutexGuard`)**，必须先释放锁或在作用域块分离后再 `await`，防止 Tokio 线程池死锁。
-- **异步与非阻塞**：
-  - 严禁在 Command 的主线程中执行耗时的 CPU 计算或 I/O 操作。
-  - 使用 `tokio::spawn` 投递后台任务，并在执行完毕后通过 `tauri::Emitter::emit`（Tauri v2 API，禁止使用 v1 的 `emit_all`）异步通知前端。
-- **命令注册 Checklist**：
-  - 新增 `#[tauri::command]` 时，**必须同步在 `lib.rs` 的 `invoke_handler!` 宏列表中注册**，否则前端调用会提示 command not found。
+- **`crates/yuumi-core`（核心领域库）**:
+    - 纯无头（Headless）Rust 逻辑库，绝对禁止引入任何 GPUI、GUI 或视口相关依赖。
+    - 承载 LCU 客户端通信、WebSocket 事件流、白名单投影、自动化 Agent（Auto BP、Auto Match、Supervisor 调度）、数据解析清洗、SQLite 本地持久化、配置读写与自动更新。
+    - 暴露纯 Rust 异步函数与数据类型，对外提供强类型领域事件与状态管道。
+- **`crates/yuumi-gpui`（原生桌面客户端）**:
+    - 基于 Zed GPUI 实体组件模式（Entity / View）驱动界面。
+    - 拥有主窗口 (`MainWindow`) 及独立悬浮/弹窗 (`BenchOverlayView`、`OpggWindow`)。
+    - 依赖 `yuumi-core`，通过 `LiveLcuService` 编排中心订阅领域事件并拉取数据，在 UI 线程精准高效重绘。
 
-### Vue 3 前端 (Vue 3 / TypeScript)
+### GPUI 渲染与 Tokio 异步隔离规范
 
-- **类型约束与强类型收敛**：
-  - 必须对所有 `invoke` 的入参及返回结果定义明确的 TypeScript Interface，绝对禁止使用 `any`。
-  - 组件 `defineProps`、Composable 函数参数与返回值、Pinia Store 状态严禁随意使用 `any`；对于具备多形态或阶段性差异的数据结构（如选人与游戏内玩家对象、组队结构），必须在 `src/types/` 下统一定义结构明确的 Interface 或联合类型。
-  - 严格处理可选属性（`undefined` / `null`）的空值守卫：在进行函数参数传递、数学运算、数组查找或对象动态 key 索引（如 `playerData[key]`）前，必须通过可选链、空值合并操作符（`??`）或类型守卫完成安全收敛，防止类型逃逸与运行时错误。
-  - Rust 返回的 Result 应该在前端有合理的错误捕获（`try-catch` 或 `.catch()`），并通过 `useToast` 或 `message` 呈现给用户。
-- **事件监听生命周期管理**：
-  - 使用 `@tauri-apps/api/event` 的 `listen` 订阅 Rust 事件时，必须在组件销毁时（`onUnmounted`）调用返回的 `unlisten()` 函数，以防闭包内存泄漏。
-- **LCU API 隔离原则**：
-  - 前端绝不应直接建立与 LCU 端口的 HTTP/WebSocket 连接。
-  - 所有 LCU 接口的调用，必须经由 Rust 端的 `call_lcu_api` 转发，以规避 Token 泄漏并统一错误捕获。
-- **静态图片资源渲染规范**：
-  - 所有 LCU 静态资源（英雄、技能、装备、符文、战利品图标等）统一使用 `<LcuImage :src="path" />` 组件或 `useLcuAsset` composable。
-  - 资源加载底层基于 `yuumi-asset://` 自定义协议（前端使用 `http://yuumi-asset.localhost/` workaround URL）与 Chromium 原生网络层，自带 HTTP 强缓存与原生解码，**严禁使用 IPC `invoke` 批量传递图片 Base64 字符串**。
-- **组件及路由状态保留**：
-  - 页面路由切换基于 Vue 的 `currentPage` 控制。
-  - Search 页和 GameInfo 页由于数据量较大且需要保留搜索/对比状态，必须使用 `v-show` 保持组件挂载，避免重新渲染销毁状态。
-- **主题与样式**：
-  - 遵循 "纯白水晶极光" 风格，背景使用毛玻璃模糊（`backdrop-filter: blur`），配色统一采用动态 CSS 变量，不可随意硬编码色值。
+- **Tokio 运行时句柄注册与任务投递**:
+    - GPUI 的 `cx.background_executor()` 由底层平台线程池驱动，线程上下文内**没有** Tokio reactor；在其中直接调用 reqwest 网络请求或 tokio I/O 会 panic（`there is no reactor running`）。
+    - 所有后台网络 I/O、LCU 接口请求及耗时任务必须通过 `yuumi_core::runtime::spawn_background(...)` 或全局 `yuumi_core::runtime::tokio_handle()` 投递至 Tokio 运行时执行。
+- **UI 主线程零阻塞**:
+    - 严禁在 GPUI UI 主线程中执行耗时的 CPU 计算、同步磁盘读写或同步阻塞等待。
+- **异步就绪与精准重绘**:
+    - 后台任务完成时，通过 `cx.spawn(...)` 配合 `this.update(cx, |this, cx| ...)` 或 `cx.notify()` 将数据回写至实体状态并驱动视图刷新。
+- **共享状态与死锁防护**:
+    - 在异步函数中获取状态锁时，**严禁跨 `await` 点持有同步锁 (`std::sync::MutexGuard`)**，必须先释放锁或在独立作用域块内完成读写后再 `await`，防止 Tokio 线程死锁。
+
+### 静态资源与图片异步加载引擎
+
+- **多级缓存与 BGRA 解码**:
+    - 静态资源经 `AssetCache` 完成磁盘与内存缓存，通过 `AssetLoader` 在 Tokio 线程池并发解码为 GPUI 原生所需的 BGRA `RenderImage`，彻底消除 UI 帧率抖动。
+    - 列表与详情视图加载前，优先通过 `prewarm_assets` 在后台批量预热图片，解码就绪后触发单次 `cx.notify()` 重绘。
+- **内嵌矢量资产与主题着色**:
+    - 所有内置线性图标（SVG）经 `assets::Assets` 实现 `gpui::AssetSource` 编译进二进制，经 `svg()` 元素自动转化为 alpha 蒙版并按当前主题语义色着色。
+    - 具象彩色徽标（如 OP.GG Logo）内嵌预解码位图，避免被全局单色蒙版覆写。
+
+### 主题与样式规范
+
+- **纯白水晶极光 (Crystal Aurora)** 风格。
+- 统一通过 `crate::theme::Theme` 访问语义色常量与尺寸配置，支持浅色/深色主题动态适配。
+- 动态自定义颜色（主题色、胜/负/重赛卡片颜色）由 `RUNTIME_COLORS` 覆盖表维护，保证用户修改设置后即时响应。
+
+### 类型安全与错误治理
+
+- 所有与外部交互的数据模型严格实现 `serde::Serialize` 和 `serde::Deserialize`，合理使用 camelCase / PascalCase 别名与 Default 兜底。
+- 生产代码严禁随意 `unwrap()` 或 `panic!`，统一通过 `Result<T, ...>` 传播，内部异常记录详细日志（`log::error!`），面向用户的错误通过 `Toast` 浮层友好呈现。
 
 ## 技术栈
 
-- **前端**: Vue 3 + TypeScript + Vite + Pinia + Naive UI
-- **后端**: Tauri v2 (Rust)
-- **包管理**: pnpm
+- **UI 渲染**: GPUI (`crates/yuumi-gpui`)
+- **核心逻辑**: Rust (`crates/yuumi-core`)
+- **异步运行时**: Tokio (multi-thread)
+- **本地存储**: SQLite (`rusqlite bundled`)
+- **包管理**: Cargo (Workspace)
 
 ## 常用命令
 
 ```bash
-pnpm tauri dev      # 开发（Vite + Tauri 窗口）
-pnpm tauri build    # 构建生产包
-pnpm dev            # 仅前端开发
-pnpm build          # 仅前端构建
+# 开发与运行（依赖项自动开启 opt-level=2 优化，保障 GPUI 渲染性能）
+cargo run -p yuumi-gpui
+# 或
+cargo run --bin yuumi
+
+# 构建生产版本（输出 target/release/yuumi.exe）
+cargo build --release -p yuumi-gpui
 
 # 代码质量校验与测试（修改代码后进行验证）
-pnpm type-check      # Vue / TS 类型检查 (vue-tsc --noEmit)
-pnpm clippy          # Rust 代码静态检查 (cargo clippy)
-pnpm format          # Rust 代码格式化 (cargo fmt)
-pnpm test:rust       # 运行 Rust 单元测试 (cargo test)
-pnpm fixtures:capture # 抓真实 LCU 响应到 testdata/match/_capture/（需客户端已启动，人工挑选后迁入 real/）
-pnpm check-all       # 一键检查全部 (Format + Type-Check + Clippy)
+cargo fmt --all                        # 自动修复全工作区代码格式
+cargo fmt --all -- --check             # 检查代码格式是否合规
+cargo clippy --workspace --all-targets # 全工作区 Clippy 静态检查
+cargo test --workspace                 # 运行全部单元测试（含解析层回归测试）
+
+# 抓取真实 LCU 测试快照（可选，需客户端处于运行状态）
+node scripts/capture-lcu-fixtures.mjs
 ```
+
+> **Git 钩子约定**: 仓库集成 `.githooks/pre-commit`，在提交时自动对暂存的 `.rs` 文件执行 `rustfmt` 并运行 `cargo clippy --workspace --all-targets`。
 
 ### 解析层测试约定（fixture 驱动）
 
-`src-tauri/testdata/match/` 存放 LCU 对局响应快照，`manifest.json` 记录每份样本的覆盖场景：
+`crates/yuumi-core/testdata/match/` 存放 LCU 对局响应快照，`manifest.json` 记录每份样本的覆盖场景：
 
-- `real/` —— 从真实客户端抓包（`pnpm fixtures:capture`），8 份，覆盖排位/匹配各分路组合、
-  三分钟重开、自定义队列 3100。
-- `synthetic/` —— 按 schema 合成，仅用于真实抓包缺失的场景（大乱斗、斗魂竞技场、
-  420 队列名映射、稀疏载荷边界）。合成样本必须在此目录，不得与真实抓包混淆。
+- `real/` —— 从真实客户端抓包（`node scripts/capture-lcu-fixtures.mjs`），覆盖排位/匹配各分路组合、三分钟重开、自定义队列 3100。
+- `synthetic/` —— 按 schema 合成，仅用于真实抓包缺失的场景（大乱斗、斗魂竞技场、420 队列名映射、稀疏载荷边界）。合成样本必须在此目录，不得与真实抓包混淆。
 
-样本保存的是**完整外层响应**（含 `participantIdentities`、`teams`、`timeline`、`gameMode`、
-`platformId` 及 `stats` 中 118 个字段里未建模的部分），用途是防止结构体过度收紧——
-内联最小 JSON 的测试永远发现不了「真实载荷多一个字段就解析失败」这类问题。
+样本保存的是**完整外层响应**（含 `participantIdentities`、`teams`、`timeline`、`gameMode`、`platformId` 及 `stats` 中 118 个字段里未建模的部分），用途是防止结构体过度收紧——内联最小 JSON 的测试永远发现不了「真实载荷多一个字段就解析失败」这类问题。
 
 - 新增解析路径的测试优先写 fixture，而非在测试里内联 `json!({...})`。
-- `all_fixtures_on_disk_deserialize` 会遍历 `real/` 与 `synthetic/` 两个目录逐一反序列化，
-  **新增样本无需改测试**（它不扫根目录，因为那里有 `manifest.json` 与 `_capture/`）。
-- 需要真实数据时执行 `pnpm fixtures:capture`（默认对 puuid / summonerId / 召唤师名做脱敏，
-  解析层不消费这些字段，加 `--no-redact` 可保留原值）。线索：部分 WeGame 渠道客户端不写
-  `lockfile`（0 字节），脚本会自动退化为读取 `LeagueClientUx.exe` 的进程命令行。
-- **脚本只写 `testdata/match/_capture/`（暂存区，已 gitignore）**，不写 `real/`、不覆盖
-  `manifest.json`：抓包结果是一次 20 局的整体快照，且含 gameflow / champ-select 等非 matches
-  结构的会话快照（放在 `_capture/sessions/`），自动覆盖会让「精选样本 + 手写元数据」同时失效。
-  迁入流程见脚本结束时的提示：挑选 → 重命名进 `real/` → 补 `manifest.json` 的 `real[]` →
-  在 `match_parser.rs` 的 `REAL` 登记并用 `dump_real_fixture_results` 生成 `REAL_EXPECT`。
-- 参照 `manifest.json` 的 `observedInRealPayload`，以下几点是实测得出的、容易被误判的载荷事实：
-  `roleBoundItem` 经常不是分路任务道具（实测出现 3006、2055），只能作候选；
-  存在 `playerAugment6` 但只建模到 5；`stats` 里**没有** `augments` 数组字段。
-
+- `all_fixtures_on_disk_deserialize` 会遍历 `real/` 与 `synthetic/` 两个目录逐一反序列化，**新增样本无需改测试**（它不扫根目录，因为那里有 `manifest.json` 与 `_capture/`）。
+- 需要真实数据时执行 `node scripts/capture-lcu-fixtures.mjs`（默认对 puuid / summonerId / 召唤师名做脱敏，解析层不消费这些字段，加 `--no-redact` 可保留原值）。线索：部分 WeGame 渠道客户端不写 `lockfile`（0 字节），脚本会自动退化为读取 `LeagueClientUx.exe` 的进程命令行。
+- **脚本只写 `crates/yuumi-core/testdata/match/_capture/`（暂存区，已 gitignore）**，不写 `real/`、不覆盖 `manifest.json`：抓包结果是一次 20 局的整体快照，且含 gameflow / champ-select 等非 matches 结构的会话快照（放在 `_capture/sessions/`），自动覆盖会让「精选样本 + 手写元数据」同时失效。迁入流程见脚本结束时的提示：挑选 → 重命名进 `real/` → 补 `manifest.json` 的 `real[]` → 在 `match_parser.rs` 的 `REAL` 登记并用 `dump_real_fixture_results` 生成 `REAL_EXPECT`。
+- 参照 `manifest.json` 的 `observedInRealPayload`，以下几点是实测得出的、容易被误判的载荷事实：`roleBoundItem` 经常不是分路任务道具（实测出现 3006、2055），只能作候选；存在 `playerAugment6` 但只建模到 5；`stats` 里**没有** `augments` 数组字段。
 
 ## 项目结构
 
 <details>
-<summary>展开查看完整目录树（前端 / Rust 后端）</summary>
+<summary>展开查看完整目录树（Cargo Workspace）</summary>
 
 ```
 Yuumi/
-├── src/                            # Vue 前端
-│   ├── App.vue                     # 根组件（自定义标题栏 + 导航栏 + 路由切换）
-│   ├── main.ts                     # 主窗口入口
-│   ├── opgg.ts                     # OP.GG 独立窗口入口
-│   ├── i18n.ts                     # 多语言配置
-│   ├── api/
-│   │   └── lcu.ts                  # LCU API 封装 + Rust 命令调用
-│   ├── store/
-│   │   └── lcuStore.ts             # Pinia 全局状态（LCU 事件映射）
-│   ├── utils/
-│   │   ├── theme.ts                # 主题色动态更新
-│   │   ├── ranked.ts               # 段位名称与图标映射
-│   │   ├── queueName.ts            # 队列名称显示（i18n 优先）
-│   │   ├── markdown.ts             # Markdown → 安全 HTML（DOMPurify 消毒）
-│   │   ├── lazyStorage.ts          # localStorage 空闲时段延迟写入
-│   │   ├── runWithConcurrency.ts   # 受控并发任务队列
-│   │   ├── championCache.ts        # 英雄列表模块级缓存（Promise 去重）
-│   │   ├── matchAnalysis.ts        # 战绩位置/英雄聚合分析
-│   │   ├── matchStats.ts           # 胜率/KDA/连胜/位置统计
-│   │   ├── playerIdentity.ts       # 玩家身份兼容判定与组队标识提取
-│   │   ├── playerDataCache.ts      # 排位/熟练度缓存 + 路人集去重查询
-│   │   ├── playerPlaceholder.ts    # 玩家占位数据构造
-│   │   ├── gameflowSession.ts      # gameflow session 短期缓存
-│   │   └── teamBuilder.ts          # 对局阵营判定与队伍映射
-│   ├── composables/
-│   │   ├── useLcuAsset.ts          # LCU 资源路径 → data URL（缓存 + 去重）
-│   │   ├── useToast.ts             # Naive UI 消息提示 Hook (多窗口安全降级)
-│   │   ├── usePlayerSearch.ts      # 召唤师名称点击跳转搜索
-│   │   ├── useTftData.ts           # 云顶之弈 API & 数据处理
-│   │   ├── useTftMetaDecks.ts      # 云顶 OP.GG 热门阵容解析
-│   │   ├── useLoot.ts              # 战利品智能开箱/分解/重铸
-│   │   ├── useMatchHistory.ts      # 战绩历史 Hook
-│   │   ├── usePremadeGroup.ts      # 组队分析 Hook
-│   │   ├── useFateBadge.ts         # 宿命对局与相遇徽章逻辑
-│   │   ├── useGamePlayerData.ts   # 对局玩家数据编排层（状态/watch/落盘/轮询，纯逻辑见 utils/）
-│   │   ├── usePlayerChampionId.ts  # 对局玩家当前英雄 ID 解析 Hook
-│   │   ├── useSettingsAutoSave.ts  # 设置页自动持久化 Hook
-│   │   └── useAutoSaveConfig.ts    # 配置项自动保存 Hook
-│   ├── assets/                     # 静态资源（图片等）
-│   ├── views/
-│   │   ├── Home.vue                # 首页（LCU 状态 + 快捷导航）
-│   │   ├── Career.vue              # 生涯战绩（召唤师 + 对局历史 + 英雄熟练度）
-│   │   ├── Search.vue              # 战绩查询（玩家搜索 + 对局列表）
-│   │   ├── GameInfo.vue            # 对局信息（10 人段位 + KDA + 宿命对局）
-│   │   ├── SavedPlayers.vue        # 路人集（曾同局玩家/标记玩家管理）
-│   │   ├── TFT.vue                 # 云顶之弈（段位/战绩/阵容推荐/海克斯）
-│   │   ├── Settings.vue            # 设置（个性化/路径/云端服务/更新/关于）
-│   │   ├── Tools.vue               # 工具箱（好友清理/房间/自动流程/战利品/符文装备/观战）
-│   │   └── BenchOverlay.vue        # 大乱斗板凳席悬浮窗
-│   └── components/
-│       ├── tft/                    # 云顶之弈子组件（TftRankHeader/TftMatchCard/TftMatchDetailModal/TftMetaCompsTab/TftAugmentsTab）
-│       ├── gameinfo/               # 对局信息子组件（PlayerCard/PlayerMatchColumn/PremadeGroupChips）
-│       ├── career/                 # 生涯子组件（MatchHistoryTab/ChampionMasteryTab/LootManagerTab）
-│       ├── search/                 # 战绩查询子组件（MatchListItem/MiniMatchList/MatchDetailPanel）
-│       ├── settings/               # 设置页模块子组件（PersonalizationSection/LolPathSection/ScreenshotSection/UpdateSection 等）
-│       ├── opgg/                   # OP.GG 子组件（TierListPanel/BuildDetailPanel/RunesSection/ItemsSection 等）
-│       ├── tools/                  # 工具箱子组件（AutoGameflowCard/FriendCleanerCard/SpectateCard/quickactions/* 等）
-│       ├── layout/                 # 布局与自定义标题栏
-│       ├── OpggModal.vue           # OP.GG 数据弹窗
-│       ├── OpggWindow.vue          # OP.GG 独立窗口组件
-│       ├── NoticePopup.vue         # 更新日志弹窗组件
-│       ├── UpdateDialog.vue        # 自动更新弹窗组件
-│       ├── ReplayButton.vue        # 对局回放下载与播放组件
-│       ├── LcuOfflineState.vue     # 统一 LCU 离线未连接状态
-│       ├── LcuImage.vue            # LCU 资源图片组件（loading/error/fallback 状态）
-│       ├── ChampionPicker.vue      # 英雄选择器（v-model: number[]）
-│       ├── SpellPicker.vue         # 召唤师技能选择器（v-model: number[]）
-│       └── NaiveApiCapture.vue     # Naive UI Message/Dialog 实例捕获（供 Provider 子树外的调用方使用）
-├── src-tauri/                      # Tauri/Rust 后端
-│   ├── src/
-│   │   ├── main.rs                 # Rust 入口（便携升级 helper 判定 / 日志初始化）
-│   │   ├── lib.rs                  # AppState、命令注册、agent 启动、系统托盘
-│   │   ├── config.rs               # 配置读写与 Schema 自动迁移（%APPDATA%/Yuumi/config.json）
-│   │   ├── runtime.rs              # 运行环境模式检测（便携版/安装版）
-│   │   ├── portable_updater.rs     # 便携版更新机制与独立升级替换 helper
-│   │   ├── saved_players.rs        # 路人集系统（SQLite 持久化/标记管理/相遇历史/导入导出）
-│   │   ├── commands/               # Tauri 拆分命令 (config.rs, lcu.rs, tools.rs)
-│   │   ├── loot.rs                 # 战利品管理系统 (开箱/分解/重铸/精粹查询)
-│   │   ├── updater.rs              # 自动更新机制与更新日志本地缓存
-│   │   ├── tools.rs                # 杂项工具（回放/好友清理/装备页/房间/ARAM摇号/符文/OP.GG抓取/观战）
-│   │   ├── logging.rs              # 日志系统（自研 log::Log 实现 + 按天/2MB 轮转，日志写入 exe 同级 log/ 目录）
-│   │   ├── signalr.rs              # SignalR Hub 远程反代（条件启动）
-│   │   ├── upload.rs               # 对局上传队列（包含落盘暂存与重试逻辑）
-│   │   ├── lcu/
-│   │   │   ├── mod.rs
-│   │   │   ├── monitor.rs          # LCU 进程轮询（sysinfo + lockfile + WMIC 兜底）
-│   │   │   ├── client.rs           # HTTPS 代理（忽略 SSL + Basic Auth + CDragon 代理请求 + 全局超时）
-│   │   │   ├── opgg.rs             # OP.GG API 隔离层（HTTP 代理 + 内存缓存）
-│   │   │   ├── sgp.rs              # SGP 远程 API 工具（信号量限流控制）
-│   │   │   ├── ws.rs               # WebSocket 事件订阅 → 广播前端 + 分发 agents（带取消机制）
-│   │   │   └── game_data.rs        # 游戏资源预加载（物品/技能/符文/Cherry海克斯/英雄 ID→名称/iconPath）
-│   │   ├── parsers/
-│   │   │   ├── mod.rs
-│   │   │   ├── summoner.rs         # 召唤师数据清洗与英雄熟练度 2.0
-│   │   │   ├── match_parser.rs     # 战绩数据清洗（parseGameData/get_recent_teammates/海克斯大乱斗/经典模式）
-│   │   │   ├── game_info.rs        # 对局信息（10 人段位 + 近期 KDA + 宿命对局分析）
-│   │   │   └── tft.rs              # TFT 云顶之弈数据解析 (战绩/段位/海克斯/阵容)
-│   │   └── agents/
-│   │       ├── mod.rs
-│   │       ├── auto_bp.rs          # 自动选人/禁人/召唤师技能/板凳席推送
-│   │       ├── auto_match.rs       # 自动接受匹配/接受邀请/自动点赞/延时再来一局/自动重连/标记提醒/对局结束触发上传
-│   │       └── auto_screenshot.rs # 游戏内多杀事件实时监听与自动截图
-│   ├── tauri.conf.json
-│   ├── capabilities/
-│   └── Cargo.toml
-├── File/                           # 重构参考文档（不入库）
-│   ├── tauri_reconstruction_spec.md
-│   └── tauri_reconstruction_context.md
+├── Cargo.toml                         # Workspace 配置（crates/yuumi-core + crates/yuumi-gpui + vendor/gpui patch）
+├── crates/
+│   ├── yuumi-core/                    # 纯核心领域库（无 UI 依赖）
+│   │   ├── Cargo.toml
+│   │   ├── src/
+│   │   │   ├── lib.rs                 # 核心模块导出
+│   │   │   ├── config.rs              # 配置读写与 Schema 自动迁移（%APPDATA%/Yuumi/config.json）
+│   │   │   ├── runtime.rs             # 运行时模式检测（便携版/安装版）、全局 Tokio 运行时句柄注册
+│   │   │   ├── opgg.rs                # OP.GG API 客户端、数据解析与内存缓存
+│   │   │   ├── update.rs              # 自动更新校验（minisign）、GitHub Release 检索与便携版替换 helper
+│   │   │   ├── upload.rs              # 对局上传队列（去重/落盘 .tmp 暂存/重试）
+│   │   │   ├── signalr.rs             # SignalR Hub 远程反代
+│   │   │   ├── lcu/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── monitor.rs         # LCU 进程轮询（sysinfo + lockfile + 命令行/WMIC 三重探测）
+│   │   │   │   ├── client.rs          # HTTPS 客户端（忽略自签证书 + Basic Auth + 并发信号量限流 + CDragon 代理）
+│   │   │   │   ├── ws.rs              # WebSocket 事件订阅（带取消机制：新连接自动终止旧循环）
+│   │   │   │   ├── event_projection.rs# LCU 事件字段白名单投影与同 URI 内容去重
+│   │   │   │   ├── game_data.rs       # 游戏资源预加载（物品/技能/符文/Cherry海克斯/英雄映射）
+│   │   │   │   ├── asset_cache.rs     # 静态资源内存+磁盘二级缓存
+│   │   │   │   └── write.rs           # LCU 写操作（符文页、装备页、房间创建、生涯背景、状态签名等）
+│   │   │   ├── gameflow/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── team_builder.rs    # 阵营判定（含脱敏推断）、gameflow → 队伍映射与组队识别
+│   │   │   │   ├── player_identity.rs # 玩家身份兼容判定与槽位英雄继承
+│   │   │   │   └── match_stats.rs     # 胜率/KDA/连胜/位置英雄聚合统计
+│   │   │   ├── parsers/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── summoner.rs        # 召唤师信息清洗
+│   │   │   │   ├── mastery.rs         # 英雄熟练度 2.0 与里程碑解析
+│   │   │   │   ├── match_parser.rs    # 战绩列表清洗（经典/海克斯大乱斗/SGP）
+│   │   │   │   ├── match_detail.rs    # 单局对局详情解析
+│   │   │   │   ├── teammates.rs       # 近期同队队友分析
+│   │   │   │   ├── game_info.rs       # 对局信息（10 人段位 + 近期战绩 + 宿命交手统计）
+│   │   │   │   ├── tft.rs             # 云顶之弈（段位/战绩/CDragon资源字典/OP.GG阵容）
+│   │   │   │   ├── loot.rs            # 战利品库存与精粹解析
+│   │   │   │   ├── loot_actions.rs    # 智能开箱/分解/重铸/解锁动作编排
+│   │   │   │   ├── replay.rs          # 对局 ROFL 回放下载/状态/观看
+│   │   │   │   └── saved_player.rs    # 路人集身份与快照模型
+│   │   │   ├── storage/
+│   │   │   │   ├── mod.rs
+│   │   │   │   └── saved_players.rs   # 路人集 SQLite 持久化（标记/备注/相遇历史/JSON 导入导出/身份回填）
+│   │   │   └── agents/
+│   │   │       ├── mod.rs
+│   │   │       ├── config.rs          # 自动化开关与分路候选配置模型
+│   │   │       ├── lifecycle.rs       # 游戏阶段枚举与生命周期代际守卫（GenerationGuard）
+│   │   │       ├── supervisor.rs      # 任务独占并发调度器（AgentSupervisor）
+│   │   │       ├── auto_bp.rs         # 自动选人/禁人/召唤师技能/板凳席处理
+│   │   │       └── auto_match.rs      # 自动接受匹配/接受邀请/自动点赞/再来一局/自动重连/标记提醒
+│   │   └── testdata/                  # 真实与合成的 LCU/TFT/Session 测试快照（fixture）
+│   └── yuumi-gpui/                    # GPUI 原生桌面应用（主二进制产物：yuumi.exe）
+│       ├── Cargo.toml
+│       ├── build.rs                   # Windows 资源清单与 exe 图标内嵌
+│       ├── assets/                    # 静态矢量图标 (SVG) 与内置位图资产
+│       └── src/
+│           ├── main.rs                # 程序入口：便携升级判定、Tokio 运行时初始化、单实例互斥、GPUI 窗口启动
+│           ├── app_window/            # 主窗口状态、路由视图渲染与事件响应
+│           │   ├── mod.rs             # MainWindow 定义与资源预热（prewarm_assets）
+│           │   ├── shell.rs           # 外壳布局（标题栏/侧栏/路由分发/回到顶部/弹窗）
+│           │   ├── lifecycle.rs       # LiveLcuEvent 分派、配置同步、独立子窗生命周期管理
+│           │   └── ...                # career / search / game_info / saved_players / tft / tools / settings / f_updates
+│           ├── views/                 # 各业务页面视图组件
+│           │   ├── mod.rs             # Route 枚举与侧栏导航定义
+│           │   ├── home.rs            # 首页（连接状态/客户端启动/快捷入口）
+│           │   ├── career.rs          # 生涯（战绩列表/英雄熟练度/挑战勋章/战利品弹窗）
+│           │   ├── search.rs          # 战绩查询（玩家搜索/战绩详情）
+│           │   ├── game_info.rs       # 对局信息（10 人段位/KDA/队伍与全员视图切换）
+│           │   ├── saved_players.rs   # 路人集（标记管理/相遇对局历史/导入导出）
+│           │   ├── tft.rs             # 云顶之弈（段位/战绩/OP.GG 热门阵容/海克斯百科）
+│           │   ├── tools.rs & tools/  # 实用工具箱（好友清理/房间/符文/装备/观战/客户端修补）
+│           │   └── settings.rs        # 设置页（个性化/路径/代理/截图/云端/更新/关于）
+│           ├── components/            # 通用 UI 基础组件（titlebar/sidebar/card/dropdown/switch/toast/lcu_image 等）
+│           ├── opgg/                  # OP.GG 独立窗口（OpggWindow）与梯度榜/出装/符文/技能组件
+│           ├── services/              # 应用后台服务集成
+│           │   ├── live_lcu.rs        # 中心实时服务（LCU 连接生命周期、WebSocket 分发、防抖拉取与事件广播）
+│           │   ├── agent_runtime.rs   # Agent 事件执行与后台任务桥接
+│           │   ├── cloud_tasks.rs     # 对局上传触发与 SignalR Hub 任务管理
+│           │   ├── screenshot.rs      # 游戏内多杀事件监听与自动截图（xcap）
+│           │   ├── logging.rs         # 日志系统（自研 log::Log 实现 + 按天/2MB 轮转）
+│           │   └── ...                # challenges / champion_alias / friend_cleaner / profile_background / spectate / system_tools
+│           ├── bench_overlay.rs       # 大乱斗板凳席独立置顶悬浮窗（BenchOverlayView）
+│           ├── asset_loader.rs        # 图片异步加载与 Tokio BGRA RenderImage 解码引擎
+│           ├── assets.rs              # 内嵌 SVG/位图资产数据源（AssetSource）
+│           ├── theme.rs               # Crystal Aurora 主题色板与亮暗模式运行时覆盖
+│           ├── tray.rs                # 系统托盘管理器（TrayManager）
+│           ├── i18n.rs                # 国际化文案
+│           └── platform/              # Windows 平台支持（单实例互斥、Win32 窗口控制、Mica 云母特效）
+├── vendor/gpui/                       # 本地打补丁的 gpui 0.2.2（避免 WM_MOVE 无效重绘）
+├── .githooks/                         # 纯 Git 钩子（pre-commit 自动 rustfmt 与 clippy）
+├── .github/                           # CI 工作流、Release 构建脚本与 NSIS 安装包模板
+├── scripts/                           # 辅助工具脚本（capture-lcu-fixtures.mjs）
+├── File/                              # 重构参考文档（不入库）
 ├── AGENTS.md
-├── package.json
-├── vite.config.ts
-└── tsconfig.json
+└── README.md
 ```
 
 </details>
@@ -278,180 +256,108 @@ Yuumi/
 ```
 LeagueClientUx.exe
   ↓ (sysinfo 轮询 port/token，支持 lockfile / 命令行 / WMIC 三种检测)
-monitor.rs → AppState.lcu_client + AppState.game_data（预加载英雄/物品/技能/符文）
+monitor.rs → LcuClient + GameDataAssets（预加载英雄/物品/技能/符文）
   ↓
 ws.rs → LCU WebSocket 事件（带取消机制：新连接自动终止旧循环）
-  ├─→ 前端: event_projection 字段投影 + 去重 → Tauri emit → lcuStore.ts → Vue 组件
-  ├─→ BP Agent: mpsc → auto_bp.rs (自动选人/禁人/技能)
-  ├─→ Match Agent: mpsc → auto_match.rs (自动接受/重连)
-  └─→ Upload Trigger: 游戏结束 → UploadQueue → 外部 API
+  ├─→ event_projection 字段投影 + 去重 → LiveLcuService (broadcast / watch)
+  │     ├─→ MainWindow (UI 主线程接收 LiveLcuEvent 驱动视图刷新与资产预热)
+  │     ├─→ BenchOverlayView (大乱斗板凳席悬浮窗实时同步)
+  │     └─→ CloudTasks / SignalR (对局上传与远程反代)
+  ├─→ BP Agent: auto_bp.rs (自动选人/禁人/召唤师技能)
+  └─→ Match Agent: auto_match.rs (自动接受/重连/自动点赞/再来一局/标记提醒)
 ```
 
 ### LCU 事件投影契约
 
-`ws.rs` 在广播给前端前会经 `lcu/event_projection.rs` 做**字段白名单投影**与**同 URI 内容去重**：
-选人阶段 session 每秒最多推送 20 次，LCU 原始载荷中大量字段（`obfuscatedPuuid`、`selectedSkinId`、
-`spell1Id/2Id`、`playerType`、`chatDetails` 等）前端从不消费，整体透传会放大 IPC 与 WebView 解析开销
-（满编 10 人会话实测 10988 B → 6729 B，约 39%）。
+`crates/yuumi-core/src/lcu/event_projection.rs` 在分发会话快照前会做**字段白名单投影**与**同 URI 内容去重**：
+选人阶段 session 每秒最多推送 20 次，LCU 原始载荷中大量冗余字段（`obfuscatedPuuid`、`selectedSkinId`、
+`spell1Id/2Id`、`playerType`、`chatDetails` 等）业务从不消费，投影与去重可显著降低内存拷贝与反序列化开销。
 
-- 白名单严格对齐 `src/store/lcuStore.ts` 与 `src/types/lcu.ts` 中的类型声明（`vue-tsc` 会校验全部消费点）。
-- **前端新增消费字段时必须同步扩展 `event_projection.rs` 的白名单**，否则该字段会被静默丢弃。
-- 只有 `champ-select session` 与 `gameflow session` 做投影；`gameflow-phase`（裸字符串）、
-  `current-champion`（裸数字）、`ready-check`（5 个字段）原样透传。
-- 去重状态按 WS 连接创建（重连自动清空），仅影响前端广播，Agent / SignalR 转发不受影响。
+- 新增读取 champ-select 或 gameflow session 中的字段时，必须同步扩展 `event_projection.rs` 的对应白名单（如 `CHAMP_SELECT_PLAYER_KEYS`、`GAMEFLOW_PARTICIPANT_KEYS`），否则该字段会被过滤掉。
+- 只有 `champ-select session` 与 `gameflow session` 做投影；`gameflow-phase`、`current-champion`、`ready-check` 原样透传。
+- 去重状态按 WS 连接实例创建（重连自动清空）。
 
 ## 窗口与 UI
 
-- **自定义标题栏**: 去掉原生装饰 (`decorations: false`)，自定义标题栏含最小化/最大化/关闭 + 返回导航 + 游戏阶段显示
-- **系统托盘**: 完整托盘菜单（主页/生涯/战绩查询/对局信息/TFT/其他功能/设置/退出），点击托盘图标显示窗口，支持关闭到托盘
-- **主题**: "纯白水晶极光" 风格，CSS 变量体系，毛玻璃效果，自定义滚动条
-- **页面路由**: 手动 `currentPage` ref 状态切换，Search 和 GameInfo 用 `v-show` 保持状态
-- **窗口启动居中**: `tauri.conf.json` 中 `"center": true`
+- **主窗口 (`MainWindow`)**:
+    - 无边框窗口 (`appears_transparent: true`)，默认 `1200×910` 居中（最小 `880×600`），自定义标题栏含拖拽/最小化/最大化/关闭、返回导航、当前游戏阶段与阵营指示器。
+    - 支持 Windows 11 Mica（云母）半透明背景效果，支持设置页 DPI 缩放覆盖。
+    - 侧栏支持展开/折叠（`64px ↔ 210px`），通过 `Route` 枚举管理 8 个核心路由视图；独立视口采用局部滚动或外层统一滚动，附带回到顶部悬浮按钮。
+- **独立窗口**:
+    - **大乱斗板凳席悬浮窗 (`BenchOverlayView`)**: 独立置顶半透明无边框小窗，支持自由拖拽并记忆坐标、15 秒摇号保护期倒计时、快速交换与自动摇号换回，支持用户手动关闭防重复弹出。
+    - **OP.GG 独立窗口 (`OpggWindow`)**: 跟随主窗所在屏幕定位，提供英雄梯度榜、分路对位出装、符文与技能加点参考。
+- **系统托盘 (`TrayManager`)**:
+    - 完整托盘菜单（主页/生涯/战绩查询/对局信息/TFT/工具/设置/退出），支持关闭到托盘、左键单击切换显示主窗口。
+- **主题与渲染性能**:
+    - "纯白水晶极光 (Crystal Aurora)" 风格，亮/暗色跟随系统或手动切换。
+    - `Cargo.toml` 中通过 `[profile.dev.package."*"] opt-level = 2` 为 `gpui` / `taffy` 依赖开启优化，确保开发模式下布局与绘制依然流畅；`vendor/gpui` 修补了 `WM_MOVE` 引起的冗余全量重绘。
 
-## Rust Tauri 命令清单
+## 核心能力与服务模块
 
-<details>
-<summary>展开查看全部 Tauri 命令（83 条）</summary>
+原生重构消除了前后端跨进程 IPC 通信开销，`yuumi-gpui` 直接调用 `yuumi-core` 的 Rust 异步接口：
 
-| 命令                         | 来源                    | 说明                                      |
-| :--------------------------- | :---------------------- | :---------------------------------------- |
-| `greet`                      | lib.rs                  | 测试命令                                  |
-| `get_config`                 | commands/config.rs      | 读取完整 AppConfig                        |
-| `update_config`              | commands/config.rs      | 写入完整 AppConfig                        |
-| `get_config_load_error`      | commands/config.rs      | 读取配置文件加载错误信息                  |
-| `get_close_to_tray`          | commands/config.rs      | 读取关闭到托盘设置                        |
-| `get_lcu_connection_info`    | commands/lcu.rs         | 获取 LCU PID/port/token                   |
-| `get_game_data_assets`       | commands/lcu.rs         | 获取预加载的游戏资源映射                  |
-| `get_bench_my_champions`     | commands/lcu.rs         | 获取大乱斗板凳席我方已拥有英雄列表        |
-| `get_liveclient_playerlist`  | commands/lcu.rs         | 从 2999 端口获取全部玩家实时信息          |
-| `get_liveclient_active_player_name` | commands/lcu.rs  | 从 2999 端口获取本机当前操作玩家名字      |
-| `get_map_side`               | commands/lcu.rs         | 获取当前对局的游戏阵营 (蓝方/红方)        |
-| `detect_lol_path`            | commands/tools.rs       | 自动检测 LOL 客户端路径                   |
-| `select_lol_folder`          | commands/tools.rs       | 打开 LOL 客户端文件夹选择框               |
-| `select_folder`              | commands/tools.rs       | 打开通用原生文件夹选择对话框              |
-| `open_screenshot_folder`     | commands/tools.rs       | 打开游戏截图目录                          |
-| `set_mica_effect`            | commands/tools.rs       | 设置窗口 Mica (云母) 毛玻璃特效           |
-| `launch_lol_client`          | commands/tools.rs       | 自动启动 LOL 客户端                       |
-| `show_bench_overlay_window`  | commands/tools.rs       | 控制并显示大乱斗板凳席悬浮窗              |
-| `call_lcu_api`               | lcu/client.rs           | 通用 LCU API 转发                         |
-| `get_lcu_asset`              | lcu/client.rs           | 获取单个 LCU 图片资源                     |
-| `get_current_summoner`       | parsers/summoner.rs     | 获取召唤师信息                            |
-| `get_champion_mastery_list`  | parsers/summoner.rs     | 获取英雄熟练度与里程碑成就列表            |
-| `get_match_history`          | parsers/match_parser.rs | 获取战绩列表 (LCU 本地接口)               |
-| `get_match_history_sgp`      | parsers/match_parser.rs | 获取战绩列表 (SGP 远程接口)               |
-| `get_recent_teammates`       | parsers/match_parser.rs | 获取近期组队队友数据分析                  |
-| `get_player_fate_info`       | parsers/game_info.rs    | 获取同场玩家历史交手/宿命战绩统计        |
-| `get_tft_data`               | parsers/tft.rs          | 获取云顶之弈基础数据                      |
-| `get_tft_ranked_stats`       | parsers/tft.rs          | 获取云顶之弈段位与近期胜率统计            |
-| `get_tft_match_history`      | parsers/tft.rs          | 获取云顶之弈对局历史与详情                |
-| `get_tft_augments`           | parsers/tft.rs          | 获取海克斯强化百科（LCU优先，CDragon兜底）|
-| `create_5v5_practice_lobby`  | tools.rs                | 创建自定义房间                            |
-| `aram_reroll_and_swap_back`  | tools.rs                | 大乱斗摇号换回                            |
-| `apply_rune_page`            | tools.rs                | 应用符文页                                |
-| `apply_item_set`             | tools.rs                | 保存并应用装备页到 LCU 客户端             |
-| `get_lcu_zoom`               | tools.rs                | 获取 LCU 窗口缩放                         |
-| `fix_lcu_window`             | tools.rs                | 修复 LCU 窗口位置                         |
-| `clear_game_cache`           | tools.rs                | 清除游戏缓存                              |
-| `open_log_folder`            | tools.rs                | 打开日志目录                              |
-| `fetch_opgg_data`            | tools.rs                | 获取 OP.GG 召唤师/英雄数据                |
-| `fetch_tft_meta_decks`       | tools.rs                | 获取 OP.GG 云顶之弈热门阵容数据           |
-| `get_champion_skins`         | tools.rs                | 获取英雄皮肤列表                          |
-| `get_game_settings_readonly` | tools.rs                | 读取游戏设置                              |
-| `set_game_settings_readonly` | tools.rs                | 写入游戏设置                              |
-| `spectate_directly`          | tools.rs                | 直接观战指定玩家                          |
-| `get_player_challenges`      | tools.rs                | 获取玩家挑战成就列表与装配勋章            |
-| `set_player_preferences`     | tools.rs                | 保存召唤师勋章称号等个性化配置            |
-| `download_game_replay`       | tools.rs                | 下载对局 ROFL 回放文件                    |
-| `get_replay_status`          | tools.rs                | 查询对局回放下载进度与状态                |
-| `watch_game_replay`          | tools.rs                | 调用客户端启动并观看对局回放              |
-| `batch_delete_friends`       | tools.rs                | 批量清理/删除指定好友                     |
-| `get_openable_loots`         | loot.rs                 | 获取可打开的战利品列表                    |
-| `batch_open_loots`           | loot.rs                 | 批量打开指定战利品                        |
-| `smart_open_all_loots`       | loot.rs                 | 一键智能全自动批量开箱                    |
-| `get_loot_inventory`         | loot.rs                 | 获取当前全部战利品库存                    |
-| `disenchant_loot`            | loot.rs                 | 分解指定战利品（蓝色/橙色精粹）          |
-| `reroll_loot`                | loot.rs                 | 重铸战利品（三合一英雄/皮肤）             |
-| `upgrade_loot`               | loot.rs                 | 升级/解锁战利品                            |
-| `get_essence_balances`       | loot.rs                 | 查询精粹余额                              |
-| `upload_single_match`        | upload.rs               | 单场对局上传                              |
-| `batch_upload_matches`       | upload.rs               | 批量对局上传                              |
-| `get_signalr_status`         | signalr.rs              | 获取 SignalR 远程连接状态                 |
-| `check_update`               | updater.rs              | 检查软件更新                              |
-| `install_update`             | updater.rs              | 开始安装最新软件更新                      |
-| `install_pending_update`     | updater.rs              | 安装已下载且挂起的更新                    |
-| `fetch_github_text`          | commands/tools.rs       | 代理抓取 GitHub 资源                      |
-| `get_release_changelog`      | commands/tools.rs       | 获取版本更新日志                          |
-| `write_frontend_log`         | commands/tools.rs       | 写入前端日志到本地文件                    |
-| `save_saved_player`          | saved_players.rs        | 保存/标记同局玩家信息                    |
-| `query_all_saved_players`    | saved_players.rs        | 查询路人集列表（支持标签过滤/置顶）       |
-| `query_encountered_games`    | saved_players.rs        | 查询指定玩家相遇对局历史                  |
-| `get_saved_players_map`      | saved_players.rs        | 获取已标记玩家 HashMap                    |
-| `delete_saved_player`        | saved_players.rs        | 删除指定已保存玩家                        |
-| `export_tagged_players_to_json_file` | saved_players.rs| 导出标记玩家到 JSON                       |
-| `import_tagged_players_from_json_file` | saved_players.rs| 从 JSON 导入标记玩家                      |
-| `backfill_saved_player_identity`     | saved_players.rs| 异步补全已记录玩家的召唤师身份            |
-
-</details>
-
-新命令需在 `lib.rs` 的 `invoke_handler` 中注册。
+| 领域             | `yuumi-core` 核心模块                                  | `yuumi-gpui` 集成与视图                                               | 说明                                                          |
+| :--------------- | :----------------------------------------------------- | :-------------------------------------------------------------------- | :------------------------------------------------------------ |
+| LCU 通信与资源   | `lcu/{monitor,client,ws,game_data,asset_cache,write}`  | `services/live_lcu.rs`, `asset_loader.rs`                             | 进程探测、HTTPS/WS 订阅、游戏资源预加载、BGRA 图片解码        |
+| 召唤师与生涯     | `parsers/{summoner,mastery,match_parser,match_detail}` | `views/career.rs`, `career_view.rs`, `app_window/career.rs`           | 召唤师信息、战绩列表（LCU/SGP）、英雄熟练度 2.0、挑战勋章     |
+| 战绩查询与回放   | `parsers/{match_parser,match_detail,replay}`           | `views/search.rs`, `replay_store.rs`, `app_window/search.rs`          | 任意玩家查询、详情面板、ROFL 回放下载与播放                   |
+| 对局信息与宿命   | `parsers/game_info.rs`, `gameflow/*`                   | `views/game_info.rs`, `game_info_view.rs`, `app_window/game_info.rs`  | 10 人实时对局分析、段位拉取、组队识别与宿命相遇统计           |
+| 路人集系统       | `storage/saved_players.rs`, `parsers/saved_player.rs`  | `views/saved_players.rs`, `app_window/saved_players.rs`               | SQLite 持久化标记、相遇历史查询、JSON 导入导出、身份回填      |
+| 云顶之弈 (TFT)   | `parsers/tft.rs`                                       | `views/tft.rs`, `app_window/tft.rs`                                   | 段位与战绩、CDragon 资源字典、海克斯强化、OP.GG 热门阵容      |
+| 战利品管理       | `parsers/{loot,loot_actions}`                          | `views/career.rs`（战利品弹窗）, `app_window/career.rs`               | 库存查询、精粹统计、智能批量开箱/分解/重铸/解锁               |
+| 实用工具与 OP.GG | `lcu/write.rs`, `opgg.rs`                              | `views/tools.rs`, `opgg/*`, `services/{friend_cleaner,spectate,...}`  | 好友清理、5v5 自定义房间、符文/装备应用、直接观战、OP.GG 窗口 |
+| 自动化与截图     | `agents/*`, `upload.rs`, `signalr.rs`                  | `services/{agent_runtime,cloud_tasks,screenshot}`                     | Auto BP/Match、对局上传队列、SignalR 反代、多杀自动截图       |
+| 配置与更新       | `config.rs`, `runtime.rs`, `update.rs`                 | `views/settings.rs`, `services/logging.rs`, `app_window/f_updates.rs` | 配置持久化、便携模式检测、minisign 验签自动更新、日志轮转     |
 
 ## Agent 后台任务
 
-| Agent      | 触发事件                       | 功能                                     |
-| :--------- | :----------------------------- | :--------------------------------------- |
-| auto_bp    | `/lol-champ-select/v1/session` | 自动选人/禁人/设置召唤师技能/推送板凳席  |
-| auto_match | gameflow-phase + ready-check   | 自动接受匹配/自动接受邀请/自动点赞/延时再来一局/自动重连/标记提醒 + 游戏结束触发上传 |
+| Agent        | 触发事件                         | 功能                                                                                 |
+| :----------- | :------------------------------- | :----------------------------------------------------------------------------------- |
+| `auto_bp`    | `/lol-champ-select/v1/session`   | 自动选人/禁人/设置召唤师技能/自动同意换人换楼/板凳席处理                             |
+| `auto_match` | `gameflow-phase` + `ready-check` | 自动接受匹配/接受邀请/自动点赞/延时再来一局/自动重连/标记玩家提醒 + 对局结束触发上传 |
 
 ## 对局数据层 (GameInfo)
 
-对局信息页的数据管线按「编排 / 纯逻辑」两层划分，新增逻辑请按下表归位，**不要继续往 `useGamePlayerData` 主函数里堆**：
+对局信息的数据管线按「核心纯逻辑 / 实时编排 / GPUI 视图」分层：
 
-| 模块                               | 职责                                                                |
-| ---------------------------------- | ------------------------------------------------------------------- |
-| `composables/useGamePlayerData.ts` | 编排层：ref 状态机、watch 联动、快照落盘、LiveClient 轮询、并发调度 |
-| `utils/teamBuilder.ts`             | 阵营判定（含脱敏推断）、gameflow → 队伍成员映射、占位播种、组队配色 |
-| `utils/playerDataCache.ts`         | 排位/熟练度 LRU 缓存、路人集去重查询、熟练度拉取                    |
-| `utils/playerIdentity.ts`          | 身份门禁 `isIdentityCompatible`、槽位英雄继承、组队标识提取         |
-| `utils/playerPlaceholder.ts`       | 占位 `PlayerData` / 兜底 `SummonerDisplay` 构造                     |
-| `utils/matchStats.ts`              | 胜率 / KDA / 连胜 / 位置英雄聚合                                    |
-| `utils/gameflowSession.ts`         | gameflow session 30 秒短期缓存与主动失效                            |
+| 模块                                                                   | 职责                                                              |
+| :--------------------------------------------------------------------- | :---------------------------------------------------------------- |
+| `crates/yuumi-core/src/gameflow/team_builder.rs`                       | 阵营判定（含脱敏推断）、gameflow → 队伍成员映射、占位与组队配色   |
+| `crates/yuumi-core/src/gameflow/player_identity.rs`                    | 身份门禁 `is_identity_compatible`、槽位英雄继承、组队标识提取     |
+| `crates/yuumi-core/src/gameflow/match_stats.rs`                        | 胜率 / KDA / 连胜 / 位置英雄聚合                                  |
+| `crates/yuumi-core/src/parsers/game_info.rs`                           | 10 人段位并发查询、宿命对局计算与 `LiveGameInfo` 组装             |
+| `crates/yuumi-gpui/src/services/live_lcu.rs`                           | 编排层：阶段联动防抖拉取、LiveClient 阵营探测、状态快照与事件广播 |
+| `crates/yuumi-gpui/src/views/game_info.rs` & `app_window/game_info.rs` | GPUI 视图渲染、队伍/全员模式切换与交互事件分派                    |
 
-约定：
+## 云顶之弈模块 (`crates/yuumi-core/src/parsers/tft.rs` & `crates/yuumi-gpui/src/views/tft.rs`)
 
-- 跨层数据通过 `TeamBuildContext` 之类的**显式上下文对象**传值，不要让 utils 反向持有 composable 的闭包状态。
-- `rankCache` / `masteryCache` / `cachedSession` / `savedPlayersMapInflight` 均为**模块级单例**，抽模块时必须保持“全应用一份”，不可退化为每次调用新建。
-- 选中快照匹配在阵营判定与队伍映射两处的条件**不完全相同**（后者额外比较 `displayName`），复用查找函数时需保留该差异。
-- `isIdentityCompatible`、`querySavedPlayersMapDedup`、`fetchPlayerMastery`、`NEW_PLAYER_MAX_LEVEL` 经 `useGamePlayerData.ts` re-export，视图层导入路径保持不变。
+- **数据源与缓存**: 段位与战绩走 LCU 本地接口；英雄 / 羁绊 / 装备 / 海克斯强化字典统一从 CDragon 镜像下载并在本地落盘缓存（`tft_catalog.json`）；热门阵容对接 OP.GG MCP（`tft_list_meta_decks`），解析失败统一返回结构化 `TftError`。
+- **视图特性**: 支持段位近况、历史对局详情弹窗、OP.GG 热门阵容 4x7 站位棋盘与一键复制阵容代码、海克斯百科检索。
 
-## 云顶之弈模块 (parsers/tft.rs & src/components/tft)
+## 战利品系统 (`crates/yuumi-core/src/parsers/loot.rs` & `loot_actions.rs`)
 
-- **数据源回落 (Fallback)**: 强化符文百科优先请求 LCU 本地 API，不可用时自动降级拉取 CDragon 镜像；支持 `force_refresh` 强刷新与 Gzip 压缩代理传输。
-- **阵容推荐**: 集成 OP.GG 热门阵容，支持前中期打工过渡、激活羁绊解析、一键复制阵容代码以及 4x7 大网格站位图（含核心 C 位、星级与装备优先级图标）。
+- **库存与精粹**: 实时读取蓝色/橙色/神话精粹余额及各分类战利品碎片列表。
+- **批量智能操作**: 支持一键智能批量开箱（遍历传送门、法球、宝箱）、碎片分解、三合一重铸与解锁，单条进度通过 `LiveLcuEvent::LootActionProgress` 实时反馈至界面进度条。
 
-## 战利品系统 (loot.rs)
+## 上传系统 (`crates/yuumi-core/src/upload.rs`)
 
-- **批量与智能开箱**: 支持遍历并自动解包传送门、法球、杰作宝箱与法球，后台线程并发安全处理。
-- **精粹统筹与重铸**: 提供战利品碎片一键分解为精粹、合成重铸以及永久解锁功能。
-
-## 上传系统 (upload.rs)
-
-- **UploadQueue**: 去重异步队列，后台 Worker 串行上传，每局 30 秒超时。
-- **UploadTrigger**: 监听游戏阶段转换（InProgress → EndOfGame/Lobby），延迟 2 秒后自动上传。
+- **UploadQueue**: 去重异步队列，后台 Worker 串行上传，单局 30 秒超时。
+- **UploadTrigger**: 由 `services/cloud_tasks.rs` 监听阶段转换（`InProgress` → 结束阶段）后自动触发上传。
 - **Smart Split**: 当前玩家数据放入 `matchInfo.participants`，其余 9 人放入外层 `participants`。
-- **失败落盘与重试**: 当网络异常或服务端报错时，数据自动落盘为 `.tmp` 暂存文件，后续在对局结束或状态更新时触发重试。
+- **失败落盘与重试**: 网络异常或服务端报错时自动落盘为 `.tmp` 暂存文件，后续在连接就绪或对局结束时自动触发重试。
 
 ## 配置文件
 
-位于 `%APPDATA%/Yuumi/config.json`，结构：
+位于 `%APPDATA%/Yuumi/config.json`（便携版位于 `data/config.json`），结构（PascalCase）：
 
-- `General` — 启动、代理 (HTTP Proxy 与 Schema 自动迁移)、日志、上传 API 地址、SignalR Hub 配置、客户端路径
-- `Personalization` — 主题、语言、颜色、侧边栏显示/隐藏控制 (TFT/SavedPlayers)
-- `Functions` — 所有自动化功能开关和候选列表 (自动接受/邀请/点赞/再来一局/ARAM报边/标记提醒)
-- `Other` — 其他杂项
+- `General` — 客户端路径、启动选项、HTTP 代理 (含旧版 Schema 自动迁移)、日志等级、上传 API 地址、SignalR Hub 配置
+- `Personalization` — Mica 效果、DPI 缩放、语言、主题模式、主题色、胜/负/重赛卡片颜色与死亡数高亮色
+- `Functions` — 自动化流程开关与分路候选列表 (自动选禁/匹配/重连/荣誉/邀请/再来一局/ARAM报边/标记提醒/多杀截图/隐藏侧栏页签)
+- `Other` — 公告记录、搜索历史
 
 ## 开发工具与调试日志
 
-- **前端调试**: 开发模式下自动打开 Chromium DevTools（见 `lib.rs` 的 `setup` 闭包），按 `F12` 可审查组件与网络请求。
-- **日志系统**: 日志由 `logging.rs` 的自研 `log::Log` 实现接管（非 `flexi_logger`），按天轮转、单文件 2MB 上限、保留 30 天。等级由设置页「日志等级」控制：0=Debug / 1=Info（默认）/ 2=Error。
-  - 日志文件输出路径：可执行文件同级 `log/` 目录（便携版即 `Yuumi-portable/log/`）；单文件超限后为 `yuumi_YYYY-MM-DD-N.log`。
-  - 排查 LCU 通信或后台 Task 异常时，请检索最新 `.log` 文件中的 `[LCU]`, `[WS]`, `[Error]` 标记。
+- **调试输出**: Debug 构建下，`services/logging.rs` 会将 `Info` 及以上日志同步输出到 `stderr`；GPUI 渲染性能与界面布局异常可通过日志和开发期断点排查。
+- **日志系统**: 由 `crates/yuumi-gpui/src/services/logging.rs` 的自研 `log::Log` 实现接管，按天轮转、单文件 2MB 上限、保留 30 天。等级由设置页「日志等级」控制：0=Debug / 1=Info（默认）/ 2=Error。
+    - 日志文件输出路径：可执行文件同级 `log/` 目录（便携版即 `Yuumi-portable/log/`）；单文件超限后为 `yuumi_YYYY-MM-DD-N.log`。
+    - 排查 LCU 通信或后台 Task 异常时，请检索最新 `.log` 文件中的 `[LCU]`, `[WS]`, `[LiveLcu]`, `[Error]` 标记。
