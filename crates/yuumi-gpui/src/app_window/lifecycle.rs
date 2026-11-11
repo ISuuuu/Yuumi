@@ -786,8 +786,17 @@ impl MainWindow {
         cx.quit();
     }
 
-    /// 将全局配置同步进磁盘、Agent 运行时与悬浮窗
+    /// 将全局配置同步进磁盘、Agent 运行时与悬浮窗（带保存成功 Toast 反馈）
     pub(super) fn persist_config(&mut self, cx: &mut Context<Self>) {
+        self.persist_config_with_toast(true, cx);
+    }
+
+    /// 静默同步全局配置（已有专用 Toast 反馈的场景使用，避免双重提示）
+    pub(super) fn persist_config_silent(&mut self, cx: &mut Context<Self>) {
+        self.persist_config_with_toast(false, cx);
+    }
+
+    fn persist_config_with_toast(&mut self, show_toast: bool, cx: &mut Context<Self>) {
         self.automation = self.app_config.to_automation_settings();
         self.search_view.has_upload_api_url =
             !self.app_config.general.upload_api_url.trim().is_empty();
@@ -814,6 +823,8 @@ impl MainWindow {
                 crate::i18n::t("settings.saveFailedDetail").replace("{error}", &e),
                 cx,
             );
+        } else if show_toast {
+            self.toast(ToastKind::Success, crate::i18n::t("settings.autoSave"), cx);
         }
 
         // 悬浮窗开关变更需立即生效

@@ -239,6 +239,7 @@ static LANG_ZH_CN: &[(&str, &str)] = &[
     ("settings.configLoadError", "配置文件异常"),
     ("settings.masteryLoadFailed", "获取英雄熟练度失败，请确认客户端已连接"),
     ("settings.cloudInvalidAddr", "云端地址无效"),
+    ("settings.autoSave", "设置已保存"),
     // ─── tray ───
     ("tray.home", "主页"),
     ("tray.quit", "退出"),
@@ -422,6 +423,7 @@ static LANG_ZH_TW: &[(&str, &str)] = &[
     ("settings.configLoadError", "配置文件異常"),
     ("settings.masteryLoadFailed", "獲取英雄熟練度失敗，請確認客戶端已連接"),
     ("settings.cloudInvalidAddr", "雲端地址無效"),
+    ("settings.autoSave", "設置已保存"),
     // ─── tray ───
     ("tray.home", "主頁"),
     ("tray.quit", "退出"),
@@ -605,6 +607,7 @@ static LANG_EN_US: &[(&str, &str)] = &[
     ("settings.configLoadError", "Config file error"),
     ("settings.masteryLoadFailed", "Failed to load champion mastery, please check the client connection"),
     ("settings.cloudInvalidAddr", "Invalid cloud address"),
+    ("settings.autoSave", "Settings saved"),
     // ─── tray ───
     ("tray.home", "Home"),
     ("tray.quit", "Exit"),

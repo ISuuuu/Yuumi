@@ -43,15 +43,22 @@ pub async fn load_skins(client: &LcuClient, champion_id: i32) -> Result<Vec<Skin
     Ok(details
         .skins
         .into_iter()
-        .map(|s| SkinInfo {
-            load_screen_path: s.load_screen_path.unwrap_or_else(|| {
-                format!(
-                    "/lol-game-data/assets/v1/champion-loadscreens/{}/{}.jpg",
-                    champion_id, s.id
-                )
-            }),
-            id: s.id,
-            name: s.name,
+        .map(|s| {
+            let name = if s.name.eq_ignore_ascii_case("default") {
+                "默认皮肤".to_string()
+            } else {
+                s.name
+            };
+            SkinInfo {
+                load_screen_path: s.load_screen_path.unwrap_or_else(|| {
+                    format!(
+                        "/lol-game-data/assets/v1/champion-loadscreens/{}/{}.jpg",
+                        champion_id, s.id
+                    )
+                }),
+                id: s.id,
+                name,
+            }
         })
         .collect())
 }

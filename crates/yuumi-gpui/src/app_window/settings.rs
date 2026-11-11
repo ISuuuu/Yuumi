@@ -96,7 +96,7 @@ impl MainWindow {
                     } else {
                         self.app_config.general.lol_path.push(path.clone());
                         self.home_view.reload_paths();
-                        self.persist_config(cx);
+                        self.persist_config_silent(cx);
                         self.toast(
                             ToastKind::Success,
                             crate::i18n::t("settings.pathAdded").replace("{path}", &path),
@@ -116,7 +116,7 @@ impl MainWindow {
                     } else {
                         self.app_config.general.lol_path.push(path.clone());
                         self.home_view.reload_paths();
-                        self.persist_config(cx);
+                        self.persist_config_silent(cx);
                         self.toast(
                             ToastKind::Success,
                             crate::i18n::t("settings.pathAdded").replace("{path}", &path),
@@ -134,7 +134,7 @@ impl MainWindow {
                 } else {
                     self.app_config.general.lol_path.push(wegame_marker);
                     self.home_view.reload_paths();
-                    self.persist_config(cx);
+                    self.persist_config_silent(cx);
                     self.toast(ToastKind::Success, crate::i18n::t("settings.wegameAdded"), cx);
                 }
                 cx.notify();
@@ -153,7 +153,7 @@ impl MainWindow {
             }
             SettingsAction::ClearCache => {
                 let client_path = self.app_config.general.lol_path.first().cloned();
-                self.settings_view.set_feedback(crate::i18n::t("settings.clearingCache"), false);
+                self.toast(ToastKind::Info, crate::i18n::t("settings.clearingCache"), cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     let res = cx
@@ -307,7 +307,7 @@ impl MainWindow {
                 if let Some(folder) = services::select_folder() {
                     self.settings_view.f_inputs[3] = folder.clone();
                     self.app_config.functions.screenshot_save_path = folder;
-                    self.persist_config(cx);
+                    self.persist_config_silent(cx);
                     self.toast(ToastKind::Success, crate::i18n::t("settings.screenshotDirUpdated"), cx);
                 }
             }
@@ -434,7 +434,7 @@ impl MainWindow {
                 self.settings_view.open_scale_dropdown = false;
                 let scale_override = scale_factor_override_for(&s);
                 self.app_config.personalization.dpi_scale = s;
-                self.persist_config(cx);
+                self.persist_config_silent(cx);
                 // 运行时立即生效：Auto=恢复跟随系统 DPI，100/125/150=固定缩放
                 window.set_scale_factor_override(scale_override);
                 // 对照 Vue B12：DPI 专用成功提示
@@ -443,7 +443,7 @@ impl MainWindow {
             SettingsAction::SetLanguage(l) => {
                 self.settings_view.open_lang_dropdown = false;
                 self.app_config.personalization.language = l;
-                self.persist_config(cx);
+                self.persist_config_silent(cx);
                 // 对照 Vue B13：语言专用成功提示
                 self.toast(ToastKind::Success, crate::i18n::t("settings.langSaved"), cx);
             }

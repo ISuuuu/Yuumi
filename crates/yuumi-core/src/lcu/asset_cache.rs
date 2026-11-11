@@ -148,7 +148,32 @@ impl AssetCache {
         let maybe_lcu = self.lcu_client.read().ok().and_then(|lock| lock.clone());
         if let Some(lcu) = maybe_lcu {
             if trimmed.starts_with('/') {
-                if let Ok(bytes) = lcu.get_bytes(trimmed).await {
+                // 战利品资源保留原样，游戏资源若含 /lol-game-data/assets/ 则统一转小写以对齐 LCU 静态索引
+                let clean_path = if trimmed.starts_with("/lol-game-data/assets/") {
+                    trimmed
+                        .strip_prefix("/lol-game-data/assets/")
+                        .map(|s| format!("/lol-game-data/assets/{}", s.to_lowercase()))
+                        .unwrap_or_else(|| trimmed.to_string())
+                } else {
+                    trimmed.to_string()
+                };
+
+                let lcu_result = match lcu.get_bytes(&clean_path).await {
+                    Ok(bytes) => Ok(bytes),
+                    Err(_) if clean_path != trimmed => lcu.get_bytes(trimmed).await,
+                    Err(e) => Err(e),
+                };
+
+                let lcu_result = match lcu_result {
+                    Ok(bytes) => Ok(bytes),
+                    Err(_) if clean_path.contains("/assets/assets/") => {
+                        let retry_path = clean_path.replace("/assets/assets/", "/assets/");
+                        lcu.get_bytes(&retry_path).await
+                    }
+                    Err(e) => Err(e),
+                };
+
+                if let Ok(bytes) = lcu_result {
                     let _ = self.write_disk_cache(trimmed, &bytes);
                     let arc_bytes = Arc::new(bytes.clone());
                     self.put_to_memory(trimmed, arc_bytes);

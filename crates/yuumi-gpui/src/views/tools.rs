@@ -367,14 +367,7 @@ impl ToolsView {
                                                 .variant(BadgeVariant::Loss),
                                         )
                                     }),
-                            )
-                            .when_some(self.status_feedback.as_ref(), |this, (msg, is_err)| {
-                                this.child(Badge::new(msg.clone()).variant(if *is_err {
-                                    BadgeVariant::Loss
-                                } else {
-                                    BadgeVariant::Primary
-                                }))
-                            }),
+                            ),
                     )
                     // ─────────────────────────────────────────────────────────────
                     // 1. 英雄选择组 - 5 张折叠卡

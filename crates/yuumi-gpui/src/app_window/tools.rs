@@ -7,6 +7,13 @@ impl MainWindow {
         match action {
             ToolsAction::ToggleCollapse(name) => {
                 self.tools_view.toggle_card(name);
+                if name == "profilebg"
+                    && self.tools_view.open_cards.contains("profilebg")
+                    && self.tools_view.bg_skins.is_empty()
+                {
+                    let cid = self.tools_view.bg_selected_champion.unwrap_or(157);
+                    self.spawn_skins_load(cid, cx);
+                }
                 cx.notify();
             }
             ToolsAction::ToggleAutoAccept => {
@@ -233,7 +240,7 @@ impl MainWindow {
             ToolsAction::CreateLobbyNow => {
                 let live = self.live_service.clone();
                 let mode = self.app_config.functions.default_game_mode;
-                self.tools_view.set_feedback("正在创建房间…", false);
+                self.toast(ToastKind::Info, "正在创建房间…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     let result = match live.get_client().await {
@@ -281,7 +288,7 @@ impl MainWindow {
                 cx.notify();
             }
             ToolsAction::FixClientWindow => {
-                self.tools_view.set_feedback("正在修复客户端窗口…", false);
+                self.toast(ToastKind::Info, "正在修复客户端窗口…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     let result = cx
@@ -303,7 +310,7 @@ impl MainWindow {
                 .detach();
             }
             ToolsAction::RestartClient => {
-                self.tools_view.set_feedback("正在重启客户端…", false);
+                self.toast(ToastKind::Info, "正在重启客户端…", cx);
                 cx.notify();
                 let live = self.live_service.clone();
                 cx.spawn(async move |entity, cx| {
@@ -347,7 +354,7 @@ impl MainWindow {
                     .find(|p| p.as_str() != services::WEGAME_MARKER)
                     .cloned();
                 let live = self.live_service.clone();
-                self.tools_view.set_feedback("正在启动观战…", false);
+                self.toast(ToastKind::Info, "正在启动观战…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     let result = match live.get_client().await {
@@ -377,7 +384,7 @@ impl MainWindow {
                     return;
                 }
                 self.tools_view.cleaner_scanning = true;
-                self.tools_view.set_feedback("正在扫描好友列表…", false);
+                self.toast(ToastKind::Info, "正在扫描好友列表…", cx);
                 cx.notify();
                 let live = self.live_service.clone();
                 cx.spawn(async move |entity, cx| {
@@ -425,7 +432,7 @@ impl MainWindow {
                     cx.notify();
                     return;
                 }
-                self.tools_view.set_feedback("正在删除选中的好友…", false);
+                self.toast(ToastKind::Info, "正在删除选中的好友…", cx);
                 cx.notify();
                 let live = self.live_service.clone();
                 cx.spawn(async move |entity, cx| {
@@ -481,7 +488,7 @@ impl MainWindow {
             ToolsAction::ApplySignature => {
                 let sig = self.tools_view.signature_buffer.clone();
                 let live = self.live_service.clone();
-                self.tools_view.set_feedback("正在保存个性签名…", false);
+                self.toast(ToastKind::Info, "正在保存个性签名…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     let result = match live.get_client().await {
@@ -512,7 +519,10 @@ impl MainWindow {
                 match cmd.as_str() {
                     "open" => {
                         if self.tools_view.bg_skins.is_empty() {
-                            self.toast(ToastKind::Warning, "请先选择英雄以加载真实皮肤列表", cx);
+                            let cid = self.tools_view.bg_selected_champion.unwrap_or(157);
+                            self.spawn_skins_load(cid, cx);
+                            self.tools_view.open_bg_skin_modal = true;
+                            self.tools_view.bg_error = None;
                         } else {
                             self.tools_view.open_bg_skin_modal = true;
                             self.tools_view.bg_error = None;
@@ -571,7 +581,7 @@ impl MainWindow {
                     }
                 };
                 let live = self.live_service.clone();
-                self.tools_view.set_feedback("正在应用主页背景…", false);
+                self.toast(ToastKind::Info, "正在应用主页背景…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     let result = match live.get_client().await {
@@ -624,7 +634,7 @@ impl MainWindow {
                 let tier = self.tools_view.spoof_tier.clone();
                 let div = self.tools_view.spoof_division.clone();
                 let live = self.live_service.clone();
-                self.tools_view.set_feedback("正在应用段位展示…", false);
+                self.toast(ToastKind::Info, "正在应用段位展示…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     let result = match live.get_client().await {
@@ -659,7 +669,7 @@ impl MainWindow {
             ToolsAction::SetOnlineStatus(st) => {
                 self.tools_view.online_status = st.clone();
                 let live = self.live_service.clone();
-                self.tools_view.set_feedback("正在切换在线状态…", false);
+                self.toast(ToastKind::Info, "正在切换在线状态…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     let result = match live.get_client().await {
@@ -694,7 +704,7 @@ impl MainWindow {
                 }
                 self.tools_view.confirm_clear_badges = false;
                 let live = self.live_service.clone();
-                self.tools_view.set_feedback("正在清除成就勋章…", false);
+                self.toast(ToastKind::Info, "正在清除成就勋章…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     // 只清 challengeIds，请求体带当前 title / bannerAccent 保护称号与头像框
@@ -724,7 +734,7 @@ impl MainWindow {
                 }
                 self.tools_view.confirm_clear_border = false;
                 let live = self.live_service.clone();
-                self.tools_view.set_feedback("正在清除个人边框…", false);
+                self.toast(ToastKind::Info, "正在清除个人边框…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     // 对齐旧版 ClearBorderCard.vue：PUT /lol-regalia/v2/current-regalia，
@@ -1010,8 +1020,7 @@ impl MainWindow {
                 let title = self.tools_view.selected_title.clone();
                 let challenge_ids = self.tools_view.selected_badges.clone();
                 let live = self.live_service.clone();
-                self.tools_view
-                    .set_feedback("正在保存称号与勋章装配…", false);
+                self.toast(ToastKind::Info, "正在保存称号与勋章装配…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     // 真实写入 + 回读当前偏好，成功才关弹层，失败保留选择与弹层便于重试
@@ -1090,6 +1099,9 @@ impl MainWindow {
                 this.tools_view.bg_loading = false;
                 match result {
                     Ok((list, cur)) => {
+                        let skin_paths: Vec<String> =
+                            list.iter().map(|s| s.load_screen_path.clone()).collect();
+                        prewarm_assets(skin_paths, cx);
                         this.tools_view.bg_current_skin_id = cur;
                         this.tools_view.bg_preview_index = cur
                             .and_then(|id| list.iter().position(|s| s.id == id))
