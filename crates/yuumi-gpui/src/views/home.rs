@@ -253,10 +253,7 @@ impl HomeView {
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(Theme::ACCENT_PRIMARY())
                 .cursor_pointer()
-                .hover(|s| {
-                    s.bg(Theme::ACCENT_HOVER())
-                        .text_color(Theme::TEXT_ON_PRIMARY())
-                })
+                .hover(|s| s.bg(Theme::ACCENT_LIGHT()))
                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                     on_launch(win, app);
                 })
@@ -392,11 +389,7 @@ impl HomeView {
                         } else {
                             Theme::CARD_BORDER()
                         })
-                        .bg(if is_selected {
-                            Theme::ACCENT_HOVER()
-                        } else {
-                            Theme::CARD_BG()
-                        })
+                        .bg(Theme::CARD_BG())
                         .cursor_pointer()
                         .hover(|s| {
                             if !is_selected {
