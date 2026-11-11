@@ -200,15 +200,15 @@ impl GameInfoView {
 
         let side_accent = if is_ally_tab {
             if user_is_red {
-                Theme::RED_SIDE_ACCENT
+                Theme::RED_SIDE_ACCENT()
             } else {
-                Theme::BLUE_SIDE_ACCENT
+                Theme::BLUE_SIDE_ACCENT()
             }
         } else {
             if user_is_red {
-                Theme::BLUE_SIDE_ACCENT
+                Theme::BLUE_SIDE_ACCENT()
             } else {
-                Theme::RED_SIDE_ACCENT
+                Theme::RED_SIDE_ACCENT()
             }
         };
 
@@ -222,8 +222,8 @@ impl GameInfoView {
             .h_full()
             .rounded_xl()
             .border_1()
-            .border_color(Theme::CARD_BORDER)
-            .bg(Theme::CARD_BG)
+            .border_color(Theme::CARD_BORDER())
+            .bg(Theme::CARD_BG())
             .overflow_hidden()
             .flex()
             .flex_col()
@@ -233,8 +233,8 @@ impl GameInfoView {
                     .h(px(44.0))
                     .flex()
                     .border_b_1()
-                    .border_color(Theme::CARD_BORDER)
-                    .bg(Theme::CARD_BG.opacity(0.4))
+                    .border_color(Theme::CARD_BORDER())
+                    .bg(Theme::CARD_BG().opacity(0.4))
                     // 友方 (n)
                     .child(
                         div()
@@ -250,18 +250,18 @@ impl GameInfoView {
                                 FontWeight::MEDIUM
                             })
                             .text_color(if is_ally_tab {
-                                Theme::ACCENT_PRIMARY
+                                Theme::ACCENT_PRIMARY()
                             } else {
-                                Theme::TEXT_MUTED
+                                Theme::TEXT_MUTED()
                             })
                             .bg(if is_ally_tab {
-                                Theme::CARD_BG
+                                Theme::CARD_BG()
                             } else {
                                 gpui::transparent_black()
                             })
                             .border_b_2()
                             .border_color(if is_ally_tab {
-                                Theme::ACCENT_PRIMARY
+                                Theme::ACCENT_PRIMARY()
                             } else {
                                 gpui::transparent_black()
                             })
@@ -285,18 +285,18 @@ impl GameInfoView {
                                 FontWeight::MEDIUM
                             })
                             .text_color(if !is_ally_tab {
-                                Theme::ACCENT_PRIMARY
+                                Theme::ACCENT_PRIMARY()
                             } else {
-                                Theme::TEXT_MUTED
+                                Theme::TEXT_MUTED()
                             })
                             .bg(if !is_ally_tab {
-                                Theme::CARD_BG
+                                Theme::CARD_BG()
                             } else {
                                 gpui::transparent_black()
                             })
                             .border_b_2()
                             .border_color(if !is_ally_tab {
-                                Theme::ACCENT_PRIMARY
+                                Theme::ACCENT_PRIMARY()
                             } else {
                                 gpui::transparent_black()
                             })
@@ -331,7 +331,7 @@ impl GameInfoView {
                                 .items_center()
                                 .justify_center()
                                 .text_size(px(12.0))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child("暂无队伍数据"),
                         )
                     }),
@@ -344,8 +344,8 @@ impl GameInfoView {
             .h_full()
             .rounded_xl()
             .border_1()
-            .border_color(Theme::CARD_BORDER)
-            .bg(Theme::CARD_BG)
+            .border_color(Theme::CARD_BORDER())
+            .bg(Theme::CARD_BG())
             .overflow_hidden()
             .flex()
             .flex_col()
@@ -422,22 +422,22 @@ impl GameInfoView {
         F6: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
     {
         let ally_accent = if user_is_red {
-            Theme::RED_SIDE_ACCENT
+            Theme::RED_SIDE_ACCENT()
         } else {
-            Theme::BLUE_SIDE_ACCENT
+            Theme::BLUE_SIDE_ACCENT()
         };
         let enemy_accent = if user_is_red {
-            Theme::BLUE_SIDE_ACCENT
+            Theme::BLUE_SIDE_ACCENT()
         } else {
-            Theme::RED_SIDE_ACCENT
+            Theme::RED_SIDE_ACCENT()
         };
 
         div()
             .size_full()
             .rounded_xl()
             .border_1()
-            .border_color(Theme::CARD_BORDER)
-            .bg(Theme::CARD_BG)
+            .border_color(Theme::CARD_BORDER())
+            .bg(Theme::CARD_BG())
             .overflow_hidden()
             .flex()
             .flex_col()
@@ -534,12 +534,12 @@ impl GameInfoView {
                                     .px(px(6.0))
                                     .py(px(2.0))
                                     .rounded_md()
-                                    .bg(Theme::ACCENT_LIGHT)
+                                    .bg(Theme::ACCENT_LIGHT())
                                     .border_1()
-                                    .border_color(Theme::ACCENT_PRIMARY.opacity(0.3))
+                                    .border_color(Theme::ACCENT_PRIMARY().opacity(0.3))
                                     .text_size(px(11.0))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(Theme::ACCENT_PRIMARY)
+                                    .text_color(Theme::ACCENT_PRIMARY())
                                     .child("演示预览模式"),
                             )
                             .child(
@@ -547,17 +547,17 @@ impl GameInfoView {
                                     .px(px(8.0))
                                     .py(px(2.0))
                                     .rounded_md()
-                                    .bg(Theme::CARD_BG)
+                                    .bg(Theme::CARD_BG())
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
+                                    .border_color(Theme::CARD_BORDER())
                                     .hover(|this| {
-                                        this.bg(Theme::HOVER_BG)
-                                            .border_color(Theme::TEXT_MUTED)
+                                        this.bg(Theme::HOVER_BG())
+                                            .border_color(Theme::TEXT_MUTED())
                                     })
                                     .cursor_pointer()
                                     .on_mouse_down(MouseButton::Left, on_exit_demo.clone())
                                     .text_size(px(11.0))
-                                    .text_color(Theme::TEXT_SECONDARY)
+                                    .text_color(Theme::TEXT_SECONDARY())
                                     .child("退出预览"),
                             ),
                     )
@@ -574,8 +574,8 @@ impl GameInfoView {
                 .h(px(44.0))
                 .flex_shrink_0()
                 .border_b_1()
-                .border_color(Theme::CARD_BORDER)
-                .bg(Theme::CARD_BG.opacity(0.5))
+                .border_color(Theme::CARD_BORDER())
+                .bg(Theme::CARD_BG().opacity(0.5))
                 .px(px(12.0))
                 .flex()
                 .items_center()
@@ -604,11 +604,11 @@ impl GameInfoView {
                         .py(px(2.0))
                         .rounded_full()
                         .border_1()
-                        .border_color(Theme::CARD_BORDER)
-                        .bg(Theme::CARD_BG)
+                        .border_color(Theme::CARD_BORDER())
+                        .bg(Theme::CARD_BG())
                         .text_size(px(10.0))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child("VS"),
                 )
                 // 右侧 50%：敌方组队芯片 + 敌方阵营指示 + 模式切换
@@ -643,8 +643,8 @@ impl GameInfoView {
             .h(px(44.0))
             .flex_shrink_0()
             .border_b_1()
-            .border_color(Theme::CARD_BORDER)
-            .bg(Theme::CARD_BG.opacity(0.5))
+            .border_color(Theme::CARD_BORDER())
+            .bg(Theme::CARD_BG().opacity(0.5))
             .px(px(12.0))
             .flex()
             .items_center()
@@ -679,11 +679,11 @@ impl GameInfoView {
                                 .py(px(2.0))
                                 .rounded_full()
                                 .border_1()
-                                .border_color(Theme::CARD_BORDER)
-                                .bg(Theme::CARD_BG)
+                                .border_color(Theme::CARD_BORDER())
+                                .bg(Theme::CARD_BG())
                                 .text_size(px(10.0))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child("VS"),
                         )
                         .child(
@@ -801,9 +801,9 @@ impl GameInfoView {
         let (border_color, bg_color) = if let Some((border, bg)) = premade_style {
             (border.opacity(0.55), bg)
         } else if is_local {
-            (side_accent.opacity(0.4), Theme::CARD_BG_HOVER)
+            (side_accent.opacity(0.4), Theme::CARD_BG_HOVER())
         } else {
-            (Theme::CARD_BORDER, Theme::CARD_BG)
+            (Theme::CARD_BORDER(), Theme::CARD_BG())
         };
 
         let player_puuid = player.puuid.clone();
@@ -852,9 +852,9 @@ impl GameInfoView {
                                     .rounded_full()
                                     .border_2()
                                     .border_color(if is_top {
-                                        Theme::GOLD
+                                        Theme::GOLD()
                                     } else {
-                                        Theme::CARD_BORDER
+                                        Theme::CARD_BORDER()
                                     })
                                     .overflow_hidden()
                                     .child(if player.champion_id > 0 {
@@ -870,13 +870,13 @@ impl GameInfoView {
                                         div()
                                             .size(px(42.0))
                                             .rounded_full()
-                                            .bg(Theme::CARD_BG)
+                                            .bg(Theme::CARD_BG())
                                             .flex()
                                             .items_center()
                                             .justify_center()
                                             .text_size(px(14.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_MUTED)
+                                            .text_color(Theme::TEXT_MUTED())
                                             .child("?")
                                             .into_any_element()
                                     }),
@@ -917,7 +917,7 @@ impl GameInfoView {
                                         let mut name_el = div()
                                             .text_size(px(12.5))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .truncate();
                                         if is_valid_target {
                                             let is_local_player = is_local;
@@ -925,7 +925,7 @@ impl GameInfoView {
                                             let on_career = on_career.clone();
                                             name_el = name_el
                                                 .cursor_pointer()
-                                                .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
+                                                .hover(|s| s.text_color(Theme::ACCENT_PRIMARY()))
                                                 .on_mouse_down(
                                                     MouseButton::Left,
                                                     move |_ev, win, app| {
@@ -962,9 +962,9 @@ impl GameInfoView {
                                                 .text_size(px(9.0))
                                                 .font_weight(FontWeight::BOLD)
                                                 .text_color(if fate.ally {
-                                                    Theme::WIN_TEXT
+                                                    Theme::WIN_TEXT()
                                                 } else {
-                                                    Theme::LOSS_TEXT
+                                                    Theme::LOSS_TEXT()
                                                 })
                                                 .child(fate.badge_text()),
                                         )
@@ -993,10 +993,10 @@ impl GameInfoView {
                                                 .px(px(4.0))
                                                 .py(px(1.0))
                                                 .rounded(px(3.0))
-                                                .bg(Theme::CARD_BORDER)
+                                                .bg(Theme::CARD_BORDER())
                                                 .text_size(px(9.0))
                                                 .font_weight(FontWeight::MEDIUM)
-                                                .text_color(Theme::TEXT_MUTED)
+                                                .text_color(Theme::TEXT_MUTED())
                                                 .child(format!("相遇{}次", player.saved_encounter_count)),
                                         )
                                     })
@@ -1008,16 +1008,16 @@ impl GameInfoView {
                                                 .py(px(1.0))
                                                 .rounded(px(3.0))
                                                 .bg(if player.streak_is_win {
-                                                    Theme::WIN_BG
+                                                    Theme::WIN_BG()
                                                 } else {
-                                                    Theme::LOSS_BG
+                                                    Theme::LOSS_BG()
                                                 })
                                                 .text_size(px(9.0))
                                                 .font_weight(FontWeight::BOLD)
                                                 .text_color(if player.streak_is_win {
-                                                    Theme::WIN_TEXT
+                                                    Theme::WIN_TEXT()
                                                 } else {
-                                                    Theme::LOSS_TEXT
+                                                    Theme::LOSS_TEXT()
                                                 })
                                                 .child(streak),
                                         )
@@ -1039,7 +1039,7 @@ impl GameInfoView {
                                     .when(player.ranked_wins > 0, |el| {
                                         el.child(
                                             div()
-                                                .text_color(Theme::TEXT_MUTED)
+                                                .text_color(Theme::TEXT_MUTED())
                                                 .child(format!("· {}胜", player.ranked_wins)),
                                         )
                                     }),
@@ -1055,13 +1055,13 @@ impl GameInfoView {
                                         div()
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(if player.win_rate >= 50 {
-                                                Theme::WIN_TEXT
+                                                Theme::WIN_TEXT()
                                             } else {
-                                                Theme::LOSS_TEXT
+                                                Theme::LOSS_TEXT()
                                             })
                                             .child(format!("{}%", player.win_rate)),
                                     )
-                                    .child(div().text_color(Theme::TEXT_MUTED).child("·"))
+                                    .child(div().text_color(Theme::TEXT_MUTED()).child("·"))
                                     .child(
                                         div()
                                             .font_weight(FontWeight::BOLD)
@@ -1079,12 +1079,12 @@ impl GameInfoView {
                     .justify_between()
                     .pt(px(4.0))
                     .border_t_1()
-                    .border_color(Theme::CARD_BORDER.opacity(0.5))
+                    .border_color(Theme::CARD_BORDER().opacity(0.5))
                     // 左侧：位置/角色
                     .child(
                         div()
                             .text_size(px(10.0))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child(position_display(&player.position)),
                     )
                     // 右侧：近期常用英雄小头像
@@ -1094,7 +1094,7 @@ impl GameInfoView {
                                 .size(px(18.0))
                                 .rounded_full()
                                 .border_1()
-                                .border_color(Theme::CARD_BORDER)
+                                .border_color(Theme::CARD_BORDER())
                                 .overflow_hidden()
                                 .child(
                                     LcuImage::new(format!(
@@ -1156,11 +1156,11 @@ impl GameInfoView {
                 .flex_shrink_0()
                 .p(px(3.0))
                 .border_b_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .bg(if let Some(col) = premade_bg {
                     col.opacity(0.12)
                 } else {
-                    Theme::CARD_BG.opacity(0.85)
+                    Theme::CARD_BG().opacity(0.85)
                 })
                 .flex()
                 .flex_col()
@@ -1187,15 +1187,15 @@ impl GameInfoView {
                                             let diff = (player.win_rate as f32 - 50.0).abs();
                                             let fill_h = (26.0 * (diff / 50.0).min(1.0)).max(2.0);
                                             let bar_color = if player.win_rate >= 50 {
-                                                Theme::WIN_BAR
+                                                Theme::WIN_BAR()
                                             } else {
-                                                Theme::LOSS_BAR
+                                                Theme::LOSS_BAR()
                                             };
                                             div()
                                                 .w(px(3.0))
                                                 .h(px(26.0))
                                                 .rounded(px(1.5))
-                                                .bg(Theme::CARD_BORDER)
+                                                .bg(Theme::CARD_BORDER())
                                                 .overflow_hidden()
                                                 .relative()
                                                 .child(
@@ -1215,9 +1215,9 @@ impl GameInfoView {
                                                 .rounded(px(5.0))
                                                 .border_1()
                                                 .border_color(if is_top {
-                                                    Theme::GOLD
+                                                    Theme::GOLD()
                                                 } else {
-                                                    Theme::CARD_BORDER
+                                                    Theme::CARD_BORDER()
                                                 })
                                                 .overflow_hidden()
                                                 .child(if player.champion_id > 0 {
@@ -1232,13 +1232,13 @@ impl GameInfoView {
                                                 } else {
                                                     div()
                                                         .size(px(26.0))
-                                                        .bg(Theme::CARD_BG)
+                                                        .bg(Theme::CARD_BG())
                                                         .flex()
                                                         .items_center()
                                                         .justify_center()
                                                         .text_size(px(10.0))
                                                         .font_weight(FontWeight::BOLD)
-                                                        .text_color(Theme::TEXT_MUTED)
+                                                        .text_color(Theme::TEXT_MUTED())
                                                         .child("?")
                                                         .into_any_element()
                                                 })
@@ -1251,7 +1251,7 @@ impl GameInfoView {
                                                             .right(px(-1.0))
                                                             .size(px(9.0))
                                                             .rounded_full()
-                                                            .bg(Theme::GOLD)
+                                                            .bg(Theme::GOLD())
                                                             .flex()
                                                             .items_center()
                                                             .justify_center()
@@ -1272,12 +1272,12 @@ impl GameInfoView {
                                         .font_weight(FontWeight::BOLD)
                                         .child(
                                             div()
-                                                .text_color(Theme::WIN_TEXT)
+                                                .text_color(Theme::WIN_TEXT())
                                                 .child(format!("{}胜", player.ranked_wins)),
                                         )
                                         .child(
                                             div()
-                                                .text_color(Theme::LOSS_TEXT)
+                                                .text_color(Theme::LOSS_TEXT())
                                                 .child(format!("{}负", player.ranked_losses)),
                                         ),
                                 ),
@@ -1299,7 +1299,7 @@ impl GameInfoView {
                                             let mut name_el = div()
                                                 .text_size(px(10.5))
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .text_color(Theme::TEXT_PRIMARY())
                                                 .truncate();
                                             if is_valid_target {
                                                 let on_search = on_player_search.clone();
@@ -1307,7 +1307,7 @@ impl GameInfoView {
                                                 let p_tag = player_tag.clone();
                                                 name_el = name_el
                                                     .cursor_pointer()
-                                                    .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
+                                                    .hover(|s| s.text_color(Theme::ACCENT_PRIMARY()))
                                                     .on_mouse_down(
                                                         MouseButton::Left,
                                                         move |_ev, win, app| {
@@ -1350,7 +1350,7 @@ impl GameInfoView {
                         .items_center()
                         .justify_between()
                         .text_size(px(8.5))
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child(
                             div()
                                 .font_weight(FontWeight::MEDIUM)
@@ -1374,9 +1374,9 @@ impl GameInfoView {
                                             .text_size(px(8.0))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(if fate.ally {
-                                                Theme::WIN_TEXT
+                                                Theme::WIN_TEXT()
                                             } else {
-                                                Theme::LOSS_TEXT
+                                                Theme::LOSS_TEXT()
                                             })
                                             .flex()
                                             .items_center()
@@ -1407,11 +1407,11 @@ impl GameInfoView {
                 .flex_shrink_0()
                 .p(px(6.0))
                 .border_b_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .bg(if let Some(col) = premade_bg {
                     col.opacity(0.12)
                 } else {
-                    Theme::CARD_BG.opacity(0.85)
+                    Theme::CARD_BG().opacity(0.85)
                 })
                 .flex()
                 .items_center()
@@ -1423,9 +1423,9 @@ impl GameInfoView {
                         .rounded(px(6.0))
                         .border_1()
                         .border_color(if is_top {
-                            Theme::GOLD
+                            Theme::GOLD()
                         } else {
-                            Theme::CARD_BORDER
+                            Theme::CARD_BORDER()
                         })
                         .overflow_hidden()
                         .child(if player.champion_id > 0 {
@@ -1440,13 +1440,13 @@ impl GameInfoView {
                         } else {
                             div()
                                 .size(px(28.0))
-                                .bg(Theme::CARD_BG)
+                                .bg(Theme::CARD_BG())
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .text_size(px(11.0))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child("?")
                                 .into_any_element()
                         }),
@@ -1468,7 +1468,7 @@ impl GameInfoView {
                                     let mut name_el = div()
                                         .text_size(px(11.5))
                                         .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .text_color(Theme::TEXT_PRIMARY())
                                         .truncate();
                                     if is_valid_target {
                                         let on_search = on_player_search.clone();
@@ -1476,7 +1476,7 @@ impl GameInfoView {
                                         let p_tag = player_tag.clone();
                                         name_el = name_el
                                             .cursor_pointer()
-                                            .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
+                                            .hover(|s| s.text_color(Theme::ACCENT_PRIMARY()))
                                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                                 on_search(
                                                     p_name.clone(),
@@ -1509,9 +1509,9 @@ impl GameInfoView {
                                             .text_size(px(8.5))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(if fate.ally {
-                                                Theme::WIN_TEXT
+                                                Theme::WIN_TEXT()
                                             } else {
-                                                Theme::LOSS_TEXT
+                                                Theme::LOSS_TEXT()
                                             })
                                             .child(fate.badge_text()),
                                     )
@@ -1538,10 +1538,10 @@ impl GameInfoView {
                                             .px(px(3.0))
                                             .py(px(0.5))
                                             .rounded(px(2.0))
-                                            .bg(Theme::CARD_BORDER)
+                                            .bg(Theme::CARD_BORDER())
                                             .text_size(px(8.5))
                                             .font_weight(FontWeight::MEDIUM)
-                                            .text_color(Theme::TEXT_MUTED)
+                                            .text_color(Theme::TEXT_MUTED())
                                             .child(format!("相遇{}次", player.saved_encounter_count)),
                                     )
                                 }),
@@ -1560,13 +1560,13 @@ impl GameInfoView {
                                         .child(
                                             div()
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::WIN_TEXT)
+                                                .text_color(Theme::WIN_TEXT())
                                                 .child(format!("{}胜", player.ranked_wins)),
                                         )
                                         .child(
                                             div()
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::LOSS_TEXT)
+                                                .text_color(Theme::LOSS_TEXT())
                                                 .child(format!("{}负", player.ranked_losses)),
                                         ),
                                 )
@@ -1611,7 +1611,7 @@ impl GameInfoView {
                     .items_center()
                     .justify_center()
                     .gap(px(4.0))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child(div().text_size(px(22.0)).child("📭"))
                     .child(div().text_size(px(11.0)).child("暂无近况战绩"))
                     .into_any_element()
@@ -1651,7 +1651,7 @@ impl GameInfoView {
             .flex_col()
             .overflow_hidden()
             .border_r_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .child(div().h(px(3.0)).w_full().bg(side_accent))
             .child(col_header)
             .child(matches_pane);
@@ -1670,11 +1670,11 @@ impl GameInfoView {
         let is_remake = m.remake;
 
         let (bg, border, text_color) = if is_remake {
-            (Theme::REMAKE_BG, Theme::REMAKE_BORDER, Theme::REMAKE_TEXT)
+            (Theme::REMAKE_BG(), Theme::REMAKE_BORDER(), Theme::REMAKE_TEXT())
         } else if is_win {
-            (Theme::WIN_BG, Theme::WIN_BORDER, Theme::WIN_TEXT)
+            (Theme::WIN_BG(), Theme::WIN_BORDER(), Theme::WIN_TEXT())
         } else {
-            (Theme::LOSS_BG, Theme::LOSS_BORDER, Theme::LOSS_TEXT)
+            (Theme::LOSS_BG(), Theme::LOSS_BORDER(), Theme::LOSS_TEXT())
         };
 
         let time_text = format_month_day(m.time_stamp);
@@ -1716,7 +1716,7 @@ impl GameInfoView {
                     )
                     .child(
                         div()
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .flex_shrink_0()
                             .child(time_text),
                     ),
@@ -1776,13 +1776,13 @@ impl GameInfoView {
                                     .items_center()
                                     .text_size(if compact { px(11.0) } else { px(12.5) })
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(format!("{}", m.kills))
                                     .child(span_sep())
                                     .child(
                                         div()
                                             .font_weight(FontWeight::EXTRA_BOLD)
-                                            .text_color(Theme::LOSS_TEXT)
+                                            .text_color(Theme::LOSS_TEXT())
                                             .child(format!("{}", m.deaths)),
                                     )
                                     .child(span_sep())
@@ -1829,13 +1829,13 @@ impl GameInfoView {
                 div()
                     .text_size(px(16.0))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(Theme::TEXT_PRIMARY)
+                    .text_color(Theme::TEXT_PRIMARY())
                     .child("尚未连接到英雄联盟客户端"),
             )
             .child(
                 div()
                     .text_size(px(13.0))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child("启动客户端并登录后会自动检测 LCU 进程，无需手动操作。"),
             )
             .child(
@@ -1844,7 +1844,7 @@ impl GameInfoView {
                     .px(px(18.0))
                     .py(px(7.0))
                     .rounded_lg()
-                    .bg(Theme::ACCENT_PRIMARY)
+                    .bg(Theme::ACCENT_PRIMARY())
                     .hover(|this| this.opacity(0.85))
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, on_load_demo)
@@ -1884,7 +1884,7 @@ impl GameInfoView {
             .child(
                 div()
                     .text_size(px(13.5))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child(tip_text),
             )
             .when_some(on_load_demo, |el, load_demo| {
@@ -1894,7 +1894,7 @@ impl GameInfoView {
                         .px(px(18.0))
                         .py(px(7.0))
                         .rounded_lg()
-                        .bg(Theme::ACCENT_PRIMARY)
+                        .bg(Theme::ACCENT_PRIMARY())
                         .hover(|this| this.opacity(0.85))
                         .cursor_pointer()
                         .on_mouse_down(MouseButton::Left, load_demo)
@@ -1917,7 +1917,7 @@ impl GameInfoView {
 /// KDA 分隔符 `/`
 fn span_sep() -> impl IntoElement {
     div()
-        .text_color(Theme::TEXT_MUTED.opacity(0.5))
+        .text_color(Theme::TEXT_MUTED().opacity(0.5))
         .mx(px(2.0))
         .child("/")
 }
@@ -1938,9 +1938,9 @@ where
         .items_center()
         .p(px(2.0))
         .rounded(px(8.0))
-        .bg(Theme::BADGE_BG)
+        .bg(Theme::BADGE_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .gap(px(2.0))
         // 按队伍
         .child(
@@ -1953,14 +1953,14 @@ where
                 .rounded(px(6.0))
                 .cursor_pointer()
                 .bg(if view_mode == GameInfoViewMode::ByTeam {
-                    Theme::CARD_BG
+                    Theme::CARD_BG()
                 } else {
                     gpui::transparent_black()
                 })
                 .text_color(if view_mode == GameInfoViewMode::ByTeam {
-                    Theme::ACCENT_PRIMARY
+                    Theme::ACCENT_PRIMARY()
                 } else {
-                    Theme::TEXT_MUTED
+                    Theme::TEXT_MUTED()
                 })
                 .font_weight(FontWeight::BOLD)
                 .text_size(px(11.5))
@@ -1971,9 +1971,9 @@ where
                     "icons/user.svg",
                     12.0,
                     if view_mode == GameInfoViewMode::ByTeam {
-                        Theme::ACCENT_PRIMARY
+                        Theme::ACCENT_PRIMARY()
                     } else {
-                        Theme::TEXT_MUTED
+                        Theme::TEXT_MUTED()
                     },
                 ))
                 .child("按队伍"),
@@ -1989,14 +1989,14 @@ where
                 .rounded(px(6.0))
                 .cursor_pointer()
                 .bg(if view_mode == GameInfoViewMode::AllMatches {
-                    Theme::CARD_BG
+                    Theme::CARD_BG()
                 } else {
                     gpui::transparent_black()
                 })
                 .text_color(if view_mode == GameInfoViewMode::AllMatches {
-                    Theme::ACCENT_PRIMARY
+                    Theme::ACCENT_PRIMARY()
                 } else {
-                    Theme::TEXT_MUTED
+                    Theme::TEXT_MUTED()
                 })
                 .font_weight(FontWeight::BOLD)
                 .text_size(px(11.5))
@@ -2016,16 +2016,16 @@ where
                                 .justify_between()
                                 .child(div().size(px(4.5)).rounded(px(1.0)).bg(
                                     if view_mode == GameInfoViewMode::AllMatches {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     } else {
-                                        Theme::TEXT_MUTED
+                                        Theme::TEXT_MUTED()
                                     },
                                 ))
                                 .child(div().size(px(4.5)).rounded(px(1.0)).bg(
                                     if view_mode == GameInfoViewMode::AllMatches {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     } else {
-                                        Theme::TEXT_MUTED
+                                        Theme::TEXT_MUTED()
                                     },
                                 )),
                         )
@@ -2035,16 +2035,16 @@ where
                                 .justify_between()
                                 .child(div().size(px(4.5)).rounded(px(1.0)).bg(
                                     if view_mode == GameInfoViewMode::AllMatches {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     } else {
-                                        Theme::TEXT_MUTED
+                                        Theme::TEXT_MUTED()
                                     },
                                 ))
                                 .child(div().size(px(4.5)).rounded(px(1.0)).bg(
                                     if view_mode == GameInfoViewMode::AllMatches {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     } else {
-                                        Theme::TEXT_MUTED
+                                        Theme::TEXT_MUTED()
                                     },
                                 )),
                         ),
@@ -2105,7 +2105,7 @@ fn render_premade_chips(groups: &[PremadeGroup]) -> impl IntoElement {
                                     .justify_center()
                                     .text_size(px(8.5))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(if !m.summoner_name.is_empty() {
                                         m.summoner_name.chars().next().unwrap_or('?').to_string()
                                     } else {
@@ -2176,7 +2176,7 @@ fn tier_color(tier: &str) -> Hsla {
         "MASTER" => hsla(262.0 / 360.0, 0.89, 0.66, 1.0),
         "GRANDMASTER" => hsla(0.0 / 360.0, 0.84, 0.60, 1.0),
         "CHALLENGER" => hsla(38.0 / 360.0, 0.92, 0.50, 1.0),
-        _ => Theme::TEXT_MUTED,
+        _ => Theme::TEXT_MUTED(),
     }
 }
 
@@ -2189,14 +2189,14 @@ fn kda_color(kda: f64) -> Hsla {
     } else if kda >= 3.0 {
         hsla(160.0 / 360.0, 0.84, 0.39, 1.0)
     } else {
-        Theme::TEXT_MUTED
+        Theme::TEXT_MUTED()
     }
 }
 
 /// KDA 倍率与样式
 fn format_kda_ratio(kills: i32, deaths: i32, assists: i32) -> (String, Hsla, Hsla) {
     if deaths == 0 {
-        ("Perf".to_string(), Theme::GOLD, Theme::GOLD.opacity(0.12))
+        ("Perf".to_string(), Theme::GOLD(), Theme::GOLD().opacity(0.12))
     } else {
         let r = (kills + assists) as f32 / deaths as f32;
         let text = if r >= 10.0 {
@@ -2205,17 +2205,17 @@ fn format_kda_ratio(kills: i32, deaths: i32, assists: i32) -> (String, Hsla, Hsl
             format!("{:.1}", r)
         };
         if r >= 5.0 {
-            (text, Theme::GOLD, Theme::GOLD.opacity(0.12))
+            (text, Theme::GOLD(), Theme::GOLD().opacity(0.12))
         } else if r >= 3.0 {
             (
                 text,
-                Theme::BLUE_SIDE_ACCENT,
-                Theme::BLUE_SIDE_ACCENT.opacity(0.12),
+                Theme::BLUE_SIDE_ACCENT(),
+                Theme::BLUE_SIDE_ACCENT().opacity(0.12),
             )
         } else if r >= 2.0 {
-            (text, Theme::WIN_TEXT, Theme::WIN_TEXT.opacity(0.12))
+            (text, Theme::WIN_TEXT(), Theme::WIN_TEXT().opacity(0.12))
         } else {
-            (text, Theme::TEXT_MUTED, Theme::BADGE_BG)
+            (text, Theme::TEXT_MUTED(), Theme::BADGE_BG())
         }
     }
 }

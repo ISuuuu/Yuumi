@@ -138,7 +138,7 @@ impl HomeView {
                 .gap(px(10.0))
                 .text_size(px(13.1))
                 .font_family(mono_font_family())
-                .text_color(Theme::TEXT_MUTED);
+                .text_color(Theme::TEXT_MUTED());
 
             for (label, value) in [
                 ("PID =", pid.to_string()),
@@ -151,11 +151,11 @@ impl HomeView {
                         .justify_center()
                         .gap(px(8.0))
                         .whitespace_nowrap()
-                        .child(div().text_color(Theme::TEXT_MUTED).child(label))
+                        .child(div().text_color(Theme::TEXT_MUTED()).child(label))
                         .child(
                             div()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .child(value),
                         ),
                 );
@@ -164,7 +164,7 @@ impl HomeView {
         } else {
             div()
                 .text_size(px(13.6))
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .child("正在获取客户端连接详情...")
                 .into_any_element()
         };
@@ -179,7 +179,7 @@ impl HomeView {
                 div()
                     .text_size(px(28.8))
                     .font_weight(FontWeight::EXTRA_BOLD)
-                    .text_color(Theme::TEXT_PRIMARY)
+                    .text_color(Theme::TEXT_PRIMARY())
                     .mb(px(20.0))
                     .child("已连接至英雄联盟客户端"),
             )
@@ -192,12 +192,12 @@ impl HomeView {
                     .max_w(px(500.0))
                     .p(px(24.0))
                     .rounded(Theme::RADIUS_LG)
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .shadow_sm()
                     .hover(|s| {
-                        s.border_color(Theme::ACCENT_PRIMARY.opacity(0.3))
+                        s.border_color(Theme::ACCENT_PRIMARY().opacity(0.3))
                             .shadow_md()
                     })
                     .child(card_body),
@@ -240,7 +240,7 @@ impl HomeView {
             div()
                 .text_size(px(28.8))
                 .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(Theme::TEXT_PRIMARY)
+                .text_color(Theme::TEXT_PRIMARY())
                 .mb(px(14.0))
                 .child("未检测到英雄联盟客户端"),
         );
@@ -250,7 +250,7 @@ impl HomeView {
             div()
                 .text_size(px(14.1))
                 .line_height(px(22.0))
-                .text_color(Theme::TEXT_SECONDARY)
+                .text_color(Theme::TEXT_SECONDARY())
                 .mb(px(24.0))
                 .child("请先启动英雄联盟客户端，或者通过下方按钮直接启动游戏"),
         );
@@ -266,16 +266,16 @@ impl HomeView {
                 .py(px(10.0))
                 .rounded(px(8.0))
                 .border(px(1.5))
-                .border_color(Theme::ACCENT_PRIMARY)
+                .border_color(Theme::ACCENT_PRIMARY())
                 .text_size(px(14.1))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(Theme::ACCENT_PRIMARY)
+                .text_color(Theme::ACCENT_PRIMARY())
                 .cursor_pointer()
-                .hover(|s| s.bg(Theme::ACCENT_HOVER).text_color(Theme::TEXT_ON_PRIMARY))
+                .hover(|s| s.bg(Theme::ACCENT_HOVER()).text_color(Theme::TEXT_ON_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                     on_launch(win, app);
                 })
-                .child(icon("icons/play.svg", 14.0, Theme::ACCENT_PRIMARY))
+                .child(icon("icons/play.svg", 14.0, Theme::ACCENT_PRIMARY()))
                 .child("启动英雄联盟客户端"),
         );
 
@@ -287,9 +287,9 @@ impl HomeView {
                     .mb(px(12.0))
                     .text_size(px(12.5))
                     .text_color(if *is_err {
-                        Theme::DEATH_RED
+                        Theme::DEATH_RED()
                     } else {
-                        Theme::ACCENT_PRIMARY
+                        Theme::ACCENT_PRIMARY()
                     })
                     .child(msg.clone()),
             );
@@ -310,7 +310,7 @@ impl HomeView {
             path_list = path_list.child(
                 div()
                     .text_size(px(12.5))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .mb(px(2.0))
                     .text_center()
                     .child("客户端启动路径:"),
@@ -326,8 +326,8 @@ impl HomeView {
                         .size(px(14.0))
                         .rounded_full()
                         .border(px(2.0))
-                        .border_color(Theme::ACCENT_PRIMARY)
-                        .bg(Theme::ACCENT_PRIMARY)
+                        .border_color(Theme::ACCENT_PRIMARY())
+                        .bg(Theme::ACCENT_PRIMARY())
                         .flex()
                         .items_center()
                         .justify_center()
@@ -338,7 +338,7 @@ impl HomeView {
                         .size(px(14.0))
                         .rounded_full()
                         .border(px(2.0))
-                        .border_color(Theme::CARD_BORDER)
+                        .border_color(Theme::CARD_BORDER())
                 };
 
                 let text_node: AnyElement = if is_wegame(path) {
@@ -347,7 +347,7 @@ impl HomeView {
                         .px(px(8.0))
                         .py(px(2.0))
                         .rounded(px(4.0))
-                        .bg(Theme::ACCENT_PRIMARY)
+                        .bg(Theme::ACCENT_PRIMARY())
                         .text_color(rgb(0xffffff))
                         .text_size(px(12.0))
                         .font_weight(FontWeight::BOLD)
@@ -356,13 +356,13 @@ impl HomeView {
                     let sub = if !self.wegame_path.is_empty() {
                         div()
                             .text_size(px(12.8))
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .truncate()
                             .child(self.wegame_path.clone())
                     } else {
                         div()
                             .text_size(px(12.8))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .italic()
                             .child("未设置 WeGame 路径")
                     };
@@ -380,9 +380,9 @@ impl HomeView {
                         .text_size(px(12.8))
                         .font_family(mono_font_family())
                         .text_color(if is_selected {
-                            Theme::TEXT_PRIMARY
+                            Theme::TEXT_PRIMARY()
                         } else {
-                            Theme::TEXT_MUTED
+                            Theme::TEXT_MUTED()
                         })
                         .truncate()
                         .child(path.clone())
@@ -403,19 +403,19 @@ impl HomeView {
                         .rounded(px(6.0))
                         .border_1()
                         .border_color(if is_selected {
-                            Theme::ACCENT_PRIMARY
+                            Theme::ACCENT_PRIMARY()
                         } else {
-                            Theme::CARD_BORDER
+                            Theme::CARD_BORDER()
                         })
                         .bg(if is_selected {
-                            Theme::ACCENT_HOVER
+                            Theme::ACCENT_HOVER()
                         } else {
-                            Theme::CARD_BG
+                            Theme::CARD_BG()
                         })
                         .cursor_pointer()
                         .hover(|s| {
                             if !is_selected {
-                                s.border_color(Theme::ACCENT_PRIMARY.opacity(0.3))
+                                s.border_color(Theme::ACCENT_PRIMARY().opacity(0.3))
                             } else {
                                 s
                             }
@@ -440,9 +440,9 @@ impl HomeView {
                 .px(px(18.0))
                 .py(px(10.0))
                 .rounded(px(20.0))
-                .bg(Theme::CARD_BG)
+                .bg(Theme::CARD_BG())
                 .border_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .shadow_sm()
                 .child(
                     div()
@@ -450,12 +450,12 @@ impl HomeView {
                         .size(px(14.0))
                         .rounded_full()
                         .border(px(2.5))
-                        .border_color(Theme::ACCENT_PRIMARY),
+                        .border_color(Theme::ACCENT_PRIMARY()),
                 )
                 .child(
                     div()
                         .text_size(px(12.8))
-                        .text_color(Theme::TEXT_SECONDARY)
+                        .text_color(Theme::TEXT_SECONDARY())
                         .child("等待英雄联盟客户端启动中..."),
                 ),
         );

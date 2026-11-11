@@ -33,22 +33,22 @@ pub fn dropdown_trigger(
                 .rounded_md()
                 .border_1()
                 .border_color(if open {
-                    Theme::SIDEBAR_ACTIVE_BORDER
+                    Theme::SIDEBAR_ACTIVE_BORDER()
                 } else {
-                    Theme::CARD_BORDER
+                    Theme::CARD_BORDER()
                 })
                 .bg(if open {
-                    Theme::ACCENT_LIGHT
+                    Theme::ACCENT_LIGHT()
                 } else {
-                    Theme::CARD_BG
+                    Theme::CARD_BG()
                 })
                 .flex()
                 .items_center()
                 .gap(px(4.0))
                 .text_size(px(12.0))
-                .text_color(Theme::TEXT_SECONDARY)
+                .text_color(Theme::TEXT_SECONDARY())
                 .cursor_pointer()
-                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
                 .child(label)
                 .child(icon(
@@ -58,7 +58,7 @@ pub fn dropdown_trigger(
                         "icons/chevron-down.svg"
                     },
                     12.0,
-                    Theme::TEXT_MUTED,
+                    Theme::TEXT_MUTED(),
                 )),
         )
         .when(open, |this| {
@@ -74,7 +74,7 @@ pub fn dropdown_trigger(
                         // 不透明背景，避免下方战绩卡片文字透上来
                         .bg(rgb(0xffffff))
                         .border_1()
-                        .border_color(Theme::CARD_BORDER)
+                        .border_color(Theme::CARD_BORDER())
                         .rounded_lg()
                         .shadow_md()
                         .child(menu),
@@ -95,17 +95,17 @@ pub fn dropdown_item(
         .py(px(6.0))
         .text_size(px(12.5))
         .text_color(if active {
-            Theme::ACCENT_PRIMARY
+            Theme::ACCENT_PRIMARY()
         } else {
-            Theme::TEXT_SECONDARY
+            Theme::TEXT_SECONDARY()
         })
         .bg(if active {
-            Theme::ACCENT_LIGHT
+            Theme::ACCENT_LIGHT()
         } else {
             transparent_black()
         })
         .cursor_pointer()
-        .hover(|s| s.bg(Theme::HOVER_BG))
+        .hover(|s| s.bg(Theme::HOVER_BG()))
         .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_select(win, app))
         .child(label)
 }
@@ -147,25 +147,25 @@ pub fn select_dropdown(
                 .rounded_md()
                 .border_1()
                 .border_color(if open {
-                    Theme::SIDEBAR_ACTIVE_BORDER
+                    Theme::SIDEBAR_ACTIVE_BORDER()
                 } else {
-                    Theme::CARD_BORDER
+                    Theme::CARD_BORDER()
                 })
                 .bg(if open {
-                    Theme::ACCENT_LIGHT
+                    Theme::ACCENT_LIGHT()
                 } else {
-                    Theme::CARD_BG
+                    Theme::CARD_BG()
                 })
                 .flex()
                 .items_center()
                 .justify_between()
                 .cursor_pointer()
-                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, on_toggle)
                 .child(
                     div()
                         .text_size(px(12.5))
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .child(current_label),
                 )
                 .child(icon(
@@ -175,7 +175,7 @@ pub fn select_dropdown(
                         "icons/chevron-down.svg"
                     },
                     12.0,
-                    Theme::TEXT_MUTED,
+                    Theme::TEXT_MUTED(),
                 )),
         )
         .when(open, |this| {
@@ -190,7 +190,7 @@ pub fn select_dropdown(
                         .occlude()
                         .bg(rgb(0xffffff))
                         .border_1()
-                        .border_color(Theme::CARD_BORDER)
+                        .border_color(Theme::CARD_BORDER())
                         .rounded_lg()
                         .shadow_md()
                         .overflow_hidden()
@@ -215,9 +215,9 @@ pub fn select_dropdown_item(
         .py(px(6.0))
         .text_size(px(12.0))
         .text_color(if active {
-            Theme::ACCENT_PRIMARY
+            Theme::ACCENT_PRIMARY()
         } else {
-            Theme::TEXT_PRIMARY
+            Theme::TEXT_PRIMARY()
         })
         .font_weight(if active {
             FontWeight::SEMIBOLD
@@ -225,12 +225,12 @@ pub fn select_dropdown_item(
             FontWeight::NORMAL
         })
         .bg(if active {
-            Theme::ACCENT_LIGHT
+            Theme::ACCENT_LIGHT()
         } else {
             transparent_black()
         })
         .cursor_pointer()
-        .hover(|s| s.bg(Theme::HOVER_BG))
+        .hover(|s| s.bg(Theme::HOVER_BG()))
         .on_mouse_down(MouseButton::Left, on_select)
         .child(label)
 }

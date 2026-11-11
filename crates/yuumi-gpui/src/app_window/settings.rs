@@ -2,10 +2,40 @@
 use super::*;
 
 impl MainWindow {
+    /// 按当前配置重建运行时主题色板（主题模式/主题色/胜负卡色/死亡数字色）
+    pub(crate) fn apply_theme(&self) {
+        let system_dark = platform::system_prefers_dark();
+        Theme::apply(&self.app_config.personalization, system_dark);
+    }
+
+    /// 按当前配置初始化全局界面语言（对照 Vue `setLocale`；与 apply_theme 同样的接线模式）
+    pub(crate) fn apply_language(&self) {
+        crate::i18n::set_language(crate::i18n::Lang::from_config(
+            &self.app_config.personalization.language,
+        ));
+    }
+
+    pub(crate) fn initialize_window_appearance(&mut self, window: &Window) {
+        self.apply_theme();
+        self.apply_language();
+        let Ok(hwnd) = platform::native_window_handle(window) else {
+            log::warn!("[Platform] 无法获取主窗口句柄");
+            return;
+        };
+        platform::set_window_rounded_corners(hwnd);
+        if self.app_config.personalization.mica_enabled {
+            match platform::set_mica(hwnd, true) {
+                Ok(()) => self.mica_active = true,
+                Err(error) => log::warn!("[Platform] 启用云母效果失败: {error}"),
+            }
+        }
+    }
+
     /// 处理设置页交互动作
     pub(super) fn handle_settings_action(
         &mut self,
         action: SettingsAction,
+        window: &Window,
         cx: &mut Context<Self>,
     ) {
         match action {
@@ -45,23 +75,36 @@ impl MainWindow {
                 self.persist_config(cx);
             }
             SettingsAction::TogglePinOpgg => {
-                self.app_config.functions.enable_opgg_on_top =
-                    !self.app_config.functions.enable_opgg_on_top;
+                let enabled = !self.app_config.functions.enable_opgg_on_top;
+                self.app_config.functions.enable_opgg_on_top = enabled;
+                if let Some(handle) = self.opgg_window {
+                    cx.defer(move |cx| {
+                        let _ = handle.update(cx, |_, window, _| {
+                            if let Ok(hwnd) = platform::native_window_handle(window) {
+                                platform::set_window_topmost(hwnd, enabled);
+                            }
+                        });
+                    });
+                }
                 self.persist_config(cx);
             }
             SettingsAction::DetectLolPath => {
                 // 对照 Vue B01/B02/B03
                 if let Some(path) = services::detect_lol_path() {
                     if self.app_config.general.lol_path.contains(&path) {
-                        self.toast(ToastKind::Info, "该路径已存在", cx);
+                        self.toast(ToastKind::Info, crate::i18n::t("settings.pathExists"), cx);
                     } else {
                         self.app_config.general.lol_path.push(path.clone());
                         self.home_view.reload_paths();
                         self.persist_config(cx);
-                        self.toast(ToastKind::Success, format!("已添加: {}", path), cx);
+                        self.toast(
+                            ToastKind::Success,
+                            crate::i18n::t("settings.pathAdded").replace("{path}", &path),
+                            cx,
+                        );
                     }
                 } else {
-                    self.toast(ToastKind::Error, "未检测到运行中的英雄联盟客户端", cx);
+                    self.toast(ToastKind::Error, crate::i18n::t("settings.lolClientNotFound"), cx);
                 }
                 cx.notify();
             }
@@ -69,12 +112,16 @@ impl MainWindow {
                 // 对照 Vue B05/B06：取消选择不提示
                 if let Some(path) = services::select_folder() {
                     if self.app_config.general.lol_path.contains(&path) {
-                        self.toast(ToastKind::Info, "该路径已存在", cx);
+                        self.toast(ToastKind::Info, crate::i18n::t("settings.pathExists"), cx);
                     } else {
                         self.app_config.general.lol_path.push(path.clone());
                         self.home_view.reload_paths();
                         self.persist_config(cx);
-                        self.toast(ToastKind::Success, format!("已添加: {}", path), cx);
+                        self.toast(
+                            ToastKind::Success,
+                            crate::i18n::t("settings.pathAdded").replace("{path}", &path),
+                            cx,
+                        );
                     }
                 }
                 cx.notify();
@@ -83,12 +130,12 @@ impl MainWindow {
                 // 对照 Vue B08/B09
                 let wegame_marker = yuumi_core::config::WEGAME_MARKER.to_string();
                 if self.app_config.general.lol_path.contains(&wegame_marker) {
-                    self.toast(ToastKind::Info, "WeGame 启动项已存在", cx);
+                    self.toast(ToastKind::Info, crate::i18n::t("settings.wegameExists"), cx);
                 } else {
                     self.app_config.general.lol_path.push(wegame_marker);
                     self.home_view.reload_paths();
                     self.persist_config(cx);
-                    self.toast(ToastKind::Success, "已添加 WeGame 启动项", cx);
+                    self.toast(ToastKind::Success, crate::i18n::t("settings.wegameAdded"), cx);
                 }
                 cx.notify();
             }
@@ -106,7 +153,7 @@ impl MainWindow {
             }
             SettingsAction::ClearCache => {
                 let client_path = self.app_config.general.lol_path.first().cloned();
-                self.settings_view.set_feedback("正在清理缓存...", false);
+                self.settings_view.set_feedback(crate::i18n::t("settings.clearingCache"), false);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     let res = cx
@@ -117,7 +164,11 @@ impl MainWindow {
                         match res {
                             // 对照 Vue B23：结果走 Toast，"正在清理"仍是局部进行中提示
                             Ok(msg) => this.toast(ToastKind::Success, msg, cx),
-                            Err(e) => this.toast(ToastKind::Error, format!("清理失败: {}", e), cx),
+                            Err(e) => this.toast(
+                                ToastKind::Error,
+                                crate::i18n::t("settings.clearCacheFailed").replace("{error}", &e),
+                                cx,
+                            ),
                         }
                         cx.notify();
                     });
@@ -163,7 +214,7 @@ impl MainWindow {
                             .and_then(|rest| rest.split('/').next())
                             .is_none_or(|host| host.is_empty()))
                 {
-                    self.toast(ToastKind::Error, "请输入有效的 HTTP 或 HTTPS 上传地址", cx);
+                    self.toast(ToastKind::Error, crate::i18n::t("settings.uploadUrlInvalid"), cx);
                     cx.notify();
                     return;
                 }
@@ -176,7 +227,7 @@ impl MainWindow {
                 {
                     self.toast(
                         ToastKind::Error,
-                        "请输入有效的代理地址（例如 127.0.0.1:7897）",
+                        crate::i18n::t("settings.proxyAddrInvalid"),
                         cx,
                     );
                     cx.notify();
@@ -191,6 +242,9 @@ impl MainWindow {
                     _ => unreachable!(),
                 }
                 self.persist_config(cx);
+                if index == 2 {
+                    self.apply_opgg_proxy(cx);
+                }
             }
             SettingsAction::SetUploadApiUrl(url) => {
                 self.app_config.general.upload_api_url = url;
@@ -208,10 +262,6 @@ impl MainWindow {
             SettingsAction::ToggleSignalrHub => {
                 self.app_config.general.enable_signalr_hub =
                     !self.app_config.general.enable_signalr_hub;
-                self.persist_config(cx);
-            }
-            SettingsAction::SetSignalrServer(s) => {
-                self.app_config.general.signalr_server_url = s;
                 self.persist_config(cx);
             }
             SettingsAction::SetSignalrUser(u) => {
@@ -258,7 +308,7 @@ impl MainWindow {
                     self.settings_view.f_inputs[3] = folder.clone();
                     self.app_config.functions.screenshot_save_path = folder;
                     self.persist_config(cx);
-                    self.toast(ToastKind::Success, "已成功更新截图保存目录", cx);
+                    self.toast(ToastKind::Success, crate::i18n::t("settings.screenshotDirUpdated"), cx);
                 }
             }
             SettingsAction::OpenScreenshotFolder => {
@@ -274,7 +324,11 @@ impl MainWindow {
                         .await;
                     if let Err(e) = res {
                         let _ = entity.update(cx, |this, cx| {
-                            this.toast(ToastKind::Error, format!("无法打开截图文件夹: {}", e), cx);
+                            this.toast(
+                                ToastKind::Error,
+                                crate::i18n::t("settings.screenshotFolderOpenFailed").replace("{error}", &e),
+                                cx,
+                            );
                         });
                     }
                 })
@@ -295,7 +349,11 @@ impl MainWindow {
                         .await;
                     if let Err(e) = res {
                         let _ = entity.update(cx, |this, cx| {
-                            this.toast(ToastKind::Error, format!("打开日志文件夹失败: {}", e), cx);
+                            this.toast(
+                                ToastKind::Error,
+                                crate::i18n::t("settings.logFolderOpenFailed").replace("{error}", &e),
+                                cx,
+                            );
                         });
                     }
                 })
@@ -303,13 +361,18 @@ impl MainWindow {
             }
             SettingsAction::ToggleMica => {
                 let new_val = !self.app_config.personalization.mica_enabled;
-                self.app_config.personalization.mica_enabled = new_val;
-                self.persist_config(cx);
-                if new_val {
-                    if let Some(hwnd) = platform::find_main_window_hwnd() {
-                        platform::apply_mica_or_acrylic(hwnd);
+                if new_val != self.mica_active {
+                    if let Err(error) = platform::native_window_handle(window)
+                        .and_then(|hwnd| platform::set_mica(hwnd, new_val))
+                    {
+                        log::warn!("[Platform] 切换云母效果失败: {error}");
+                        self.toast(ToastKind::Error, crate::i18n::t("settings.micaError"), cx);
+                        return;
                     }
                 }
+                self.mica_active = new_val;
+                self.app_config.personalization.mica_enabled = new_val;
+                self.persist_config(cx);
             }
             SettingsAction::SetThemeMode(mode) => {
                 self.settings_view.open_theme_mode_dropdown = false;
@@ -369,17 +432,20 @@ impl MainWindow {
             }
             SettingsAction::SetDpiScale(s) => {
                 self.settings_view.open_scale_dropdown = false;
+                let scale_override = scale_factor_override_for(&s);
                 self.app_config.personalization.dpi_scale = s;
                 self.persist_config(cx);
+                // 运行时立即生效：Auto=恢复跟随系统 DPI，100/125/150=固定缩放
+                window.set_scale_factor_override(scale_override);
                 // 对照 Vue B12：DPI 专用成功提示
-                self.toast(ToastKind::Success, "DPI 缩放已保存", cx);
+                self.toast(ToastKind::Success, crate::i18n::t("settings.dpiScaleApplied"), cx);
             }
             SettingsAction::SetLanguage(l) => {
                 self.settings_view.open_lang_dropdown = false;
                 self.app_config.personalization.language = l;
                 self.persist_config(cx);
                 // 对照 Vue B13：语言专用成功提示
-                self.toast(ToastKind::Success, "语言设置已保存", cx);
+                self.toast(ToastKind::Success, crate::i18n::t("settings.langSaved"), cx);
             }
             SettingsAction::CheckUpdate => {
                 self.check_updates(true, cx);
@@ -404,10 +470,7 @@ impl MainWindow {
                 self.app_config.general.enable_http_proxy =
                     !self.app_config.general.enable_http_proxy;
                 self.persist_config(cx);
-            }
-            SettingsAction::SetHttpProxyAddr(addr) => {
-                self.app_config.general.http_proxy_addr = addr;
-                self.persist_config(cx);
+                self.apply_opgg_proxy(cx);
             }
             SettingsAction::ToggleChangelog => {
                 self.settings_view.show_changelog = !self.settings_view.show_changelog;
@@ -490,9 +553,9 @@ impl MainWindow {
     ) -> Stateful<Div> {
         let view_entity = cx.entity().clone();
         let view = view_entity.clone();
-        let on_settings_action = move |action, _win: &mut Window, app: &mut App| {
+        let on_settings_action = move |action, win: &mut Window, app: &mut App| {
             view.update(app, |this, cx| {
-                this.handle_settings_action(action, cx);
+                this.handle_settings_action(action, win, cx);
             });
         };
         el.child(

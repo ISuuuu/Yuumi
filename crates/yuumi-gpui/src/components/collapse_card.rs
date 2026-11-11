@@ -28,12 +28,12 @@ pub fn collapse_card(
     div()
         .id(id)
         .w_full()
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
         .border_color(if open {
-            Theme::SIDEBAR_ACTIVE_BORDER
+            Theme::SIDEBAR_ACTIVE_BORDER()
         } else {
-            Theme::CARD_BORDER
+            Theme::CARD_BORDER()
         })
         .rounded(px(12.0))
         .shadow_sm()
@@ -48,7 +48,7 @@ pub fn collapse_card(
                 .items_center()
                 .justify_between()
                 .cursor_pointer()
-                .hover(|s| s.bg(Theme::HOVER_BG))
+                .hover(|s| s.bg(Theme::HOVER_BG()))
                 .on_mouse_down(MouseButton::Left, on_toggle)
                 .child(
                     div()
@@ -61,9 +61,9 @@ pub fn collapse_card(
                                 icon_path,
                                 16.0,
                                 if open {
-                                    Theme::ACCENT_PRIMARY
+                                    Theme::ACCENT_PRIMARY()
                                 } else {
-                                    Theme::TEXT_MUTED
+                                    Theme::TEXT_MUTED()
                                 },
                             ))
                         })
@@ -76,13 +76,13 @@ pub fn collapse_card(
                                     div()
                                         .text_size(px(13.5))
                                         .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .text_color(Theme::TEXT_PRIMARY())
                                         .child(title),
                                 )
                                 .child(
                                     div()
                                         .text_size(px(12.0))
-                                        .text_color(Theme::TEXT_MUTED)
+                                        .text_color(Theme::TEXT_MUTED())
                                         .child(desc),
                                 ),
                         ),
@@ -97,9 +97,9 @@ pub fn collapse_card(
                                 div()
                                     .text_size(px(12.0))
                                     .text_color(if open {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     } else {
-                                        Theme::TEXT_MUTED
+                                        Theme::TEXT_MUTED()
                                     })
                                     .child(st),
                             )
@@ -111,7 +111,7 @@ pub fn collapse_card(
                                 "icons/chevron-right.svg"
                             },
                             14.0,
-                            Theme::TEXT_MUTED,
+                            Theme::TEXT_MUTED(),
                         )),
                 ),
         )
@@ -121,7 +121,7 @@ pub fn collapse_card(
                 div()
                     .w_full()
                     .border_t_1()
-                    .border_color(Theme::CARD_BORDER.opacity(0.6))
+                    .border_color(Theme::CARD_BORDER().opacity(0.6))
                     .px(px(24.0))
                     .py(px(16.0))
                     .flex()
@@ -156,11 +156,11 @@ pub fn setting_row(
                 .child(
                     div()
                         .text_size(px(13.0))
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .child(title),
                 )
                 .when_some(desc, |this, d| {
-                    this.child(div().text_size(px(11.5)).text_color(Theme::TEXT_MUTED).child(d))
+                    this.child(div().text_size(px(11.5)).text_color(Theme::TEXT_MUTED()).child(d))
                 }),
         )
         .child(control)
@@ -180,9 +180,9 @@ pub fn settings_card_item(
         .w_full()
         .px(px(24.0))
         .py(px(16.0))
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .when(border_bottom, |s| {
-            s.border_b_1().border_color(Theme::CARD_BORDER.opacity(0.5))
+            s.border_b_1().border_color(Theme::CARD_BORDER().opacity(0.5))
         })
         .flex()
         .items_center()
@@ -198,14 +198,14 @@ pub fn settings_card_item(
                     div()
                         .text_size(px(13.5))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .child(title),
                 )
                 .when_some(desc_opt, |this, d| {
                     this.child(
                         div()
                             .text_size(px(12.0))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .line_height(relative(1.4))
                             .child(d),
                     )
@@ -229,8 +229,8 @@ pub fn number_stepper(
         .h(px(28.0))
         .rounded_md()
         .border_1()
-        .border_color(Theme::CARD_BORDER)
-        .bg(Theme::CARD_BG)
+        .border_color(Theme::CARD_BORDER())
+        .bg(Theme::CARD_BG())
         .flex()
         .items_center()
         .justify_between()
@@ -245,7 +245,7 @@ pub fn number_stepper(
                 .items_center()
                 .text_size(px(12.5))
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(Theme::TEXT_PRIMARY)
+                .text_color(Theme::TEXT_PRIMARY())
                 .child(value_display),
         )
         // 右侧减加按钮组
@@ -255,7 +255,7 @@ pub fn number_stepper(
                 .items_center()
                 .h_full()
                 .border_l_1()
-                .border_color(Theme::CARD_BORDER.opacity(0.6))
+                .border_color(Theme::CARD_BORDER().opacity(0.6))
                 // 减按钮
                 .child(
                     div()
@@ -267,9 +267,9 @@ pub fn number_stepper(
                         .text_size(px(13.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(if can_decrement {
-                            Theme::TEXT_PRIMARY
+                            Theme::TEXT_PRIMARY()
                         } else {
-                            Theme::TEXT_MUTED.opacity(0.3)
+                            Theme::TEXT_MUTED().opacity(0.3)
                         })
                         .cursor(if can_decrement {
                             CursorStyle::PointingHand
@@ -277,7 +277,7 @@ pub fn number_stepper(
                             CursorStyle::OperationNotAllowed
                         })
                         .when(can_decrement, |this| {
-                            this.hover(|s| s.bg(Theme::HOVER_BG))
+                            this.hover(|s| s.bg(Theme::HOVER_BG()))
                                 .on_mouse_down(MouseButton::Left, on_decrement)
                         })
                         .child("−"),
@@ -287,7 +287,7 @@ pub fn number_stepper(
                     div()
                         .w(px(1.0))
                         .h(px(14.0))
-                        .bg(Theme::CARD_BORDER.opacity(0.6)),
+                        .bg(Theme::CARD_BORDER().opacity(0.6)),
                 )
                 // 加按钮
                 .child(
@@ -300,9 +300,9 @@ pub fn number_stepper(
                         .text_size(px(13.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(if can_increment {
-                            Theme::TEXT_PRIMARY
+                            Theme::TEXT_PRIMARY()
                         } else {
-                            Theme::TEXT_MUTED.opacity(0.3)
+                            Theme::TEXT_MUTED().opacity(0.3)
                         })
                         .cursor(if can_increment {
                             CursorStyle::PointingHand
@@ -310,7 +310,7 @@ pub fn number_stepper(
                             CursorStyle::OperationNotAllowed
                         })
                         .when(can_increment, |this| {
-                            this.hover(|s| s.bg(Theme::HOVER_BG))
+                            this.hover(|s| s.bg(Theme::HOVER_BG()))
                                 .on_mouse_down(MouseButton::Left, on_increment)
                         })
                         .child("+"),
@@ -339,14 +339,14 @@ pub fn checkbox(
                 .rounded(px(3.0))
                 .border_1()
                 .border_color(if checked {
-                    Theme::ACCENT_PRIMARY
+                    Theme::ACCENT_PRIMARY()
                 } else {
-                    Theme::CARD_BORDER
+                    Theme::CARD_BORDER()
                 })
                 .bg(if checked {
-                    Theme::ACCENT_PRIMARY
+                    Theme::ACCENT_PRIMARY()
                 } else {
-                    Theme::CARD_BG
+                    Theme::CARD_BG()
                 })
                 .flex()
                 .items_center()
@@ -359,7 +359,7 @@ pub fn checkbox(
         .child(
             div()
                 .text_size(px(12.5))
-                .text_color(Theme::TEXT_PRIMARY)
+                .text_color(Theme::TEXT_PRIMARY())
                 .child(label),
         )
 }
@@ -393,23 +393,23 @@ where
                 .rounded_md()
                 .border_1()
                 .border_color(if active {
-                    Theme::SIDEBAR_ACTIVE_BORDER
+                    Theme::SIDEBAR_ACTIVE_BORDER()
                 } else {
-                    Theme::CARD_BORDER
+                    Theme::CARD_BORDER()
                 })
                 .bg(if active {
-                    Theme::ACCENT_LIGHT
+                    Theme::ACCENT_LIGHT()
                 } else {
-                    Theme::CARD_BG
+                    Theme::CARD_BG()
                 })
                 .text_size(px(12.0))
                 .text_color(if active {
-                    Theme::ACCENT_PRIMARY
+                    Theme::ACCENT_PRIMARY()
                 } else {
-                    Theme::TEXT_SECONDARY
+                    Theme::TEXT_SECONDARY()
                 })
                 .cursor_pointer()
-                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| cb(val, win, app))
                 .child(label)
         }))
@@ -427,27 +427,27 @@ pub fn action_button(
         .rounded_md()
         .border_1()
         .border_color(if primary {
-            Theme::ACCENT_PRIMARY
+            Theme::ACCENT_PRIMARY()
         } else {
-            Theme::CARD_BORDER
+            Theme::CARD_BORDER()
         })
         .bg(if primary {
-            Theme::ACCENT_PRIMARY
+            Theme::ACCENT_PRIMARY()
         } else {
-            Theme::CARD_BG
+            Theme::CARD_BG()
         })
         .text_size(px(12.0))
         .text_color(if primary {
             gpui::white()
         } else {
-            Theme::TEXT_PRIMARY
+            Theme::TEXT_PRIMARY()
         })
         .cursor_pointer()
         .hover(|s| {
             if primary {
                 s.opacity(0.85)
             } else {
-                s.bg(Theme::HOVER_BG)
+                s.bg(Theme::HOVER_BG())
             }
         })
         .on_mouse_down(MouseButton::Left, on_click)

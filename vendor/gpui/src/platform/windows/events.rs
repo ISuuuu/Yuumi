@@ -194,7 +194,8 @@ impl WindowsWindowInner {
         Some(0)
     }
 
-    fn handle_size_change(
+    // [Yuumi patch] pub(crate)：供 window.rs 的 set_scale_factor_override 复用
+    pub(crate) fn handle_size_change(
         &self,
         device_size: Size<DevicePixels>,
         scale_factor: f32,
@@ -781,7 +782,10 @@ impl WindowsWindowInner {
         let new_dpi = wparam.loword() as f32;
         let mut lock = self.state.borrow_mut();
         let is_maximized = lock.is_maximized();
-        let new_scale_factor = new_dpi / USER_DEFAULT_SCREEN_DPI as f32;
+        // [Yuumi patch] 设置了固定缩放覆盖时，跨显示器移动保持该缩放不变
+        let new_scale_factor = lock
+            .scale_factor_override
+            .unwrap_or_else(|| new_dpi / USER_DEFAULT_SCREEN_DPI as f32);
         lock.scale_factor = new_scale_factor;
         lock.border_offset.update(handle).log_err();
         drop(lock);

@@ -334,9 +334,9 @@ impl MainWindow {
             .w(px(380.0))
             .p(px(16.0))
             .rounded(Theme::RADIUS_LG)
-            .bg(Theme::CARD_BG_HOVER)
+            .bg(Theme::CARD_BG_HOVER())
             .border_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .shadow_lg()
             .flex()
             .flex_col()
@@ -368,7 +368,7 @@ impl MainWindow {
                 ))
             })
             .when_some(self.f_update.error.as_ref(), |el, error| {
-                el.child(div().text_color(Theme::LOSS_TEXT).child(error.clone()))
+                el.child(div().text_color(Theme::LOSS_TEXT()).child(error.clone()))
             })
             .child(
                 div()
@@ -414,9 +414,9 @@ impl MainWindow {
                             entity_install.update(app, |view, cx| view.install_update(cx))
                         }))
                     })
-                    .child(update_action("打开发布页", move |_, app| {
+                    .child(update_action("打开发布页", move |window, app| {
                         entity_release.update(app, |view, cx| {
-                            view.handle_settings_action(SettingsAction::GoToReleases, cx);
+                            view.handle_settings_action(SettingsAction::GoToReleases, window, cx);
                         })
                     })),
             )
@@ -433,11 +433,11 @@ fn update_action(
         .px(px(10.0))
         .py(px(5.0))
         .rounded(Theme::RADIUS_SM)
-        .bg(Theme::ACCENT_LIGHT)
-        .text_color(Theme::TEXT_PRIMARY)
+        .bg(Theme::ACCENT_LIGHT())
+        .text_color(Theme::TEXT_PRIMARY())
         .text_sm()
         .cursor_pointer()
-        .hover(|s| s.bg(Theme::HOVER_BG_STRONG))
+        .hover(|s| s.bg(Theme::HOVER_BG_STRONG()))
         .on_mouse_down(MouseButton::Left, move |_, window, app| action(window, app))
         .child(label)
 }
@@ -472,12 +472,7 @@ fn release_client(config: &AppConfig) -> Result<reqwest::Client, String> {
 }
 
 fn update_service(config: &AppConfig) -> Result<UpdateService, String> {
-    let endpoint = option_env!("YUUMI_GPUI_UPDATE_ENDPOINT")
-        .filter(|s| !s.is_empty())
-        .ok_or("此 GPUI 构建未配置签名更新通道，请通过发布页获取兼容版本。")?;
-    let key = option_env!("YUUMI_GPUI_UPDATE_PUBLIC_KEY")
-        .filter(|s| !s.is_empty())
-        .ok_or("此 GPUI 构建缺少可信更新公钥。")?;
+    let (endpoint, key) = update::gpui_update_channel()?;
     let target = format!(
         "windows-{}-gpui{}",
         std::env::consts::ARCH,
@@ -489,9 +484,9 @@ fn update_service(config: &AppConfig) -> Result<UpdateService, String> {
     );
     Ok(UpdateService::new(
         release_client(config)?,
-        endpoint.into(),
+        endpoint,
         env!("CARGO_PKG_VERSION").into(),
         target,
-        key.into(),
+        key,
     ))
 }

@@ -1,6 +1,7 @@
 //! Windows 平台级深度接入（Win32 API、命名互斥量单实例、透明置顶与无边框控制）
 
 use crate::MAIN_WINDOW_TITLE;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM, WPARAM,
@@ -11,8 +12,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowExW, FindWindowW, GetForegroundWindow, GetWindowLongW, IsIconic, IsWindowVisible,
     PostMessageW, SetForegroundWindow, SetWindowLongW, SetWindowPos, ShowWindowAsync, GWL_EXSTYLE,
     HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_NCLBUTTONDOWN,
-    WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    SWP_NOSIZE, SW_HIDE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_NCLBUTTONDOWN, WS_EX_LAYERED,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
 /// 命名互斥量守卫，负责释放句柄
@@ -173,7 +174,17 @@ pub fn begin_window_drag(hwnd: HWND) {
     }
 }
 
-/// 设置窗口置顶 (HWND_TOPMOST)
+pub fn native_window_handle(window: &gpui::Window) -> Result<HWND, String> {
+    match HasWindowHandle::window_handle(window)
+        .map_err(|e| e.to_string())?
+        .as_raw()
+    {
+        RawWindowHandle::Win32(handle) => Ok(HWND(handle.hwnd.get() as *mut _)),
+        _ => Err("无法获取 Windows 窗口句柄".into()),
+    }
+}
+
+/// 设置窗口置顶，保留当前的可见性和焦点。
 pub fn set_window_topmost(hwnd: HWND, topmost: bool) {
     unsafe {
         let insert_after = if topmost {
@@ -181,15 +192,17 @@ pub fn set_window_topmost(hwnd: HWND, topmost: bool) {
         } else {
             HWND_NOTOPMOST
         };
-        let _ = SetWindowPos(
+        if let Err(error) = SetWindowPos(
             hwnd,
             insert_after,
             0,
             0,
             0,
             0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        );
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        ) {
+            log::warn!("[Platform] 设置窗口置顶失败: {error}");
+        }
     }
 }
 
@@ -233,20 +246,53 @@ pub fn set_window_clickthrough(hwnd: HWND, enable: bool) {
     }
 }
 
-/// 在 Windows 11 上启用 Mica 亚克力材质极光半透明
-pub fn apply_mica_or_acrylic(hwnd: HWND) {
+/// 在 Windows 11 上启用或清除 Mica 背景。
+pub fn set_mica(hwnd: HWND, enabled: bool) -> Result<(), String> {
     unsafe {
-        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE};
-        // DWMSBT_ACRYLIC = 3, DWMSBT_MAINWINDOW = 2 (Mica)
-        let backdrop_type: u32 = 2; // Mica
-        let res = DwmSetWindowAttribute(
+        use windows::Win32::Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMSBT_MAINWINDOW, DWMSBT_NONE, DWMWA_SYSTEMBACKDROP_TYPE,
+        };
+        let backdrop = if enabled {
+            DWMSBT_MAINWINDOW
+        } else {
+            DWMSBT_NONE
+        };
+        DwmSetWindowAttribute(
             hwnd,
             DWMWA_SYSTEMBACKDROP_TYPE,
-            &backdrop_type as *const _ as *const _,
-            std::mem::size_of::<u32>() as u32,
-        );
-        log::info!("[Platform] DwmSetWindowAttribute Mica 返回: {:?}", res);
+            std::ptr::from_ref(&backdrop).cast(),
+            std::mem::size_of_val(&backdrop) as u32,
+        )
+        .map_err(|e| e.to_string())
     }
+}
+
+/// 读取 Windows「应用模式」系统深色偏好（AppsUseLightTheme=0 表示深色）。
+/// 读取失败时按浅色处理。
+pub fn system_prefers_dark() -> bool {
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let subkey = widen("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+    let value = widen("AppsUseLightTheme");
+
+    let mut data: u32 = 0;
+    let mut data_size = std::mem::size_of::<u32>() as u32;
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(subkey.as_ptr()),
+            PCWSTR(value.as_ptr()),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(std::ptr::from_mut(&mut data).cast()),
+            Some(std::ptr::from_mut(&mut data_size)),
+        )
+    };
+    result.is_ok() && data == 0
+}
+
+/// UTF-16 NUL 结尾字符串
+fn widen(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// 在 Windows 11 上启用原生圆角

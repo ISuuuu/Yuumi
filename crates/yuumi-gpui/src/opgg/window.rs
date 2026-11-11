@@ -115,6 +115,21 @@ impl OpggWindow {
 
     // ─── 数据 ───
 
+    pub(crate) fn set_proxy(&mut self, proxy: ProxyConfig, cx: &mut Context<Self>) {
+        if self.proxy == proxy {
+            return;
+        }
+        let refresh = self.proxy.enable || proxy.enable;
+        self.proxy = proxy;
+        if refresh {
+            match (self.tab, self.selected_champion) {
+                (OpggTab::Build, Some(champion_id)) => self.fetch_build(champion_id, cx),
+                _ => self.fetch_tier_list(cx),
+            }
+            cx.notify();
+        }
+    }
+
     /// 载入 LCU 侧静态资料：英雄名映射与符文树/符文文案
     fn load_static_data(&mut self, cx: &mut Context<Self>) {
         let service = self.service.clone();
@@ -425,7 +440,7 @@ impl OpggWindow {
             .px(px(16.0))
             .py(px(10.0))
             .border_b_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .child(
                 div()
                     .flex()
@@ -468,7 +483,7 @@ impl OpggWindow {
                 (!self.version.is_empty()).then(|| {
                     div()
                         .text_size(px(11.52))
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child(format!("游戏版本: {}", self.version))
                 }),
             ))
@@ -488,7 +503,7 @@ impl OpggWindow {
                         .size(px(28.0))
                         .rounded_full()
                         .border_2()
-                        .border_color(Theme::ACCENT_ALPHA_20)
+                        .border_color(Theme::ACCENT_ALPHA_20())
                         .flex()
                         .items_center()
                         .justify_center()
@@ -496,7 +511,7 @@ impl OpggWindow {
                             div()
                                 .size(px(10.0))
                                 .rounded_full()
-                                .bg(Theme::ACCENT_PRIMARY),
+                                .bg(Theme::ACCENT_PRIMARY()),
                         ),
                 )
                 .into_any_element();
@@ -596,20 +611,20 @@ fn tab_button(
         .border_color(if active {
             Palette::tab_active()
         } else {
-            Theme::CARD_BORDER
+            Theme::CARD_BORDER()
         })
         .rounded(px(6.0))
         .bg(if active {
             Palette::tab_active()
         } else {
-            Theme::CARD_BG
+            Theme::CARD_BG()
         })
         .text_size(px(12.48))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(if active {
             rgb(0xffffff).into()
         } else {
-            Theme::TEXT_SECONDARY
+            Theme::TEXT_SECONDARY()
         })
         .when(disabled, |style| style.opacity(0.4))
         .when(!disabled, |style| {
@@ -622,8 +637,8 @@ fn tab_button(
                             .border_color(Palette::tab_active_hover())
                     } else {
                         hover
-                            .bg(Theme::CARD_BG_HOVER)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .bg(Theme::CARD_BG_HOVER())
+                            .text_color(Theme::TEXT_PRIMARY())
                     }
                 })
                 .on_mouse_down(MouseButton::Left, move |_ev, _window, app| {
@@ -720,8 +735,8 @@ impl Render for OpggWindow {
             .size_full()
             .flex()
             .flex_col()
-            .bg(Theme::BG_APP)
-            .text_color(Theme::TEXT_PRIMARY)
+            .bg(Theme::BG_APP())
+            .text_color(Theme::TEXT_PRIMARY())
             .font_family(Theme::font_family())
             // 空白区域按下收起筛选下拉（对照 Vue 的 document click 全局关闭）
             .on_mouse_down(

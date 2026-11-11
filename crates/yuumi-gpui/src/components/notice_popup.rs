@@ -32,13 +32,13 @@ pub fn notice_popup(
                     .size(px(16.0))
                     .rounded_full()
                     .border(px(2.0))
-                    .border_color(Theme::ACCENT_PRIMARY),
+                    .border_color(Theme::ACCENT_PRIMARY()),
             )
             .child(
                 div()
                     .text_size(px(12.5))
-                    .text_color(Theme::TEXT_MUTED)
-                    .child("正在获取最新公告..."),
+                    .text_color(Theme::TEXT_MUTED())
+                    .child(crate::i18n::t("noticePage.loadingText")),
             )
             .into_any_element()
     } else if has_error {
@@ -52,16 +52,16 @@ pub fn notice_popup(
             .child(
                 div()
                     .text_size(px(12.5))
-                    .text_color(Theme::LOSS_TEXT)
-                    .child("获取最新公告失败"),
+                    .text_color(Theme::LOSS_TEXT())
+                    .child(crate::i18n::t("noticePage.errorText")),
             )
-            .child(action_button("重试", false, move |_ev, win, app| {
+            .child(action_button(crate::i18n::t("noticePage.retryBtn"), false, move |_ev, win, app| {
                 retry_cb(win, app);
             }))
             .into_any_element()
     } else {
         let display_content = if content.is_empty() {
-            "当前版本已完整复刻 Vue 纯白水晶极光界面，Direct3D 11 原生极速渲染，内存与启动性能优化完毕。"
+            crate::i18n::t("noticePage.emptyContent")
         } else {
             content
         };
@@ -75,7 +75,7 @@ pub fn notice_popup(
             .flex_col()
             .gap(px(8.0))
             .text_size(px(12.5))
-            .text_color(Theme::TEXT_SECONDARY)
+            .text_color(Theme::TEXT_SECONDARY())
             .line_height(relative(1.4))
             .child(display_content.to_string())
             .into_any_element()
@@ -85,9 +85,9 @@ pub fn notice_popup(
         .id("notice-popup-toast")
         .occlude()
         .w(px(320.0))
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .rounded(Theme::RADIUS_LG)
         .shadow_lg()
         .overflow_hidden()
@@ -102,19 +102,19 @@ pub fn notice_popup(
                 .h(px(40.0))
                 .px(px(14.0))
                 .border_b_1()
-                .border_color(Theme::CARD_BORDER)
-                .bg(Theme::HOVER_BG)
+                .border_color(Theme::CARD_BORDER())
+                .bg(Theme::HOVER_BG())
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .gap(px(6.0))
-                        .child(icon("icons/bell.svg", 16.0, Theme::ACCENT_PRIMARY))
+                        .child(icon("icons/bell.svg", 16.0, Theme::ACCENT_PRIMARY()))
                         .child(
                             div()
                                 .text_size(px(13.0))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .child(title),
                         ),
                 )
@@ -126,12 +126,12 @@ pub fn notice_popup(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .hover(|s| s.bg(Theme::HOVER_BG_STRONG))
+                        .hover(|s| s.bg(Theme::HOVER_BG_STRONG()))
                         .cursor_pointer()
                         .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                             close_cb(win, app);
                         })
-                        .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED)),
+                        .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED())),
                 ),
         )
         // 内容区

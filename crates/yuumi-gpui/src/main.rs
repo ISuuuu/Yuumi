@@ -12,6 +12,7 @@ mod bench_overlay;
 mod career_view;
 mod components;
 mod game_info_view;
+mod i18n;
 mod match_model;
 mod opgg;
 pub mod platform;
@@ -21,13 +22,15 @@ mod theme;
 mod tray;
 pub mod views;
 
-use app_window::{main_window_bounds, MainWindow};
+use app_window::{main_window_bounds, scale_factor_override_for, MainWindow};
 
 // 主窗标题常量沿用原有 crate 级访问路径（bench_overlay / platform 直接引用 crate::BENCH_WINDOW_TITLE）
 pub use app_window::{BENCH_WINDOW_TITLE, MAIN_WINDOW_TITLE};
 
 fn main() {
-    if yuumi_core::update::run_portable_helper_if_requested() { return; }
+    if yuumi_core::update::run_portable_helper_if_requested() {
+        return;
+    }
     // 显式安装全局默认 CryptoProvider，防止 rustls 0.23+ 多 provider 特性冲突
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -60,7 +63,9 @@ fn main() {
 
     // 2. 初始化平台日志系统（输出到标准错误与调试输出）
     yuumi_core::runtime::init();
-    if let Err(error) = services::logging::init(yuumi_core::config::AppConfig::load().general.log_level) {
+    if let Err(error) =
+        services::logging::init(yuumi_core::config::AppConfig::load().general.log_level)
+    {
         eprintln!("日志初始化失败: {error}");
     }
     log::info!("Yuumi GPUI 原生 Direct3D 11/DirectWrite 渲染宿主正在启动...");
@@ -69,6 +74,7 @@ fn main() {
     let app = Application::new().with_assets(assets::Assets);
 
     app.run(move |cx| {
+        let config = yuumi_core::config::AppConfig::load();
         // 创建主应用窗口（无边框，1200×910 居中，可调整大小）
         let window_options = WindowOptions {
             window_bounds: Some(main_window_bounds(cx)),
@@ -83,33 +89,25 @@ fn main() {
                 appears_transparent: true,
                 traffic_light_position: None,
             }),
+            // 设置页 DPI 缩放（Auto=跟随系统，100/125/150=固定缩放）
+            scale_factor_override: scale_factor_override_for(&config.personalization.dpi_scale),
             focus: true,
             is_movable: true,
             ..Default::default()
         };
 
-        let window_handle = cx
-            .open_window(window_options, |_window, cx| cx.new(MainWindow::new))
-            .expect("创建 Yuumi GPUI 主窗口失败");
+        cx.open_window(window_options, |window, cx| {
+            cx.new(|cx| {
+                let mut view = MainWindow::new(cx);
+                view.initialize_window_appearance(window);
+                view
+            })
+        })
+        .expect("创建 Yuumi GPUI 主窗口失败");
 
-        // 读取持久化配置以按需应用 Mica 与全局 API 并发限制
-        let config = yuumi_core::config::AppConfig::load();
-        yuumi_core::lcu::client::set_api_concurrency(config.functions.api_concurrency_number as usize);
-        let mica_enabled = config.personalization.mica_enabled;
-
-        // 异步应用 Windows 11 Mica / DwmExtendFrameIntoClientArea 亚克力极光特效与圆角
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(60));
-            if let Some(hwnd) = platform::find_main_window_hwnd() {
-                if mica_enabled {
-                    platform::apply_mica_or_acrylic(hwnd);
-                }
-                platform::set_window_rounded_corners(hwnd);
-            } else {
-                log::warn!("[Platform] 未找到主窗口 HWND，跳过 Mica/圆角设置");
-            }
-        });
-
-        let _ = window_handle;
+        // 应用全局 API 并发限制。
+        yuumi_core::lcu::client::set_api_concurrency(
+            config.functions.api_concurrency_number as usize,
+        );
     });
 }

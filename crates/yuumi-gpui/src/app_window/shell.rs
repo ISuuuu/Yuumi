@@ -14,8 +14,12 @@ impl Render for MainWindow {
         };
         let map_side_label = if let Some(info) = &self.game_info {
             match info.user_side {
-                Some(yuumi_core::gameflow::team_builder::MapSide::Blue) => Some("蓝方"),
-                Some(yuumi_core::gameflow::team_builder::MapSide::Red) => Some("红方"),
+                Some(yuumi_core::gameflow::team_builder::MapSide::Blue) => {
+                    Some(crate::i18n::t("titlebar.blueSide"))
+                }
+                Some(yuumi_core::gameflow::team_builder::MapSide::Red) => {
+                    Some(crate::i18n::t("titlebar.redSide"))
+                }
                 _ => None,
             }
         } else {
@@ -52,7 +56,11 @@ impl Render for MainWindow {
             .size_full()
             .flex()
             .flex_col()
-            .bg(Theme::BG_APP)
+            .bg(if self.mica_active {
+                Theme::BG_APP().opacity(0.75)
+            } else {
+                Theme::BG_APP()
+            })
             .font_family(Theme::font_family())
             // 1. 无边框自定义标题栏（Logo + Yummi + 阶段徽章 + 窗口按钮）
             .child(self.titlebar.render(
@@ -188,16 +196,16 @@ impl Render for MainWindow {
                                     .right(px(32.0))
                                     .size(px(40.0))
                                     .rounded_full()
-                                    .bg(Theme::CARD_BG)
+                                    .bg(Theme::CARD_BG())
                                     .border_1()
-                                    .border_color(Theme::AURORA_CYAN)
+                                    .border_color(Theme::AURORA_CYAN())
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .cursor_pointer()
                                     .hover(|s| {
-                                        s.bg(Theme::CARD_BG_HOVER)
-                                            .border_color(Theme::ACCENT_PRIMARY)
+                                        s.bg(Theme::CARD_BG_HOVER())
+                                            .border_color(Theme::ACCENT_PRIMARY())
                                     })
                                     .on_mouse_down(MouseButton::Left, move |_ev, _win, app| {
                                         v.update(app, |this, cx| {
@@ -238,7 +246,7 @@ impl Render for MainWindow {
                                         div()
                                             .text_base()
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::ACCENT_PRIMARY)
+                                            .text_color(Theme::ACCENT_PRIMARY())
                                             .child("↑"),
                                     ),
                             )
@@ -256,7 +264,7 @@ impl Render for MainWindow {
                         .right(px(20.0))
                         .bottom(px(20.0))
                         .child(notice_popup(
-                            "版本更新与运行公告",
+                            crate::i18n::t("noticePage.title"),
                             self.notice_loading,
                             self.notice_error,
                             content_str,

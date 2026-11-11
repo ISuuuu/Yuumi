@@ -49,15 +49,38 @@ impl MainWindow {
             }
             ToolsAction::ClearPickChampion(lane) => {
                 match lane {
-                    "top" => self.app_config.functions.auto_select_champion_top.clear(),
-                    "jug" => self.app_config.functions.auto_select_champion_jug.clear(),
-                    "mid" => self.app_config.functions.auto_select_champion_mid.clear(),
-                    "bot" => self.app_config.functions.auto_select_champion_bot.clear(),
-                    "sup" => self.app_config.functions.auto_select_champion_sup.clear(),
-                    _ => self.app_config.functions.auto_select_champion.clear(),
+                    "top" => {
+                        self.automation.auto_bp.pick_champion_ids_top.clear();
+                        self.app_config.functions.auto_select_champion_top.clear();
+                    }
+                    "jug" => {
+                        self.automation.auto_bp.pick_champion_ids_jug.clear();
+                        self.app_config.functions.auto_select_champion_jug.clear();
+                    }
+                    "mid" => {
+                        self.automation.auto_bp.pick_champion_ids_mid.clear();
+                        self.app_config.functions.auto_select_champion_mid.clear();
+                    }
+                    "bot" => {
+                        self.automation.auto_bp.pick_champion_ids_bot.clear();
+                        self.app_config.functions.auto_select_champion_bot.clear();
+                    }
+                    "sup" => {
+                        self.automation.auto_bp.pick_champion_ids_sup.clear();
+                        self.app_config.functions.auto_select_champion_sup.clear();
+                    }
+                    _ => {
+                        self.automation.auto_bp.pick_champion_ids.clear();
+                        self.app_config.functions.auto_select_champion.clear();
+                    }
                 }
-                // [D06-c] 清空也是选择器内的临时操作，等待「完成」确认才落盘
-                cx.notify();
+                if self.tools_view.open_hover_picker {
+                    // 选择器展开编辑中：作为临时修改等待「完成」确认才落盘
+                    cx.notify();
+                } else {
+                    // 收起状态直接点清空：立即落盘保存
+                    self.persist_config(cx);
+                }
             }
             ToolsAction::ToggleAutoBan => {
                 self.app_config.functions.enable_auto_ban_champion =
@@ -78,15 +101,38 @@ impl MainWindow {
             }
             ToolsAction::ClearBanChampion(lane) => {
                 match lane {
-                    "top" => self.app_config.functions.auto_ban_champion_top.clear(),
-                    "jug" => self.app_config.functions.auto_ban_champion_jug.clear(),
-                    "mid" => self.app_config.functions.auto_ban_champion_mid.clear(),
-                    "bot" => self.app_config.functions.auto_ban_champion_bot.clear(),
-                    "sup" => self.app_config.functions.auto_ban_champion_sup.clear(),
-                    _ => self.app_config.functions.auto_ban_champion.clear(),
+                    "top" => {
+                        self.automation.auto_bp.ban_champion_ids_top.clear();
+                        self.app_config.functions.auto_ban_champion_top.clear();
+                    }
+                    "jug" => {
+                        self.automation.auto_bp.ban_champion_ids_jug.clear();
+                        self.app_config.functions.auto_ban_champion_jug.clear();
+                    }
+                    "mid" => {
+                        self.automation.auto_bp.ban_champion_ids_mid.clear();
+                        self.app_config.functions.auto_ban_champion_mid.clear();
+                    }
+                    "bot" => {
+                        self.automation.auto_bp.ban_champion_ids_bot.clear();
+                        self.app_config.functions.auto_ban_champion_bot.clear();
+                    }
+                    "sup" => {
+                        self.automation.auto_bp.ban_champion_ids_sup.clear();
+                        self.app_config.functions.auto_ban_champion_sup.clear();
+                    }
+                    _ => {
+                        self.automation.auto_bp.ban_champion_ids.clear();
+                        self.app_config.functions.auto_ban_champion.clear();
+                    }
                 }
-                // [D06-c] 清空也是选择器内的临时操作，等待「完成」确认才落盘
-                cx.notify();
+                if self.tools_view.open_ban_picker {
+                    // 选择器展开编辑中：作为临时修改等待「完成」确认才落盘
+                    cx.notify();
+                } else {
+                    // 收起状态直接点清空：立即落盘保存
+                    self.persist_config(cx);
+                }
             }
             ToolsAction::ToggleAutoSpell => {
                 self.app_config.functions.enable_auto_set_spells =

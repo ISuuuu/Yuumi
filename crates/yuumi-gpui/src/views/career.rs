@@ -723,7 +723,7 @@ impl CareerView {
                 div()
                     .text_size(px(15.0))
                     .line_height(px(24.0))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child("请先启动英雄联盟客户端"),
             )
     }
@@ -770,7 +770,7 @@ impl CareerView {
                 .child(
                     div()
                         .text_size(px(14.0))
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child("正在加载召唤师资料..."),
                 )
                 .into_any_element();
@@ -898,9 +898,9 @@ impl CareerView {
 
         div()
             .w(px(1000.0))
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .border_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .rounded_xl()
             .p(px(24.0))
             .shadow_sm()
@@ -936,14 +936,14 @@ impl CareerView {
                                                 div()
                                                     .text_size(px(26.0))
                                                     .font_weight(FontWeight::EXTRA_BOLD)
-                                                    .text_color(Theme::TEXT_PRIMARY)
+                                                    .text_color(Theme::TEXT_PRIMARY())
                                                     .child(game_name),
                                             )
                                             .when(is_private, |this| {
                                                 this.child(icon(
                                                     "icons/lock.svg",
                                                     17.0,
-                                                    Theme::GOLD,
+                                                    Theme::GOLD(),
                                                 ))
                                             })
                                             .when(copied, |this| {
@@ -951,7 +951,7 @@ impl CareerView {
                                                     div()
                                                         .text_size(px(12.0))
                                                         .font_weight(FontWeight::SEMIBOLD)
-                                                        .text_color(Theme::WIN_TEXT)
+                                                        .text_color(Theme::WIN_TEXT())
                                                         .child("✓ 已复制"),
                                                 )
                                             }),
@@ -960,7 +960,7 @@ impl CareerView {
                                         this.child(
                                             div()
                                                 .text_size(px(13.6))
-                                                .text_color(Theme::TEXT_MUTED)
+                                                .text_color(Theme::TEXT_MUTED())
                                                 .child(format!("# {}", tag)),
                                         )
                                     }),
@@ -974,17 +974,17 @@ impl CareerView {
                                     .justify_center()
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .bg(Theme::HOVER_BG)
+                                    .border_color(Theme::CARD_BORDER())
+                                    .bg(Theme::HOVER_BG())
                                     .cursor_pointer()
                                     .hover(|s| {
-                                        s.bg(Theme::HOVER_BG_STRONG)
-                                            .border_color(Theme::ACCENT_PRIMARY)
+                                        s.bg(Theme::HOVER_BG_STRONG())
+                                            .border_color(Theme::ACCENT_PRIMARY())
                                     })
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         cb(win, app)
                                     })
-                                    .child(icon("icons/copy.svg", 14.0, Theme::TEXT_MUTED))
+                                    .child(icon("icons/copy.svg", 14.0, Theme::TEXT_MUTED()))
                             }),
                     ),
             )
@@ -998,8 +998,8 @@ impl CareerView {
                     .when(is_viewing_other, |this| {
                         this.child(Self::action_button_styled(
                             "返回我的生涯",
-                            Theme::ACCENT_PRIMARY,
-                            Theme::ACCENT_LIGHT,
+                            Theme::ACCENT_PRIMARY(),
+                            Theme::ACCENT_LIGHT(),
                             on_back_to_me,
                         ))
                     })
@@ -1027,7 +1027,7 @@ impl CareerView {
                         let sweep = 300.0 * (progress.min(100) as f32 / 100.0);
                         if sweep > 0.5 {
                             if let Some(fill) = arc_path(center, radius, 120.0, sweep, stroke) {
-                                window.paint_path(fill, Theme::ACCENT_PRIMARY);
+                                window.paint_path(fill, Theme::ACCENT_PRIMARY());
                             }
                         }
                     },
@@ -1063,7 +1063,7 @@ impl CareerView {
                     .text_size(px(11.5))
                     .font_weight(FontWeight::BOLD)
                     .line_height(px(12.0))
-                    .text_color(Theme::TEXT_PRIMARY)
+                    .text_color(Theme::TEXT_PRIMARY())
                     .child(level.to_string()),
             )
     }
@@ -1077,15 +1077,15 @@ impl CareerView {
             .py(px(6.0))
             .rounded(px(6.0))
             .border_1()
-            .border_color(Theme::CARD_BORDER)
-            .bg(Theme::CARD_BG)
+            .border_color(Theme::CARD_BORDER())
+            .bg(Theme::CARD_BG())
             .text_size(px(13.1))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(Theme::TEXT_PRIMARY)
+            .text_color(Theme::TEXT_PRIMARY())
             .cursor_pointer()
             .hover(|s| {
-                s.bg(Theme::CARD_BG_HOVER)
-                    .border_color(Theme::ACCENT_PRIMARY)
+                s.bg(Theme::CARD_BG_HOVER())
+                    .border_color(Theme::ACCENT_PRIMARY())
             })
             .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
             .child(label)
@@ -1106,9 +1106,9 @@ impl CareerView {
             .bg(bg_color)
             .text_size(px(13.0))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(Theme::ACCENT_PRIMARY)
+            .text_color(Theme::ACCENT_PRIMARY())
             .cursor_pointer()
-            .hover(|s| s.bg(Theme::HOVER_BG_STRONG))
+            .hover(|s| s.bg(Theme::HOVER_BG_STRONG()))
             .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
             .child(label)
     }
@@ -1126,7 +1126,7 @@ impl CareerView {
             .mb(px(16.0))
             .pb(px(8.0))
             .border_b_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .flex_none()
             .children(
                 [CareerTab::Matches, CareerTab::Loot, CareerTab::Mastery]
@@ -1143,23 +1143,23 @@ impl CareerView {
                             .text_size(px(14.1))
                             .font_weight(FontWeight::BOLD)
                             .bg(if is_active {
-                                Theme::ACCENT_ALPHA_10
+                                Theme::ACCENT_ALPHA_10()
                             } else {
                                 transparent_black()
                             })
                             .text_color(if is_active {
-                                Theme::ACCENT_PRIMARY
+                                Theme::ACCENT_PRIMARY()
                             } else {
-                                Theme::TEXT_MUTED
+                                Theme::TEXT_MUTED()
                             })
                             .border_color(if is_active {
-                                Theme::ACCENT_ALPHA_20
+                                Theme::ACCENT_ALPHA_20()
                             } else {
                                 transparent_black()
                             })
                             .when(!is_active, |this| {
                                 this.hover(|s| {
-                                    s.bg(Theme::CARD_BG_HOVER).text_color(Theme::ACCENT_PRIMARY)
+                                    s.bg(Theme::CARD_BG_HOVER()).text_color(Theme::ACCENT_PRIMARY())
                                 })
                             })
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
@@ -1216,9 +1216,9 @@ impl CareerView {
                     .child(if is_empty {
                         div()
                             .w(px(1000.0))
-                            .bg(Theme::CARD_BG)
+                            .bg(Theme::CARD_BG())
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .rounded_xl()
                             .p_8()
                             .flex()
@@ -1230,13 +1230,13 @@ impl CareerView {
                                 div()
                                     .text_base()
                                     .font_weight(FontWeight::MEDIUM)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child("暂无近期的对局历史记录"),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child("请在英雄联盟客户端完成对局，或点击资料卡右侧的「刷新」拉取最新战绩"),
                             )
                             .into_any_element()
@@ -1282,9 +1282,9 @@ impl CareerView {
         div()
             .w(px(1000.0))
             .flex_none()
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .border_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .rounded_xl()
             .overflow_hidden()
             .flex()
@@ -1295,14 +1295,14 @@ impl CareerView {
                     .items_center()
                     .px(px(16.0))
                     .py(px(6.0))
-                    .bg(Theme::HOVER_BG)
+                    .bg(Theme::HOVER_BG())
                     .border_b_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .children(COLUMNS.iter().map(|(label, width)| {
                         ranked_cell(
                             label.to_string(),
                             *width,
-                            Theme::TEXT_MUTED,
+                            Theme::TEXT_MUTED(),
                             13.1,
                             FontWeight::SEMIBOLD,
                         )
@@ -1312,15 +1312,15 @@ impl CareerView {
                 let is_last = idx + 1 == 2;
                 let mut row = div().flex().items_center().px(px(16.0)).py(px(8.0));
                 if !is_last {
-                    row = row.border_b_1().border_color(Theme::CARD_BORDER);
+                    row = row.border_b_1().border_color(Theme::CARD_BORDER());
                 }
                 row.children(values.into_iter().zip(COLUMNS.iter()).enumerate().map(
                     |(col, (value, (_, width)))| {
                         let (color, weight) = match col {
-                            0 => (Theme::TEXT_PRIMARY, FontWeight::SEMIBOLD),
+                            0 => (Theme::TEXT_PRIMARY(), FontWeight::SEMIBOLD),
                             // 段位列在 Vue 侧为品牌青加粗
-                            5 => (Theme::ACCENT_PRIMARY, FontWeight::BOLD),
-                            _ => (Theme::TEXT_PRIMARY, FontWeight::NORMAL),
+                            5 => (Theme::ACCENT_PRIMARY(), FontWeight::BOLD),
+                            _ => (Theme::TEXT_PRIMARY(), FontWeight::NORMAL),
                         };
                         ranked_cell(value, *width, color, 13.1, weight)
                     },
@@ -1356,9 +1356,9 @@ impl CareerView {
             .w(px(1000.0))
             .flex_none()
             .relative()
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .border_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .rounded(px(8.0))
             .px(px(16.0))
             .py(px(10.0))
@@ -1373,30 +1373,30 @@ impl CareerView {
                     .items_center()
                     .gap(px(8.0))
                     .text_size(px(13.1))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .whitespace_nowrap()
                     .child(
                         div()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .mr(px(4.0))
                             .child(format!("近期对局（最近 {} 场）", stats.total_games)),
                     )
                     .child(
                         div()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(Theme::WIN_TEXT)
+                            .text_color(Theme::WIN_TEXT())
                             .child(format!("胜: {}", stats.wins)),
                     )
                     .child(
                         div()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(Theme::LOSS_TEXT)
+                            .text_color(Theme::LOSS_TEXT())
                             .child(format!("负: {}", stats.losses)),
                     )
                     .child(
                         div()
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .ml(px(8.0))
                             .child("KDA:"),
                     )
@@ -1406,18 +1406,18 @@ impl CareerView {
                             .items_center()
                             .gap(px(3.0))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child(format!("{} /", sum_kills))
                             .child(
                                 div()
-                                    .text_color(Theme::DEATH_RED)
+                                    .text_color(Theme::DEATH_RED())
                                     .child(sum_deaths.to_string()),
                             )
                             .child(format!("/ {}", sum_assists)),
                     )
                     .child(
                         div()
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child(format!("({:.1})", stats.avg_kda_ratio)),
                     ),
             )
@@ -1430,14 +1430,14 @@ impl CareerView {
                     .px(px(8.0))
                     .py(px(3.0))
                     .rounded(px(6.0))
-                    .bg(Theme::HOVER_BG)
+                    .bg(Theme::HOVER_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .when(positions.is_empty(), |this| {
                         this.child(
                             div()
                                 .text_size(px(11.5))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child("常玩位置: 暂无"),
                         )
                     })
@@ -1446,7 +1446,7 @@ impl CareerView {
                             div()
                                 .text_size(px(11.5))
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child("常玩位置:"),
                         )
                     })
@@ -1459,12 +1459,12 @@ impl CareerView {
                             .child(
                                 div()
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(label),
                             )
                             .child(
                                 div()
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(format!("{}%", count * 100 / valid_total)),
                             )
                     })),
@@ -1478,7 +1478,7 @@ impl CareerView {
                         this.child(
                             div()
                                 .text_size(px(11.5))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child("暂无英雄数据"),
                         )
                     })
@@ -1500,12 +1500,12 @@ impl CareerView {
                                     .right(px(-2.0))
                                     .px(px(3.0))
                                     .rounded_full()
-                                    .bg(Theme::CARD_BG)
+                                    .bg(Theme::CARD_BG())
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
+                                    .border_color(Theme::CARD_BORDER())
                                     .text_size(px(9.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(count.to_string()),
                             )
                     })),
@@ -1577,18 +1577,18 @@ impl CareerView {
                     .justify_between()
                     .pb(px(4.0))
                     .border_b_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .child(
                         div()
                             .text_size(px(13.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child("最近队友"),
                     )
                     .child(
                         div()
                             .text_size(px(11.0))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child("近 20 场同队数据"),
                     ),
             )
@@ -1599,7 +1599,7 @@ impl CareerView {
                     .items_center()
                     .justify_center()
                     .text_size(px(12.0))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child("暂无最近队友数据")
                     .into_any_element()
             } else {
@@ -1616,9 +1616,9 @@ impl CareerView {
                             .p(px(8.0))
                             .rounded_lg()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .bg(Theme::CARD_BG)
-                            .hover(|s| s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY))
+                            .border_color(Theme::CARD_BORDER())
+                            .bg(Theme::CARD_BG())
+                            .hover(|s| s.bg(Theme::HOVER_BG()).border_color(Theme::ACCENT_PRIMARY()))
                             .cursor_pointer()
                             .flex()
                             .items_center()
@@ -1652,7 +1652,7 @@ impl CareerView {
                                                         div()
                                                             .text_size(px(12.5))
                                                             .font_weight(FontWeight::SEMIBOLD)
-                                                            .text_color(Theme::TEXT_PRIMARY)
+                                                            .text_color(Theme::TEXT_PRIMARY())
                                                             .child(tm.name.clone()),
                                                     )
                                                     .when_some(tm.tag.as_ref(), |this, tag| {
@@ -1661,9 +1661,9 @@ impl CareerView {
                                                                 .px(px(4.0))
                                                                 .py(px(1.0))
                                                                 .rounded_sm()
-                                                                .bg(Theme::BADGE_BG)
+                                                                .bg(Theme::BADGE_BG())
                                                                 .text_size(px(10.0))
-                                                                .text_color(Theme::ACCENT_PRIMARY)
+                                                                .text_color(Theme::ACCENT_PRIMARY())
                                                                 .child(tag.clone()),
                                                         )
                                                     }),
@@ -1672,7 +1672,7 @@ impl CareerView {
                                                 this.child(
                                                     div()
                                                         .text_size(px(10.5))
-                                                        .text_color(Theme::TEXT_MUTED)
+                                                        .text_color(Theme::TEXT_MUTED())
                                                         .child(time_str),
                                                 )
                                             }),
@@ -1686,19 +1686,19 @@ impl CareerView {
                                     .text_size(px(11.5))
                                     .child(
                                         div()
-                                            .text_color(Theme::TEXT_MUTED)
+                                            .text_color(Theme::TEXT_MUTED())
                                             .child(format!("总: {}", tm.total)),
                                     )
                                     .child(
                                         div()
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::WIN_TEXT)
+                                            .text_color(Theme::WIN_TEXT())
                                             .child(format!("胜: {}", tm.wins)),
                                     )
                                     .child(
                                         div()
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::LOSS_TEXT)
+                                            .text_color(Theme::LOSS_TEXT())
                                             .child(format!("负: {}", tm.losses)),
                                     ),
                             )
@@ -1714,15 +1714,15 @@ impl CareerView {
     ) -> impl IntoElement {
         let (bg_color, border_color, win_text_color, win_label) = if m.display.remake {
             (
-                Theme::REMAKE_BG,
-                Theme::REMAKE_BORDER,
-                Theme::REMAKE_TEXT,
+                Theme::REMAKE_BG(),
+                Theme::REMAKE_BORDER(),
+                Theme::REMAKE_TEXT(),
                 "重开",
             )
         } else if m.display.win {
-            (Theme::WIN_BG, Theme::WIN_BORDER, Theme::WIN_TEXT, "胜利")
+            (Theme::WIN_BG(), Theme::WIN_BORDER(), Theme::WIN_TEXT(), "胜利")
         } else {
-            (Theme::LOSS_BG, Theme::LOSS_BORDER, Theme::LOSS_TEXT, "失败")
+            (Theme::LOSS_BG(), Theme::LOSS_BORDER(), Theme::LOSS_TEXT(), "失败")
         };
 
         let champion_name = m.display.name.clone();
@@ -1752,7 +1752,7 @@ impl CareerView {
         } else if kda_val >= 3.0 {
             hsla(217.0 / 360.0, 0.90, 0.55, 1.0)
         } else {
-            Theme::TEXT_MUTED
+            Theme::TEXT_MUTED()
         };
 
         let select_cb = on_select.clone();
@@ -1803,15 +1803,15 @@ impl CareerView {
                                     .right(px(-2.0))
                                     .size(px(18.0))
                                     .rounded_full()
-                                    .bg(Theme::CARD_BG)
+                                    .bg(Theme::CARD_BG())
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
+                                    .border_color(Theme::CARD_BORDER())
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .text_size(px(11.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(champ_level.to_string()),
                             ),
                     )
@@ -1830,7 +1830,7 @@ impl CareerView {
                                             .size(px(22.0))
                                             .rounded(px(3.0))
                                             .border_1()
-                                            .border_color(Theme::CARD_BORDER)
+                                            .border_color(Theme::CARD_BORDER())
                                             .overflow_hidden()
                                             .child(
                                                 LcuImage::new(spell1_icon_url)
@@ -1843,7 +1843,7 @@ impl CareerView {
                                             .size(px(22.0))
                                             .rounded(px(3.0))
                                             .border_1()
-                                            .border_color(Theme::CARD_BORDER)
+                                            .border_color(Theme::CARD_BORDER())
                                             .overflow_hidden()
                                             .child(
                                                 LcuImage::new(spell2_icon_url)
@@ -1858,7 +1858,7 @@ impl CareerView {
                                         .size(px(22.0))
                                         .rounded_full()
                                         .border_1()
-                                        .border_color(Theme::CARD_BORDER)
+                                        .border_color(Theme::CARD_BORDER())
                                         .overflow_hidden()
                                         .child(
                                             LcuImage::new(rune_icon_url)
@@ -1897,10 +1897,10 @@ impl CareerView {
                                         .px(px(4.0))
                                         .py(px(1.0))
                                         .rounded_sm()
-                                        .bg(Theme::BADGE_BG)
+                                        .bg(Theme::BADGE_BG())
                                         .text_size(px(10.0))
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(Theme::TEXT_SECONDARY)
+                                        .text_color(Theme::TEXT_SECONDARY())
                                         .child(pos_str),
                                 )
                             }),
@@ -1915,7 +1915,7 @@ impl CareerView {
                                 div()
                                     .text_size(px(13.0))
                                     .line_height(px(17.0))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(queue_name.clone()),
                             )
                             .child(
@@ -1923,7 +1923,7 @@ impl CareerView {
                                     .text_size(px(12.0))
                                     .line_height(px(15.0))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(duration_str),
                             ),
                     ),
@@ -1945,21 +1945,21 @@ impl CareerView {
                                 .child(
                                     div()
                                         .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .text_color(Theme::TEXT_PRIMARY())
                                         .child(kills.to_string()),
                                 )
-                                .child(div().text_color(Theme::TEXT_MUTED).child("/"))
+                                .child(div().text_color(Theme::TEXT_MUTED()).child("/"))
                                 .child(
                                     div()
                                         .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::LOSS_TEXT)
+                                        .text_color(Theme::LOSS_TEXT())
                                         .child(deaths.to_string()),
                                 )
-                                .child(div().text_color(Theme::TEXT_MUTED).child("/"))
+                                .child(div().text_color(Theme::TEXT_MUTED()).child("/"))
                                 .child(
                                     div()
                                         .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .text_color(Theme::TEXT_PRIMARY())
                                         .child(assists.to_string()),
                                 ),
                         ),
@@ -1982,12 +1982,12 @@ impl CareerView {
                     .min_w(px(44.0))
                     .flex_shrink_0()
                     .mr(px(6.0))
-                    .child(icon("icons/cs.svg", 14.0, Theme::TEXT_MUTED))
+                    .child(icon("icons/cs.svg", 14.0, Theme::TEXT_MUTED()))
                     .child(
                         div()
                             .text_size(px(13.6))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child(cs_str),
                     ),
             )
@@ -2025,9 +2025,9 @@ impl CareerView {
                         div()
                             .size(px(28.0))
                             .rounded(px(4.0))
-                            .bg(Theme::HOVER_BG)
+                            .bg(Theme::HOVER_BG())
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .overflow_hidden()
                             .when(!url.is_empty(), |this| {
                                 this.child(LcuImage::new(url).size(px(28.0)).placeholder(""))
@@ -2064,10 +2064,10 @@ impl CareerView {
                         div()
                             .text_size(px(13.6))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child(gold_str),
                     )
-                    .child(icon("icons/gold.svg", 14.0, Theme::GOLD)),
+                    .child(icon("icons/gold.svg", 14.0, Theme::GOLD())),
             )
             // 7. 时间面板 (地图与日期时间)
             .child(
@@ -2079,7 +2079,7 @@ impl CareerView {
                     .flex_shrink_0()
                     .whitespace_nowrap()
                     .text_size(px(13.1))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .when(!map_name.is_empty(), |this| {
                         this.child(div().child(map_name))
                     })
@@ -2100,16 +2100,16 @@ impl CareerView {
                             .rounded_md()
                             .border_1()
                             .border_color(match replay_state {
-                                crate::match_model::ReplayState::Watch => Theme::WIN_BORDER,
+                                crate::match_model::ReplayState::Watch => Theme::WIN_BORDER(),
                                 crate::match_model::ReplayState::Downloading
                                 | crate::match_model::ReplayState::Checking => {
-                                    Theme::ACCENT_PRIMARY
+                                    Theme::ACCENT_PRIMARY()
                                 }
-                                crate::match_model::ReplayState::Error => Theme::LOSS_BORDER,
-                                _ => Theme::CARD_BORDER,
+                                crate::match_model::ReplayState::Error => Theme::LOSS_BORDER(),
+                                _ => Theme::CARD_BORDER(),
                             })
-                            .bg(Theme::CARD_BG)
-                            .hover(|s| s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY))
+                            .bg(Theme::CARD_BG())
+                            .hover(|s| s.bg(Theme::HOVER_BG()).border_color(Theme::ACCENT_PRIMARY()))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -2126,13 +2126,13 @@ impl CareerView {
                                 },
                                 13.0,
                                 match replay_state {
-                                    crate::match_model::ReplayState::Watch => Theme::WIN_TEXT,
-                                    crate::match_model::ReplayState::Error => Theme::LOSS_TEXT,
+                                    crate::match_model::ReplayState::Watch => Theme::WIN_TEXT(),
+                                    crate::match_model::ReplayState::Error => Theme::LOSS_TEXT(),
                                     crate::match_model::ReplayState::Downloading
                                     | crate::match_model::ReplayState::Checking => {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     }
-                                    _ => Theme::TEXT_MUTED,
+                                    _ => Theme::TEXT_MUTED(),
                                 },
                             )),
                     )
@@ -2220,13 +2220,13 @@ impl CareerView {
                         "熟练英雄总数",
                         format!("{} 位", total_champs),
                         "累计拥有熟练度记录".to_string(),
-                        Theme::TEXT_PRIMARY,
+                        Theme::TEXT_PRIMARY(),
                     ))
                     .child(mastery_stat(
                         "熟练度总分",
                         format!("{} 分", format_num(total_points)),
                         "全英雄点数总和".to_string(),
-                        Theme::WIN_TEXT,
+                        Theme::WIN_TEXT(),
                     ))
                     .child(mastery_stat(
                         "最高等级英雄",
@@ -2234,13 +2234,13 @@ impl CareerView {
                             .unwrap_or_else(|| "--".to_string()),
                         top.map(|m| format!("{} 分", format_num(m.champion_points)))
                             .unwrap_or_default(),
-                        Theme::ACCENT_PRIMARY,
+                        Theme::ACCENT_PRIMARY(),
                     ))
                     .child(mastery_stat(
                         "里程碑宝箱",
                         format!("{} / +{} 可得", granted, eligible),
                         "本赛段里程碑宝箱追踪".to_string(),
-                        Theme::GOLD,
+                        Theme::GOLD(),
                     )),
             )
             .child(
@@ -2254,9 +2254,9 @@ impl CareerView {
                     .px(px(16.0))
                     .py(px(10.0))
                     .rounded_xl()
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .mt(px(14.0))
                     .child(
                         div()
@@ -2349,7 +2349,7 @@ impl CareerView {
                                 div()
                                     .text_size(px(12.0))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child("排序:"),
                             )
                             .child({
@@ -2387,10 +2387,10 @@ impl CareerView {
                                     .size(px(28.0))
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .bg(Theme::CARD_BG)
+                                    .border_color(Theme::CARD_BORDER())
+                                    .bg(Theme::CARD_BG())
                                     .hover(|s| {
-                                        s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY)
+                                        s.bg(Theme::HOVER_BG()).border_color(Theme::ACCENT_PRIMARY())
                                     })
                                     .flex()
                                     .items_center()
@@ -2402,7 +2402,7 @@ impl CareerView {
                                     .child(
                                         div()
                                             .text_size(px(13.0))
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .child(if desc { "↓" } else { "↑" }),
                                     )
                             })
@@ -2412,10 +2412,10 @@ impl CareerView {
                                     .size(px(28.0))
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .bg(Theme::CARD_BG)
+                                    .border_color(Theme::CARD_BORDER())
+                                    .bg(Theme::CARD_BG())
                                     .hover(|s| {
-                                        s.bg(Theme::HOVER_BG).border_color(Theme::ACCENT_PRIMARY)
+                                        s.bg(Theme::HOVER_BG()).border_color(Theme::ACCENT_PRIMARY())
                                     })
                                     .flex()
                                     .items_center()
@@ -2427,7 +2427,7 @@ impl CareerView {
                                     .child(
                                         div()
                                             .text_size(px(14.0))
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .child("↻"),
                                     )
                             }),
@@ -2445,9 +2445,9 @@ impl CareerView {
                     .child(if list.is_empty() {
                         div()
                             .w(px(1000.0))
-                            .bg(Theme::CARD_BG)
+                            .bg(Theme::CARD_BG())
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .rounded_xl()
                             .p_8()
                             .flex()
@@ -2458,13 +2458,13 @@ impl CareerView {
                                 div()
                                     .text_base()
                                     .font_weight(FontWeight::MEDIUM)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child("未找到匹配的英雄"),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child("尝试清除搜索条件或刷新客户端数据"),
                             )
                             .into_any_element()
@@ -2568,9 +2568,9 @@ impl CareerView {
                     .flex_none()
                     .p(px(16.0))
                     .rounded_xl()
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .flex()
                     .flex_col()
                     .gap_3()
@@ -2588,7 +2588,7 @@ impl CareerView {
                                         div()
                                             .text_size(px(16.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .child("📦 可开启战利品"),
                                     )
                                     .child(Self::action_button("刷新", on_refresh.clone()))
@@ -2598,10 +2598,10 @@ impl CareerView {
                                                 .px(px(8.0))
                                                 .py(px(3.0))
                                                 .rounded_md()
-                                                .bg(Theme::BADGE_BG)
+                                                .bg(Theme::BADGE_BG())
                                                 .text_size(px(12.0))
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::GOLD)
+                                                .text_color(Theme::GOLD())
                                                 .child(format!("🔑 x{}", key_count)),
                                         )
                                     }),
@@ -2628,21 +2628,21 @@ impl CareerView {
                                         .rounded_md()
                                         .border_1()
                                         .border_color(if can_smart_open {
-                                            Theme::ACCENT_PRIMARY
+                                            Theme::ACCENT_PRIMARY()
                                         } else {
-                                            Theme::CARD_BORDER
+                                            Theme::CARD_BORDER()
                                         })
                                         .bg(if can_smart_open {
-                                            Theme::ACCENT_LIGHT
+                                            Theme::ACCENT_LIGHT()
                                         } else {
-                                            Theme::BADGE_BG
+                                            Theme::BADGE_BG()
                                         })
                                         .text_size(px(13.0))
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(if can_smart_open {
-                                            Theme::ACCENT_PRIMARY
+                                            Theme::ACCENT_PRIMARY()
                                         } else {
-                                            Theme::TEXT_MUTED
+                                            Theme::TEXT_MUTED()
                                         })
                                         .when(can_smart_open, |el| {
                                             el.cursor_pointer().on_mouse_down(
@@ -2669,7 +2669,7 @@ impl CareerView {
                             .items_center()
                             .justify_center()
                             .text_size(px(12.5))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child("点击刷新以加载可开启战利品")
                             .into_any_element()
                     } else {
@@ -2707,10 +2707,10 @@ impl CareerView {
                                 div()
                                     .p(px(14.0))
                                     .rounded_xl()
-                                    .bg(Theme::CARD_BG)
+                                    .bg(Theme::CARD_BG())
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                                    .border_color(Theme::CARD_BORDER())
+                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                                     .flex()
                                     .items_center()
                                     .justify_between()
@@ -2740,7 +2740,7 @@ impl CareerView {
                                                         div()
                                                             .text_size(px(13.0))
                                                             .font_weight(FontWeight::BOLD)
-                                                            .text_color(Theme::TEXT_PRIMARY)
+                                                            .text_color(Theme::TEXT_PRIMARY())
                                                             .overflow_hidden()
                                                             .whitespace_nowrap()
                                                             .child(item.name.clone()),
@@ -2749,7 +2749,7 @@ impl CareerView {
                                                         div()
                                                             .text_size(px(11.5))
                                                             .font_weight(FontWeight::SEMIBOLD)
-                                                            .text_color(Theme::ACCENT_PRIMARY)
+                                                            .text_color(Theme::ACCENT_PRIMARY())
                                                             .child(format!("拥有 x{}", item.count)),
                                                     ),
                                             ),
@@ -2776,11 +2776,11 @@ impl CareerView {
                                                     .text_size(px(10.5))
                                                     .font_weight(FontWeight::SEMIBOLD)
                                                     .text_color(if is_frag {
-                                                        Theme::WIN_TEXT
+                                                        Theme::WIN_TEXT()
                                                     } else if need_key {
-                                                        Theme::GOLD
+                                                        Theme::GOLD()
                                                     } else {
-                                                        Theme::ACCENT_PRIMARY
+                                                        Theme::ACCENT_PRIMARY()
                                                     })
                                                     .child(if is_frag {
                                                         "3合1合成"
@@ -2796,13 +2796,13 @@ impl CareerView {
                                                     .py(px(4.0))
                                                     .rounded_md()
                                                     .border_1()
-                                                    .border_color(Theme::ACCENT_PRIMARY)
-                                                    .bg(Theme::ACCENT_LIGHT)
+                                                    .border_color(Theme::ACCENT_PRIMARY())
+                                                    .bg(Theme::ACCENT_LIGHT())
                                                     .text_size(px(12.0))
                                                     .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(Theme::ACCENT_PRIMARY)
+                                                    .text_color(Theme::ACCENT_PRIMARY())
                                                     .cursor_pointer()
-                                                    .hover(|s| s.bg(Theme::HOVER_BG_STRONG))
+                                                    .hover(|s| s.bg(Theme::HOVER_BG_STRONG()))
                                                     .on_mouse_down(
                                                         MouseButton::Left,
                                                         move |_ev, win, app| {
@@ -2833,9 +2833,9 @@ impl CareerView {
                     .flex_none()
                     .p(px(16.0))
                     .rounded_xl()
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .flex()
                     .flex_col()
                     .gap_3()
@@ -2853,7 +2853,7 @@ impl CareerView {
                                         div()
                                             .text_size(px(16.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .child("💎 碎片库存管理"),
                                     )
                                     .child(Self::action_button("刷新", on_refresh)),
@@ -2866,14 +2866,14 @@ impl CareerView {
                                     .px(px(10.0))
                                     .py(px(4.0))
                                     .rounded_full()
-                                    .bg(Theme::BADGE_BG)
+                                    .bg(Theme::BADGE_BG())
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
+                                    .border_color(Theme::CARD_BORDER())
                                     .child(
                                         div()
                                             .text_size(px(12.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::ACCENT_PRIMARY)
+                                            .text_color(Theme::ACCENT_PRIMARY())
                                             .child(format!(
                                                 "🔵 {}",
                                                 format_num(self.essences.blue_essence as i64)
@@ -2883,7 +2883,7 @@ impl CareerView {
                                         div()
                                             .text_size(px(12.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::GOLD)
+                                            .text_color(Theme::GOLD())
                                             .child(format!(
                                                 "🟠 {}",
                                                 format_num(self.essences.orange_essence as i64)
@@ -2900,9 +2900,9 @@ impl CareerView {
                             .px(px(12.0))
                             .py(px(8.0))
                             .rounded_lg()
-                            .bg(Theme::HOVER_BG)
+                            .bg(Theme::HOVER_BG())
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .child(loot_filter_label("碎片类型"))
                             .child({
                                 let cb = on_action.clone();
@@ -3037,7 +3037,7 @@ impl CareerView {
                             .items_center()
                             .justify_center()
                             .text_size(px(12.5))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child("暂无符合筛选条件的碎片")
                             .into_any_element()
                     } else {
@@ -3052,27 +3052,27 @@ impl CareerView {
                                 let cat = loot_category(item);
                                 let owned = item.item_status.eq_ignore_ascii_case("OWNED");
                                 let essence_color = if cat == "CHAMPION" {
-                                    Theme::ACCENT_PRIMARY
+                                    Theme::ACCENT_PRIMARY()
                                 } else {
-                                    Theme::GOLD
+                                    Theme::GOLD()
                                 };
                                 div()
                                     .relative()
                                     .p(px(12.0))
                                     .rounded_xl()
                                     .bg(if selected {
-                                        Theme::ACCENT_LIGHT
+                                        Theme::ACCENT_LIGHT()
                                     } else {
-                                        Theme::CARD_BG
+                                        Theme::CARD_BG()
                                     })
                                     .border_1()
                                     .border_color(if selected {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     } else {
-                                        Theme::CARD_BORDER
+                                        Theme::CARD_BORDER()
                                     })
                                     .cursor_pointer()
-                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         cb(LootAction::ToggleSelect(id.clone()), win, app)
                                     })
@@ -3084,7 +3084,7 @@ impl CareerView {
                                                 .right(px(-6.0))
                                                 .size(px(18.0))
                                                 .rounded_full()
-                                                .bg(Theme::ACCENT_PRIMARY)
+                                                .bg(Theme::ACCENT_PRIMARY())
                                                 .flex()
                                                 .items_center()
                                                 .justify_center()
@@ -3122,7 +3122,7 @@ impl CareerView {
                                                                 div()
                                                                     .text_size(px(12.5))
                                                                     .font_weight(FontWeight::BOLD)
-                                                                    .text_color(Theme::TEXT_PRIMARY)
+                                                                    .text_color(Theme::TEXT_PRIMARY())
                                                                     .overflow_hidden()
                                                                     .whitespace_nowrap()
                                                                     .child(item.item_desc.clone()),
@@ -3134,7 +3134,7 @@ impl CareerView {
                                                                         FontWeight::SEMIBOLD,
                                                                     )
                                                                     .text_color(
-                                                                        Theme::ACCENT_PRIMARY,
+                                                                        Theme::ACCENT_PRIMARY(),
                                                                     )
                                                                     .child(format!(
                                                                         "x{}",
@@ -3152,15 +3152,15 @@ impl CareerView {
                                                                     .px(px(6.0))
                                                                     .py(px(1.0))
                                                                     .rounded_sm()
-                                                                    .bg(Theme::BADGE_BG)
+                                                                    .bg(Theme::BADGE_BG())
                                                                     .text_size(px(10.0))
                                                                     .font_weight(
                                                                         FontWeight::SEMIBOLD,
                                                                     )
                                                                     .text_color(if owned {
-                                                                        Theme::WIN_TEXT
+                                                                        Theme::WIN_TEXT()
                                                                     } else {
-                                                                        Theme::TEXT_MUTED
+                                                                        Theme::TEXT_MUTED()
                                                                     })
                                                                     .child(if owned {
                                                                         "已拥有"
@@ -3236,9 +3236,9 @@ impl CareerView {
                                 .gap_3()
                                 .p(px(10.0))
                                 .rounded_lg()
-                                .bg(Theme::CARD_BG_HOVER)
+                                .bg(Theme::CARD_BG_HOVER())
                                 .border_1()
-                                .border_color(Theme::CARD_BORDER)
+                                .border_color(Theme::CARD_BORDER())
                                 .child(
                                     div()
                                         .flex()
@@ -3260,7 +3260,7 @@ impl CareerView {
                                             div()
                                                 .text_size(px(12.5))
                                                 .font_weight(FontWeight::SEMIBOLD)
-                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .text_color(Theme::TEXT_PRIMARY())
                                                 .child(format!("已选 {} 项", selected_count)),
                                         ),
                                 )
@@ -3278,14 +3278,14 @@ impl CareerView {
                                                     .child(
                                                         div()
                                                             .text_size(px(12.0))
-                                                            .text_color(Theme::TEXT_MUTED)
+                                                            .text_color(Theme::TEXT_MUTED())
                                                             .child("预计精粹"),
                                                     )
                                                     .child(
                                                         div()
                                                             .text_size(px(12.0))
                                                             .font_weight(FontWeight::BOLD)
-                                                            .text_color(Theme::ACCENT_PRIMARY)
+                                                            .text_color(Theme::ACCENT_PRIMARY())
                                                             .child(format!(
                                                                 "🔵 +{}",
                                                                 format_num(gain_blue)
@@ -3295,7 +3295,7 @@ impl CareerView {
                                                         div()
                                                             .text_size(px(12.0))
                                                             .font_weight(FontWeight::BOLD)
-                                                            .text_color(Theme::GOLD)
+                                                            .text_color(Theme::GOLD())
                                                             .child(format!(
                                                                 "🟠 +{}",
                                                                 format_num(gain_orange)
@@ -3312,21 +3312,21 @@ impl CareerView {
                                                 .rounded_md()
                                                 .border_1()
                                                 .border_color(if has_selection {
-                                                    Theme::ACCENT_PRIMARY
+                                                    Theme::ACCENT_PRIMARY()
                                                 } else {
-                                                    Theme::CARD_BORDER
+                                                    Theme::CARD_BORDER()
                                                 })
                                                 .bg(if has_selection {
-                                                    Theme::ACCENT_LIGHT
+                                                    Theme::ACCENT_LIGHT()
                                                 } else {
-                                                    Theme::BADGE_BG
+                                                    Theme::BADGE_BG()
                                                 })
                                                 .text_size(px(12.5))
                                                 .font_weight(FontWeight::SEMIBOLD)
                                                 .text_color(if has_selection {
-                                                    Theme::ACCENT_PRIMARY
+                                                    Theme::ACCENT_PRIMARY()
                                                 } else {
-                                                    Theme::TEXT_MUTED
+                                                    Theme::TEXT_MUTED()
                                                 })
                                                 .when(has_selection, |el| {
                                                     el.cursor_pointer().on_mouse_down(
@@ -3353,21 +3353,21 @@ impl CareerView {
                                                 .rounded_md()
                                                 .border_1()
                                                 .border_color(if can_reroll {
-                                                    Theme::ACCENT_PRIMARY
+                                                    Theme::ACCENT_PRIMARY()
                                                 } else {
-                                                    Theme::CARD_BORDER
+                                                    Theme::CARD_BORDER()
                                                 })
                                                 .bg(if can_reroll {
-                                                    Theme::ACCENT_LIGHT
+                                                    Theme::ACCENT_LIGHT()
                                                 } else {
-                                                    Theme::BADGE_BG
+                                                    Theme::BADGE_BG()
                                                 })
                                                 .text_size(px(12.5))
                                                 .font_weight(FontWeight::SEMIBOLD)
                                                 .text_color(if can_reroll {
-                                                    Theme::ACCENT_PRIMARY
+                                                    Theme::ACCENT_PRIMARY()
                                                 } else {
-                                                    Theme::TEXT_MUTED
+                                                    Theme::TEXT_MUTED()
                                                 })
                                                 .when(can_reroll, |el| {
                                                     el.cursor_pointer().on_mouse_down(
@@ -3394,21 +3394,21 @@ impl CareerView {
                                                 .rounded_md()
                                                 .border_1()
                                                 .border_color(if can_upgrade {
-                                                    Theme::ACCENT_PRIMARY
+                                                    Theme::ACCENT_PRIMARY()
                                                 } else {
-                                                    Theme::CARD_BORDER
+                                                    Theme::CARD_BORDER()
                                                 })
                                                 .bg(if can_upgrade {
-                                                    Theme::ACCENT_LIGHT
+                                                    Theme::ACCENT_LIGHT()
                                                 } else {
-                                                    Theme::BADGE_BG
+                                                    Theme::BADGE_BG()
                                                 })
                                                 .text_size(px(12.5))
                                                 .font_weight(FontWeight::SEMIBOLD)
                                                 .text_color(if can_upgrade {
-                                                    Theme::ACCENT_PRIMARY
+                                                    Theme::ACCENT_PRIMARY()
                                                 } else {
-                                                    Theme::TEXT_MUTED
+                                                    Theme::TEXT_MUTED()
                                                 })
                                                 .when(can_upgrade, |el| {
                                                     el.cursor_pointer().on_mouse_down(
@@ -3521,9 +3521,9 @@ impl CareerView {
 
                 div()
                     .w(px(440.0))
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .rounded_xl()
                     .p(px(20.0))
                     .shadow_lg()
@@ -3540,7 +3540,7 @@ impl CareerView {
                                 div()
                                     .text_size(px(15.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(format!("{} - {}", action.label(), name)),
                             )
                             .child({
@@ -3552,7 +3552,7 @@ impl CareerView {
                                     .justify_center()
                                     .rounded_md()
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(Theme::HOVER_BG))
+                                    .hover(|s| s.bg(Theme::HOVER_BG()))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         close_cb(LootAction::CloseModal, win, app)
                                     })
@@ -3566,7 +3566,7 @@ impl CareerView {
                             .gap_3()
                             .p(px(10.0))
                             .rounded_lg()
-                            .bg(Theme::HOVER_BG)
+                            .bg(Theme::HOVER_BG())
                             .child(
                                 LcuImage::new(tile_path.clone().unwrap_or_default())
                                     .size(px(48.0))
@@ -3582,13 +3582,13 @@ impl CareerView {
                                         div()
                                             .text_size(px(13.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .child(name.clone()),
                                     )
                                     .child(
                                         div()
                                             .text_size(px(12.0))
-                                            .text_color(Theme::TEXT_MUTED)
+                                            .text_color(Theme::TEXT_MUTED())
                                             .child(format!("持有数量: x{}", owned)),
                                     ),
                             ),
@@ -3600,11 +3600,11 @@ impl CareerView {
                                 .items_center()
                                 .justify_between()
                                 .text_size(px(12.5))
-                                .child(div().text_color(Theme::TEXT_MUTED).child("所需钥匙:"))
+                                .child(div().text_color(Theme::TEXT_MUTED()).child("所需钥匙:"))
                                 .child(
                                     div()
                                         .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::GOLD)
+                                        .text_color(Theme::GOLD())
                                         .child(format!("x{} (持有: {})", quantity, key_count)),
                                 ),
                         )
@@ -3618,7 +3618,7 @@ impl CareerView {
                                 div()
                                     .text_size(px(13.0))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(if *action == LootQuantityAction::Craft {
                                         "合成次数:"
                                     } else {
@@ -3635,9 +3635,9 @@ impl CareerView {
                                             .size(px(28.0))
                                             .rounded_md()
                                             .border_1()
-                                            .border_color(Theme::CARD_BORDER)
-                                            .bg(Theme::CARD_BG)
-                                            .hover(|s| s.bg(Theme::HOVER_BG))
+                                            .border_color(Theme::CARD_BORDER())
+                                            .bg(Theme::CARD_BG())
+                                            .hover(|s| s.bg(Theme::HOVER_BG()))
                                             .flex()
                                             .items_center()
                                             .justify_center()
@@ -3664,7 +3664,7 @@ impl CareerView {
                                             .justify_center()
                                             .text_size(px(14.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .child(quantity.to_string()),
                                     )
                                     .child(
@@ -3672,9 +3672,9 @@ impl CareerView {
                                             .size(px(28.0))
                                             .rounded_md()
                                             .border_1()
-                                            .border_color(Theme::CARD_BORDER)
-                                            .bg(Theme::CARD_BG)
-                                            .hover(|s| s.bg(Theme::HOVER_BG))
+                                            .border_color(Theme::CARD_BORDER())
+                                            .bg(Theme::CARD_BG())
+                                            .hover(|s| s.bg(Theme::HOVER_BG()))
                                             .flex()
                                             .items_center()
                                             .justify_center()
@@ -3699,7 +3699,7 @@ impl CareerView {
                         this.child(
                             div()
                                 .text_size(px(12.0))
-                                .text_color(Theme::LOSS_TEXT)
+                                .text_color(Theme::LOSS_TEXT())
                                 .child(if *need_key {
                                     "钥匙不足，无法开启"
                                 } else {
@@ -3720,8 +3720,8 @@ impl CareerView {
                                     .py(px(6.0))
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .bg(Theme::CARD_BG)
+                                    .border_color(Theme::CARD_BORDER())
+                                    .bg(Theme::CARD_BG())
                                     .text_size(px(13.0))
                                     .cursor_pointer()
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
@@ -3736,19 +3736,19 @@ impl CareerView {
                                     .rounded_md()
                                     .border_1()
                                     .border_color(if is_insufficient {
-                                        Theme::CARD_BORDER
+                                        Theme::CARD_BORDER()
                                     } else {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     })
                                     .bg(if is_insufficient {
-                                        Theme::BADGE_BG
+                                        Theme::BADGE_BG()
                                     } else {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     })
                                     .text_size(px(13.0))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(if is_insufficient {
-                                        Theme::TEXT_MUTED
+                                        Theme::TEXT_MUTED()
                                     } else {
                                         hsla(0.0, 0.0, 1.0, 1.0)
                                     })
@@ -3781,9 +3781,9 @@ impl CareerView {
                 ..
             } => div()
                 .w(px(440.0))
-                .bg(Theme::CARD_BG)
+                .bg(Theme::CARD_BG())
                 .border_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .rounded_xl()
                 .p(px(20.0))
                 .shadow_lg()
@@ -3800,7 +3800,7 @@ impl CareerView {
                             div()
                                 .text_size(px(15.0))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .child(title.clone()),
                         )
                         .child({
@@ -3812,7 +3812,7 @@ impl CareerView {
                                 .justify_center()
                                 .rounded_md()
                                 .cursor_pointer()
-                                .hover(|s| s.bg(Theme::HOVER_BG))
+                                .hover(|s| s.bg(Theme::HOVER_BG()))
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                     close_cb(LootAction::CloseModal, win, app)
                                 })
@@ -3823,7 +3823,7 @@ impl CareerView {
                     div()
                         .text_size(px(13.0))
                         .line_height(px(20.0))
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .child(message.clone()),
                 )
                 .when(*gain_blue > 0 || *gain_orange > 0, |this| {
@@ -3834,18 +3834,18 @@ impl CareerView {
                             .gap(px(6.0))
                             .p(px(10.0))
                             .rounded_lg()
-                            .bg(Theme::HOVER_BG)
+                            .bg(Theme::HOVER_BG())
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
                                     .justify_between()
                                     .text_size(px(12.5))
-                                    .child(div().text_color(Theme::TEXT_MUTED).child("已选项目:"))
+                                    .child(div().text_color(Theme::TEXT_MUTED()).child("已选项目:"))
                                     .child(
                                         div()
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .child(format!("{} 项", selected)),
                                     ),
                             )
@@ -3858,13 +3858,13 @@ impl CareerView {
                                         .text_size(px(12.5))
                                         .child(
                                             div()
-                                                .text_color(Theme::TEXT_MUTED)
+                                                .text_color(Theme::TEXT_MUTED())
                                                 .child("预计获得蓝色精粹:"),
                                         )
                                         .child(
                                             div()
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::ACCENT_PRIMARY)
+                                                .text_color(Theme::ACCENT_PRIMARY())
                                                 .child(format!("+{}", format_num(*gain_blue))),
                                         ),
                                 )
@@ -3878,13 +3878,13 @@ impl CareerView {
                                         .text_size(px(12.5))
                                         .child(
                                             div()
-                                                .text_color(Theme::TEXT_MUTED)
+                                                .text_color(Theme::TEXT_MUTED())
                                                 .child("预计获得橙色精粹:"),
                                         )
                                         .child(
                                             div()
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::GOLD)
+                                                .text_color(Theme::GOLD())
                                                 .child(format!("+{}", format_num(*gain_orange))),
                                         ),
                                 )
@@ -3904,8 +3904,8 @@ impl CareerView {
                                 .py(px(6.0))
                                 .rounded_md()
                                 .border_1()
-                                .border_color(Theme::CARD_BORDER)
-                                .bg(Theme::CARD_BG)
+                                .border_color(Theme::CARD_BORDER())
+                                .bg(Theme::CARD_BG())
                                 .text_size(px(13.0))
                                 .cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
@@ -3918,7 +3918,7 @@ impl CareerView {
                                 .px(px(16.0))
                                 .py(px(6.0))
                                 .rounded_md()
-                                .bg(Theme::ACCENT_PRIMARY)
+                                .bg(Theme::ACCENT_PRIMARY())
                                 .text_size(px(13.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(hsla(0.0, 0.0, 1.0, 1.0))
@@ -3946,9 +3946,9 @@ impl CareerView {
 
         div()
             .w(px(420.0))
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .border_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .rounded_xl()
             .p(px(20.0))
             .shadow_lg()
@@ -3965,7 +3965,7 @@ impl CareerView {
                         div()
                             .text_size(px(15.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child(if is_done {
                                 "战利品处理完成"
                             } else {
@@ -3982,7 +3982,7 @@ impl CareerView {
                                 .justify_center()
                                 .rounded_md()
                                 .cursor_pointer()
-                                .hover(|s| s.bg(Theme::HOVER_BG))
+                                .hover(|s| s.bg(Theme::HOVER_BG()))
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                     cb(LootAction::CloseProgress, win, app)
                                 })
@@ -3993,7 +3993,7 @@ impl CareerView {
             .child(
                 div()
                     .text_size(px(12.5))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child(format!("当前条目: {}", progress.current_name)),
             )
             .child(
@@ -4001,14 +4001,14 @@ impl CareerView {
                     .w_full()
                     .h(px(8.0))
                     .rounded_full()
-                    .bg(Theme::BADGE_BG)
+                    .bg(Theme::BADGE_BG())
                     .overflow_hidden()
                     .child(
                         div()
                             .w(px(380.0 * pct))
                             .h(px(8.0))
                             .rounded_full()
-                            .bg(Theme::ACCENT_PRIMARY),
+                            .bg(Theme::ACCENT_PRIMARY()),
                     ),
             )
             .child(
@@ -4019,18 +4019,18 @@ impl CareerView {
                     .text_size(px(12.0))
                     .child(
                         div()
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child(format!("{}/{}", progress.current, progress.total)),
                     )
                     .child(
                         div()
-                            .text_color(Theme::WIN_TEXT)
+                            .text_color(Theme::WIN_TEXT())
                             .child(format!("成功 {} 项", progress.success)),
                     )
                     .child(
                         div()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::ACCENT_PRIMARY)
+                            .text_color(Theme::ACCENT_PRIMARY())
                             .child(format!("{:.0}%", pct * 100.0)),
                     ),
             )
@@ -4042,7 +4042,7 @@ impl CareerView {
                         .mt(px(8.0))
                         .py(px(7.0))
                         .rounded_md()
-                        .bg(Theme::ACCENT_PRIMARY)
+                        .bg(Theme::ACCENT_PRIMARY())
                         .text_size(px(13.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(hsla(0.0, 0.0, 1.0, 1.0))
@@ -4068,9 +4068,9 @@ fn mastery_stat(
     div()
         .p(px(14.0))
         .rounded_xl()
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .flex()
         .flex_col()
         .gap(px(4.0))
@@ -4078,7 +4078,7 @@ fn mastery_stat(
             div()
                 .text_size(px(12.0))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .child(label),
         )
         .child(
@@ -4094,7 +4094,7 @@ fn mastery_stat(
         .child(
             div()
                 .text_size(px(11.5))
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .whitespace_nowrap()
                 .overflow_hidden()
                 .child(sub),
@@ -4115,14 +4115,14 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
     div()
         .p(px(14.0))
         .rounded_xl()
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
         .border_color(if is_eligible {
-            Theme::AURORA_CYAN
+            Theme::AURORA_CYAN()
         } else {
-            Theme::CARD_BORDER
+            Theme::CARD_BORDER()
         })
-        .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+        .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
         .flex()
         .flex_col()
         .gap(px(10.0))
@@ -4138,7 +4138,7 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                         .size(px(46.0))
                         .rounded_lg()
                         .border_1()
-                        .border_color(Theme::CARD_BORDER)
+                        .border_color(Theme::CARD_BORDER())
                         .overflow_hidden()
                         .flex_none()
                         .child(
@@ -4178,7 +4178,7 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                                 .text_size(px(14.0))
                                 .line_height(px(18.0))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .overflow_hidden()
                                 .whitespace_nowrap()
                                 .child(m.champion_name.clone()),
@@ -4186,7 +4186,7 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                         .child(
                             div()
                                 .text_size(px(12.0))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child(format!("{} 分", format_num(m.champion_points))),
                         ),
                 ),
@@ -4202,14 +4202,14 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                         .w_full()
                         .h(px(6.0))
                         .rounded_full()
-                        .bg(Theme::BADGE_BG)
+                        .bg(Theme::BADGE_BG())
                         .overflow_hidden()
                         .child(
                             div()
                                 .h_full()
                                 .w(px(213.0 * pct / 100.0))
                                 .rounded_full()
-                                .bg(Theme::ACCENT_PRIMARY),
+                                .bg(Theme::ACCENT_PRIMARY()),
                         ),
                 )
                 .child(
@@ -4221,10 +4221,10 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                         .child(
                             div()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .child(format!("{:.0}%", pct)),
                         )
-                        .child(div().text_color(Theme::TEXT_MUTED).child(if until <= 0 {
+                        .child(div().text_color(Theme::TEXT_MUTED()).child(if until <= 0 {
                             "已满级".to_string()
                         } else {
                             format!("距下一级还需 {}", format_num(until))
@@ -4239,7 +4239,7 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                 .justify_between()
                 .pt(px(8.0))
                 .border_t_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .text_size(px(11.0))
                 .child(
                     div()
@@ -4248,7 +4248,7 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                         .gap_1()
                         .child(
                             div()
-                                .text_color(Theme::TEXT_SECONDARY)
+                                .text_color(Theme::TEXT_SECONDARY())
                                 .child(format!("里程碑 {}", m.champion_season_milestone)),
                         )
                         .when(!m.milestone_grades.is_empty(), |this| {
@@ -4257,10 +4257,10 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                                     div()
                                         .px(px(3.0))
                                         .rounded_sm()
-                                        .bg(Theme::BADGE_BG)
+                                        .bg(Theme::BADGE_BG())
                                         .text_size(px(9.5))
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(Theme::ACCENT_PRIMARY)
+                                        .text_color(Theme::ACCENT_PRIMARY())
                                         .child(g.clone())
                                 }),
                             ))
@@ -4272,18 +4272,18 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                         .py(px(1.5))
                         .rounded_md()
                         .bg(if m.chest_granted {
-                            Theme::WIN_BG
+                            Theme::WIN_BG()
                         } else if m.eligible_for_chest {
-                            Theme::ACCENT_LIGHT
+                            Theme::ACCENT_LIGHT()
                         } else {
-                            Theme::BADGE_BG
+                            Theme::BADGE_BG()
                         })
                         .text_color(if m.chest_granted {
-                            Theme::WIN_TEXT
+                            Theme::WIN_TEXT()
                         } else if m.eligible_for_chest {
-                            Theme::AURORA_CYAN
+                            Theme::AURORA_CYAN()
                         } else {
-                            Theme::TEXT_MUTED
+                            Theme::TEXT_MUTED()
                         })
                         .child(if m.chest_granted {
                             "已获宝箱 🎁"
@@ -4324,7 +4324,7 @@ fn loot_filter_label(text: &'static str) -> impl IntoElement {
     div()
         .text_size(px(11.0))
         .font_weight(FontWeight::BOLD)
-        .text_color(Theme::TEXT_MUTED)
+        .text_color(Theme::TEXT_MUTED())
         .whitespace_nowrap()
         .child(text)
 }

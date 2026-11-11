@@ -90,6 +90,8 @@ pub struct LiveLcuService {
     pub asset_cache: Arc<AssetCache>,
     pub auto_match_cfg: Arc<watch::Sender<AutoMatchConfig>>,
     pub auto_bp_cfg: Arc<watch::Sender<AutoBpConfig>>,
+    _auto_match_rx: Arc<watch::Receiver<AutoMatchConfig>>,
+    _auto_bp_rx: Arc<watch::Receiver<AutoBpConfig>>,
     pub client: Arc<tokio::sync::RwLock<Option<yuumi_core::lcu::client::LcuClient>>>,
     pub game_data_assets: Arc<tokio::sync::RwLock<Option<Arc<GameDataAssets>>>>,
     /// 当前连接生命周期内的 Agent 后台运行时（未连接时为 None）
@@ -113,8 +115,8 @@ impl LiveLcuService {
         let (status_tx, _) = watch::channel(ConnectionStatus::Disconnected);
         let (event_tx, _) = broadcast::channel(128);
         let (cloud_events, _) = broadcast::channel(64);
-        let (match_tx, _) = watch::channel(AutoMatchConfig::default());
-        let (bp_tx, _) = watch::channel(AutoBpConfig::default());
+        let (match_tx, match_rx) = watch::channel(AutoMatchConfig::default());
+        let (bp_tx, bp_rx) = watch::channel(AutoBpConfig::default());
 
         Self {
             status: Arc::new(status_tx),
@@ -125,6 +127,8 @@ impl LiveLcuService {
             asset_cache,
             auto_match_cfg: Arc::new(match_tx),
             auto_bp_cfg: Arc::new(bp_tx),
+            _auto_match_rx: Arc::new(match_rx),
+            _auto_bp_rx: Arc::new(bp_rx),
             client: Arc::new(tokio::sync::RwLock::new(None)),
             game_data_assets: Arc::new(tokio::sync::RwLock::new(None)),
             agent_runtime: Arc::new(tokio::sync::RwLock::new(None)),
@@ -147,6 +151,16 @@ impl LiveLcuService {
 
     pub fn subscribe_status(&self) -> watch::Receiver<ConnectionStatus> {
         self.status.subscribe()
+    }
+
+    /// 更新 Match Agent 配置并立即同步至 channel（确保无接收端时值也能被更新）
+    pub fn update_auto_match_cfg(&self, cfg: AutoMatchConfig) {
+        self.auto_match_cfg.send_replace(cfg);
+    }
+
+    /// 更新 BP Agent 配置并立即同步至 channel（确保无接收端时值也能被更新）
+    pub fn update_auto_bp_cfg(&self, cfg: AutoBpConfig) {
+        self.auto_bp_cfg.send_replace(cfg);
     }
 
     /// 获取当前的 LcuClient（若已连接）
@@ -214,6 +228,10 @@ impl LiveLcuService {
                                 assets.champions.len(),
                                 assets.augments.len(),
                             );
+                            // 选择器静态资源：召唤师技能图标 + 后台拉取腾讯英雄别称库
+                            super::champion_alias::store_spell_icons(&assets);
+                            super::champion_alias::spawn_fetch_tencent_keywords();
+
                             let arc_assets = Arc::new(assets);
                             game_data_assets = Some(arc_assets.clone());
                             *self.game_data_assets.write().await = Some(arc_assets.clone());
@@ -851,5 +869,62 @@ fn load_tagged_players_map(self_puuid: &str) -> HashMap<String, String> {
             log::warn!("[LiveLcu] 标记提醒：读取标记玩家失败: {}", e);
             HashMap::new()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_agent_config_sync_startup_runtime_and_reconnect() {
+        let asset_cache = Arc::new(AssetCache::new(None));
+        let service = LiveLcuService::new(asset_cache);
+
+        // 1. 启动加载自定义项（测试代表：自动接受匹配关闭、延迟 3 秒；自动禁用开启、候选 [1, 2, 3]、延迟 5 秒）
+        let mut match_cfg = AutoMatchConfig {
+            auto_accept: false,
+            auto_accept_delay: 3,
+            ..AutoMatchConfig::default()
+        };
+
+        let mut bp_cfg = AutoBpConfig {
+            auto_ban: true,
+            ban_champion_ids: vec![1, 2, 3],
+            ban_delay_ms: 5000,
+            ..AutoBpConfig::default()
+        };
+
+        service.update_auto_match_cfg(match_cfg.clone());
+        service.update_auto_bp_cfg(bp_cfg.clone());
+
+        assert!(!service.auto_match_cfg.borrow().auto_accept);
+        assert_eq!(service.auto_match_cfg.borrow().auto_accept_delay, 3);
+        assert!(service.auto_bp_cfg.borrow().auto_ban);
+        assert_eq!(service.auto_bp_cfg.borrow().ban_champion_ids, vec![1, 2, 3]);
+        assert_eq!(service.auto_bp_cfg.borrow().ban_delay_ms, 5000);
+
+        // 2. 运行中开启再关闭
+        match_cfg.auto_accept = true;
+        match_cfg.auto_accept_delay = 0;
+        service.update_auto_match_cfg(match_cfg.clone());
+        assert!(service.auto_match_cfg.borrow().auto_accept);
+        assert_eq!(service.auto_match_cfg.borrow().auto_accept_delay, 0);
+
+        match_cfg.auto_accept = false;
+        service.update_auto_match_cfg(match_cfg.clone());
+        assert!(!service.auto_match_cfg.borrow().auto_accept);
+
+        bp_cfg.auto_ban = false;
+        bp_cfg.ban_champion_ids.clear();
+        service.update_auto_bp_cfg(bp_cfg.clone());
+        assert!(!service.auto_bp_cfg.borrow().auto_ban);
+        assert!(service.auto_bp_cfg.borrow().ban_champion_ids.is_empty());
+
+        // 3. 模拟 LCU 重连：重新引用的 channel 读取到的仍是最新保留的配置
+        let reconnected_match_cfg = service.auto_match_cfg.borrow().clone();
+        let reconnected_bp_cfg = service.auto_bp_cfg.borrow().clone();
+        assert!(!reconnected_match_cfg.auto_accept);
+        assert!(!reconnected_bp_cfg.auto_ban);
     }
 }

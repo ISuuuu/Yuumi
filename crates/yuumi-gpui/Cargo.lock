@@ -8135,6 +8135,7 @@ dependencies = [
  "gpui",
  "image",
  "log",
+ "raw-window-handle",
  "reqwest",
  "rfd",
  "rustls",

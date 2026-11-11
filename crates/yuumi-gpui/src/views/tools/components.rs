@@ -3,7 +3,9 @@
 //! 包含直显卡片行、英雄选择器、技能选择器、带后缀按钮输入框、危险按钮、装配弹窗等。
 
 use crate::components::icon::icon;
+use crate::components::lcu_image::{LcuImage, LcuImageShape};
 use crate::components::text_field::{text_field, TextFieldOptions};
+use crate::services::champion_alias::{champion_keywords, spell_icon_path};
 use crate::theme::Theme;
 use super::data::{
     get_champion_name, get_spell_name, ChampionEntry, CHAMPIONS, SUMMONER_SPELLS,
@@ -48,9 +50,9 @@ pub fn direct_card_row(
     div()
         .id(id)
         .w_full()
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .when(border_b_zero, |s| s.border_t_0())
         .when(rounded_t, |s| s.rounded_t(px(8.0)))
         .when(rounded_b, |s| s.rounded_b(px(8.0)))
@@ -61,7 +63,7 @@ pub fn direct_card_row(
         .items_center()
         .justify_between()
         .gap(px(14.0))
-        .hover(|s| s.bg(Theme::HOVER_BG))
+        .hover(|s| s.bg(Theme::HOVER_BG()))
         .child(
             div()
                 .flex()
@@ -72,11 +74,11 @@ pub fn direct_card_row(
                     div()
                         .size(px(32.0))
                         .rounded(px(6.0))
-                        .bg(Theme::HOVER_BG)
+                        .bg(Theme::HOVER_BG())
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(icon(icon_name, 16.0, Theme::TEXT_MUTED)),
+                        .child(icon(icon_name, 16.0, Theme::TEXT_MUTED())),
                 )
                 .child(
                     div()
@@ -87,13 +89,13 @@ pub fn direct_card_row(
                             div()
                                 .text_size(px(13.5))
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .child(title),
                         )
                         .child(
                             div()
                                 .text_size(px(11.5))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child(desc),
                         ),
                 ),
@@ -111,13 +113,13 @@ pub fn danger_button(
         .py(px(5.0))
         .rounded_md()
         .border_1()
-        .border_color(Theme::LOSS_BORDER)
-        .bg(Theme::CARD_BG)
+        .border_color(Theme::LOSS_BORDER())
+        .bg(Theme::CARD_BG())
         .text_size(px(12.0))
         .font_weight(FontWeight::MEDIUM)
-        .text_color(Theme::LOSS_TEXT)
+        .text_color(Theme::LOSS_TEXT())
         .cursor_pointer()
-        .hover(|s| s.bg(Theme::LOSS_BG).border_color(Theme::LOSS_TEXT))
+        .hover(|s| s.bg(Theme::LOSS_BG()).border_color(Theme::LOSS_TEXT()))
         .on_mouse_down(MouseButton::Left, on_click)
         .child(label.into())
 }
@@ -151,27 +153,27 @@ where
                 .rounded_md()
                 .border_1()
                 .border_color(if open && !disabled {
-                    Theme::SIDEBAR_ACTIVE_BORDER
+                    Theme::SIDEBAR_ACTIVE_BORDER()
                 } else {
-                    Theme::CARD_BORDER
+                    Theme::CARD_BORDER()
                 })
                 .bg(if open && !disabled {
-                    Theme::ACCENT_LIGHT
+                    Theme::ACCENT_LIGHT()
                 } else {
-                    Theme::CARD_BG
+                    Theme::CARD_BG()
                 })
                 .flex()
                 .items_center()
                 .justify_between()
                 .text_size(px(12.0))
-                .text_color(Theme::TEXT_SECONDARY)
+                .text_color(Theme::TEXT_SECONDARY())
                 .cursor(if disabled {
                     CursorStyle::OperationNotAllowed
                 } else {
                     CursorStyle::PointingHand
                 })
                 .when(!disabled, |this| {
-                    this.hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                    this.hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                         .on_mouse_down(MouseButton::Left, move |_ev, win, app| toggle_cb(win, app))
                 })
                 .child(
@@ -188,7 +190,7 @@ where
                         "icons/chevron-down.svg"
                     },
                     12.0,
-                    Theme::TEXT_MUTED,
+                    Theme::TEXT_MUTED(),
                 )),
         )
         .when(open && !disabled, |this| {
@@ -206,7 +208,7 @@ where
                         .occlude()
                         .bg(rgb(0xffffff))
                         .border_1()
-                        .border_color(Theme::CARD_BORDER)
+                        .border_color(Theme::CARD_BORDER())
                         .rounded_lg()
                         .shadow_md()
                         .p(px(4.0))
@@ -221,9 +223,9 @@ where
                                 .py(px(5.0))
                                 .rounded_md()
                                 .text_size(px(12.0))
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .cursor_pointer()
-                                .hover(|s| s.bg(Theme::HOVER_BG))
+                                .hover(|s| s.bg(Theme::HOVER_BG()))
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                     select_cb(val, win, app)
                                 })
@@ -254,8 +256,8 @@ where
         .h(px(32.0))
         .rounded_md()
         .border_1()
-        .border_color(Theme::CARD_BORDER)
-        .bg(Theme::CARD_BG)
+        .border_color(Theme::CARD_BORDER())
+        .bg(Theme::CARD_BG())
         .px(px(8.0))
         .flex()
         .items_center()
@@ -266,9 +268,9 @@ where
                 .flex_1()
                 .text_size(px(12.5))
                 .text_color(if text.is_empty() {
-                    Theme::TEXT_MUTED
+                    Theme::TEXT_MUTED()
                 } else {
-                    Theme::TEXT_PRIMARY
+                    Theme::TEXT_PRIMARY()
                 })
                 .child(if text.is_empty() {
                     placeholder.to_string()
@@ -282,14 +284,14 @@ where
                 .py(px(3.0))
                 .rounded(px(4.0))
                 .bg(if button_disabled {
-                    Theme::HOVER_BG
+                    Theme::HOVER_BG()
                 } else {
-                    Theme::ACCENT_PRIMARY
+                    Theme::ACCENT_PRIMARY()
                 })
                 .text_size(px(11.5))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(if button_disabled {
-                    Theme::TEXT_MUTED
+                    Theme::TEXT_MUTED()
                 } else {
                     gpui::white()
                 })
@@ -415,9 +417,15 @@ where
     let has_selected = !selected_ids.is_empty();
     let q = search_query.trim().to_lowercase();
 
+    // 腾讯别称检索串缓存命中与否与过滤输入无关，统一先取（未加载时为空串不参与匹配）
+    let tencent_keywords: Vec<String> = CHAMPIONS
+        .iter()
+        .map(|c| champion_keywords(c.id).to_lowercase())
+        .collect();
     let filtered_champions: Vec<&ChampionEntry> = CHAMPIONS
         .iter()
-        .filter(|c| {
+        .zip(tencent_keywords.iter())
+        .filter(|(c, keywords)| {
             if q.is_empty() {
                 true
             } else {
@@ -425,8 +433,10 @@ where
                     || c.pinyin.contains(&q)
                     || c.title.contains(&q)
                     || c.id.to_string() == q
+                    || (!keywords.is_empty() && keywords.contains(&q))
             }
         })
+        .map(|(c, _)| c)
         .collect();
 
     let open_click = on_open.clone();
@@ -446,11 +456,11 @@ where
                 .rounded_md()
                 .border_1()
                 .border_color(if is_open {
-                    Theme::SIDEBAR_ACTIVE_BORDER
+                    Theme::SIDEBAR_ACTIVE_BORDER()
                 } else {
-                    Theme::CARD_BORDER
+                    Theme::CARD_BORDER()
                 })
-                .bg(Theme::CARD_BG)
+                .bg(Theme::CARD_BG())
                 .flex()
                 .items_center()
                 .justify_between()
@@ -467,7 +477,7 @@ where
                             this.child(
                                 div()
                                     .text_size(px(12.0))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child("未配置英雄 (点击右侧选择)"),
                             )
                         })
@@ -477,38 +487,33 @@ where
                                 .h(px(26.0))
                                 .px(px(8.0))
                                 .rounded_full()
-                                .bg(Theme::HOVER_BG)
+                                .bg(Theme::HOVER_BG())
                                 .border_1()
-                                .border_color(Theme::CARD_BORDER)
+                                .border_color(Theme::CARD_BORDER())
                                 .flex()
                                 .items_center()
                                 .gap(px(6.0))
+                                // 英雄头像（对照 Vue chip-icon 22px，此处 chip 高 26px 用 16px）
                                 .child(
-                                    div()
-                                        .size(px(16.0))
-                                        .rounded_full()
-                                        .bg(Theme::ACCENT_LIGHT)
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_size(px(9.0))
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::ACCENT_PRIMARY)
-                                        .child("★"),
+                                    LcuImage::new(format!(
+                                        "/lol-game-data/assets/v1/champion-icons/{cid}.png"
+                                    ))
+                                    .size(px(16.0))
+                                    .shape(LcuImageShape::Rounded),
                                 )
                                 .child(
                                     div()
                                         .text_size(px(12.0))
                                         .font_weight(FontWeight::MEDIUM)
-                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .text_color(Theme::TEXT_PRIMARY())
                                         .child(get_champion_name(cid)),
                                 )
                                 .child(
                                     div()
                                         .text_size(px(11.0))
-                                        .text_color(Theme::TEXT_MUTED)
+                                        .text_color(Theme::TEXT_MUTED())
                                         .cursor_pointer()
-                                        .hover(|s| s.text_color(Theme::LOSS_TEXT))
+                                        .hover(|s| s.text_color(Theme::LOSS_TEXT()))
                                         .on_mouse_down(
                                             MouseButton::Left,
                                             move |_ev, win, app| remove_cb(cid, win, app),
@@ -531,12 +536,12 @@ where
                                     .py(px(4.0))
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .bg(Theme::CARD_BG)
+                                    .border_color(Theme::CARD_BORDER())
+                                    .bg(Theme::CARD_BG())
                                     .text_size(px(11.5))
-                                    .text_color(Theme::TEXT_SECONDARY)
+                                    .text_color(Theme::TEXT_SECONDARY())
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(Theme::HOVER_BG))
+                                    .hover(|s| s.bg(Theme::HOVER_BG()))
                                     .on_mouse_down(MouseButton::Left, clear_cb)
                                     .child("清空"),
                             )
@@ -547,22 +552,22 @@ where
                                 .py(px(4.0))
                                 .rounded_md()
                                 .bg(if is_open {
-                                    Theme::SIDEBAR_ACTIVE
+                                    Theme::SIDEBAR_ACTIVE()
                                 } else {
-                                    Theme::ACCENT_PRIMARY
+                                    Theme::ACCENT_PRIMARY()
                                 })
                                 .text_size(px(11.5))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(if is_open {
-                                    Theme::ACCENT_PRIMARY
+                                    Theme::ACCENT_PRIMARY()
                                 } else {
                                     gpui::white()
                                 })
                                 .border_1()
                                 .border_color(if is_open {
-                                    Theme::ACCENT_PRIMARY
+                                    Theme::ACCENT_PRIMARY()
                                 } else {
-                                    Theme::ACCENT_PRIMARY
+                                    Theme::ACCENT_PRIMARY()
                                 })
                                 .cursor_pointer()
                                 .hover(|s| s.opacity(0.85))
@@ -587,8 +592,8 @@ where
                     .p(px(12.0))
                     .rounded_md()
                     .border_1()
-                    .border_color(Theme::SIDEBAR_ACTIVE_BORDER)
-                    .bg(Theme::CARD_BG)
+                    .border_color(Theme::SIDEBAR_ACTIVE_BORDER())
+                    .bg(Theme::CARD_BG())
                     .shadow_sm()
                     .flex()
                     .flex_col()
@@ -603,15 +608,15 @@ where
                                 div()
                                     .text_size(px(12.5))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(format!("点选常用英雄 (最多 {} 位)", PICKER_MAX_COUNT)),
                             )
                             .child(
                                 div()
                                     .text_size(px(12.0))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .cursor_pointer()
-                                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
+                                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY()))
                                     .on_mouse_down(MouseButton::Left, cancel_cb.clone())
                                     .child("✕"),
                             ),
@@ -642,28 +647,36 @@ where
                                 let select_cb = on_select.clone();
 
                                 div()
-                                    .px(px(8.0))
-                                    .py(px(5.0))
+                                    .px(px(6.0))
+                                    .py(px(4.0))
                                     .rounded_md()
                                     .border_1()
                                     .border_color(if is_selected {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     } else {
-                                        Theme::CARD_BORDER
+                                        Theme::CARD_BORDER()
                                     })
                                     .bg(if is_selected {
-                                        Theme::ACCENT_LIGHT
+                                        Theme::ACCENT_LIGHT()
                                     } else {
-                                        Theme::HOVER_BG
+                                        Theme::HOVER_BG()
                                     })
                                     .flex()
                                     .items_center()
                                     .gap(px(6.0))
                                     .cursor_pointer()
-                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         move |_ev, win, app| select_cb(cid, win, app),
+                                    )
+                                    // 英雄头像（对照 Vue champ-icon，网格紧凑布局用 28px）
+                                    .child(
+                                        LcuImage::new(format!(
+                                            "/lol-game-data/assets/v1/champion-icons/{cid}.png"
+                                        ))
+                                        .size(px(28.0))
+                                        .shape(LcuImageShape::Rounded),
                                     )
                                     .child(
                                         div()
@@ -674,9 +687,9 @@ where
                                                 FontWeight::NORMAL
                                             })
                                             .text_color(if is_selected {
-                                                Theme::ACCENT_PRIMARY
+                                                Theme::ACCENT_PRIMARY()
                                             } else {
-                                                Theme::TEXT_PRIMARY
+                                                Theme::TEXT_PRIMARY()
                                             })
                                             .child(champ.name),
                                     )
@@ -684,7 +697,7 @@ where
                                         s.child(
                                             div()
                                                 .text_size(px(10.0))
-                                                .text_color(Theme::ACCENT_PRIMARY)
+                                                .text_color(Theme::ACCENT_PRIMARY())
                                                 .child("✓"),
                                         )
                                     })
@@ -698,11 +711,11 @@ where
                             .justify_between()
                             .pt(px(4.0))
                             .border_t_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .child(
                                 div()
                                     .text_size(px(11.5))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(format!(
                                         "已配置 {} / 上限 {} 位英雄",
                                         selected_ids.len(),
@@ -714,7 +727,7 @@ where
                                     .px(px(14.0))
                                     .py(px(4.0))
                                     .rounded_md()
-                                    .bg(Theme::ACCENT_PRIMARY)
+                                    .bg(Theme::ACCENT_PRIMARY())
                                     .text_size(px(12.0))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(gpui::white())
@@ -764,9 +777,9 @@ fn picker_search_field(
         .w(px(240.0))
         .h(px(30.0))
         .rounded_lg()
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .px(px(10.0))
         .flex()
         .items_center()
@@ -779,9 +792,9 @@ fn picker_search_field(
             div()
                 .text_size(px(12.5))
                 .text_color(if text.is_empty() {
-                    Theme::TEXT_MUTED
+                    Theme::TEXT_MUTED()
                 } else {
-                    Theme::TEXT_PRIMARY
+                    Theme::TEXT_PRIMARY()
                 })
                 .child(if text.is_empty() {
                     "搜索英雄名称 / 拼音 / ID…".to_string()
@@ -865,8 +878,8 @@ where
                     .p(px(12.0))
                     .rounded_md()
                     .border_1()
-                    .border_color(Theme::SIDEBAR_ACTIVE_BORDER)
-                    .bg(Theme::CARD_BG)
+                    .border_color(Theme::SIDEBAR_ACTIVE_BORDER())
+                    .bg(Theme::CARD_BG())
                     .flex()
                     .flex_col()
                     .gap(px(10.0))
@@ -879,15 +892,15 @@ where
                                 div()
                                     .text_size(px(12.5))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(format!("选择 {} 召唤师技能", slot_label)),
                             )
                             .child(
                                 div()
                                     .text_size(px(12.0))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .cursor_pointer()
-                                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
+                                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY()))
                                     .on_mouse_down(MouseButton::Left, on_close)
                                     .child("✕"),
                             ),
@@ -908,24 +921,35 @@ where
                                 let select_cb = on_select.clone();
 
                                 div()
-                                    .px(px(12.0))
-                                    .py(px(6.0))
+                                    .px(px(8.0))
+                                    .py(px(4.0))
                                     .rounded_md()
                                     .border_1()
                                     .border_color(if is_cur {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     } else {
-                                        Theme::CARD_BORDER
+                                        Theme::CARD_BORDER()
                                     })
                                     .bg(if is_cur {
-                                        Theme::ACCENT_LIGHT
+                                        Theme::ACCENT_LIGHT()
                                     } else {
-                                        Theme::HOVER_BG
+                                        Theme::HOVER_BG()
                                     })
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
                                     .cursor_pointer()
-                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         select_cb(id_val, win, app)
+                                    })
+                                    // 技能图标（GameData 预加载的 iconPath；离线时降级为纯文字）
+                                    .when_some(spell_icon_path(id_val), |this, icon| {
+                                        this.child(
+                                            LcuImage::new(icon)
+                                                .size(px(20.0))
+                                                .shape(LcuImageShape::Rounded),
+                                        )
                                     })
                                     .child(
                                         div()
@@ -936,9 +960,9 @@ where
                                                 FontWeight::NORMAL
                                             })
                                             .text_color(if is_cur {
-                                                Theme::ACCENT_PRIMARY
+                                                Theme::ACCENT_PRIMARY()
                                             } else {
-                                                Theme::TEXT_PRIMARY
+                                                Theme::TEXT_PRIMARY()
                                             })
                                             .child(*sname),
                                     )
@@ -971,20 +995,20 @@ where
         .rounded_md()
         .border_1()
         .border_color(if is_active {
-            Theme::SIDEBAR_ACTIVE_BORDER
+            Theme::SIDEBAR_ACTIVE_BORDER()
         } else {
-            Theme::CARD_BORDER
+            Theme::CARD_BORDER()
         })
         .bg(if is_active {
-            Theme::ACCENT_LIGHT
+            Theme::ACCENT_LIGHT()
         } else {
-            Theme::CARD_BG
+            Theme::CARD_BG()
         })
         .flex()
         .items_center()
         .justify_between()
         .cursor_pointer()
-        .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+        .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
         .on_mouse_down(MouseButton::Left, move |_ev, win, app| click_cb(win, app))
         .child(
             div()
@@ -995,7 +1019,7 @@ where
                     div()
                         .size(px(24.0))
                         .rounded(px(4.0))
-                        .bg(Theme::ACCENT_PRIMARY)
+                        .bg(Theme::ACCENT_PRIMARY())
                         .flex()
                         .items_center()
                         .justify_center()
@@ -1007,27 +1031,44 @@ where
                 .child(
                     div()
                         .flex()
-                        .flex_col()
-                        .gap(px(1.0))
-                        .child(
-                            div()
-                                .text_size(px(10.0))
-                                .text_color(Theme::TEXT_MUTED)
-                                .child(key_title),
+                        .items_center()
+                        .gap(px(6.0))
+                        // 已选技能图标（GameData 预加载；离线时降级为纯文字）
+                        .when_some(
+                            spell_id.and_then(spell_icon_path),
+                            |this, icon| {
+                                this.child(
+                                    LcuImage::new(icon)
+                                        .size(px(24.0))
+                                        .shape(LcuImageShape::Rounded),
+                                )
+                            },
                         )
                         .child(
                             div()
-                                .text_size(px(13.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(if has_spell {
-                                    Theme::TEXT_PRIMARY
-                                } else {
-                                    Theme::TEXT_MUTED
-                                })
-                                .child(match spell_id {
-                                    Some(id) => get_spell_name(id).to_string(),
-                                    None => "+ 选择技能".to_string(),
-                                }),
+                                .flex()
+                                .flex_col()
+                                .gap(px(1.0))
+                                .child(
+                                    div()
+                                        .text_size(px(10.0))
+                                        .text_color(Theme::TEXT_MUTED())
+                                        .child(key_title),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(13.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(if has_spell {
+                                            Theme::TEXT_PRIMARY()
+                                        } else {
+                                            Theme::TEXT_MUTED()
+                                        })
+                                        .child(match spell_id {
+                                            Some(id) => get_spell_name(id).to_string(),
+                                            None => "+ 选择技能".to_string(),
+                                        }),
+                                ),
                         ),
                 ),
         )
@@ -1036,9 +1077,9 @@ where
             this.child(
                 div()
                     .text_size(px(11.0))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .cursor_pointer()
-                    .hover(|s| s.text_color(Theme::LOSS_TEXT))
+                    .hover(|s| s.text_color(Theme::LOSS_TEXT()))
                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| remove_cb(win, app))
                     .child("✕"),
             )
@@ -1171,14 +1212,14 @@ where
             .w(px(190.0))
             .h(px(30.0))
             .rounded_md()
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .border_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .px(px(10.0))
             .flex()
             .items_center()
             .text_size(px(12.0))
-            .text_color(Theme::TEXT_MUTED)
+            .text_color(Theme::TEXT_MUTED())
             .cursor_text()
             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                 let handle = cell.get_or_init(|| app.focus_handle()).clone();
@@ -1234,7 +1275,7 @@ where
                     .rounded_xl()
                     .shadow_lg()
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .p(px(20.0))
                     .flex()
                     .flex_col()
@@ -1246,21 +1287,21 @@ where
                             .items_center()
                             .justify_between()
                             .border_b_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .pb(px(12.0))
                             .child(
                                 div()
                                     .text_size(px(16.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child("装配称号与挑战勋章"),
                             )
                             .child(
                                 div()
                                     .text_size(px(14.0))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .cursor_pointer()
-                                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
+                                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY()))
                                     .on_mouse_down(MouseButton::Left, close_cb)
                                     .child("✕"),
                             ),
@@ -1274,7 +1315,7 @@ where
                                 .items_center()
                                 .justify_center()
                                 .text_size(px(12.5))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child("正在读取您的挑战与称号数据…"),
                         )
                     })
@@ -1284,9 +1325,9 @@ where
                             div()
                                 .p(px(10.0))
                                 .rounded_md()
-                                .bg(Theme::LOSS_BG)
+                                .bg(Theme::LOSS_BG())
                                 .border_1()
-                                .border_color(Theme::LOSS_BORDER)
+                                .border_color(Theme::LOSS_BORDER())
                                 .flex()
                                 .items_center()
                                 .justify_between()
@@ -1294,7 +1335,7 @@ where
                                 .child(
                                     div()
                                         .text_size(px(12.0))
-                                        .text_color(Theme::LOSS_TEXT)
+                                        .text_color(Theme::LOSS_TEXT())
                                         .child(err.clone()),
                                 )
                                 .child(
@@ -1303,9 +1344,9 @@ where
                                         .py(px(4.0))
                                         .rounded_md()
                                         .border_1()
-                                        .border_color(Theme::LOSS_BORDER)
+                                        .border_color(Theme::LOSS_BORDER())
                                         .text_size(px(12.0))
-                                        .text_color(Theme::LOSS_TEXT)
+                                        .text_color(Theme::LOSS_TEXT())
                                         .cursor_pointer()
                                         .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                             act("retry".to_string(), win, app)
@@ -1325,7 +1366,7 @@ where
                                     div()
                                         .text_size(px(12.5))
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .text_color(Theme::TEXT_PRIMARY())
                                         .child(format!("佩戴称号（当前: {}）",
                                             if selected_title.is_empty() { "无称号" } else { selected_title })),
                                 )
@@ -1351,17 +1392,17 @@ where
                                                 .rounded_md()
                                                 .border_1()
                                                 .border_color(if active {
-                                                    Theme::ACCENT_PRIMARY
+                                                    Theme::ACCENT_PRIMARY()
                                                 } else {
-                                                    Theme::CARD_BORDER
+                                                    Theme::CARD_BORDER()
                                                 })
                                                 .bg(if active {
-                                                    Theme::ACCENT_LIGHT
+                                                    Theme::ACCENT_LIGHT()
                                                 } else {
-                                                    Theme::HOVER_BG
+                                                    Theme::HOVER_BG()
                                                 })
                                                 .text_size(px(11.5))
-                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .text_color(Theme::TEXT_PRIMARY())
                                                 .cursor_pointer()
                                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                                     act("title:".to_string(), win, app)
@@ -1378,17 +1419,17 @@ where
                                                 .rounded_md()
                                                 .border_1()
                                                 .border_color(if active {
-                                                    Theme::ACCENT_PRIMARY
+                                                    Theme::ACCENT_PRIMARY()
                                                 } else {
-                                                    Theme::CARD_BORDER
+                                                    Theme::CARD_BORDER()
                                                 })
                                                 .bg(if active {
-                                                    Theme::ACCENT_LIGHT
+                                                    Theme::ACCENT_LIGHT()
                                                 } else {
-                                                    Theme::HOVER_BG
+                                                    Theme::HOVER_BG()
                                                 })
                                                 .text_size(px(11.5))
-                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .text_color(Theme::TEXT_PRIMARY())
                                                 .cursor_pointer()
                                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                                     act(format!("title:{}", id), win, app)
@@ -1409,7 +1450,7 @@ where
                                     div()
                                         .text_size(px(12.5))
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .text_color(Theme::TEXT_PRIMARY())
                                         .child(format!("已选挑战勋章 ({}/3)", selected_badges.len())),
                                 )
                                 .child(
@@ -1435,14 +1476,14 @@ where
                                                 .rounded_lg()
                                                 .border_1()
                                                 .border_color(if has {
-                                                    Theme::SIDEBAR_ACTIVE_BORDER
+                                                    Theme::SIDEBAR_ACTIVE_BORDER()
                                                 } else {
-                                                    Theme::CARD_BORDER
+                                                    Theme::CARD_BORDER()
                                                 })
                                                 .bg(if has {
-                                                    Theme::ACCENT_LIGHT
+                                                    Theme::ACCENT_LIGHT()
                                                 } else {
-                                                    Theme::HOVER_BG
+                                                    Theme::HOVER_BG()
                                                 })
                                                 .flex()
                                                 .items_center()
@@ -1452,9 +1493,9 @@ where
                                                     div()
                                                         .text_size(px(11.5))
                                                         .text_color(if has {
-                                                            Theme::ACCENT_PRIMARY
+                                                            Theme::ACCENT_PRIMARY()
                                                         } else {
-                                                            Theme::TEXT_MUTED
+                                                            Theme::TEXT_MUTED()
                                                         })
                                                         .child(match &detail_name {
                                                             Some(n) => n.clone(),
@@ -1465,9 +1506,9 @@ where
                                                     s.child(
                                                         div()
                                                             .text_size(px(11.0))
-                                                            .text_color(Theme::TEXT_MUTED)
+                                                            .text_color(Theme::TEXT_MUTED())
                                                             .cursor_pointer()
-                                                            .hover(|s| s.text_color(Theme::LOSS_TEXT))
+                                                            .hover(|s| s.text_color(Theme::LOSS_TEXT()))
                                                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                                                 act(format!("remove:{}", idx), win, app)
                                                             })
@@ -1488,7 +1529,7 @@ where
                                 .child(
                                     div()
                                         .text_size(px(12.0))
-                                        .text_color(Theme::TEXT_MUTED)
+                                        .text_color(Theme::TEXT_MUTED())
                                         .child(format!("候选勋章库（已获 {} 枚）", state.owned_badges.len())),
                                 )
                                 .child(
@@ -1511,17 +1552,17 @@ where
                                                         .rounded_md()
                                                         .border_1()
                                                         .border_color(if active {
-                                                            Theme::ACCENT_PRIMARY
+                                                            Theme::ACCENT_PRIMARY()
                                                         } else {
-                                                            Theme::CARD_BORDER
+                                                            Theme::CARD_BORDER()
                                                         })
                                                         .bg(if active {
-                                                            Theme::ACCENT_LIGHT
+                                                            Theme::ACCENT_LIGHT()
                                                         } else {
-                                                            Theme::CARD_BG
+                                                            Theme::CARD_BG()
                                                         })
                                                         .text_size(px(11.0))
-                                                        .text_color(Theme::TEXT_SECONDARY)
+                                                        .text_color(Theme::TEXT_SECONDARY())
                                                         .cursor_pointer()
                                                         .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                                             act(format!("filter:{}", val), win, app)
@@ -1552,20 +1593,20 @@ where
                                                 .rounded_md()
                                                 .border_1()
                                                 .border_color(if is_equipped {
-                                                    Theme::ACCENT_PRIMARY
+                                                    Theme::ACCENT_PRIMARY()
                                                 } else {
-                                                    Theme::CARD_BORDER
+                                                    Theme::CARD_BORDER()
                                                 })
                                                 .bg(if is_equipped {
-                                                    Theme::ACCENT_LIGHT
+                                                    Theme::ACCENT_LIGHT()
                                                 } else {
-                                                    Theme::CARD_BG
+                                                    Theme::CARD_BG()
                                                 })
                                                 .flex()
                                                 .items_center()
                                                 .justify_between()
                                                 .cursor_pointer()
-                                                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                                                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                                     act(bid.clone(), win, app)
                                                 })
@@ -1578,13 +1619,13 @@ where
                                                             div()
                                                                 .text_size(px(12.5))
                                                                 .font_weight(FontWeight::SEMIBOLD)
-                                                                .text_color(Theme::TEXT_PRIMARY)
+                                                                .text_color(Theme::TEXT_PRIMARY())
                                                                 .child(b.name.clone()),
                                                         )
                                                         .child(
                                                             div()
                                                                 .text_size(px(11.0))
-                                                                .text_color(Theme::TEXT_MUTED)
+                                                                .text_color(Theme::TEXT_MUTED())
                                                                 .child(if b.description.is_empty() {
                                                                     "暂无描述".to_string()
                                                                 } else {
@@ -1603,7 +1644,7 @@ where
                                                                 .py(px(2.0))
                                                                 .rounded_md()
                                                                 .text_size(px(10.5))
-                                                                .text_color(Theme::TEXT_MUTED)
+                                                                .text_color(Theme::TEXT_MUTED())
                                                                 .child(level),
                                                         )
                                                         .child(
@@ -1614,9 +1655,9 @@ where
                                                                 .text_size(px(11.0))
                                                                 .font_weight(FontWeight::MEDIUM)
                                                                 .text_color(if is_equipped {
-                                                                    Theme::ACCENT_PRIMARY
+                                                                    Theme::ACCENT_PRIMARY()
                                                                 } else {
-                                                                    Theme::TEXT_MUTED
+                                                                    Theme::TEXT_MUTED()
                                                                 })
                                                                 .child(if is_equipped { "已装备" } else { "装备" }),
                                                         ),
@@ -1633,19 +1674,19 @@ where
                             .justify_between()
                             .pt(px(12.0))
                             .border_t_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .child(
                                 div()
                                     .px(px(12.0))
                                     .py(px(6.0))
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .bg(Theme::CARD_BG)
+                                    .border_color(Theme::CARD_BORDER())
+                                    .bg(Theme::CARD_BG())
                                     .text_size(px(12.0))
-                                    .text_color(Theme::TEXT_SECONDARY)
+                                    .text_color(Theme::TEXT_SECONDARY())
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(Theme::HOVER_BG))
+                                    .hover(|s| s.bg(Theme::HOVER_BG()))
                                     .on_mouse_down(MouseButton::Left, on_clear)
                                     .child("清空所有装配"),
                             )
@@ -1660,12 +1701,12 @@ where
                                             .py(px(6.0))
                                             .rounded_md()
                                             .border_1()
-                                            .border_color(Theme::CARD_BORDER)
-                                            .bg(Theme::CARD_BG)
+                                            .border_color(Theme::CARD_BORDER())
+                                            .bg(Theme::CARD_BG())
                                             .text_size(px(12.0))
-                                            .text_color(Theme::TEXT_SECONDARY)
+                                            .text_color(Theme::TEXT_SECONDARY())
                                             .cursor_pointer()
-                                            .hover(|s| s.bg(Theme::HOVER_BG))
+                                            .hover(|s| s.bg(Theme::HOVER_BG()))
                                             .on_mouse_down(MouseButton::Left, cancel_cb)
                                             .child("取消"),
                                     )
@@ -1674,7 +1715,7 @@ where
                                             .px(px(18.0))
                                             .py(px(6.0))
                                             .rounded_md()
-                                            .bg(Theme::ACCENT_PRIMARY)
+                                            .bg(Theme::ACCENT_PRIMARY())
                                             .text_size(px(12.5))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(gpui::white())

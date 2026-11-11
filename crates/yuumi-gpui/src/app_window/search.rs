@@ -1,8 +1,96 @@
 // 战绩查询路由：查询、详情、翻页、复制与跨页跳转。
 use super::*;
-use crate::match_model::ReplayState;
+use crate::match_model::{GameDetail, ReplayState};
+use crate::views::search::ParticipantRankInfo;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use std::time::Instant;
+use yuumi_core::parsers::game_info::{fetch_ranked_stats_batch, RankedQueueEntry};
+
+/// 详情段位 TTL 缓存（对齐旧版 RANK_TTL = 5 分钟）
+const RANK_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// 模块级段位缓存: puuid -> (段位项, 缓存时刻)。全应用一份，切对局/换玩家时命中免重复请求。
+static RANK_CACHE: LazyLock<Mutex<HashMap<String, (RankedQueueEntry, Instant)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// 段位项转玩家行徽章信息
+fn rank_badge_info(entry: &RankedQueueEntry) -> ParticipantRankInfo {
+    ParticipantRankInfo {
+        tier: entry.tier.clone(),
+        rank_text: yuumi_core::parsers::game_info::rank_tier_label(&entry.tier, &entry.division),
+    }
+}
 
 impl MainWindow {
+    /// 对局详情玩家段位后台拉取（对照 Vue loadRanksInBackground）。
+    /// 关闭「对局信息显示段位」开关时不发任何请求；部分玩家查询失败不影响基础详情展示。
+    pub(super) fn load_detail_ranks(&mut self, detail: &GameDetail, cx: &mut Context<Self>) {
+        if !self.app_config.functions.show_tier_in_game_info {
+            return;
+        }
+        let puuids: Vec<String> = detail
+            .blue
+            .players
+            .iter()
+            .chain(detail.red.players.iter())
+            .map(|p| p.puuid.clone())
+            .filter(|puuid| !puuid.is_empty())
+            .collect();
+        if puuids.is_empty() {
+            return;
+        }
+
+        // 先吃模块级 TTL 缓存，仅未命中的 puuid 才发请求
+        let mut results: HashMap<String, ParticipantRankInfo> = HashMap::new();
+        let now = Instant::now();
+        let pending: Vec<String>;
+        {
+            let cache = RANK_CACHE.lock().unwrap();
+            pending = puuids
+                .into_iter()
+                .filter(|puuid| match cache.get(puuid) {
+                    Some((entry, cached_at)) if now.duration_since(*cached_at) < RANK_TTL => {
+                        results.insert(puuid.clone(), rank_badge_info(entry));
+                        false
+                    }
+                    _ => true,
+                })
+                .collect();
+        }
+
+        self.search_view.rank_request_id += 1;
+        let req_id = self.search_view.rank_request_id;
+        self.search_view.participant_ranks = results.clone();
+        if pending.is_empty() {
+            cx.notify();
+            return;
+        }
+
+        let live_service = self.live_service.clone();
+        cx.spawn(async move |entity, cx| {
+            let Some(client) = live_service.get_client().await else {
+                return;
+            };
+            let fetched = fetch_ranked_stats_batch(&client, pending).await;
+            let now = Instant::now();
+            {
+                let mut cache = RANK_CACHE.lock().unwrap();
+                for (puuid, entry) in &fetched {
+                    cache.insert(puuid.clone(), (entry.clone(), now));
+                }
+            }
+            let _ = entity.update(cx, |this, cx| {
+                if this.search_view.rank_request_id == req_id {
+                    results.extend(fetched.iter().map(|(puuid, e)| (puuid.clone(), rank_badge_info(e))));
+                    this.search_view.participant_ranks = results;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     /// 批量上传结果转 Toast（对照 Vue D15-D18）
     pub(super) fn show_upload_outcome(
         &mut self,
@@ -177,7 +265,8 @@ impl MainWindow {
                                 {
                                     let _ = entity.update(cx, |this, cx| {
                                         if this.search_view.search_generation == current_gen {
-                                            this.search_view.insert_game_detail(gid, detail);
+                                            this.search_view.insert_game_detail(gid, detail.clone());
+                                            this.load_detail_ranks(&detail, cx);
                                             cx.notify();
                                         }
                                     });
@@ -210,13 +299,14 @@ impl MainWindow {
     }
 
     pub(super) fn load_match_detail(&mut self, game_id: u64, cx: &mut Context<Self>) {
-        if self.search_view.details_cache.contains_key(&game_id) {
+        if let Some(cached) = self.search_view.details_cache.get(&game_id).cloned() {
             // 修复 B04 缺陷：缓存命中分支必须递增请求代数并重置加载/错误状态，
             // 避免已发出的旧网络请求在晚到后覆盖当前选中的缓存详情！
             self.search_view.select_request_id += 1;
             self.search_view.is_loading_detail = false;
             self.search_view.detail_error = None;
             self.search_view.selected_game_id = Some(game_id);
+            self.load_detail_ranks(&cached, cx);
             cx.notify();
             return;
         }
@@ -240,7 +330,8 @@ impl MainWindow {
                 {
                     let _ = entity.update(cx, |this, cx| {
                         if this.search_view.select_request_id == req_id {
-                            this.search_view.insert_game_detail(game_id, detail);
+                            this.search_view.insert_game_detail(game_id, detail.clone());
+                            this.load_detail_ranks(&detail, cx);
                             this.search_view.is_loading_detail = false;
                             this.search_view.detail_error = None;
                             cx.notify();

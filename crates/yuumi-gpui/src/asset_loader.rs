@@ -151,7 +151,6 @@ impl AssetLoader {
     }
 
     /// 获取段位图标的相对路径（可直接送给 LcuImage 渲染）
-    #[allow(dead_code)]
     pub fn get_ranked_icon_path(tier: &str) -> Option<&'static str> {
         match tier.trim().to_ascii_uppercase().as_str() {
             "IRON" => Some("assets/ranked-icons/iron.png"),

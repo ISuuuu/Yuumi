@@ -165,6 +165,7 @@ pub struct MainWindow {
     notice_error: bool,
     /// OP.GG 独立窗口句柄（存在即复用并聚焦）
     opgg_window: Option<WindowHandle<OpggWindow>>,
+    mica_active: bool,
     /// 窗口级 Toast 队列（对照 Vue NMessageProvider，全部业务反馈的统一出口）
     toast_stack: Entity<ToastStack>,
     /// 最近一次已成功记录相遇的对局 ID（防止结算多事件重复写入）
@@ -192,6 +193,10 @@ impl MainWindow {
 
         // 加载持久化的全局配置与自动化配置（异常信息留给首帧 Toast）
         let (app_config, config_error) = AppConfig::load_with_error();
+        // 尽早初始化全局语言：首帧 Toast（如配置异常提示）与后续渲染都要用配置里的语言
+        crate::i18n::set_language(crate::i18n::Lang::from_config(
+            &app_config.personalization.language,
+        ));
         let automation = app_config.to_automation_settings();
         let tools_view = ToolsView::new();
 
@@ -213,7 +218,7 @@ impl MainWindow {
             toast_stack.update(cx, |stack, cx| {
                 stack.push(
                     ToastKind::Warning,
-                    format!("配置文件异常:\n{}", config_error),
+                    format!("{}:\n{}", crate::i18n::t("settings.configLoadError"), config_error),
                     cx,
                 );
             });
@@ -283,10 +288,8 @@ impl MainWindow {
         .detach();
 
         // 启动即把持久化配置灌入 Agent 运行时，避免默认值覆盖用户选择
-        let _ = live_service
-            .auto_match_cfg
-            .send(automation.auto_match.clone());
-        let _ = live_service.auto_bp_cfg.send(automation.auto_bp.clone());
+        live_service.update_auto_match_cfg(automation.auto_match.clone());
+        live_service.update_auto_bp_cfg(automation.auto_bp.clone());
 
         // 优先订阅 LCU 领域事件与连接状态，避免漏掉启动瞬间的广播消息
         let mut event_rx = live_service.subscribe_events();
@@ -374,6 +377,7 @@ impl MainWindow {
             notice_loading: false,
             notice_error: false,
             opgg_window: None,
+            mica_active: false,
             toast_stack,
             last_recorded_encounter_game_id: None,
             main_window_bounds: None,
@@ -406,4 +410,15 @@ pub(crate) fn main_window_bounds(cx: &App) -> WindowBounds {
         height = height.min(max_height);
     }
     WindowBounds::centered(Size { width, height }, cx)
+}
+
+/// 设置页 DPI 缩放选项（对照 Vue B12）→ GPUI scale factor 覆盖。
+/// "Auto"（或未知值）返回 None 表示跟随系统 DPI，其余按百分比固定缩放。
+pub(crate) fn scale_factor_override_for(dpi_scale: &str) -> Option<f32> {
+    match dpi_scale {
+        "100" => Some(1.0),
+        "125" => Some(1.25),
+        "150" => Some(1.5),
+        _ => None,
+    }
 }

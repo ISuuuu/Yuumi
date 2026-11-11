@@ -61,7 +61,6 @@ pub enum SettingsAction {
     ToggleLcuRealtime,
     SetLcuUserId(String),
     ToggleSignalrHub,
-    SetSignalrServer(String),
     SetSignalrUser(String),
     ToggleHideTft,
     ToggleHideSavedPlayers,
@@ -96,7 +95,6 @@ pub enum SettingsAction {
     ToggleCheckUpdate,
     GoToReleases,
     ToggleHttpProxy,
-    SetHttpProxyAddr(String),
 
     // ─── 7. 关于 ───
     ToggleChangelog,
@@ -185,16 +183,16 @@ fn render_color_picker(
                 .rounded_md()
                 .border_1()
                 .border_color(if open {
-                    Theme::SIDEBAR_ACTIVE_BORDER
+                    Theme::SIDEBAR_ACTIVE_BORDER()
                 } else {
-                    Theme::CARD_BORDER
+                    Theme::CARD_BORDER()
                 })
-                .bg(Theme::CARD_BG)
+                .bg(Theme::CARD_BG())
                 .flex()
                 .items_center()
                 .gap(px(8.0))
                 .cursor_pointer()
-                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, on_toggle)
                 // 色块预览
                 .child(
@@ -203,14 +201,14 @@ fn render_color_picker(
                         .h(px(16.0))
                         .rounded(px(3.0))
                         .border_1()
-                        .border_color(Theme::CARD_BORDER)
+                        .border_color(Theme::CARD_BORDER())
                         .bg(swatch_color),
                 )
                 // 色值文本
                 .child(
                     div()
                         .text_size(px(11.5))
-                        .text_color(Theme::TEXT_SECONDARY)
+                        .text_color(Theme::TEXT_SECONDARY())
                         .child(hex_display),
                 ),
         )
@@ -225,7 +223,7 @@ fn render_color_picker(
                         .p(px(8.0))
                         .rounded_lg()
                         .border_1()
-                        .border_color(Theme::CARD_BORDER)
+                        .border_color(Theme::CARD_BORDER())
                         .bg(rgb(0xffffff))
                         .shadow_lg()
                         .occlude()
@@ -235,30 +233,30 @@ fn render_color_picker(
                         .child(
                             div()
                                 .text_size(px(11.0))
-                                .text_color(Theme::TEXT_MUTED)
-                                .child("选择推荐色阶:"),
+                                .text_color(Theme::TEXT_MUTED())
+                                .child(crate::i18n::t("settings.paletteHint")),
                         )
                         .child(div().flex().flex_wrap().gap(px(6.0)).w(px(180.0)).children(
                             palette.iter().map(|(hex, _name)| {
-                                    let h = hex.to_string();
-                                    let c = parse_hex_color(hex);
-                                    let is_cur = color_hex.eq_ignore_ascii_case(hex);
-                                    let sel = on_select.clone();
-                                    div()
-                                        .size(px(24.0))
-                                        .rounded_md()
-                                        .border_1()
-                                        .border_color(if is_cur {
-                                            Theme::ACCENT_PRIMARY
-                                        } else {
-                                            Theme::CARD_BORDER
-                                        })
-                                        .bg(c)
-                                        .cursor_pointer()
-                                        .hover(|s| s.opacity(0.8))
-                                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                            sel(h.clone(), win, app)
-                                        })
+                                let h = hex.to_string();
+                                let c = parse_hex_color(hex);
+                                let is_cur = color_hex.eq_ignore_ascii_case(hex);
+                                let sel = on_select.clone();
+                                div()
+                                    .size(px(24.0))
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(if is_cur {
+                                        Theme::ACCENT_PRIMARY()
+                                    } else {
+                                        Theme::CARD_BORDER()
+                                    })
+                                    .bg(c)
+                                    .cursor_pointer()
+                                    .hover(|s| s.opacity(0.8))
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        sel(h.clone(), win, app)
+                                    })
                             }),
                         )),
                 )
@@ -382,7 +380,7 @@ impl SettingsView {
                 },
                 move |_, win, app| submit(SettingsAction::SaveFInput(key), win, app),
             ))
-            .child(action_button("保存", false, move |_, win, app| {
+            .child(action_button(crate::i18n::t("common.save"), false, move |_, win, app| {
                 save(SettingsAction::SaveFInput(key), win, app)
             }))
     }
@@ -393,6 +391,18 @@ impl SettingsView {
             self.open_sections.remove(section_name);
         } else {
             self.open_sections.insert(section_name.to_string());
+        }
+    }
+
+    /// 云端连接状态文案（yuumi-core 的 `HubStatus::label` 为硬编码中文，
+    /// 视图层在本方法内改查 i18n 键，避免改动 yuumi-core）
+    fn cloud_status_label(&self) -> &'static str {
+        match self.cloud_status {
+            yuumi_core::signalr::HubStatus::Disabled => crate::i18n::t("settings.cloudDisconnected"),
+            yuumi_core::signalr::HubStatus::Connecting => crate::i18n::t("settings.cloudConnecting"),
+            yuumi_core::signalr::HubStatus::Connected => crate::i18n::t("settings.cloudConnected"),
+            yuumi_core::signalr::HubStatus::Retry => crate::i18n::t("settings.cloudConnectFailed"),
+            yuumi_core::signalr::HubStatus::InvalidConfig => crate::i18n::t("settings.cloudInvalidAddr"),
         }
     }
 
@@ -427,40 +437,36 @@ impl SettingsView {
                     .gap(px(12.0))
                     // 页面标题 (去除多余状态徽章)
                     .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .mb(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(22.0))
-                                    .font_weight(FontWeight::EXTRA_BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
-                                    .child("设置"),
-                            ),
+                        div().flex().items_center().mb(px(8.0)).child(
+                            div()
+                                .text_size(px(22.0))
+                                .font_weight(FontWeight::EXTRA_BOLD)
+                                .text_color(Theme::TEXT_PRIMARY())
+                                .child(crate::i18n::t("settings.title")),
+                        ),
                     )
                     // ─── 1. 功能 ───
-                    .child(self.render_group_header("功能"))
+                    .child(self.render_group_header(crate::i18n::t("settings.groupFeatures")))
                     .child(self.render_features_group(config, on_action.clone()))
                     // ─── 2. OP.GG ───
                     .child(self.render_group_header("OP.GG"))
                     .child(self.render_opgg_group(config, on_action.clone()))
                     // ─── 3. 通用设置 ───
-                    .child(self.render_group_header("通用设置"))
+                    .child(self.render_group_header(crate::i18n::t("settings.generalGroup")))
                     .child(self.render_general_group(config, on_action.clone()))
                     // ─── 4. 日志 ───
-                    .child(self.render_group_header("日志"))
+                    .child(self.render_group_header(crate::i18n::t("settings.logGroup")))
                     .child(self.render_log_group(config, on_action.clone()))
                     // ─── 5. 个性化 ───
-                    .child(self.render_group_header("个性化"))
+                    .child(self.render_group_header(crate::i18n::t("settings.personalizationGroup")))
                     .child(self.render_personalization_group(config, on_action.clone()))
                     // ─── 6. 软件更新 ───
-                    .child(self.render_group_header("软件更新"))
+                    .child(self.render_group_header(crate::i18n::t("settings.softwareUpdateGroup")))
                     .child(self.render_update_group(config, on_action.clone()))
                     // ─── 7. 网络代理 ───
                     .child(self.render_proxy_group(config, on_action.clone()))
                     // ─── 8. 关于 ───
-                    .child(self.render_group_header("关于"))
+                    .child(self.render_group_header(crate::i18n::t("settings.aboutGroup")))
                     .child(self.render_about_group(config, on_action.clone()))
                     .child(div().h(px(32.0))),
             )
@@ -474,7 +480,7 @@ impl SettingsView {
         div()
             .text_size(px(12.5))
             .font_weight(FontWeight::BOLD)
-            .text_color(Theme::TEXT_MUTED)
+            .text_color(Theme::TEXT_MUTED())
             .mt(px(20.0))
             .mb(px(4.0))
             .px(px(6.0))
@@ -503,8 +509,8 @@ impl SettingsView {
                 .flex_col()
                 // LCU API 并发数 (140px 数值居左，减加居右)
                 .child(settings_card_item(
-                    "LCU API 并发数",
-                    Some("该值越大数据加载速度越快，但越可能引起客户端闪退"),
+                    crate::i18n::t("settings.lcuConcurrencyTitle"),
+                    Some(crate::i18n::t("settings.lcuConcurrencyDesc")),
                     true,
                     number_stepper(
                         "stepper-api-concurr".into(),
@@ -531,8 +537,8 @@ impl SettingsView {
                 ))
                 // 默认对局数量 (140px 数值居左，减加居右)
                 .child(settings_card_item(
-                    "默认对局数量",
-                    Some("调整在个人生涯界面中显示的最大对局数量"),
+                    crate::i18n::t("settings.defaultGamesTitle"),
+                    Some(crate::i18n::t("settings.defaultGamesDesc")),
                     true,
                     number_stepper(
                         "stepper-career-games".into(),
@@ -557,8 +563,8 @@ impl SettingsView {
                 ))
                 // 对局信息过滤 (直显开关)
                 .child(settings_card_item(
-                    "对局信息过滤",
-                    Some("基于你当前游戏模式（地图/队列）筛选战绩，只显示相同模式的玩家历史数据"),
+                    crate::i18n::t("settings.gameInfoFilterTitle"),
+                    Some(crate::i18n::t("settings.gameInfoFilterDesc")),
                     true,
                     div()
                         .cursor_pointer()
@@ -569,8 +575,8 @@ impl SettingsView {
                 ))
                 // 保留对局信息 (直显开关)
                 .child(settings_card_item(
-                    "保留对局信息界面内容",
-                    Some("保留上一局的对局信息内容直到下一次对局开始"),
+                    crate::i18n::t("settings.reserveGameInfoTitle"),
+                    Some(crate::i18n::t("settings.reserveGameInfoDesc")),
                     true,
                     div()
                         .cursor_pointer()
@@ -581,8 +587,8 @@ impl SettingsView {
                 ))
                 // 详情显示段位 (直显开关)
                 .child(settings_card_item(
-                    "对局详情中显示段位",
-                    Some("在搜索界面对局详情界面中显示段位，启动该选项将影响加载界面的速度"),
+                    crate::i18n::t("settings.showTierInGameInfoTitle"),
+                    Some(crate::i18n::t("settings.showTierInGameInfoDesc")),
                     false,
                     div()
                         .cursor_pointer()
@@ -608,8 +614,8 @@ impl SettingsView {
                 .flex()
                 .flex_col()
                 .child(settings_card_item(
-                    "自动显示 OP.GG 窗口",
-                    Some("在英雄选择开始时自动显示 OP.GG 窗口"),
+                    crate::i18n::t("settings.autoShowOpggTitle"),
+                    Some(crate::i18n::t("settings.autoShowOpggDesc")),
                     true,
                     div()
                         .cursor_pointer()
@@ -619,8 +625,8 @@ impl SettingsView {
                         .child(Switch::new(f.auto_show_opgg)),
                 ))
                 .child(settings_card_item(
-                    "置顶 OP.GG 窗口",
-                    Some("在英雄选择时将 OP.GG 窗口置顶"),
+                    crate::i18n::t("settings.pinOpggTitle"),
+                    Some(crate::i18n::t("settings.pinOpggDesc")),
                     false,
                     div()
                         .cursor_pointer()
@@ -676,12 +682,12 @@ impl SettingsView {
                 "settings-card-lolpath".into(),
                 open_path,
                 None,
-                "英雄联盟客户端路径",
-                "设置英雄联盟客户端所在目录的路径",
+                crate::i18n::t("settings.lolPathGroup"),
+                crate::i18n::t("settings.lolPathDesc"),
                 Some(if g.lol_path.is_empty() {
-                    "未设置".to_string()
+                    crate::i18n::t("settings.pathNotSet").to_string()
                 } else {
-                    format!("已设置 {} 个路径", g.lol_path.len())
+                    crate::i18n::t("settings.pathSetCount").replace("{count}", &g.lol_path.len().to_string())
                 }),
                 move |_ev, win, app| {
                     act_toggle_path(SettingsAction::ToggleCollapse("lolpath"), win, app)
@@ -697,9 +703,9 @@ impl SettingsView {
                                 .w_full()
                                 .py(px(12.0))
                                 .text_size(px(12.5))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .text_align(TextAlign::Center)
-                                .child("暂无客户端路径"),
+                                .child(crate::i18n::t("settings.pathEmpty")),
                         )
                     })
                     // 现有路径列表 (输入展示 + 标记 + 移除)
@@ -711,8 +717,8 @@ impl SettingsView {
                             .px(px(12.0))
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .bg(Theme::CARD_BG)
+                            .border_color(Theme::CARD_BORDER())
+                            .bg(Theme::CARD_BG())
                             .flex()
                             .items_center()
                             .justify_between()
@@ -728,10 +734,10 @@ impl SettingsView {
                                                 .px(px(6.0))
                                                 .py(px(2.0))
                                                 .rounded_sm()
-                                                .bg(Theme::ACCENT_LIGHT)
+                                                .bg(Theme::ACCENT_LIGHT())
                                                 .text_size(px(11.0))
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::ACCENT_PRIMARY)
+                                                .text_color(Theme::ACCENT_PRIMARY())
                                                 .child("WeGame"),
                                         )
                                     })
@@ -739,14 +745,14 @@ impl SettingsView {
                                         div()
                                             .text_size(px(12.0))
                                             .text_color(if is_wegame && g.wegame_path.is_none() {
-                                                Theme::TEXT_MUTED
+                                                Theme::TEXT_MUTED()
                                             } else {
-                                                Theme::TEXT_PRIMARY
+                                                Theme::TEXT_PRIMARY()
                                             })
                                             .child(if is_wegame {
                                                 g.wegame_path
                                                     .as_deref()
-                                                    .unwrap_or("WeGame 安装路径（可手动修改）")
+                                                    .unwrap_or(crate::i18n::t("settings.wegamePathPlaceholder"))
                                                     .to_string()
                                             } else {
                                                 path.clone()
@@ -762,8 +768,8 @@ impl SettingsView {
                                     .items_center()
                                     .justify_center()
                                     .text_size(px(11.0))
-                                    .text_color(Theme::TEXT_MUTED)
-                                    .hover(|s| s.bg(Theme::HOVER_BG).text_color(Theme::LOSS_TEXT))
+                                    .text_color(Theme::TEXT_MUTED())
+                                    .hover(|s| s.bg(Theme::HOVER_BG()).text_color(Theme::LOSS_TEXT()))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         act_rm(SettingsAction::RemoveLolPath(idx), win, app)
                                     })
@@ -778,24 +784,24 @@ impl SettingsView {
                             .justify_end()
                             .gap(px(8.0))
                             .child(action_button(
-                                "自动检测",
+                                crate::i18n::t("settings.detectBtn"),
                                 false,
                                 move |_ev, win, app| {
-                                act_detect(SettingsAction::DetectLolPath, win, app)
+                                    act_detect(SettingsAction::DetectLolPath, win, app)
                                 },
                             ))
                             .child(action_button(
-                                "浏览文件夹",
+                                crate::i18n::t("settings.browseBtn"),
                                 false,
                                 move |_ev, win, app| {
-                                act_select_folder(SettingsAction::SelectLolFolder, win, app)
+                                    act_select_folder(SettingsAction::SelectLolFolder, win, app)
                                 },
                             ))
                             .child(action_button(
-                                "添加 WeGame 启动项",
+                                crate::i18n::t("settings.wegameAddBtn"),
                                 false,
                                 move |_ev, win, app| {
-                                act_add_wegame(SettingsAction::AddWegamePath, win, app)
+                                    act_add_wegame(SettingsAction::AddWegamePath, win, app)
                                 },
                             )),
                     ),
@@ -807,8 +813,8 @@ impl SettingsView {
                         .flex()
                         .flex_col()
                         .child(settings_card_item(
-                            "启动时自动运行 LOL",
-                            Some("Yuumi 启动后自动检测并运行英雄联盟客户端"),
+                            crate::i18n::t("settings.autoStartLolTitle"),
+                            Some(crate::i18n::t("settings.autoStartLolDesc")),
                             true,
                             div()
                                 .cursor_pointer()
@@ -818,16 +824,16 @@ impl SettingsView {
                                 .child(Switch::new(g.enable_start_lol_with_app)),
                         ))
                         .child(settings_card_item(
-                            "清除缓存",
-                            Some("删除所有游戏资源的缓存（建议在游戏资源有更新时使用）"),
+                            crate::i18n::t("settings.clearCacheTitle"),
+                            Some(crate::i18n::t("settings.clearCacheDesc")),
                             true,
-                            action_button("删除", false, move |_ev, win, app| {
+                            action_button(crate::i18n::t("settings.deleteBtn"), false, move |_ev, win, app| {
                                 act_clear_cache(SettingsAction::ClearCache, win, app)
                             }),
                         ))
                         .child(settings_card_item(
-                            "关闭到托盘",
-                            Some("点击关闭按钮时将窗口隐藏到系统托盘区域"),
+                            crate::i18n::t("settings.closeToTrayTitle"),
+                            Some(crate::i18n::t("settings.closeToTrayDesc")),
                             true,
                             div()
                                 .cursor_pointer()
@@ -837,8 +843,8 @@ impl SettingsView {
                                 .child(Switch::new(g.enable_close_to_tray.unwrap_or(true))),
                         ))
                         .child(settings_card_item(
-                            "启动时最小化",
-                            Some("软件启动后自动隐藏主窗口并最小化到系统托盘"),
+                            crate::i18n::t("settings.startMinimizedTitle"),
+                            Some(crate::i18n::t("settings.startMinimizedDesc")),
                             false,
                             div()
                                 .cursor_pointer()
@@ -854,16 +860,16 @@ impl SettingsView {
                 "settings-card-cloud".into(),
                 open_cloud,
                 None,
-                "云端服务",
-                "LCU 实时数据上传及 SignalR 实时查询服务",
+                crate::i18n::t("settings.cloudServiceTitle"),
+                crate::i18n::t("settings.cloudServiceDesc"),
                 Some({
                     let upload_st = if g.upload_api_url.is_empty() {
-                        "未配置"
+                        crate::i18n::t("settings.uploadNotConfigured")
                     } else {
-                        "已配置上传"
+                        crate::i18n::t("settings.uploadConfigured")
                     };
                     if f.lcu_realtime_enabled {
-                        format!("{} / {}", upload_st, self.cloud_status.label())
+                        format!("{} / {}", upload_st, self.cloud_status_label())
                     } else {
                         upload_st.to_string()
                     }
@@ -881,14 +887,14 @@ impl SettingsView {
                     .gap(px(12.0))
                     // 1. 服务器 API 地址
                     .child(setting_row(
-                        "服务器 API 地址:",
+                        crate::i18n::t("settings.apiServerAddrLabel"),
                         None,
                         self.f_input(0, "f-upload", "http://example.com", on_action.clone()),
                     ))
                     // 2. LCU 实时服务开关
                     .child(setting_row(
-                        "LCU 实时查询:",
-                        None,
+                        crate::i18n::t("settings.realtimeLcuLabel"),
+                        Some(crate::i18n::t("settings.realtimeLcuHint")),
                         div()
                             .cursor_pointer()
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
@@ -900,7 +906,7 @@ impl SettingsView {
                     .child(setting_row(
                         "userid:",
                         None,
-                        self.f_input(1, "f-user", "留空默认使用 lcu_user_001", on_action.clone()),
+                        self.f_input(1, "f-user", crate::i18n::t("settings.useridPlaceholder"), on_action.clone()),
                     )),
             ))
             // 隐藏菜单折叠卡片 (F-V04)
@@ -908,13 +914,13 @@ impl SettingsView {
                 "settings-card-hidemenu".into(),
                 open_hide,
                 None,
-                "隐藏菜单",
-                "在侧边栏中隐藏选中的菜单入口",
+                crate::i18n::t("settings.hideMenuTitle"),
+                crate::i18n::t("settings.hideMenuDesc"),
                 Some(
                     if f.hide_tft || f.hide_saved_players {
-                    "已启用"
-                } else {
-                    "未启用"
+                        crate::i18n::t("settings.enabled")
+                    } else {
+                        crate::i18n::t("settings.disabled")
                     }
                     .to_string(),
                 ),
@@ -926,7 +932,7 @@ impl SettingsView {
                     .flex_col()
                     .gap(px(10.0))
                     .child(setting_row(
-                        "云顶之弈",
+                        crate::i18n::t("settings.hideMenuOptionTft"),
                         None,
                         div()
                             .cursor_pointer()
@@ -936,7 +942,7 @@ impl SettingsView {
                             .child(Switch::new(f.hide_tft)),
                     ))
                     .child(setting_row(
-                        "路人集",
+                        crate::i18n::t("settings.hideMenuOptionSavedPlayers"),
                         None,
                         div()
                             .cursor_pointer()
@@ -947,18 +953,18 @@ impl SettingsView {
                     )),
             ))
             // 自动截图组 (F-V04)
-            .child(self.render_group_header("自动截图"))
+            .child(self.render_group_header(crate::i18n::t("settings.screenshotGroup")))
             .child(collapse_card(
                 "settings-card-screenshot".into(),
                 open_shot,
                 None,
-                "多杀与超神自动截图",
-                "多杀或超神时自动截图。游戏视频设置须为「无边框」或「窗口化」以防黑屏",
+                crate::i18n::t("settings.enableScreenshotOnMultikillTitle"),
+                crate::i18n::t("settings.enableScreenshotOnMultikillDesc"),
                 Some(
                     if f.enable_screenshot_on_multikill {
-                    "已启用"
-                } else {
-                    "未启用"
+                        crate::i18n::t("settings.enabled")
+                    } else {
+                        crate::i18n::t("settings.disabled")
                     }
                     .to_string(),
                 ),
@@ -970,7 +976,7 @@ impl SettingsView {
                     .flex_col()
                     .gap(px(12.0))
                     .child(setting_row(
-                        "多杀与超神自动截图",
+                        crate::i18n::t("settings.enableScreenshotOnMultikillTitle"),
                         None,
                         div()
                             .cursor_pointer()
@@ -989,7 +995,7 @@ impl SettingsView {
                         let act_lvl5 = on_action.clone();
                         let act_lvl8 = on_action.clone();
                         this.child(setting_row(
-                            "截图触发事件",
+                            crate::i18n::t("settings.screenshotLevelsTitle"),
                             None,
                             div()
                                 .flex()
@@ -997,7 +1003,7 @@ impl SettingsView {
                                 .gap(px(14.0))
                                 .child(checkbox(
                                     "cb-triple".into(),
-                                    "三杀",
+                                    crate::i18n::t("settings.tripleKill"),
                                     f.screenshot_on_multikill_levels.contains(&3),
                                     move |_ev, win, app| {
                                         act_lvl3(SettingsAction::ToggleScreenshotLevel(3), win, app)
@@ -1005,7 +1011,7 @@ impl SettingsView {
                                 ))
                                 .child(checkbox(
                                     "cb-quadra".into(),
-                                    "四杀",
+                                    crate::i18n::t("settings.quadraKill"),
                                     f.screenshot_on_multikill_levels.contains(&4),
                                     move |_ev, win, app| {
                                         act_lvl4(SettingsAction::ToggleScreenshotLevel(4), win, app)
@@ -1013,7 +1019,7 @@ impl SettingsView {
                                 ))
                                 .child(checkbox(
                                     "cb-penta".into(),
-                                    "五杀",
+                                    crate::i18n::t("settings.pentaKill"),
                                     f.screenshot_on_multikill_levels.contains(&5),
                                     move |_ev, win, app| {
                                         act_lvl5(SettingsAction::ToggleScreenshotLevel(5), win, app)
@@ -1021,7 +1027,7 @@ impl SettingsView {
                                 ))
                                 .child(checkbox(
                                     "cb-godlike".into(),
-                                    "超神",
+                                    crate::i18n::t("settings.legendary"),
                                     f.screenshot_on_multikill_levels.contains(&8),
                                     move |_ev, win, app| {
                                         act_lvl8(SettingsAction::ToggleScreenshotLevel(8), win, app)
@@ -1029,7 +1035,7 @@ impl SettingsView {
                                 )),
                         ))
                         .child(setting_row(
-                            "截图保存位置",
+                            crate::i18n::t("settings.screenshotSavePathTitle"),
                             None,
                             div()
                                 .flex()
@@ -1039,22 +1045,22 @@ impl SettingsView {
                                 .child(self.f_input(
                                     3,
                                     "f-screenshot",
-                                    "默认保存至系统图片目录",
+                                    crate::i18n::t("settings.screenshotSavePathPlaceholder"),
                                     on_action.clone(),
                                 ))
                                 .child(action_button(
-                                    "浏览文件夹",
+                                    crate::i18n::t("settings.browseBtn"),
                                     false,
                                     move |_ev, win, app| {
                                         act_shot_pick(
                                             SettingsAction::SelectScreenshotFolder,
                                             win,
                                             app,
-                                )
+                                        )
                                     },
                                 ))
                                 .child(action_button(
-                                    "打开截图文件夹",
+                                    crate::i18n::t("settings.openScreenshotFolderBtn"),
                                     false,
                                     move |_ev, win, app| {
                                         act_shot_open(
@@ -1090,8 +1096,8 @@ impl SettingsView {
                 .flex_col()
                 // 日志等级 (120px 下拉)
                 .child(settings_card_item(
-                    "日志等级",
-                    Some("日志写入文件记录的等级（Debug, Info, Error）"),
+                    crate::i18n::t("settings.logLevelTitle"),
+                    Some(crate::i18n::t("settings.logLevelDesc")),
                     true,
                     select_dropdown(
                         "dropdown-log-level".into(),
@@ -1126,10 +1132,10 @@ impl SettingsView {
                 ))
                 // 打开日志文件
                 .child(settings_card_item(
-                    "日志文件",
-                    Some("[exe 目录]/log/"),
+                    crate::i18n::t("settings.logFileTitle"),
+                    Some(crate::i18n::t("settings.logFileDesc")),
                     false,
-                    action_button("打开文件夹", false, move |_ev, win, app| {
+                    action_button(crate::i18n::t("settings.openFolderBtn"), false, move |_ev, win, app| {
                         act_open(SettingsAction::OpenLogFolder, win, app)
                     }),
                 )),
@@ -1160,23 +1166,23 @@ impl SettingsView {
         let act_reset_dcol = on_action.clone();
 
         let cur_theme_mode = match p.theme_mode.as_str() {
-            "Light" => "浅色",
-            "Dark" => "深色",
-            _ => "跟随系统",
+            "Light" => crate::i18n::t("settings.themeModeLight"),
+            "Dark" => crate::i18n::t("settings.themeModeDark"),
+            _ => crate::i18n::t("settings.themeModeAuto"),
         };
 
         let cur_scale = match p.dpi_scale.as_str() {
             "100" => "100%",
             "125" => "125%",
             "150" => "150%",
-            _ => "跟随系统",
+            _ => crate::i18n::t("settings.dpiScaleAuto"),
         };
 
         let cur_lang = match p.language.as_str() {
             "zh_CN" => "简体中文",
             "zh_TW" => "繁體中文",
             "en_US" => "English",
-            _ => "跟随系统",
+            _ => crate::i18n::t("settings.langAuto"),
         };
 
         div()
@@ -1190,8 +1196,8 @@ impl SettingsView {
                         .flex()
                         .flex_col()
                         .child(settings_card_item(
-                            "云母效果 (Windows 11)",
-                            Some("启用 Windows 11 云母材质效果，使窗口背景模糊及跟随系统主题"),
+                            crate::i18n::t("settings.micaTitle"),
+                            Some(crate::i18n::t("settings.micaDesc")),
                             true,
                             div()
                                 .cursor_pointer()
@@ -1201,8 +1207,8 @@ impl SettingsView {
                                 .child(Switch::new(p.mica_enabled)),
                         ))
                         .child(settings_card_item(
-                            "主题模式",
-                            Some("选择浅色/深色/跟随系统"),
+                            crate::i18n::t("settings.themeModeTitle"),
+                            Some(crate::i18n::t("settings.themeModeDesc")),
                             false,
                             select_dropdown(
                                 "dropdown-theme-mode".into(),
@@ -1215,7 +1221,7 @@ impl SettingsView {
                                     .child({
                                         let act = on_action.clone();
                                         select_dropdown_item(
-                                            "浅色",
+                                            crate::i18n::t("settings.themeModeLight"),
                                             p.theme_mode == "Light",
                                             move |_ev, win, app| {
                                                 act(
@@ -1229,7 +1235,7 @@ impl SettingsView {
                                     .child({
                                         let act = on_action.clone();
                                         select_dropdown_item(
-                                            "深色",
+                                            crate::i18n::t("settings.themeModeDark"),
                                             p.theme_mode == "Dark",
                                             move |_ev, win, app| {
                                                 act(
@@ -1243,7 +1249,7 @@ impl SettingsView {
                                     .child({
                                         let act = on_action.clone();
                                         select_dropdown_item(
-                                            "跟随系统",
+                                            crate::i18n::t("settings.themeModeAuto"),
                                             p.theme_mode == "Auto",
                                             move |_ev, win, app| {
                                                 act(
@@ -1270,8 +1276,8 @@ impl SettingsView {
                 "settings-card-themecolor".into(),
                 open_theme_col,
                 None,
-                "主题颜色",
-                "自定义软件界面主色调 (点击色块选择)",
+                crate::i18n::t("settings.themeColorTitle"),
+                crate::i18n::t("settings.themeColorDesc"),
                 Some(p.theme_color.to_uppercase()),
                 move |_ev, win, app| {
                     act_toggle_tcol(SettingsAction::ToggleCollapse("themecolor"), win, app)
@@ -1281,7 +1287,7 @@ impl SettingsView {
                     .flex_col()
                     .gap(px(12.0))
                     .child(setting_row(
-                        "选择调色盘颜色:",
+                        crate::i18n::t("settings.themeColorPickerLabel"),
                         None,
                         render_color_picker(
                             "picker-themecolor".into(),
@@ -1304,10 +1310,10 @@ impl SettingsView {
                         ),
                     ))
                     .child(div().flex().justify_end().child(action_button(
-                        "重置默认颜色",
+                        crate::i18n::t("settings.resetColors"),
                         false,
                         move |_ev, win, app| {
-                                act_reset_tcol(SettingsAction::ResetThemeColor, win, app)
+                            act_reset_tcol(SettingsAction::ResetThemeColor, win, app)
                         },
                     ))),
             ))
@@ -1316,9 +1322,9 @@ impl SettingsView {
                 "settings-card-cardcolors".into(),
                 open_card_col,
                 None,
-                "战绩卡片颜色",
-                "自定义胜利、失败、重开对局的战绩卡片颜色",
-                Some("已设置自定义颜色".to_string()),
+                crate::i18n::t("settings.cardColorTitle"),
+                crate::i18n::t("settings.cardColorDesc"),
+                Some(crate::i18n::t("settings.cardColorStatusSet").to_string()),
                 move |_ev, win, app| {
                     act_toggle_ccol(SettingsAction::ToggleCollapse("cardcolors"), win, app)
                 },
@@ -1327,7 +1333,7 @@ impl SettingsView {
                     .flex_col()
                     .gap(px(10.0))
                     .child(setting_row(
-                        "胜利",
+                        crate::i18n::t("settings.winCard"),
                         None,
                         render_color_picker(
                             "picker-win-card".into(),
@@ -1350,7 +1356,7 @@ impl SettingsView {
                         ),
                     ))
                     .child(setting_row(
-                        "失败",
+                        crate::i18n::t("settings.loseCard"),
                         None,
                         render_color_picker(
                             "picker-lose-card".into(),
@@ -1373,7 +1379,7 @@ impl SettingsView {
                         ),
                     ))
                     .child(setting_row(
-                        "重开",
+                        crate::i18n::t("settings.remakeCard"),
                         None,
                         render_color_picker(
                             "picker-remake-card".into(),
@@ -1396,10 +1402,10 @@ impl SettingsView {
                         ),
                     ))
                     .child(div().flex().justify_end().child(action_button(
-                        "重置默认颜色",
+                        crate::i18n::t("settings.resetColors"),
                         false,
                         move |_ev, win, app| {
-                                act_reset_ccol(SettingsAction::ResetCardColors, win, app)
+                            act_reset_ccol(SettingsAction::ResetCardColors, win, app)
                         },
                     ))),
             ))
@@ -1408,9 +1414,9 @@ impl SettingsView {
                 "settings-card-deathfontcolor".into(),
                 open_death_col,
                 None,
-                "死亡数字颜色",
-                "自定义对局详情中死亡数字的颜色",
-                Some("已配置死亡高亮".to_string()),
+                crate::i18n::t("settings.deathColorTitle"),
+                crate::i18n::t("settings.deathColorDesc"),
+                Some(crate::i18n::t("settings.deathColorStatusSet").to_string()),
                 move |_ev, win, app| {
                     act_toggle_dcol(SettingsAction::ToggleCollapse("deathfontcolor"), win, app)
                 },
@@ -1419,7 +1425,7 @@ impl SettingsView {
                     .flex_col()
                     .gap(px(10.0))
                     .child(setting_row(
-                        "浅色模式高亮色:",
+                        crate::i18n::t("settings.lightDeathLabel"),
                         None,
                         render_color_picker(
                             "picker-light-death".into(),
@@ -1442,7 +1448,7 @@ impl SettingsView {
                         ),
                     ))
                     .child(setting_row(
-                        "深色模式高亮色:",
+                        crate::i18n::t("settings.darkDeathLabel"),
                         None,
                         render_color_picker(
                             "picker-dark-death".into(),
@@ -1465,10 +1471,10 @@ impl SettingsView {
                         ),
                     ))
                     .child(div().flex().justify_end().child(action_button(
-                        "重置默认颜色",
+                        crate::i18n::t("settings.resetColors"),
                         false,
                         move |_ev, win, app| {
-                                act_reset_dcol(SettingsAction::ResetDeathsColors, win, app)
+                            act_reset_dcol(SettingsAction::ResetDeathsColors, win, app)
                         },
                     ))),
             ))
@@ -1479,8 +1485,8 @@ impl SettingsView {
                         .flex()
                         .flex_col()
                         .child(settings_card_item(
-                            "界面缩放",
-                            Some("支持调整客户端视图的 DPI 缩放大小比例"),
+                            crate::i18n::t("settings.dpiScaleTitle"),
+                            Some(crate::i18n::t("settings.dpiScaleDesc")),
                             true,
                             select_dropdown(
                                 "dropdown-dpi-scale".into(),
@@ -1493,7 +1499,7 @@ impl SettingsView {
                                     .child({
                                         let act = on_action.clone();
                                         select_dropdown_item(
-                                            "跟随系统",
+                                            crate::i18n::t("settings.dpiScaleAuto"),
                                             p.dpi_scale == "Auto",
                                             move |_ev, win, app| {
                                                 act(
@@ -1556,8 +1562,8 @@ impl SettingsView {
                             ),
                         ))
                         .child(settings_card_item(
-                            "语言",
-                            Some("选择软件界面语言选项"),
+                            crate::i18n::t("settings.langTitle"),
+                            Some(crate::i18n::t("settings.langDesc")),
                             false,
                             select_dropdown(
                                 "dropdown-language".into(),
@@ -1570,7 +1576,7 @@ impl SettingsView {
                                     .child({
                                         let act = on_action.clone();
                                         select_dropdown_item(
-                                            "跟随系统",
+                                            crate::i18n::t("settings.langAuto"),
                                             p.language == "Auto",
                                             move |_ev, win, app| {
                                                 act(
@@ -1648,40 +1654,40 @@ impl SettingsView {
 
         Card::new().rounded(px(12.0)).overflow_hidden().child(
             div().flex().flex_col().child(settings_card_item(
-                    "检查更新",
-                    Some(if is_port {
-                        "便携版通过 zip 覆盖方式自动更新，更新后自动重启"
-                    } else {
-                        "在 Yuumi 启动时自动检查更新 — 开启后，检测到新版本将自动后台静默下载"
-                    }),
-                    false,
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(10.0))
+                crate::i18n::t("settings.checkUpdateTitle"),
+                Some(if is_port {
+                    crate::i18n::t("settings.checkUpdateDescPortable")
+                } else {
+                    crate::i18n::t("settings.checkUpdateDescGpui")
+                }),
+                false,
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
                     .child(action_button(
-                        "检查更新",
+                        crate::i18n::t("settings.checkUpdateBtn"),
                         false,
                         move |_ev, win, app| act_check(SettingsAction::CheckUpdate, win, app),
                     ))
-                        .when(is_port, |this| {
+                    .when(is_port, |this| {
                         this.child(action_button(
-                            "前往 GitHub 下载",
+                            crate::i18n::t("settings.goToReleases"),
                             false,
                             move |_ev, win, app| {
                                 act_release(SettingsAction::GoToReleases, win, app)
                             },
                         ))
-                        })
-                        .child(
-                            div()
-                                .cursor_pointer()
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    act_switch(SettingsAction::ToggleCheckUpdate, win, app)
-                                })
-                                .child(Switch::new(config.general.enable_check_update)),
-                        ),
-                )),
+                    })
+                    .child(
+                        div()
+                            .cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                act_switch(SettingsAction::ToggleCheckUpdate, win, app)
+                            })
+                            .child(Switch::new(config.general.enable_check_update)),
+                    ),
+            )),
         )
     }
 
@@ -1699,13 +1705,13 @@ impl SettingsView {
             "settings-card-proxy".into(),
             open_proxy,
             None,
-            "软件 HTTP 代理",
-            "软件更新、TFT 数据、OP.GG 及 GitHub 服务访问走此 HTTP 代理通道",
+            crate::i18n::t("settings.httpProxyGroup"),
+            crate::i18n::t("settings.httpProxyDesc"),
             Some(
                 if g.enable_http_proxy {
-                "已启用"
-            } else {
-                "未启用"
+                    crate::i18n::t("settings.enabled")
+                } else {
+                    crate::i18n::t("settings.disabled")
                 }
                 .to_string(),
             ),
@@ -1755,7 +1761,7 @@ impl SettingsView {
                             div()
                                 .size(px(32.0))
                                 .rounded(px(8.0))
-                                .bg(Theme::ACCENT_PRIMARY)
+                                .bg(Theme::ACCENT_PRIMARY())
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -1768,13 +1774,13 @@ impl SettingsView {
                             div()
                                 .text_size(px(18.0))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .child("Yuumi"),
                         )
                         .child(
                             div()
                                 .text_size(px(12.0))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child("v2.5.0"),
                         ),
                 )
@@ -1783,19 +1789,19 @@ impl SettingsView {
                         .max_w(px(560.0))
                         .text_size(px(12.0))
                         .line_height(relative(1.5))
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .text_align(TextAlign::Center)
-                        .child("Yuumi 是一款基于 Tauri 与 GPUI 原生构建的英雄联盟辅助工具，提供战绩查询、对局信息、云顶之弈数据、战利品管理以及自动对局功能，让游戏体验更轻松。"),
+                        .child(crate::i18n::t("settings.aboutIntroGpui")),
                 )
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .gap(px(12.0))
-                        .child(action_button("更新日志", false, move |_ev, win, app| {
+                        .child(action_button(crate::i18n::t("settings.aboutHistoryBtn"), false, move |_ev, win, app| {
                             act_log(SettingsAction::ToggleChangelog, win, app)
                         }))
-                        .child(action_button("开源仓库", false, move |_ev, win, app| {
+                        .child(action_button(crate::i18n::t("settings.aboutRepository"), false, move |_ev, win, app| {
                             act_repo(SettingsAction::OpenRepo, win, app)
                         })),
                 ),
@@ -1828,7 +1834,7 @@ impl SettingsView {
                     .rounded_xl()
                     .shadow_xl()
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .overflow_hidden()
                     .flex()
                     .flex_col()
@@ -1839,18 +1845,18 @@ impl SettingsView {
                             .px(px(20.0))
                             .py(px(14.0))
                             .border_b_1()
-                            .border_color(Theme::CARD_BORDER.opacity(0.6))
+                            .border_color(Theme::CARD_BORDER().opacity(0.6))
                             .flex()
                             .items_center()
                             .justify_between()
                             .child(
                                 div().flex().items_center().gap(px(10.0)).child(
-                                        div()
-                                            .text_size(px(15.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
-                                            .child("更新日志"),
-                                    ),
+                                    div()
+                                        .text_size(px(15.0))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(Theme::TEXT_PRIMARY())
+                                        .child(crate::i18n::t("settings.aboutHistoryTitle")),
+                                ),
                             )
                             .child(
                                 div()
@@ -1861,9 +1867,9 @@ impl SettingsView {
                                     .items_center()
                                     .justify_center()
                                     .text_size(px(14.0))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .hover(|s| {
-                                        s.bg(Theme::HOVER_BG).text_color(Theme::TEXT_PRIMARY)
+                                        s.bg(Theme::HOVER_BG()).text_color(Theme::TEXT_PRIMARY())
                                     })
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         act_close(SettingsAction::ToggleChangelog, win, app)
@@ -1881,10 +1887,10 @@ impl SettingsView {
                             .flex()
                             .flex_col()
                             .gap(px(14.0))
-                            .child(action_button("刷新", false, move |_, win, app| {
+                            .child(action_button(crate::i18n::t("common.refresh"), false, move |_, win, app| {
                                 act_refresh(SettingsAction::RefreshChangelog, win, app)
                             }))
-                            .when(self.release_loading, |d| d.child("正在加载更新日志…"))
+                            .when(self.release_loading, |d| d.child(crate::i18n::t("settings.aboutHistoryLoading")))
                             .when_some(self.release_error.clone(), |d, error| d.child(error))
                             .children(self.release_notes.iter().map(|release| {
                                 div()

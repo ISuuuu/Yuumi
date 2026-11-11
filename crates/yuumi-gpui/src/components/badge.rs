@@ -41,18 +41,18 @@ impl IntoElement for Badge {
 
     fn into_element(self) -> Self::Element {
         let (bg_color, text_color, border_color) = match self.variant {
-            BadgeVariant::Default => (Theme::BADGE_BG, Theme::TEXT_SECONDARY, Theme::CARD_BORDER),
+            BadgeVariant::Default => (Theme::BADGE_BG(), Theme::TEXT_SECONDARY(), Theme::CARD_BORDER()),
             BadgeVariant::Primary => (
-                Theme::ACCENT_PRIMARY.opacity(0.18),
-                Theme::ACCENT_PRIMARY,
-                Theme::ACCENT_PRIMARY.opacity(0.4),
+                Theme::ACCENT_PRIMARY().opacity(0.18),
+                Theme::ACCENT_PRIMARY(),
+                Theme::ACCENT_PRIMARY().opacity(0.4),
             ),
-            BadgeVariant::Win => (Theme::WIN_BG, Theme::WIN_TEXT, Theme::WIN_BORDER),
-            BadgeVariant::Loss => (Theme::LOSS_BG, Theme::LOSS_TEXT, Theme::LOSS_BORDER),
+            BadgeVariant::Win => (Theme::WIN_BG(), Theme::WIN_TEXT(), Theme::WIN_BORDER()),
+            BadgeVariant::Loss => (Theme::LOSS_BG(), Theme::LOSS_TEXT(), Theme::LOSS_BORDER()),
             BadgeVariant::Ghost => (
                 gpui::transparent_black(),
-                Theme::TEXT_SECONDARY,
-                Theme::CARD_BORDER,
+                Theme::TEXT_SECONDARY(),
+                Theme::CARD_BORDER(),
             ),
         };
 

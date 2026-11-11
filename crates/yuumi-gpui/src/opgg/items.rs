@@ -16,7 +16,7 @@ use yuumi_core::opgg::IdWinRate;
 fn item_icon_element(assets: Option<&GameDataAssets>, item_id: i32) -> LcuImage {
     LcuImage::new(item_icon(assets, item_id))
         .size(px(26.0))
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
 }
 
 /// 出门装/鞋子条目：图标 + 胜率 + 场次
@@ -36,14 +36,14 @@ fn group_entry(assets: Option<&GameDataAssets>, entry: &IdWinRate) -> impl IntoE
                 .ml_auto()
                 .text_size(px(11.52))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(Theme::TEXT_PRIMARY)
+                .text_color(Theme::TEXT_PRIMARY())
                 .child(pct(entry.win_rate)),
         )
         .child(
             div()
                 .min_w(px(50.0))
                 .text_size(px(9.92))
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .child(games_count(entry.play)),
         )
 }
@@ -61,7 +61,7 @@ fn horizontal_divider() -> impl IntoElement {
     div()
         .h(px(1.0))
         .my(px(6.0))
-        .bg(Theme::CARD_BORDER)
+        .bg(Theme::CARD_BORDER())
 }
 
 /// 装备区块；四类装备数据都为空时不渲染
@@ -85,7 +85,7 @@ pub fn items_section(
                 div()
                     .w(px(1.0))
                     .mx(px(8.0))
-                    .bg(Theme::CARD_BORDER),
+                    .bg(Theme::CARD_BORDER()),
             )
             .child(group_column(assets, boots))
     });
@@ -103,7 +103,7 @@ pub fn items_section(
                         div()
                             .mx(px(2.0))
                             .text_size(px(11.2))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child("›")
                             .into_any_element(),
                     );
@@ -127,13 +127,13 @@ pub fn items_section(
                         div()
                             .text_size(px(11.52))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child(pct(entry.win_rate)),
                     )
                     .child(
                         div()
                             .text_size(px(9.92))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child(games_count(entry.play)),
                     ),
             )
@@ -143,7 +143,7 @@ pub fn items_section(
                     .text_right()
                     .text_size(px(11.52))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(Theme::TEXT_SECONDARY)
+                    .text_color(Theme::TEXT_SECONDARY())
                     .child(pct(entry.pick_rate)),
             )
     });
@@ -167,9 +167,9 @@ pub fn items_section(
             .my(px(10.0))
             .px(px(16.0))
             .py(px(12.0))
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .border_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .rounded(px(8.0))
             .shadow_sm()
             .children(top_row)

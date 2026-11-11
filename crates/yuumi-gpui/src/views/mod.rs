@@ -29,16 +29,17 @@ pub enum Route {
 }
 
 impl Route {
+    /// 路由标题（经 i18n 查表，侧栏 / 托盘 / 页面共用）
     pub fn title(&self) -> &'static str {
         match self {
-            Route::Home => "首页",
-            Route::Career => "生涯",
-            Route::Search => "战绩查询",
-            Route::GameInfo => "对局信息",
-            Route::Tft => "云顶之弈",
-            Route::SavedPlayers => "路人集",
-            Route::Tools => "工具箱",
-            Route::Settings => "设置",
+            Route::Home => crate::i18n::t("nav.home"),
+            Route::Career => crate::i18n::t("nav.career"),
+            Route::Search => crate::i18n::t("nav.search"),
+            Route::GameInfo => crate::i18n::t("nav.gameinfo"),
+            Route::Tft => crate::i18n::t("nav.tft"),
+            Route::SavedPlayers => crate::i18n::t("nav.savedPlayers"),
+            Route::Tools => crate::i18n::t("nav.tools"),
+            Route::Settings => crate::i18n::t("nav.settings"),
         }
     }
 

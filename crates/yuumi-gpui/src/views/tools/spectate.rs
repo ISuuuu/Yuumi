@@ -83,14 +83,14 @@ impl ToolsView {
                                 .py(px(4.0))
                                 .rounded(px(4.0))
                                 .bg(if name_empty {
-                                    Theme::HOVER_BG
+                                    Theme::HOVER_BG()
                                 } else {
-                                    Theme::ACCENT_PRIMARY
+                                    Theme::ACCENT_PRIMARY()
                                 })
                                 .text_size(px(11.5))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(if name_empty {
-                                    Theme::TEXT_MUTED
+                                    Theme::TEXT_MUTED()
                                 } else {
                                     gpui::white()
                                 })
@@ -249,7 +249,7 @@ impl ToolsView {
                         div()
                             .p(px(16.0))
                             .rounded_md()
-                            .bg(Theme::HOVER_BG)
+                            .bg(Theme::HOVER_BG())
                             .flex()
                             .items_center()
                             .justify_between()
@@ -262,7 +262,7 @@ impl ToolsView {
                                         div()
                                             .text_size(px(13.0))
                                             .font_weight(FontWeight::MEDIUM)
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .child(if scanning {
                                                 "正在读取好友列表并检测最后活跃时间…"
                                             } else {
@@ -272,7 +272,7 @@ impl ToolsView {
                                     .child(
                                         div()
                                             .text_size(px(11.5))
-                                            .text_color(Theme::TEXT_MUTED)
+                                            .text_color(Theme::TEXT_MUTED())
                                             .child("穿透查询最近对局与熟练度时间，保护隐藏战绩玩家不被误删"),
                                     ),
                             )
@@ -281,7 +281,7 @@ impl ToolsView {
                                     .px(px(16.0))
                                     .py(px(6.0))
                                     .rounded_md()
-                                    .bg(Theme::ACCENT_PRIMARY)
+                                    .bg(Theme::ACCENT_PRIMARY())
                                     .text_size(px(12.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(gpui::white())
@@ -328,7 +328,7 @@ impl ToolsView {
                                                     .px(px(12.0))
                                                     .py(px(5.0))
                                                     .rounded_md()
-                                                    .bg(Theme::ACCENT_PRIMARY)
+                                                    .bg(Theme::ACCENT_PRIMARY())
                                                     .text_size(px(12.0))
                                                     .font_weight(FontWeight::MEDIUM)
                                                     .text_color(gpui::white())
@@ -397,12 +397,12 @@ impl ToolsView {
                                                     .py(px(4.0))
                                                     .rounded_md()
                                                     .border_1()
-                                                    .border_color(Theme::CARD_BORDER)
-                                                    .bg(Theme::CARD_BG)
+                                                    .border_color(Theme::CARD_BORDER())
+                                                    .bg(Theme::CARD_BG())
                                                     .text_size(px(11.5))
-                                                    .text_color(Theme::TEXT_SECONDARY)
+                                                    .text_color(Theme::TEXT_SECONDARY())
                                                     .cursor_pointer()
-                                                    .hover(|s| s.bg(Theme::HOVER_BG))
+                                                    .hover(|s| s.bg(Theme::HOVER_BG()))
                                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                                         act_select_all(ToolsAction::SelectAllCleanerFriends, win, app)
                                                     })
@@ -414,12 +414,12 @@ impl ToolsView {
                                                     .py(px(4.0))
                                                     .rounded_md()
                                                     .border_1()
-                                                    .border_color(Theme::CARD_BORDER)
-                                                    .bg(Theme::CARD_BG)
+                                                    .border_color(Theme::CARD_BORDER())
+                                                    .bg(Theme::CARD_BG())
                                                     .text_size(px(11.5))
-                                                    .text_color(Theme::TEXT_SECONDARY)
+                                                    .text_color(Theme::TEXT_SECONDARY())
                                                     .cursor_pointer()
-                                                    .hover(|s| s.bg(Theme::HOVER_BG))
+                                                    .hover(|s| s.bg(Theme::HOVER_BG()))
                                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                                         act_clear_sel(ToolsAction::ClearSelectedCleanerFriends, win, app)
                                                     })
@@ -446,7 +446,7 @@ impl ToolsView {
                                             div()
                                                 .py(px(12.0))
                                                 .text_size(px(12.0))
-                                                .text_color(Theme::TEXT_MUTED)
+                                                .text_color(Theme::TEXT_MUTED())
                                                 .child("无符合当前筛选条件的好友"),
                                         )
                                     })
@@ -455,9 +455,9 @@ impl ToolsView {
                                         let is_selected = self.cleaner_selected_ids.contains(&fid);
                                         let act_check = on_action.clone();
                                         let activity_color = match f.activity {
-                                            FriendActivity::Online => Theme::WIN_TEXT,
-                                            FriendActivity::Hidden => Theme::TEXT_MUTED,
-                                            _ => Theme::LOSS_TEXT,
+                                            FriendActivity::Online => Theme::WIN_TEXT(),
+                                            FriendActivity::Hidden => Theme::TEXT_MUTED(),
+                                            _ => Theme::LOSS_TEXT(),
                                         };
 
                                         div()
@@ -467,20 +467,20 @@ impl ToolsView {
                                             .rounded_md()
                                             .border_1()
                                             .border_color(if is_selected {
-                                                Theme::SIDEBAR_ACTIVE_BORDER
+                                                Theme::SIDEBAR_ACTIVE_BORDER()
                                             } else {
-                                                Theme::CARD_BORDER
+                                                Theme::CARD_BORDER()
                                             })
                                             .bg(if is_selected {
-                                                Theme::ACCENT_LIGHT
+                                                Theme::ACCENT_LIGHT()
                                             } else {
-                                                Theme::CARD_BG
+                                                Theme::CARD_BG()
                                             })
                                             .flex()
                                             .items_center()
                                             .justify_between()
                                             .cursor_pointer()
-                                            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                                            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                                 act_check(ToolsAction::ToggleSelectCleanerFriend(fid.clone()), win, app)
                                             })
@@ -495,14 +495,14 @@ impl ToolsView {
                                                             .rounded(px(3.0))
                                                             .border_1()
                                                             .border_color(if is_selected {
-                                                                Theme::ACCENT_PRIMARY
+                                                                Theme::ACCENT_PRIMARY()
                                                             } else {
-                                                                Theme::CARD_BORDER
+                                                                Theme::CARD_BORDER()
                                                             })
                                                             .bg(if is_selected {
-                                                                Theme::ACCENT_PRIMARY
+                                                                Theme::ACCENT_PRIMARY()
                                                             } else {
-                                                                Theme::CARD_BG
+                                                                Theme::CARD_BG()
                                                             })
                                                             .flex()
                                                             .items_center()
@@ -515,14 +515,14 @@ impl ToolsView {
                                                         div()
                                                             .text_size(px(12.5))
                                                             .font_weight(FontWeight::MEDIUM)
-                                                            .text_color(Theme::TEXT_PRIMARY)
+                                                            .text_color(Theme::TEXT_PRIMARY())
                                                             .child(f.name.clone()),
                                                     )
                                                     .when(!f.note.is_empty(), |s| {
                                                         s.child(
                                                             div()
                                                                 .text_size(px(11.0))
-                                                                .text_color(Theme::TEXT_MUTED)
+                                                                .text_color(Theme::TEXT_MUTED())
                                                                 .child(format!("({})", f.note)),
                                                         )
                                                     }),
@@ -584,9 +584,9 @@ fn lazy_text_field(
         .w(px(width))
         .h(px(30.0))
         .rounded_lg()
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .px(px(10.0))
         .flex()
         .items_center()
@@ -598,7 +598,7 @@ fn lazy_text_field(
         .child(
             div()
                 .text_size(px(12.5))
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .child(if text.is_empty() {
                     placeholder.to_string()
                 } else {

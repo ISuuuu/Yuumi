@@ -165,7 +165,7 @@ impl MainWindow {
                 if self.career_view.mastery_list.is_empty() {
                     self.toast(
                         ToastKind::Error,
-                        "获取英雄熟练度失败，请确认客户端已连接",
+                        crate::i18n::t("settings.masteryLoadFailed"),
                         cx,
                     );
                 }
@@ -510,7 +510,7 @@ impl MainWindow {
     /// 已有窗口时直接聚焦复用，句柄失效则重建（对照 Vue 的 `getByLabel("opgg")`）。
     pub(super) fn open_opgg_window(&mut self, cx: &mut Context<Self>) {
         if !matches!(self.connection_status, ConnectionStatus::Connected { .. }) {
-            self.show_opgg_hint("未连接到英雄联盟客户端，无法打开 OP.GG", cx);
+            self.show_opgg_hint(crate::i18n::t("common.lcuNotConnected"), cx);
             return;
         }
 
@@ -526,10 +526,7 @@ impl MainWindow {
         }
 
         let service = self.live_service.clone();
-        let proxy = yuumi_core::opgg::ProxyConfig {
-            enable: self.app_config.general.enable_http_proxy,
-            addr: self.app_config.general.http_proxy_addr.clone(),
-        };
+        let proxy = self.opgg_proxy();
         let on_top = self.app_config.functions.enable_opgg_on_top;
         let initial_champion = self.initial_opgg_champion();
         let window_options = WindowOptions {
@@ -546,23 +543,32 @@ impl MainWindow {
             ..Default::default()
         };
 
-        match cx.open_window(window_options, move |_window, cx| {
+        match cx.open_window(window_options, move |window, cx| {
+            if on_top {
+                if let Ok(hwnd) = platform::native_window_handle(window) {
+                    platform::set_window_topmost(hwnd, true);
+                }
+            }
             cx.new(move |cx| OpggWindow::new(service, proxy, initial_champion, cx))
         }) {
             Ok(handle) => {
                 self.opgg_window = Some(handle);
-                if on_top {
-                    // 置顶需等原生窗口就绪后再套用 Win32 样式
-                    std::thread::spawn(move || {
-                        std::thread::sleep(Duration::from_millis(120));
-                        match platform::find_window_by_title(OPGG_WINDOW_TITLE) {
-                            Some(hwnd) => platform::set_window_topmost(hwnd, true),
-                            None => log::warn!("[OPGG] 未找到窗口 HWND，置顶未应用"),
-                        }
-                    });
-                }
             }
             Err(err) => log::error!("[OPGG] 创建窗口失败: {}", err),
+        }
+    }
+
+    fn opgg_proxy(&self) -> yuumi_core::opgg::ProxyConfig {
+        yuumi_core::opgg::ProxyConfig {
+            enable: self.app_config.general.enable_http_proxy,
+            addr: self.app_config.general.http_proxy_addr.clone(),
+        }
+    }
+
+    pub(super) fn apply_opgg_proxy(&self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.opgg_window {
+            let proxy = self.opgg_proxy();
+            let _ = handle.update(cx, |view, _, cx| view.set_proxy(proxy, cx));
         }
     }
 
@@ -603,7 +609,7 @@ impl MainWindow {
         log::info!("[MainWindow] 用户触发重新连接/修复流程");
         // 对照 Vue A03：未连接时手动重连只提示警告，不发起请求
         if !matches!(self.connection_status, ConnectionStatus::Connected { .. }) {
-            self.toast(ToastKind::Warning, "客户端未连接，无法手动重连", cx);
+            self.toast(ToastKind::Warning, crate::i18n::t("common.lcuNotConnected"), cx);
             cx.notify();
             return;
         }
@@ -613,7 +619,7 @@ impl MainWindow {
             let Some(client) = live.get_client().await else {
                 let _ = entity.update(cx, |this, cx| {
                     // 对照 Vue A03
-                    this.toast(ToastKind::Warning, "客户端未连接，无法手动重连", cx);
+                    this.toast(ToastKind::Warning, crate::i18n::t("common.lcuNotConnected"), cx);
                 });
                 return;
             };
@@ -640,9 +646,17 @@ impl MainWindow {
                 }
                 let _ = entity.update(cx, |this, cx| match last_err {
                     // 对照 Vue A04
-                    None => this.toast(ToastKind::Success, "🔄 重新连接已触发，请留意对局窗口", cx),
+                    None => this.toast(
+                        ToastKind::Success,
+                        format!("🔄 {}", crate::i18n::t("common.reconnectTriggered")),
+                        cx,
+                    ),
                     // 对照 Vue A05
-                    Some(e) => this.toast(ToastKind::Error, format!("重新连接失败: {}", e), cx),
+                    Some(e) => this.toast(
+                        ToastKind::Error,
+                        format!("{}: {}", crate::i18n::t("common.reconnectFailed"), e),
+                        cx,
+                    ),
                 });
             } else {
                 // 其他阶段 → 请求回到大厅房间阶段并刷新
@@ -656,9 +670,17 @@ impl MainWindow {
                     .await;
                 let _ = entity.update(cx, |this, cx| match result {
                     // 对照 Vue A04
-                    Ok(_) => this.toast(ToastKind::Success, "🔄 重新连接已触发", cx),
+                    Ok(_) => this.toast(
+                        ToastKind::Success,
+                        format!("🔄 {}", crate::i18n::t("common.reconnectTriggered")),
+                        cx,
+                    ),
                     // 对照 Vue A05
-                    Err(e) => this.toast(ToastKind::Error, format!("重新连接失败: {}", e), cx),
+                    Err(e) => this.toast(
+                        ToastKind::Error,
+                        format!("{}: {}", crate::i18n::t("common.reconnectFailed"), e),
+                        cx,
+                    ),
                 });
             }
         })
@@ -753,15 +775,13 @@ impl MainWindow {
         self.search_view.upload_enabled = self.app_config.functions.upload_enabled;
         self.cloud_tasks.apply(&self.app_config);
         services::logging::set_level(self.app_config.general.log_level);
+        self.apply_theme();
+        self.apply_language();
 
-        let _ = self
-            .live_service
-            .auto_match_cfg
-            .send(self.automation.auto_match.clone());
-        let _ = self
-            .live_service
-            .auto_bp_cfg
-            .send(self.automation.auto_bp.clone());
+        self.live_service
+            .update_auto_match_cfg(self.automation.auto_match.clone());
+        self.live_service
+            .update_auto_bp_cfg(self.automation.auto_bp.clone());
 
         if let Some(tray) = self.tray.as_mut() {
             let _ = tray.update_menu(self.app_config.functions.hide_tft);
@@ -770,7 +790,11 @@ impl MainWindow {
         if let Err(e) = self.app_config.save() {
             log::warn!("[Config] 全局配置持久化失败: {}", e);
             // 对照 Vue B18/B20/B21：用户触发的自动保存失败要以 Toast 呈现
-            self.toast(ToastKind::Error, format!("设置保存失败: {}", e), cx);
+            self.toast(
+                ToastKind::Error,
+                crate::i18n::t("settings.saveFailedDetail").replace("{error}", &e),
+                cx,
+            );
         }
 
         // 悬浮窗开关变更需立即生效

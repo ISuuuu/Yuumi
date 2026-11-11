@@ -12,9 +12,9 @@ impl Card {
     pub fn new() -> Self {
         Self {
             element: div()
-                .bg(Theme::CARD_BG)
+                .bg(Theme::CARD_BG())
                 .border_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .rounded(px(8.0))
                 .shadow_sm(),
         }

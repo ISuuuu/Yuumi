@@ -63,9 +63,9 @@ impl Sidebar {
             .w(width)
             .flex_shrink_0()
             .overflow_hidden()
-            .bg(Theme::SIDEBAR_BG)
+            .bg(Theme::SIDEBAR_BG())
             .border_r_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             // 顶部：汉堡折叠按钮
             .child(
                 div()
@@ -84,13 +84,13 @@ impl Sidebar {
                             .w(px(36.0))
                             .h(px(36.0))
                             .rounded(px(8.0))
-                            .text_color(Theme::TEXT_MUTED)
-                            .hover(|s| s.bg(Theme::HOVER_BG).text_color(Theme::TEXT_PRIMARY))
+                            .text_color(Theme::TEXT_MUTED())
+                            .hover(|s| s.bg(Theme::HOVER_BG()).text_color(Theme::TEXT_PRIMARY()))
                             .cursor_pointer()
                             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                                 toggle_cb(window, app);
                             })
-                            .child(icon("icons/menu.svg", 20.0, Theme::TEXT_MUTED)),
+                            .child(icon("icons/menu.svg", 20.0, Theme::TEXT_MUTED())),
                     ),
             )
             // 中部：主功能导航 (可根据配置隐藏 TFT / 路人集)
@@ -114,11 +114,11 @@ impl Sidebar {
                     .gap(px(4.0))
                     .p(px(8.0))
                     .border_t_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     // 1. OP.GG
                     .child(Self::render_bottom_action(
                         "action-opgg",
-                        "OP.GG",
+                        crate::i18n::t("nav.opgg"),
                         opgg_logo(18.0),
                         expanded,
                         on_open_opgg,
@@ -126,16 +126,16 @@ impl Sidebar {
                     // 2. 修复无限加载 / 重新连接
                     .child(Self::render_bottom_action(
                         "action-reconnect",
-                        "修复加载",
-                        icon("icons/refresh.svg", 18.0, Theme::TEXT_MUTED).into_any_element(),
+                        crate::i18n::t("nav.reconnect"),
+                        icon("icons/refresh.svg", 18.0, Theme::TEXT_MUTED()).into_any_element(),
                         expanded,
                         on_reconnect,
                     ))
                     // 3. 公告 / 更新日志
                     .child(Self::render_bottom_action(
                         "action-notice",
-                        "公告日志",
-                        icon("icons/bell.svg", 18.0, Theme::TEXT_MUTED).into_any_element(),
+                        crate::i18n::t("nav.notice"),
+                        icon("icons/bell.svg", 18.0, Theme::TEXT_MUTED()).into_any_element(),
                         expanded,
                         on_open_notice,
                     ))
@@ -171,9 +171,9 @@ impl Sidebar {
         let title = route.title();
         let icon_path = route.icon_path();
         let fg = if is_active {
-            Theme::TEXT_PRIMARY
+            Theme::TEXT_PRIMARY()
         } else {
-            Theme::TEXT_MUTED
+            Theme::TEXT_MUTED()
         };
 
         div()
@@ -185,14 +185,14 @@ impl Sidebar {
             .rounded(Theme::RADIUS_MD)
             .border_1()
             .border_color(if is_active {
-                Theme::SIDEBAR_ACTIVE_BORDER
+                Theme::SIDEBAR_ACTIVE_BORDER()
             } else {
                 transparent_black()
             })
             .when(expanded, |el| el.px(px(14.0)))
             .when(!expanded, |el| el.justify_center())
-            .when(is_active, |el| el.bg(Theme::SIDEBAR_ACTIVE))
-            .when(!is_active, |el| el.hover(|s| s.bg(Theme::HOVER_BG)))
+            .when(is_active, |el| el.bg(Theme::SIDEBAR_ACTIVE()))
+            .when(!is_active, |el| el.hover(|s| s.bg(Theme::HOVER_BG())))
             .cursor_pointer()
             // 左侧指示条 (4px，对照 Vue ::before)
             .when(is_active, |el| {
@@ -203,7 +203,7 @@ impl Sidebar {
                         .bottom(px(10.0))
                         .w(px(4.0))
                         .rounded_r(px(4.0))
-                        .bg(Theme::ACCENT_PRIMARY)
+                        .bg(Theme::ACCENT_PRIMARY())
                         .when(expanded, |el| el.left(px(-1.0)))
                         .when(!expanded, |el| el.left(px(3.0))),
                 )
@@ -217,7 +217,7 @@ impl Sidebar {
                     .child(icon(
                         icon_path,
                         18.0,
-                        if is_active { Theme::ACCENT_PRIMARY } else { fg },
+                        if is_active { Theme::ACCENT_PRIMARY() } else { fg },
                     ))
                     // 更新提示红点
                     .when(has_dot, |el| {
@@ -228,7 +228,7 @@ impl Sidebar {
                                 .right(px(-2.0))
                                 .size(px(6.0))
                                 .rounded_full()
-                                .bg(Theme::LOSS_BAR),
+                                .bg(Theme::LOSS_BAR()),
                         )
                     }),
             )
@@ -271,7 +271,7 @@ impl Sidebar {
             .border_color(transparent_black())
             .when(expanded, |el| el.px(px(14.0)))
             .when(!expanded, |el| el.justify_center())
-            .hover(|s| s.bg(Theme::HOVER_BG))
+            .hover(|s| s.bg(Theme::HOVER_BG()))
             .cursor_pointer()
             .child(icon_el)
             .when(expanded, |el| {
@@ -282,7 +282,7 @@ impl Sidebar {
                         .min_w(px(0.0))
                         .truncate()
                         .text_size(px(13.5))
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child(label),
                 )
             })
@@ -320,7 +320,7 @@ impl Sidebar {
             .rounded(Theme::RADIUS_MD)
             .border_1()
             .border_color(transparent_black())
-            .hover(|s| s.bg(Theme::HOVER_BG_STRONG))
+            .hover(|s| s.bg(Theme::HOVER_BG_STRONG()))
             .cursor_pointer()
             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                 click_cb(window, app);
@@ -329,7 +329,7 @@ impl Sidebar {
                 LcuImage::new(avatar)
                     .size(px(30.0))
                     .circle()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .placeholder("·"),
             )
             .when(expanded, |el| {
@@ -343,14 +343,14 @@ impl Sidebar {
                             div()
                                 .text_size(px(12.5))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .truncate()
                                 .child(name),
                         )
                         .child(
                             div()
                                 .text_size(px(10.5))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .truncate()
                                 .child(region),
                         ),

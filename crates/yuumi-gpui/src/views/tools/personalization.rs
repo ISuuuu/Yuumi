@@ -141,7 +141,7 @@ impl ToolsView {
                 .child(
                     div()
                         .text_size(px(12.5))
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child("选择背景展示的英雄与皮肤立绘:"),
                 )
                 // 单英雄选择器（保持既有组件与回调形态）
@@ -163,10 +163,10 @@ impl ToolsView {
                             .p(px(12.0))
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .bg(Theme::HOVER_BG)
+                            .border_color(Theme::CARD_BORDER())
+                            .bg(Theme::HOVER_BG())
                             .text_size(px(12.0))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child("正在读取该英雄的真实皮肤列表…"),
                     )
                 })
@@ -178,8 +178,8 @@ impl ToolsView {
                             .p(px(12.0))
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::LOSS_BORDER)
-                            .bg(Theme::LOSS_BG)
+                            .border_color(Theme::LOSS_BORDER())
+                            .bg(Theme::LOSS_BG())
                             .flex()
                             .items_center()
                             .justify_between()
@@ -187,7 +187,7 @@ impl ToolsView {
                             .child(
                                 div()
                                     .text_size(px(12.0))
-                                    .text_color(Theme::LOSS_TEXT)
+                                    .text_color(Theme::LOSS_TEXT())
                                     .child(err.clone()),
                             )
                             .child(
@@ -196,11 +196,11 @@ impl ToolsView {
                                     .py(px(5.0))
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(Theme::LOSS_BORDER)
+                                    .border_color(Theme::LOSS_BORDER())
                                     .text_size(px(12.0))
-                                    .text_color(Theme::LOSS_TEXT)
+                                    .text_color(Theme::LOSS_TEXT())
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(Theme::CARD_BG))
+                                    .hover(|s| s.bg(Theme::CARD_BG()))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         act(ToolsAction::ProfileBgSkinInput("retry".to_string()), win, app)
                                     })
@@ -216,8 +216,8 @@ impl ToolsView {
                             .p(px(12.0))
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .bg(Theme::HOVER_BG)
+                            .border_color(Theme::CARD_BORDER())
+                            .bg(Theme::HOVER_BG())
                             .flex()
                             .items_center()
                             .justify_between()
@@ -241,19 +241,19 @@ impl ToolsView {
                                                 div()
                                                     .text_size(px(13.0))
                                                     .font_weight(FontWeight::BOLD)
-                                                    .text_color(Theme::TEXT_PRIMARY)
+                                                    .text_color(Theme::TEXT_PRIMARY())
                                                     .child(preview_name.clone()),
                                             )
                                             .child(
                                                 div()
                                                     .text_size(px(11.0))
-                                                    .text_color(Theme::TEXT_MUTED)
+                                                    .text_color(Theme::TEXT_MUTED())
                                                     .child(preview_id.clone()),
                                             )
                                             .child(
                                                 div()
                                                     .text_size(px(11.0))
-                                                    .text_color(Theme::TEXT_MUTED)
+                                                    .text_color(Theme::TEXT_MUTED())
                                                     .child(current_bg.clone()),
                                             ),
                                     ),
@@ -263,7 +263,7 @@ impl ToolsView {
                                     .px(px(14.0))
                                     .py(px(5.0))
                                     .rounded_md()
-                                    .bg(Theme::ACCENT_PRIMARY)
+                                    .bg(Theme::ACCENT_PRIMARY())
                                     .text_size(px(12.0))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(gpui::white())
@@ -317,8 +317,8 @@ impl ToolsView {
             .p(px(12.0))
             .rounded_md()
             .border_1()
-            .border_color(Theme::SIDEBAR_ACTIVE_BORDER)
-            .bg(Theme::CARD_BG)
+            .border_color(Theme::SIDEBAR_ACTIVE_BORDER())
+            .bg(Theme::CARD_BG())
             .flex()
             .flex_col()
             .gap(px(10.0))
@@ -332,15 +332,15 @@ impl ToolsView {
                         div()
                             .text_size(px(13.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child("预览并确认主页背景"),
                     )
                     .child(
                         div()
                             .text_size(px(12.0))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .cursor_pointer()
-                            .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
+                            .hover(|s| s.text_color(Theme::TEXT_PRIMARY()))
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                 act_close(ToolsAction::ProfileBgSkinInput("cancel".to_string()), win, app)
                             })
@@ -367,19 +367,19 @@ impl ToolsView {
                                 div()
                                     .text_size(px(13.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(name),
                             )
                             .child(
                                 div()
                                     .text_size(px(11.0))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(id_label),
                             )
                             .child(
                                 div()
                                     .text_size(px(11.0))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(format!("第 {} / {} 款", idx + 1, count)),
                             ),
                     ),
@@ -396,12 +396,12 @@ impl ToolsView {
                             .py(px(4.0))
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .bg(Theme::CARD_BG)
+                            .border_color(Theme::CARD_BORDER())
+                            .bg(Theme::CARD_BG())
                             .text_size(px(12.0))
-                            .text_color(Theme::TEXT_SECONDARY)
+                            .text_color(Theme::TEXT_SECONDARY())
                             .cursor_pointer()
-                            .hover(|s| s.bg(Theme::HOVER_BG))
+                            .hover(|s| s.bg(Theme::HOVER_BG()))
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                 act_prev(ToolsAction::ProfileBgSkinInput("prev".to_string()), win, app)
                             })
@@ -413,12 +413,12 @@ impl ToolsView {
                             .py(px(4.0))
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .bg(Theme::CARD_BG)
+                            .border_color(Theme::CARD_BORDER())
+                            .bg(Theme::CARD_BG())
                             .text_size(px(12.0))
-                            .text_color(Theme::TEXT_SECONDARY)
+                            .text_color(Theme::TEXT_SECONDARY())
                             .cursor_pointer()
-                            .hover(|s| s.bg(Theme::HOVER_BG))
+                            .hover(|s| s.bg(Theme::HOVER_BG()))
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                 act_next(ToolsAction::ProfileBgSkinInput("next".to_string()), win, app)
                             })
@@ -442,12 +442,12 @@ impl ToolsView {
                             .rounded_md()
                             .border_1()
                             .border_color(if active {
-                                Theme::ACCENT_PRIMARY
+                                Theme::ACCENT_PRIMARY()
                             } else {
-                                Theme::CARD_BORDER
+                                Theme::CARD_BORDER()
                             })
                             .cursor_pointer()
-                            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+                            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                 act(ToolsAction::SelectBgSkin(sid), win, app)
                             })
@@ -465,9 +465,9 @@ impl ToolsView {
                     div()
                         .p(px(8.0))
                         .rounded_md()
-                        .bg(Theme::LOSS_BG)
+                        .bg(Theme::LOSS_BG())
                         .border_1()
-                        .border_color(Theme::LOSS_BORDER)
+                        .border_color(Theme::LOSS_BORDER())
                         .flex()
                         .items_center()
                         .justify_between()
@@ -475,7 +475,7 @@ impl ToolsView {
                         .child(
                             div()
                                 .text_size(px(11.5))
-                                .text_color(Theme::LOSS_TEXT)
+                                .text_color(Theme::LOSS_TEXT())
                                 .child(err.clone()),
                         )
                         .child(
@@ -484,9 +484,9 @@ impl ToolsView {
                                 .py(px(4.0))
                                 .rounded_md()
                                 .border_1()
-                                .border_color(Theme::LOSS_BORDER)
+                                .border_color(Theme::LOSS_BORDER())
                                 .text_size(px(11.5))
-                                .text_color(Theme::LOSS_TEXT)
+                                .text_color(Theme::LOSS_TEXT())
                                 .cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                     act(ToolsAction::ApplyProfileBackground, win, app)
@@ -503,19 +503,19 @@ impl ToolsView {
                     .gap(px(8.0))
                     .pt(px(4.0))
                     .border_t_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .child(
                         div()
                             .px(px(14.0))
                             .py(px(6.0))
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .bg(Theme::CARD_BG)
+                            .border_color(Theme::CARD_BORDER())
+                            .bg(Theme::CARD_BG())
                             .text_size(px(12.0))
-                            .text_color(Theme::TEXT_SECONDARY)
+                            .text_color(Theme::TEXT_SECONDARY())
                             .cursor_pointer()
-                            .hover(|s| s.bg(Theme::HOVER_BG))
+                            .hover(|s| s.bg(Theme::HOVER_BG()))
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                 act_cancel(ToolsAction::ProfileBgSkinInput("cancel".to_string()), win, app)
                             })
@@ -526,7 +526,7 @@ impl ToolsView {
                             .px(px(18.0))
                             .py(px(6.0))
                             .rounded_md()
-                            .bg(Theme::ACCENT_PRIMARY)
+                            .bg(Theme::ACCENT_PRIMARY())
                             .text_size(px(12.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(gpui::white())
@@ -633,7 +633,7 @@ impl ToolsView {
                                 .px(px(12.0))
                                 .py(px(5.0))
                                 .rounded_md()
-                                .bg(Theme::ACCENT_PRIMARY)
+                                .bg(Theme::ACCENT_PRIMARY())
                                 .text_size(px(12.0))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(gpui::white())
@@ -703,14 +703,14 @@ impl ToolsView {
             .rounded_md()
             .border_1()
             .border_color(if active {
-                Theme::ACCENT_PRIMARY
+                Theme::ACCENT_PRIMARY()
             } else {
-                Theme::CARD_BORDER
+                Theme::CARD_BORDER()
             })
             .bg(if active {
-                Theme::ACCENT_LIGHT
+                Theme::ACCENT_LIGHT()
             } else {
-                Theme::CARD_BG
+                Theme::CARD_BG()
             })
             .text_size(px(12.0))
             .font_weight(if active {
@@ -719,12 +719,12 @@ impl ToolsView {
                 FontWeight::MEDIUM
             })
             .text_color(if active {
-                Theme::ACCENT_PRIMARY
+                Theme::ACCENT_PRIMARY()
             } else {
-                Theme::TEXT_PRIMARY
+                Theme::TEXT_PRIMARY()
             })
             .cursor_pointer()
-            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY))
+            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
             .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
             .child(label)
     }
@@ -747,13 +747,13 @@ impl ToolsView {
                 .py(px(5.0))
                 .rounded_md()
                 .border_1()
-                .border_color(Theme::ACCENT_PRIMARY)
-                .bg(Theme::CARD_BG)
+                .border_color(Theme::ACCENT_PRIMARY())
+                .bg(Theme::CARD_BG())
                 .text_size(px(12.0))
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(Theme::ACCENT_PRIMARY)
+                .text_color(Theme::ACCENT_PRIMARY())
                 .cursor_pointer()
-                .hover(|s| s.bg(Theme::ACCENT_LIGHT))
+                .hover(|s| s.bg(Theme::ACCENT_LIGHT()))
                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                     act_open(ToolsAction::ToggleBadgesModal(true), win, app)
                 })
@@ -846,8 +846,8 @@ impl ToolsView {
             .p(px(12.0))
             .rounded_md()
             .border_1()
-            .border_color(Theme::LOSS_BORDER)
-            .bg(Theme::LOSS_BG)
+            .border_color(Theme::LOSS_BORDER())
+            .bg(Theme::LOSS_BG())
             .flex()
             .flex_col()
             .gap(px(8.0))
@@ -855,13 +855,13 @@ impl ToolsView {
                 div()
                     .text_size(px(13.0))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(Theme::LOSS_TEXT)
+                    .text_color(Theme::LOSS_TEXT())
                     .child(title),
             )
             .child(
                 div()
                     .text_size(px(11.5))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child(desc),
             )
             .child(
@@ -875,12 +875,12 @@ impl ToolsView {
                             .py(px(5.0))
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .bg(Theme::CARD_BG)
+                            .border_color(Theme::CARD_BORDER())
+                            .bg(Theme::CARD_BG())
                             .text_size(px(12.0))
-                            .text_color(Theme::TEXT_SECONDARY)
+                            .text_color(Theme::TEXT_SECONDARY())
                             .cursor_pointer()
-                            .hover(|s| s.bg(Theme::HOVER_BG))
+                            .hover(|s| s.bg(Theme::HOVER_BG()))
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                 act_cancel(
                                     ToolsAction::ToggleBadgeItem("cancel-clear".to_string()),
@@ -895,7 +895,7 @@ impl ToolsView {
                             .px(px(14.0))
                             .py(px(5.0))
                             .rounded_md()
-                            .bg(Theme::LOSS_TEXT)
+                            .bg(Theme::LOSS_TEXT())
                             .text_size(px(12.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(gpui::white())

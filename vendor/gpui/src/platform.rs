@@ -464,6 +464,9 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn content_size(&self) -> Size<Pixels>;
     fn resize(&mut self, size: Size<Pixels>);
     fn scale_factor(&self) -> f32;
+    /// [Yuumi patch] Overrides the window's scale factor at runtime; `None` restores
+    /// the platform default (system DPI). No-op on platforms without live rescaling.
+    fn set_scale_factor_override(&self, _scale_factor_override: Option<f32>) {}
     fn appearance(&self) -> WindowAppearance;
     fn display(&self) -> Option<Rc<dyn PlatformDisplay>>;
     fn mouse_position(&self) -> Point<Pixels>;
@@ -1126,6 +1129,11 @@ pub struct WindowOptions {
     /// Window minimum size
     pub window_min_size: Option<Size<Pixels>>,
 
+    /// [Yuumi patch] Overrides the window's scale factor (device pixels per logical
+    /// pixel). `None` uses the platform default (per-monitor system DPI on Windows).
+    /// Used by the settings page's DPI scale option (Auto/100/125/150).
+    pub scale_factor_override: Option<f32>,
+
     /// Whether to use client or server side decorations. Wayland only
     /// Note that this may be ignored.
     pub window_decorations: Option<WindowDecorations>,
@@ -1179,6 +1187,9 @@ pub(crate) struct WindowParams {
     pub display_id: Option<DisplayId>,
 
     pub window_min_size: Option<Size<Pixels>>,
+    /// [Yuumi patch] See `WindowOptions::scale_factor_override`
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub scale_factor_override: Option<f32>,
     #[cfg(target_os = "macos")]
     pub tabbing_identifier: Option<String>,
 }
@@ -1237,6 +1248,7 @@ impl Default for WindowOptions {
             window_background: WindowBackgroundAppearance::default(),
             app_id: None,
             window_min_size: None,
+            scale_factor_override: None,
             window_decorations: None,
             tabbing_identifier: None,
         }

@@ -187,8 +187,21 @@ pub struct SearchView {
     pub target_select_game_id: Option<u64>,
     /// 复制状态反馈提示
     pub copied_feedback: Option<u64>,
+    /// 对局详情玩家段位 (puuid -> 段位)，受「对局信息显示段位」开关控制按需拉取
+    pub participant_ranks: HashMap<String, ParticipantRankInfo>,
+    /// 段位请求序号：防止旧详情的段位结果回写当前选中详情
+    pub rank_request_id: usize,
     /// 键盘焦点句柄
     pub focus_handle: FocusHandle,
+}
+
+/// 对局详情玩家行段位徽章信息
+#[derive(Debug, Clone)]
+pub struct ParticipantRankInfo {
+    /// 段位英文（用于挑选内置图标），例如 "DIAMOND"
+    pub tier: String,
+    /// 段位中文标签，例如 "钻石 I"
+    pub rank_text: String,
 }
 
 /// 本地持久化搜索历史路径
@@ -249,6 +262,8 @@ impl SearchView {
             has_upload_api_url: false,
             target_select_game_id: None,
             copied_feedback: None,
+            participant_ranks: HashMap::new(),
+            rank_request_id: 0,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -426,7 +441,7 @@ impl SearchView {
                 .flex()
                 .flex_col()
                 .size_full()
-                .bg(Theme::BG_APP)
+                .bg(Theme::BG_APP())
                 .items_center()
                 .justify_center()
                 .child(
@@ -440,7 +455,7 @@ impl SearchView {
                             div()
                                 .text_sm()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child("英雄联盟客户端未连接，请先启动游戏客户端"),
                         ),
                 )
@@ -467,7 +482,7 @@ impl SearchView {
             .size_full()
             .flex()
             .flex_col()
-            .bg(Theme::BG_APP)
+            .bg(Theme::BG_APP())
             .px(px(24.0))
             .py(px(16.0))
             .overflow_hidden()
@@ -501,11 +516,11 @@ impl SearchView {
                                 .px_3()
                                 .py_1p5()
                                 .rounded(Theme::RADIUS_SM)
-                                .bg(Theme::LOSS_BG)
+                                .bg(Theme::LOSS_BG())
                                 .border_1()
-                                .border_color(Theme::LOSS_BORDER)
+                                .border_color(Theme::LOSS_BORDER())
                                 .text_xs()
-                                .text_color(Theme::LOSS_TEXT)
+                                .text_color(Theme::LOSS_TEXT())
                                 .child(err.clone()),
                         )
                     })
@@ -526,7 +541,7 @@ impl SearchView {
                                         .left_0()
                                         .right_0()
                                         .h(px(2.0))
-                                        .bg(Theme::ACCENT_PRIMARY),
+                                        .bg(Theme::ACCENT_PRIMARY()),
                                 )
                             })
                             // 双栏布局网格
@@ -572,9 +587,9 @@ impl SearchView {
                                                 .px_8()
                                                 .py_6()
                                                 .rounded(Theme::RADIUS_LG)
-                                                .bg(Theme::CARD_BG_HOVER)
+                                                .bg(Theme::CARD_BG_HOVER())
                                                 .border_1()
-                                                .border_color(Theme::CARD_BORDER)
+                                                .border_color(Theme::CARD_BORDER())
                                                 .shadow_md()
                                                 .flex()
                                                 .flex_col()
@@ -585,13 +600,13 @@ impl SearchView {
                                                     div()
                                                         .text_sm()
                                                         .font_weight(FontWeight::BOLD)
-                                                        .text_color(Theme::TEXT_PRIMARY)
+                                                        .text_color(Theme::TEXT_PRIMARY())
                                                         .child("正在查询战绩历史..."),
                                                 )
                                                 .child(
                                                     div()
                                                         .text_xs()
-                                                        .text_color(Theme::TEXT_MUTED)
+                                                        .text_color(Theme::TEXT_MUTED())
                                                         .child(
                                                             "正在通过 LCU 拉取召唤师档案与近期对局",
                                                         ),
@@ -682,10 +697,10 @@ impl SearchView {
                                             .left_0()
                                             .right_0()
                                             .occlude()
-                                            .bg(Theme::CARD_BG_HOVER)
+                                            .bg(Theme::CARD_BG_HOVER())
                                             .border_1()
                                             .border_t_0()
-                                            .border_color(Theme::CARD_BORDER)
+                                            .border_color(Theme::CARD_BORDER())
                                             .rounded_b(px(8.0))
                                             .shadow_lg()
                                             .p(px(12.0))
@@ -701,12 +716,12 @@ impl SearchView {
                                                     .justify_between()
                                                     .pb(px(6.0))
                                                     .border_b_1()
-                                                    .border_color(Theme::CARD_BORDER)
+                                                    .border_color(Theme::CARD_BORDER())
                                                     .child(
                                                         div()
                                                             .text_size(px(11.5))
                                                             .font_weight(FontWeight::BOLD)
-                                                            .text_color(Theme::TEXT_MUTED)
+                                                            .text_color(Theme::TEXT_MUTED())
                                                             .child("🕐 搜索历史"),
                                                     ),
                                             )
@@ -724,14 +739,14 @@ impl SearchView {
                                                         .px(px(10.0))
                                                         .py(px(4.0))
                                                         .rounded(px(14.0))
-                                                        .bg(Theme::HOVER_BG)
+                                                        .bg(Theme::HOVER_BG())
                                                         .border_1()
-                                                        .border_color(Theme::CARD_BORDER)
+                                                        .border_color(Theme::CARD_BORDER())
                                                         .cursor_pointer()
                                                         .max_w(px(260.0))
                                                         .hover(|s| {
-                                                            s.bg(Theme::ACCENT_LIGHT)
-                                                                .border_color(Theme::ACCENT_PRIMARY)
+                                                            s.bg(Theme::ACCENT_LIGHT())
+                                                                .border_color(Theme::ACCENT_PRIMARY())
                                                         })
                                                         .on_mouse_down(
                                                             MouseButton::Left,
@@ -746,7 +761,7 @@ impl SearchView {
                                                                 .whitespace_nowrap()
                                                                 .text_size(px(12.5))
                                                                 .font_weight(FontWeight::SEMIBOLD)
-                                                                .text_color(Theme::TEXT_PRIMARY)
+                                                                .text_color(Theme::TEXT_PRIMARY())
                                                                 .child(item.to_string()),
                                                         )
                                                         .child(
@@ -758,10 +773,10 @@ impl SearchView {
                                                                 .items_center()
                                                                 .justify_center()
                                                                 .text_size(px(10.0))
-                                                                .text_color(Theme::TEXT_MUTED)
+                                                                .text_color(Theme::TEXT_MUTED())
                                                                 .hover(|s| {
-                                                                    s.bg(Theme::LOSS_BG).text_color(
-                                                                        Theme::LOSS_TEXT,
+                                                                    s.bg(Theme::LOSS_BG()).text_color(
+                                                                        Theme::LOSS_TEXT(),
                                                                     )
                                                                 })
                                                                 .on_mouse_down(
@@ -791,17 +806,17 @@ impl SearchView {
                             .h(px(28.0))
                             .px(px(10.0))
                             .rounded(px(10.0))
-                            .bg(Theme::CARD_BG)
+                            .bg(Theme::CARD_BG())
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .border_color(Theme::CARD_BORDER())
+                            .text_color(Theme::TEXT_PRIMARY())
                             .hover(|s| {
-                                s.border_color(Theme::ACCENT_PRIMARY)
-                                    .text_color(Theme::ACCENT_PRIMARY)
+                                s.border_color(Theme::ACCENT_PRIMARY())
+                                    .text_color(Theme::ACCENT_PRIMARY())
                             })
                             .active(|s| {
-                                s.border_color(Theme::ACCENT_HOVER)
-                                    .text_color(Theme::ACCENT_HOVER)
+                                s.border_color(Theme::ACCENT_HOVER())
+                                    .text_color(Theme::ACCENT_HOVER())
                             })
                             .flex()
                             .items_center()
@@ -843,26 +858,26 @@ impl SearchView {
                                         .rounded(px(3.0))
                                         .border_1()
                                         .border_color(if is_checked {
-                                            Theme::ACCENT_PRIMARY
+                                            Theme::ACCENT_PRIMARY()
                                         } else {
-                                            Theme::CARD_BORDER
+                                            Theme::CARD_BORDER()
                                         })
                                         .bg(if is_checked {
-                                            Theme::ACCENT_PRIMARY
+                                            Theme::ACCENT_PRIMARY()
                                         } else {
-                                            Theme::CARD_BG
+                                            Theme::CARD_BG()
                                         })
                                         .flex()
                                         .items_center()
                                         .justify_center()
                                         .text_xs()
-                                        .text_color(Theme::TEXT_ON_PRIMARY)
+                                        .text_color(Theme::TEXT_ON_PRIMARY())
                                         .child(if is_checked { "✓" } else { "" }),
                                 )
                                 .child(
                                     div()
                                         .text_xs()
-                                        .text_color(Theme::TEXT_MUTED)
+                                        .text_color(Theme::TEXT_MUTED())
                                         .child("Upload matches"),
                                 ),
                         )
@@ -909,17 +924,17 @@ impl SearchView {
                     .w(px(130.0))
                     .h(px(28.0))
                     .rounded(px(10.0))
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
                     .border_color(if is_open {
-                        Theme::ACCENT_PRIMARY
+                        Theme::ACCENT_PRIMARY()
                     } else {
-                        Theme::CARD_BORDER
+                        Theme::CARD_BORDER()
                     })
                     .map(|mut el| {
                         if is_open {
                             el.style().box_shadow = Some(vec![BoxShadow {
-                                color: Theme::ACCENT_ALPHA_20,
+                                color: Theme::ACCENT_ALPHA_20(),
                                 offset: point(px(0.0), px(0.0)),
                                 blur_radius: px(0.0),
                                 spread_radius: px(2.0),
@@ -929,7 +944,7 @@ impl SearchView {
                     })
                     .hover(|s| {
                         if !is_open {
-                            s.border_color(Theme::ACCENT_PRIMARY)
+                            s.border_color(Theme::ACCENT_PRIMARY())
                         } else {
                             s
                         }
@@ -949,7 +964,7 @@ impl SearchView {
                             .pl(px(12.0))
                             .text_size(px(14.0))
                             .font_weight(FontWeight::NORMAL)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child(label),
                     )
                     .child(
@@ -967,7 +982,7 @@ impl SearchView {
                                     })
                                     .flex_none()
                                     .size(px(16.0))
-                                    .text_color(Theme::TEXT_MUTED),
+                                    .text_color(Theme::TEXT_MUTED()),
                             ),
                     ),
             )
@@ -984,9 +999,9 @@ impl SearchView {
                             .w_full()
                             .py(px(4.0))
                             .occlude()
-                            .bg(Theme::CARD_BG_HOVER)
+                            .bg(Theme::CARD_BG_HOVER())
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .rounded(px(8.0))
                             .shadow_md()
                             .children(SEARCH_QUEUE_OPTIONS.into_iter().map(|option| {
@@ -1000,7 +1015,7 @@ impl SearchView {
                                     .items_center()
                                     .justify_between()
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(Theme::HOVER_BG))
+                                    .hover(|s| s.bg(Theme::HOVER_BG()))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         select(option.id, win, app);
                                         close(false, win, app);
@@ -1010,9 +1025,9 @@ impl SearchView {
                                             .text_size(px(14.0))
                                             .font_weight(FontWeight::NORMAL)
                                             .text_color(if is_selected {
-                                                Theme::ACCENT_PRIMARY
+                                                Theme::ACCENT_PRIMARY()
                                             } else {
-                                                Theme::TEXT_PRIMARY
+                                                Theme::TEXT_PRIMARY()
                                             })
                                             .child(option.label),
                                     )
@@ -1020,7 +1035,7 @@ impl SearchView {
                                         row.child(
                                             div()
                                                 .text_size(px(14.0))
-                                                .text_color(Theme::ACCENT_PRIMARY)
+                                                .text_color(Theme::ACCENT_PRIMARY())
                                                 .child("✓"),
                                         )
                                     })
@@ -1082,25 +1097,25 @@ impl SearchView {
                                 .px_2p5()
                                 .py_2()
                                 .cursor_pointer()
-                                .bg(if win { Theme::WIN_BG } else { Theme::LOSS_BG })
+                                .bg(if win { Theme::WIN_BG() } else { Theme::LOSS_BG() })
                                 .border_1()
                                 .border_color(if is_selected {
                                     if win {
-                                        Theme::WIN_TEXT
+                                        Theme::WIN_TEXT()
                                     } else {
-                                        Theme::LOSS_BORDER
+                                        Theme::LOSS_BORDER()
                                     }
                                 } else if win {
-                                    Theme::WIN_BORDER
+                                    Theme::WIN_BORDER()
                                 } else {
-                                    Theme::LOSS_BORDER
+                                    Theme::LOSS_BORDER()
                                 })
                                 .when(is_selected, |s| s.border_2().shadow_sm())
                                 .hover(|s| {
                                     s.bg(if win {
-                                        Theme::WIN_BG_HOVER
+                                        Theme::WIN_BG_HOVER()
                                     } else {
-                                        Theme::LOSS_BG_HOVER
+                                        Theme::LOSS_BG_HOVER()
                                     })
                                 })
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
@@ -1117,7 +1132,7 @@ impl SearchView {
                                         .rounded(px(18.0))
                                         .overflow_hidden()
                                         .border_1()
-                                        .border_color(Theme::CARD_BORDER)
+                                        .border_color(Theme::CARD_BORDER())
                                         .child(
                                             LcuImage::new(item.display.champion_icon_url.clone())
                                                 .size(px(36.0))
@@ -1137,7 +1152,7 @@ impl SearchView {
                                             div()
                                                 .text_size(px(12.5))
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::TEXT_PRIMARY)
+                                                .text_color(Theme::TEXT_PRIMARY())
                                                 .overflow_hidden()
                                                 .whitespace_nowrap()
                                                 .child(queue_id_to_name(
@@ -1148,7 +1163,7 @@ impl SearchView {
                                         .child(
                                             div()
                                                 .text_size(px(11.5))
-                                                .text_color(Theme::TEXT_MUTED)
+                                                .text_color(Theme::TEXT_MUTED())
                                                 .whitespace_nowrap()
                                                 .flex()
                                                 .items_center()
@@ -1163,7 +1178,7 @@ impl SearchView {
                                                         .child(format!("{}/", item.display.kills))
                                                         .child(
                                                             div()
-                                                                .text_color(Theme::DEATH_RED)
+                                                                .text_color(Theme::DEATH_RED())
                                                                 .font_weight(FontWeight::BOLD)
                                                                 .child(format!(
                                                                     "{}",
@@ -1195,9 +1210,9 @@ impl SearchView {
                                     .py_8()
                                     .px_3()
                                     .rounded(px(8.0))
-                                    .bg(Theme::CARD_BG)
+                                    .bg(Theme::CARD_BG())
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
+                                    .border_color(Theme::CARD_BORDER())
                                     .flex()
                                     .flex_col()
                                     .items_center()
@@ -1208,13 +1223,13 @@ impl SearchView {
                                         div()
                                             .text_xs()
                                             .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .child("当前筛选条件下没有对局"),
                                     )
                                     .child(
                                         div()
                                             .text_xs()
-                                            .text_color(Theme::TEXT_MUTED)
+                                            .text_color(Theme::TEXT_MUTED())
                                             .child("可切回「全部」模式重试"),
                                     ),
                             )
@@ -1232,9 +1247,9 @@ impl SearchView {
                                     .min_h(px(58.0))
                                     .w_full()
                                     .rounded(px(8.0))
-                                    .bg(Theme::SKELETON_BG)
+                                    .bg(Theme::SKELETON_BG())
                                     .border_1()
-                                    .border_color(Theme::SKELETON_BORDER)
+                                    .border_color(Theme::SKELETON_BORDER())
                             }))
                         },
                     ),
@@ -1246,9 +1261,9 @@ impl SearchView {
                     .h(px(38.0))
                     .w_full()
                     .rounded(px(6.0))
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1270,7 +1285,7 @@ impl SearchView {
                                 .justify_center()
                                 .cursor_pointer()
                                 .when(can_prev, |s| {
-                                    s.hover(|h| h.bg(Theme::HOVER_BG)).on_mouse_down(
+                                    s.hover(|h| h.bg(Theme::HOVER_BG())).on_mouse_down(
                                         MouseButton::Left,
                                         move |_ev, win, app| {
                                             prev_cb(win, app);
@@ -1278,9 +1293,9 @@ impl SearchView {
                                     )
                                 })
                                 .text_color(if can_prev {
-                                    Theme::TEXT_PRIMARY
+                                    Theme::TEXT_PRIMARY()
                                 } else {
-                                    Theme::TEXT_MUTED
+                                    Theme::TEXT_MUTED()
                                 })
                                 .child("◀"),
                         )
@@ -1288,7 +1303,7 @@ impl SearchView {
                             div()
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .child(if is_loading_page {
                                     "⏳".to_string()
                                 } else {
@@ -1305,7 +1320,7 @@ impl SearchView {
                                 .justify_center()
                                 .cursor_pointer()
                                 .when(can_next, |s| {
-                                    s.hover(|h| h.bg(Theme::HOVER_BG)).on_mouse_down(
+                                    s.hover(|h| h.bg(Theme::HOVER_BG())).on_mouse_down(
                                         MouseButton::Left,
                                         move |_ev, win, app| {
                                             next_cb(win, app);
@@ -1313,16 +1328,16 @@ impl SearchView {
                                     )
                                 })
                                 .text_color(if can_next {
-                                    Theme::TEXT_PRIMARY
+                                    Theme::TEXT_PRIMARY()
                                 } else {
-                                    Theme::TEXT_MUTED
+                                    Theme::TEXT_MUTED()
                                 })
                                 .child("▶"),
                         )
                     })
                     // 无结果时的占位
                     .when(total_count == 0, |this| {
-                        this.child(div().text_xs().text_color(Theme::TEXT_MUTED).child("—"))
+                        this.child(div().text_xs().text_color(Theme::TEXT_MUTED()).child("—"))
                     }),
             )
     }
@@ -1371,9 +1386,9 @@ impl SearchView {
                             .text_sm()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if self.detail_error.is_some() {
-                                Theme::LOSS_TEXT
+                                Theme::LOSS_TEXT()
                             } else {
-                                Theme::TEXT_PRIMARY
+                                Theme::TEXT_PRIMARY()
                             })
                             .child(if is_loading {
                                 "正在拉取对局详细数据...".to_string()
@@ -1392,13 +1407,13 @@ impl SearchView {
                                 .px_3()
                                 .py_1p5()
                                 .rounded(px(6.0))
-                                .bg(Theme::CARD_BG)
+                                .bg(Theme::CARD_BG())
                                 .border_1()
-                                .border_color(Theme::CARD_BORDER)
-                                .hover(|s| s.bg(Theme::CARD_BG_HOVER).border_color(Theme::ACCENT_PRIMARY))
+                                .border_color(Theme::CARD_BORDER())
+                                .hover(|s| s.bg(Theme::CARD_BG_HOVER()).border_color(Theme::ACCENT_PRIMARY()))
                                 .text_xs()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                     retry_cb(gid, win, app);
@@ -1428,12 +1443,12 @@ impl SearchView {
             .w_full()
             .rounded(px(8.0))
             .p_3()
-            .bg(if win { Theme::WIN_BG } else { Theme::LOSS_BG })
+            .bg(if win { Theme::WIN_BG() } else { Theme::LOSS_BG() })
             .border_1()
             .border_color(if win {
-                Theme::WIN_BORDER
+                Theme::WIN_BORDER()
             } else {
-                Theme::LOSS_BORDER
+                Theme::LOSS_BORDER()
             })
             .flex()
             .items_center()
@@ -1450,7 +1465,7 @@ impl SearchView {
                             .rounded(px(6.0))
                             .overflow_hidden()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .child(
                                 LcuImage::new(map_icon.to_string())
                                     .size(px(54.0))
@@ -1468,16 +1483,16 @@ impl SearchView {
                                     .text_size(px(20.0))
                                     .font_weight(FontWeight::EXTRA_BOLD)
                                     .text_color(if win {
-                                        Theme::WIN_TEXT
+                                        Theme::WIN_TEXT()
                                     } else {
-                                        Theme::LOSS_TEXT
+                                        Theme::LOSS_TEXT()
                                     })
                                     .child(if win { "胜利" } else { "失败" }),
                             )
                             .child(
                                 div()
                                     .text_size(px(12.0))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(format!(
                                         "{} · {} · {} · {} · Game ID: {}",
                                         d.map_name, d.queue_name, d.duration, d.date, d.game_id
@@ -1500,20 +1515,20 @@ impl SearchView {
                             .h(px(30.0))
                             .px_2()
                             .rounded(px(6.0))
-                            .bg(Theme::CARD_BG)
+                            .bg(Theme::CARD_BG())
                             .border_1()
                             .border_color(match replay_state {
-                                crate::match_model::ReplayState::Watch => Theme::WIN_BORDER,
+                                crate::match_model::ReplayState::Watch => Theme::WIN_BORDER(),
                                 crate::match_model::ReplayState::Downloading
                                 | crate::match_model::ReplayState::Checking => {
-                                    Theme::ACCENT_PRIMARY
+                                    Theme::ACCENT_PRIMARY()
                                 }
-                                crate::match_model::ReplayState::Error => Theme::LOSS_BORDER,
-                                _ => Theme::CARD_BORDER,
+                                crate::match_model::ReplayState::Error => Theme::LOSS_BORDER(),
+                                _ => Theme::CARD_BORDER(),
                             })
                             .hover(|s| {
-                                s.border_color(Theme::ACCENT_PRIMARY)
-                                    .bg(Theme::CARD_BG_HOVER)
+                                s.border_color(Theme::ACCENT_PRIMARY())
+                                    .bg(Theme::CARD_BG_HOVER())
                             })
                             .cursor_pointer()
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
@@ -1531,13 +1546,13 @@ impl SearchView {
                                 },
                                 12.0,
                                 match replay_state {
-                                    crate::match_model::ReplayState::Watch => Theme::WIN_TEXT,
-                                    crate::match_model::ReplayState::Error => Theme::LOSS_TEXT,
+                                    crate::match_model::ReplayState::Watch => Theme::WIN_TEXT(),
+                                    crate::match_model::ReplayState::Error => Theme::LOSS_TEXT(),
                                     crate::match_model::ReplayState::Downloading
                                     | crate::match_model::ReplayState::Checking => {
-                                        Theme::ACCENT_PRIMARY
+                                        Theme::ACCENT_PRIMARY()
                                     }
-                                    _ => Theme::TEXT_MUTED,
+                                    _ => Theme::TEXT_MUTED(),
                                 },
                             ))
                             .child(
@@ -1545,13 +1560,13 @@ impl SearchView {
                                     .text_size(px(12.2))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(match replay_state {
-                                        crate::match_model::ReplayState::Watch => Theme::WIN_TEXT,
-                                        crate::match_model::ReplayState::Error => Theme::LOSS_TEXT,
+                                        crate::match_model::ReplayState::Watch => Theme::WIN_TEXT(),
+                                        crate::match_model::ReplayState::Error => Theme::LOSS_TEXT(),
                                         crate::match_model::ReplayState::Downloading
                                         | crate::match_model::ReplayState::Checking => {
-                                            Theme::ACCENT_PRIMARY
+                                            Theme::ACCENT_PRIMARY()
                                         }
-                                        _ => Theme::TEXT_MUTED,
+                                        _ => Theme::TEXT_MUTED(),
                                     })
                                     .child(replay_state.label()),
                             )
@@ -1562,12 +1577,12 @@ impl SearchView {
                             .id("btn-copy-game-id")
                             .size(px(30.0))
                             .rounded(px(6.0))
-                            .bg(Theme::CARD_BG)
+                            .bg(Theme::CARD_BG())
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .hover(|s| {
-                                s.bg(Theme::CARD_BG_HOVER)
-                                    .border_color(Theme::ACCENT_PRIMARY)
+                                s.bg(Theme::CARD_BG_HOVER())
+                                    .border_color(Theme::ACCENT_PRIMARY())
                             })
                             .cursor_pointer()
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
@@ -1581,12 +1596,12 @@ impl SearchView {
                                     div()
                                         .text_size(px(12.0))
                                         .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::WIN_TEXT)
+                                        .text_color(Theme::WIN_TEXT())
                                         .child("✓"),
                                 )
                             })
                             .when(!copied, |this| {
-                                this.child(icon("icons/copy.svg", 14.0, Theme::TEXT_PRIMARY))
+                                this.child(icon("icons/copy.svg", 14.0, Theme::TEXT_PRIMARY()))
                             }),
                     ),
             )
@@ -1608,11 +1623,11 @@ impl SearchView {
             .rounded(px(8.0))
             .border_1()
             .border_color(if win {
-                Theme::WIN_BORDER
+                Theme::WIN_BORDER()
             } else {
-                Theme::LOSS_BORDER
+                Theme::LOSS_BORDER()
             })
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .overflow_hidden()
             .flex()
             .flex_col()
@@ -1622,12 +1637,12 @@ impl SearchView {
                     .w_full()
                     .px(px(16.0))
                     .py(px(8.0))
-                    .bg(if win { Theme::WIN_BG } else { Theme::LOSS_BG })
+                    .bg(if win { Theme::WIN_BG() } else { Theme::LOSS_BG() })
                     .border_b_1()
                     .border_color(if win {
-                        Theme::WIN_BORDER
+                        Theme::WIN_BORDER()
                     } else {
-                        Theme::LOSS_BORDER
+                        Theme::LOSS_BORDER()
                     })
                     .flex()
                     .items_center()
@@ -1644,9 +1659,9 @@ impl SearchView {
                                     .text_size(px(13.6))
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(if win {
-                                        Theme::WIN_TEXT
+                                        Theme::WIN_TEXT()
                                     } else {
-                                        Theme::LOSS_TEXT
+                                        Theme::LOSS_TEXT()
                                     })
                                     .child(if win { "胜方" } else { "败方" }),
                             )
@@ -1657,7 +1672,7 @@ impl SearchView {
                                     .items_center()
                                     .gap(px(10.0))
                                     .text_size(px(12.8))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(self.render_obj_icon("/images/kills.png", team.kills))
                                     .child(self.render_obj_icon(
                                         if is_blue {
@@ -1708,7 +1723,7 @@ impl SearchView {
                             .items_center()
                             .text_size(px(11.5))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child(div().w(px(210.0)).text_center().child("装备"))
                             .child(div().w(px(70.0)).text_center().child("KDA"))
                             .child(div().w(px(42.0)).text_center().child("补刀"))
@@ -1760,10 +1775,16 @@ impl SearchView {
         let name_val = p.name.clone();
         let pure_name = p.name.split('#').next().unwrap_or(&p.name).to_string();
 
+        // 段位徽章（按需拉取后展示；未拉到或未定级时不渲染）
+        let rank_info = self.participant_ranks.get(&p.puuid).cloned();
+        let rank_icon_path = rank_info
+            .as_ref()
+            .and_then(|info| crate::asset_loader::AssetLoader::get_ranked_icon_path(&info.tier));
+
         let self_highlight_color = if win {
-            Theme::WIN_TEXT
+            Theme::WIN_TEXT()
         } else {
-            Theme::LOSS_TEXT
+            Theme::LOSS_TEXT()
         };
 
         div()
@@ -1771,17 +1792,17 @@ impl SearchView {
             .h(px(52.0))
             .px(px(14.0))
             .border_b_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .bg(if is_self {
                 if win {
-                    Theme::WIN_BG
+                    Theme::WIN_BG()
                 } else {
-                    Theme::LOSS_BG
+                    Theme::LOSS_BG()
                 }
             } else {
-                Theme::CARD_BG
+                Theme::CARD_BG()
             })
-            .hover(|s| s.bg(Theme::CARD_BG_HOVER))
+            .hover(|s| s.bg(Theme::CARD_BG_HOVER()))
             .flex()
             .items_center()
             .justify_between()
@@ -1817,15 +1838,15 @@ impl SearchView {
                                             .right(px(-2.0))
                                             .size(px(14.0))
                                             .rounded_full()
-                                            .bg(Theme::TEXT_PRIMARY)
+                                            .bg(Theme::TEXT_PRIMARY())
                                             .border_1()
-                                            .border_color(Theme::CARD_BG)
+                                            .border_color(Theme::CARD_BG())
                                             .flex()
                                             .items_center()
                                             .justify_center()
                                             .text_size(px(9.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::CARD_BG)
+                                            .text_color(Theme::CARD_BG())
                                             .child(format!("{}", p.level)),
                                     ),
                             )
@@ -1846,7 +1867,7 @@ impl SearchView {
                                                     .size(px(18.0))
                                                     .rounded(px(2.0))
                                                     .border_1()
-                                                    .border_color(Theme::CARD_BORDER)
+                                                    .border_color(Theme::CARD_BORDER())
                                                     .overflow_hidden()
                                                     .child(
                                                         LcuImage::new(p.spell1_icon_url.clone())
@@ -1858,7 +1879,7 @@ impl SearchView {
                                                     .size(px(18.0))
                                                     .rounded(px(2.0))
                                                     .border_1()
-                                                    .border_color(Theme::CARD_BORDER)
+                                                    .border_color(Theme::CARD_BORDER())
                                                     .overflow_hidden()
                                                     .child(
                                                         LcuImage::new(p.spell2_icon_url.clone())
@@ -1912,13 +1933,37 @@ impl SearchView {
                                     .text_color(if is_self {
                                         self_highlight_color
                                     } else {
-                                        Theme::TEXT_PRIMARY
+                                        Theme::TEXT_PRIMARY()
                                     })
-                                    .hover(|s| s.text_color(Theme::ACCENT_PRIMARY))
+                                    .hover(|s| s.text_color(Theme::ACCENT_PRIMARY()))
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .child(pure_name),
-                            ),
+                            )
+                            // 段位徽章：图标(13px) + 中文标签 (对齐 Vue row-rank-badge)
+                            .when_some(rank_info, |this, info| {
+                                this.child(
+                                    div()
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(2.0))
+                                        .when(rank_icon_path.is_some(), |this| {
+                                            this.child(
+                                                LcuImage::new(
+                                                    rank_icon_path.unwrap().to_string(),
+                                                )
+                                                .size(px(13.0)),
+                                            )
+                                        })
+                                        .child(
+                                            div()
+                                                .text_size(px(11.0))
+                                                .text_color(Theme::TEXT_MUTED())
+                                                .child(info.rank_text),
+                                        ),
+                                )
+                            }),
                     ),
             )
             .child(div().flex_1())
@@ -1947,9 +1992,9 @@ impl SearchView {
                                         div()
                                             .size(px(28.0))
                                             .rounded(px(3.0))
-                                            .bg(Theme::HOVER_BG)
+                                            .bg(Theme::HOVER_BG())
                                             .border_1()
-                                            .border_color(Theme::CARD_BORDER)
+                                            .border_color(Theme::CARD_BORDER())
                                             .overflow_hidden()
                                             .when(!url.is_empty(), |this| {
                                                 this.child(
@@ -1997,14 +2042,14 @@ impl SearchView {
                                     .text_color(if is_self {
                                         self_highlight_color
                                     } else {
-                                        Theme::TEXT_PRIMARY
+                                        Theme::TEXT_PRIMARY()
                                     })
                                     .child(format!("{}/", p.kills)),
                             )
                             .child(
                                 div()
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::DEATH_RED)
+                                    .text_color(Theme::DEATH_RED())
                                     .child(format!("{}", p.deaths)),
                             )
                             .child(
@@ -2017,7 +2062,7 @@ impl SearchView {
                                     .text_color(if is_self {
                                         self_highlight_color
                                     } else {
-                                        Theme::TEXT_PRIMARY
+                                        Theme::TEXT_PRIMARY()
                                     })
                                     .child(format!("/{}", p.assists)),
                             ),
@@ -2036,7 +2081,7 @@ impl SearchView {
                             .text_color(if is_self {
                                 self_highlight_color
                             } else {
-                                Theme::TEXT_MUTED
+                                Theme::TEXT_MUTED()
                             })
                             .child(format!("{}", p.cs)),
                     )
@@ -2054,7 +2099,7 @@ impl SearchView {
                             .text_color(if is_self {
                                 self_highlight_color
                             } else {
-                                Theme::TEXT_MUTED
+                                Theme::TEXT_MUTED()
                             })
                             .child(format_num(p.gold as i64)),
                     )
@@ -2068,7 +2113,7 @@ impl SearchView {
                             .text_color(if is_self {
                                 self_highlight_color
                             } else {
-                                Theme::TEXT_PRIMARY
+                                Theme::TEXT_PRIMARY()
                             })
                             .child(format_num(p.damage as i64)),
                     ),

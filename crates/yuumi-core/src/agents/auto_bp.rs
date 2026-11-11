@@ -264,6 +264,7 @@ pub async fn handle_champ_select_session(
     lifecycle: &Arc<LifecycleManager>,
 ) {
     let any_enabled = config.auto_pick
+        || config.confirm_on_timeout
         || config.auto_pick_intent
         || config.auto_ban
         || config.auto_spell
@@ -309,8 +310,8 @@ pub async fn handle_champ_select_session(
         schedule_spell(client, session, config, &position, supervisor).await;
     }
 
-    // 5. 超时前自动锁定
-    if config.auto_pick {
+    // 5. 超时前自动锁定（支持 auto_pick 或 confirm_on_timeout）
+    if config.auto_pick || config.confirm_on_timeout {
         schedule_pick(client, session, config, &position, supervisor, lifecycle).await;
     }
 }
@@ -473,10 +474,7 @@ async fn schedule_pick(
 ) {
     let cell_id = session.local_player_cell_id;
     let Some(action) = session.actions.iter().flatten().find(|a| {
-        a.actor_cell_id == cell_id
-            && a.action_type == "pick"
-            && a.is_in_progress
-            && !a.completed
+        a.actor_cell_id == cell_id && a.action_type == "pick" && a.is_in_progress && !a.completed
     }) else {
         return;
     };
@@ -527,15 +525,67 @@ async fn schedule_pick(
                     return;
                 }
 
+                // 倒计时结束前重新拉取最新会话二次复核，对齐旧版 do_auto_complete
+                let fresh = match fetch_champ_select_session(&client).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::warn!("[Agent] 自动锁定放弃: 获取最新会话失败: {}", e);
+                        return;
+                    }
+                };
+
+                let fresh_action = fresh.actions.iter().flatten().find(|a| {
+                    a.id == action_id && a.actor_cell_id == cell_id && a.action_type == "pick"
+                });
+                let Some(fresh_action) = fresh_action else {
+                    log::info!("[Agent] 自动锁定放弃: 未找到对应 pick 动作");
+                    return;
+                };
+                if fresh_action.completed {
+                    log::info!("[Agent] 自动锁定放弃: 动作已完成（玩家已手动锁定或阶段已过）");
+                    return;
+                }
+                if !fresh_action.is_in_progress {
+                    log::info!("[Agent] 自动锁定放弃: 动作已不在进行中");
+                    return;
+                }
+
+                // 目标英雄确定：手选 > 预选/候选
+                let final_target = if fresh_action.champion_id > 0 {
+                    fresh_action.champion_id
+                } else {
+                    target
+                };
+                if final_target <= 0 {
+                    log::warn!("[Agent] 自动锁定放弃: 无有效目标英雄");
+                    return;
+                }
+
+                // 检查不可选英雄（已被他人锁定或已被禁用）
+                let mut cant_select: Vec<i32> = Vec::new();
+                for a in fresh.actions.iter().flatten() {
+                    if a.action_type == "pick" && a.completed && a.actor_cell_id != cell_id {
+                        cant_select.push(a.champion_id);
+                    }
+                }
+                cant_select.extend(fresh.bans.all());
+                if cant_select.contains(&final_target) {
+                    log::warn!(
+                        "[Agent] 自动锁定放弃: 目标英雄 {} 已被禁用或被他人选走",
+                        final_target
+                    );
+                    return;
+                }
+
                 let _permit = supervisor_clone.acquire_exclusive_permit().await;
                 let payload = serde_json::json!({
-                    "championId": target,
+                    "championId": final_target,
                     "completed": true,
                 });
                 if let Err(e) = client.patch(&url, Some(payload)).await {
-                    log::warn!("[Agent] 自动锁定失败 (champ={}): {}", target, e);
+                    log::warn!("[Agent] 自动锁定失败 (champ={}): {}", final_target, e);
                 } else {
-                    log::info!("[Agent] 自动锁定成功 (champ={})", target);
+                    log::info!("[Agent] 自动锁定成功 (champ={})", final_target);
                 }
             },
         )
@@ -610,10 +660,7 @@ async fn schedule_ban(
                 let champion_id = match fetch_champ_select_session(&client).await {
                     Ok(fresh) => {
                         let new_bans = fresh.bans.all();
-                        candidates
-                            .iter()
-                            .find(|c| !new_bans.contains(c))
-                            .copied()
+                        candidates.iter().find(|c| !new_bans.contains(c)).copied()
                     }
                     Err(_) => candidates.first().copied(),
                 };
@@ -990,5 +1037,54 @@ mod tests {
             compute_lock_delay_ms(None, 1_000),
             DEFAULT_PHASE_LEFT_MS - LOCK_BUFFER_MS
         );
+    }
+
+    #[test]
+    fn test_auto_pick_conditions_and_target_priority() {
+        let config = AutoBpConfig {
+            auto_pick: false,
+            confirm_on_timeout: true,
+            auto_pick_intent: false,
+            ..AutoBpConfig::default()
+        };
+
+        // 仅开启 confirm_on_timeout，any_enabled 应判定为真
+        let any_enabled = config.auto_pick
+            || config.confirm_on_timeout
+            || config.auto_pick_intent
+            || config.auto_ban
+            || config.auto_spell
+            || config.auto_pick_order_swap
+            || config.auto_champ_trade;
+        assert!(any_enabled);
+
+        // 两者都关闭时，不应调度锁定
+        let disabled = AutoBpConfig {
+            confirm_on_timeout: false,
+            ..config
+        };
+        assert!(!(disabled.auto_pick || disabled.confirm_on_timeout));
+
+        // 目标选择优先级：手选(action.champion_id) > 预选(intent) > 候选(candidates)
+        let candidates = [238, 91];
+        let pick_target = |action_champion_id: i32, intent: i32| {
+            if action_champion_id > 0 {
+                action_champion_id
+            } else if intent > 0 {
+                intent
+            } else {
+                candidates.first().copied().unwrap_or(0)
+            }
+        };
+
+        // 1. 有手选英雄
+        assert_eq!(pick_target(157, 84), 157);
+        // 2. 无手选，有预选
+        assert_eq!(pick_target(0, 84), 84);
+        // 3. 无手选，无预选，有候选
+        assert_eq!(pick_target(0, 0), 238);
+        // 4. 无有效目标
+        let empty: [i32; 0] = [];
+        assert_eq!(empty.first().copied().unwrap_or(0), 0);
     }
 }

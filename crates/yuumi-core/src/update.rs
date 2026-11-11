@@ -1,5 +1,5 @@
 //! GPUI release checks and cached release notes. GPUI targets are deliberately
-//! distinct from the legacy Tauri targets; no production channel is configured.
+//! distinct from the legacy Tauri targets, even on the shared release channel.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -7,6 +7,23 @@ use std::{collections::HashMap, path::Path, time::Duration};
 
 const MAX_PACKAGE: usize = 512 * 1024 * 1024;
 pub const RELEASES_URL: &str = "https://api.github.com/repos/ISuuuu/Yuumi/releases";
+
+/// Reuse the Tauri release manifest and signing key unless overridden at build time.
+pub fn gpui_update_channel() -> Result<(String, String), String> {
+    let config: serde_json::Value =
+        serde_json::from_str(include_str!("../../../src-tauri/tauri.conf.json"))
+            .map_err(|e| format!("无法读取默认更新渠道: {e}"))?;
+    let updater = &config["plugins"]["updater"];
+    let endpoint = option_env!("YUUMI_GPUI_UPDATE_ENDPOINT")
+        .filter(|value| !value.is_empty())
+        .or_else(|| updater["endpoints"][0].as_str())
+        .ok_or("缺少更新清单地址")?;
+    let key = option_env!("YUUMI_GPUI_UPDATE_PUBLIC_KEY")
+        .filter(|value| !value.is_empty())
+        .or_else(|| updater["pubkey"].as_str())
+        .ok_or("缺少可信更新公钥")?;
+    Ok((endpoint.into(), key.into()))
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UpdateInfo {
@@ -481,7 +498,7 @@ fn run_portable_helper(args: &[std::ffi::OsString]) -> Result<(), String> {
     let target = std::path::PathBuf::from(&args[4]);
     let key = args[5].to_str().ok_or("公钥无效")?;
     let signature = args[6].to_str().ok_or("签名无效")?;
-    if option_env!("YUUMI_GPUI_UPDATE_PUBLIC_KEY").filter(|value| !value.is_empty()) != Some(key) {
+    if gpui_update_channel()?.1 != key {
         return Err("便携更新公钥不属于此构建".into());
     }
     if target

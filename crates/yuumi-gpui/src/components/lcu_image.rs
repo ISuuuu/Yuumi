@@ -134,9 +134,9 @@ impl IntoElement for LcuImage {
             loader.get_cached_render_image(trimmed_src)
         };
 
-        let default_border = Theme::CARD_BORDER;
+        let default_border = Theme::CARD_BORDER();
         let border_c = self.border_color.unwrap_or(default_border);
-        let bg_c = self.placeholder_bg.unwrap_or(Theme::BADGE_BG);
+        let bg_c = self.placeholder_bg.unwrap_or(Theme::BADGE_BG());
 
         let mut container = div()
             .size(self.size)
@@ -185,11 +185,11 @@ impl IntoElement for LcuImage {
                     div()
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child(txt),
                 )
             } else {
-                container.child(div().size_full().bg(Theme::BADGE_BG).opacity(0.6))
+                container.child(div().size_full().bg(Theme::BADGE_BG()).opacity(0.6))
             }
         }
     }

@@ -34,8 +34,8 @@ fn skill_palette(key: &str) -> (Hsla, Hsla, Hsla) {
         ),
         _ => (
             rgba(0x0000000d).into(),
-            Theme::TEXT_SECONDARY,
-            Theme::CARD_BORDER,
+            Theme::TEXT_SECONDARY(),
+            Theme::CARD_BORDER(),
         ),
     }
 }
@@ -105,7 +105,7 @@ pub fn skill_order_section(
                         .mx(px(4.0))
                         .text_size(px(13.12))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child("›"),
                 );
             }
@@ -131,13 +131,13 @@ pub fn skill_order_section(
                 div()
                     .text_size(px(12.48))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(Theme::TEXT_PRIMARY)
+                    .text_color(Theme::TEXT_PRIMARY())
                     .child(pct(skill.win_rate)),
             )
             .child(
                 div()
                     .text_size(px(10.4))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child(games_count(skill.play)),
             )
     });
@@ -148,7 +148,7 @@ pub fn skill_order_section(
             .text_right()
             .text_size(px(12.0))
             .font_weight(FontWeight::BOLD)
-            .text_color(Theme::TEXT_SECONDARY)
+            .text_color(Theme::TEXT_SECONDARY())
             .child(pct(skill.pick_rate))
     });
 
@@ -158,9 +158,9 @@ pub fn skill_order_section(
             .my(px(10.0))
             .px(px(16.0))
             .py(px(12.0))
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .border_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .rounded(px(8.0))
             .shadow_sm()
             .child(
@@ -190,6 +190,6 @@ mod tests {
         let q = skill_palette("q").1;
         let r = skill_palette("R").1;
         assert_ne!(q, r);
-        assert_eq!(skill_palette("X").1, Theme::TEXT_SECONDARY);
+        assert_eq!(skill_palette("X").1, Theme::TEXT_SECONDARY());
     }
 }

@@ -240,7 +240,7 @@ impl TftView {
                 .mb(px(16.0))
                 .pb(px(8.0))
                 .border_b_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .child(div().flex().items_center().gap(px(8.0)).children(
                     TftTab::ALL.into_iter().map(|tab| {
                         let active = self.active_tab == tab;
@@ -255,25 +255,25 @@ impl TftView {
                             .text_size(px(14.0))
                             .font_weight(FontWeight::BOLD)
                             .bg(if active {
-                                Theme::ACCENT_ALPHA_10
+                                Theme::ACCENT_ALPHA_10()
                             } else {
                                 gpui::transparent_black()
                             })
                             .text_color(if active {
-                                Theme::ACCENT_PRIMARY
+                                Theme::ACCENT_PRIMARY()
                             } else {
-                                Theme::TEXT_MUTED
+                                Theme::TEXT_MUTED()
                             })
                             .border_color(if active {
-                                Theme::ACCENT_ALPHA_20
+                                Theme::ACCENT_ALPHA_20()
                             } else {
                                 gpui::transparent_black()
                             })
                             .when(!active, |this| {
                                 this.hover(|style| {
                                     style
-                                        .bg(Theme::CARD_BG_HOVER)
-                                        .text_color(Theme::ACCENT_PRIMARY)
+                                        .bg(Theme::CARD_BG_HOVER())
+                                        .text_color(Theme::ACCENT_PRIMARY())
                                 })
                             })
                             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
@@ -290,12 +290,12 @@ impl TftView {
                                 .px(px(8.0))
                                 .py(px(2.0))
                                 .rounded(px(12.0))
-                                .bg(Theme::ACCENT_ALPHA_10)
+                                .bg(Theme::ACCENT_ALPHA_10())
                                 .border_1()
-                                .border_color(Theme::ACCENT_ALPHA_20)
+                                .border_color(Theme::ACCENT_ALPHA_20())
                                 .text_size(px(11.5))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::ACCENT_PRIMARY)
+                                .text_color(Theme::ACCENT_PRIMARY())
                                 .child(format!("v{}", self.client_version)),
                         )
                     },
@@ -366,7 +366,7 @@ impl TftView {
                 div()
                     .text_size(px(15.0))
                     .line_height(px(24.0))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child("请先启动英雄联盟客户端"),
             )
             .into_any_element()
@@ -432,7 +432,7 @@ impl TftView {
                         .w_full()
                         .pb(px(8.0))
                         .text_size(px(12.0))
-                        .text_color(Theme::LOSS_TEXT)
+                        .text_color(Theme::LOSS_TEXT())
                         .child(format!("刷新失败，展示上次数据: {}", self.error)),
                 )
             })
@@ -484,21 +484,21 @@ impl TftView {
             .mb(px(14.0))
             .child(rank_card(
                 "单排",
-                Theme::ACCENT_PRIMARY,
+                Theme::ACCENT_PRIMARY(),
                 &solo_tier,
                 &format!("{solo_lp} LP"),
                 &format!("胜: {solo_wins}    负: {solo_losses}"),
             ))
             .child(rank_card(
                 "狂暴",
-                Theme::GOLD,
+                Theme::GOLD(),
                 &turbo_tier,
                 &format!("{turbo_rating} 评分"),
                 &format!("胜场: {turbo_wins}"),
             ))
             .child(rank_card(
                 "双人",
-                Theme::WIN_TEXT,
+                Theme::WIN_TEXT(),
                 &double_tier,
                 &format!("{double_lp} LP"),
                 &format!("胜: {double_wins}    负: {double_losses}"),
@@ -509,16 +509,16 @@ impl TftView {
                     .px(px(14.0))
                     .py(px(12.0))
                     .rounded(px(10.0))
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .flex()
                     .flex_col()
                     .gap(px(6.0))
                     .child(
                         div()
                             .text_size(px(11.5))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child("近期战绩汇总"),
                     )
                     .child(
@@ -528,12 +528,12 @@ impl TftView {
                             .child(summary_stat(
                                 "前四率",
                                 &format!("{top4_rate:.1}%"),
-                                Theme::WIN_TEXT,
+                                Theme::WIN_TEXT(),
                             ))
                             .child(summary_stat(
                                 "登顶率",
                                 &format!("{win_rate:.1}%"),
-                                Theme::GOLD,
+                                Theme::GOLD(),
                             )),
                     )
                     .child(
@@ -543,12 +543,12 @@ impl TftView {
                             .child(summary_stat(
                                 "平均名次",
                                 &format!("#{avg_placement:.2}"),
-                                Theme::TEXT_PRIMARY,
+                                Theme::TEXT_PRIMARY(),
                             ))
                             .child(summary_stat(
                                 "总场次",
                                 &total_games.to_string(),
-                                Theme::TEXT_PRIMARY,
+                                Theme::TEXT_PRIMARY(),
                             )),
                     ),
             )
@@ -572,14 +572,14 @@ impl TftView {
             .px(px(14.0))
             .py(px(12.0))
             .rounded(px(10.0))
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .border_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .cursor_pointer()
             .hover(|style| {
                 style
-                    .bg(Theme::CARD_BG_HOVER)
-                    .border_color(Theme::BORDER_HOVER)
+                    .bg(Theme::CARD_BG_HOVER())
+                    .border_color(Theme::BORDER_HOVER())
             })
             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                 on_select(TftAction::OpenMatch(game_id), window, app);
@@ -607,14 +607,14 @@ impl TftView {
                             .child(
                                 div()
                                     .text_size(px(11.5))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(entry.duration_str.clone()),
                             ),
                     )
                     .child(
                         div()
                             .text_size(px(11.5))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child(format!("{} · {}", entry.queue_name, entry.time_str)),
                     )
                     .child(
@@ -652,20 +652,20 @@ impl TftView {
                             .px(px(6.0))
                             .py(px(2.0))
                             .rounded(px(6.0))
-                            .bg(Theme::ACCENT_ALPHA_10)
+                            .bg(Theme::ACCENT_ALPHA_10())
                             .border_1()
-                            .border_color(Theme::ACCENT_ALPHA_20)
+                            .border_color(Theme::ACCENT_ALPHA_20())
                             .child(
                                 div()
                                     .text_size(px(10.8))
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(trait_value.name.clone()),
                             )
                             .child(
                                 div()
                                     .text_size(px(10.8))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::ACCENT_PRIMARY)
+                                    .text_color(Theme::ACCENT_PRIMARY())
                                     .child(trait_value.num_units.to_string()),
                             )
                     })),
@@ -696,23 +696,23 @@ impl TftView {
                                     .px(px(8.0))
                                     .py(px(2.0))
                                     .rounded(px(6.0))
-                                    .bg(Theme::ACCENT_ALPHA_10)
+                                    .bg(Theme::ACCENT_ALPHA_10())
                                     .text_size(px(12.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::ACCENT_PRIMARY)
+                                    .text_color(Theme::ACCENT_PRIMARY())
                                     .child(format!("第 {} 名", entry.placement)),
                             )
                             .child(
                                 div()
                                     .text_size(px(14.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child("对局结算榜 (8人对决)"),
                             )
                             .child(
                                 div()
                                     .text_size(px(11.5))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(format!("{} • {}", entry.time_str, entry.duration_str)),
                             ),
                     )
@@ -742,15 +742,15 @@ impl TftView {
                             .py(px(8.0))
                             .rounded(px(8.0))
                             .bg(if participant.is_self {
-                                Theme::ACCENT_ALPHA_10
+                                Theme::ACCENT_ALPHA_10()
                             } else {
-                                Theme::BADGE_BG
+                                Theme::BADGE_BG()
                             })
                             .border_1()
                             .border_color(if is_top4 {
-                                Theme::WIN_BORDER
+                                Theme::WIN_BORDER()
                             } else {
-                                Theme::CARD_BORDER
+                                Theme::CARD_BORDER()
                             })
                             .child(
                                 div()
@@ -776,7 +776,7 @@ impl TftView {
                                             .child(
                                                 div()
                                                     .text_size(px(12.0))
-                                                    .text_color(Theme::TEXT_PRIMARY)
+                                                    .text_color(Theme::TEXT_PRIMARY())
                                                     .child(participant.summoner_name.clone()),
                                             )
                                             .when(participant.is_self, |this| {
@@ -786,7 +786,7 @@ impl TftView {
                                     .child(
                                         div()
                                             .text_size(px(10.8))
-                                            .text_color(Theme::TEXT_MUTED)
+                                            .text_color(Theme::TEXT_MUTED())
                                             .child(format!(
                                                 "Lv.{} · 金币 {} · 伤害 {}",
                                                 participant.level,
@@ -847,7 +847,7 @@ impl TftView {
                     .child(
                         div()
                             .text_size(px(12.0))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child("OP.GG 实时热门阵容，点击卡片查看站位与装备"),
                     )
                     .when_some(version, |this, text| {
@@ -856,9 +856,9 @@ impl TftView {
                                 .px(px(8.0))
                                 .py(px(2.0))
                                 .rounded(px(10.0))
-                                .bg(Theme::ACCENT_ALPHA_10)
+                                .bg(Theme::ACCENT_ALPHA_10())
                                 .text_size(px(11.0))
-                                .text_color(Theme::ACCENT_PRIMARY)
+                                .text_color(Theme::ACCENT_PRIMARY())
                                 .child(text),
                         )
                     }),
@@ -949,7 +949,7 @@ impl TftView {
                 div()
                     .text_size(px(15.0))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(Theme::TEXT_PRIMARY)
+                    .text_color(Theme::TEXT_PRIMARY())
                     .child(deck.name.clone()),
             )
             .when(deck.cost > 0, |this| {
@@ -968,7 +968,7 @@ impl TftView {
                 .child(
                     div()
                         .text_size(px(11.5))
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child(format!("{} / {}", index + 1, total)),
                 )
                 .child(nav_pill(
@@ -1067,7 +1067,7 @@ impl TftView {
             div()
                 .mt(px(6.0))
                 .text_size(px(10.8))
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .child("C: 阵容核心 · P1/P2/P3: 装备分配优先级"),
         )
     }
@@ -1118,19 +1118,19 @@ impl TftView {
                     .cursor_pointer()
                     .text_size(px(11.5))
                     .bg(if active {
-                        Theme::ACCENT_ALPHA_10
+                        Theme::ACCENT_ALPHA_10()
                     } else {
-                        Theme::CARD_BG
+                        Theme::CARD_BG()
                     })
                     .border_color(if active {
-                        Theme::ACCENT_ALPHA_20
+                        Theme::ACCENT_ALPHA_20()
                     } else {
-                        Theme::CARD_BORDER
+                        Theme::CARD_BORDER()
                     })
                     .text_color(if active {
-                        Theme::ACCENT_PRIMARY
+                        Theme::ACCENT_PRIMARY()
                     } else {
-                        Theme::TEXT_SECONDARY
+                        Theme::TEXT_SECONDARY()
                     })
                     .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                         cb(TftAction::SetAugmentTier(filter), window, app);
@@ -1238,9 +1238,9 @@ fn rank_card(title: &str, accent: Hsla, tier: &str, lp: &str, sub: &str) -> Div 
         .px(px(14.0))
         .py(px(12.0))
         .rounded(px(10.0))
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .flex()
         .flex_col()
         .gap(px(6.0))
@@ -1254,7 +1254,7 @@ fn rank_card(title: &str, accent: Hsla, tier: &str, lp: &str, sub: &str) -> Div 
                         .px(px(6.0))
                         .py(px(1.0))
                         .rounded(px(10.0))
-                        .bg(Theme::ACCENT_ALPHA_10)
+                        .bg(Theme::ACCENT_ALPHA_10())
                         .text_size(px(10.5))
                         .font_weight(FontWeight::BOLD)
                         .text_color(accent)
@@ -1263,7 +1263,7 @@ fn rank_card(title: &str, accent: Hsla, tier: &str, lp: &str, sub: &str) -> Div 
                 .child(
                     div()
                         .text_size(px(11.0))
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child("云顶段位"),
                 ),
         )
@@ -1276,21 +1276,21 @@ fn rank_card(title: &str, accent: Hsla, tier: &str, lp: &str, sub: &str) -> Div 
                     div()
                         .text_size(px(15.0))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .child(tier.to_string()),
                 )
                 .child(
                     div()
                         .text_size(px(11.5))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::ACCENT_PRIMARY)
+                        .text_color(Theme::ACCENT_PRIMARY())
                         .child(lp.to_string()),
                 ),
         )
         .child(
             div()
                 .text_size(px(11.0))
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .child(sub.to_string()),
         )
 }
@@ -1302,7 +1302,7 @@ fn summary_stat(label: &str, value: &str, color: Hsla) -> Div {
         .child(
             div()
                 .text_size(px(10.5))
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .child(label.to_string()),
         )
         .child(
@@ -1319,21 +1319,21 @@ fn pill(text: &str) -> Div {
         .px(px(6.0))
         .py(px(1.0))
         .rounded(px(6.0))
-        .bg(Theme::BADGE_BG)
+        .bg(Theme::BADGE_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .text_size(px(10.5))
-        .text_color(Theme::TEXT_SECONDARY)
+        .text_color(Theme::TEXT_SECONDARY())
         .child(text.to_string())
 }
 
 fn placement_accent(placement: i32) -> Hsla {
     if placement == 1 {
-        Theme::GOLD
+        Theme::GOLD()
     } else if placement <= 4 {
-        Theme::WIN_TEXT
+        Theme::WIN_TEXT()
     } else {
-        Theme::LOSS_TEXT
+        Theme::LOSS_TEXT()
     }
 }
 
@@ -1361,20 +1361,20 @@ fn trait_pill(trait_value: TftTrait) -> Div {
         .px(px(6.0))
         .py(px(2.0))
         .rounded(px(6.0))
-        .bg(Theme::ACCENT_ALPHA_10)
+        .bg(Theme::ACCENT_ALPHA_10())
         .border_1()
-        .border_color(Theme::ACCENT_ALPHA_20)
+        .border_color(Theme::ACCENT_ALPHA_20())
         .child(
             div()
                 .text_size(px(10.5))
-                .text_color(Theme::TEXT_PRIMARY)
+                .text_color(Theme::TEXT_PRIMARY())
                 .child(trait_value.name),
         )
         .child(
             div()
                 .text_size(px(10.5))
                 .font_weight(FontWeight::BOLD)
-                .text_color(Theme::ACCENT_PRIMARY)
+                .text_color(Theme::ACCENT_PRIMARY())
                 .child(trait_value.num_units.to_string()),
         )
 }
@@ -1392,7 +1392,7 @@ fn unit_chip(unit: &TftUnit) -> Div {
             div()
                 .h(px(10.0))
                 .text_size(px(9.0))
-                .text_color(Theme::GOLD)
+                .text_color(Theme::GOLD())
                 .child(stars),
         )
         .child(
@@ -1412,9 +1412,9 @@ fn unit_chip(unit: &TftUnit) -> Div {
 
 fn augment_card(augment: &TftAugmentInfo) -> Div {
     let (tier_label, tier_color) = match augment.tier {
-        1 => ("银色", Theme::TEXT_MUTED),
-        3 => ("棱彩", Theme::PREMADE_COLOR_3),
-        _ => ("金色", Theme::GOLD),
+        1 => ("银色", Theme::TEXT_MUTED()),
+        3 => ("棱彩", Theme::PREMADE_COLOR_3()),
+        _ => ("金色", Theme::GOLD()),
     };
     div()
         .w(px(310.0))
@@ -1424,9 +1424,9 @@ fn augment_card(augment: &TftAugmentInfo) -> Div {
         .px(px(10.0))
         .py(px(8.0))
         .rounded(px(8.0))
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .child(
             div().w(px(34.0)).h(px(34.0)).flex_none().child(
                 LcuImage::new(augment.icon_path.clone())
@@ -1450,7 +1450,7 @@ fn augment_card(augment: &TftAugmentInfo) -> Div {
                             div()
                                 .text_size(px(12.5))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .child(augment.name.clone()),
                         )
                         .child(
@@ -1458,7 +1458,7 @@ fn augment_card(augment: &TftAugmentInfo) -> Div {
                                 .px(px(6.0))
                                 .py(px(1.0))
                                 .rounded(px(8.0))
-                                .bg(Theme::BADGE_BG)
+                                .bg(Theme::BADGE_BG())
                                 .text_size(px(10.0))
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(tier_color)
@@ -1469,7 +1469,7 @@ fn augment_card(augment: &TftAugmentInfo) -> Div {
                     div()
                         .text_size(px(11.0))
                         .line_height(relative(1.35))
-                        .text_color(Theme::TEXT_SECONDARY)
+                        .text_color(Theme::TEXT_SECONDARY())
                         .child(if augment.desc.is_empty() {
                             "暂无效果描述".to_string()
                         } else {
@@ -1499,14 +1499,14 @@ fn deck_card(
         .px(px(12.0))
         .py(px(10.0))
         .rounded(px(10.0))
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .cursor_pointer()
         .hover(|style| {
             style
-                .bg(Theme::CARD_BG_HOVER)
-                .border_color(Theme::BORDER_HOVER)
+                .bg(Theme::CARD_BG_HOVER())
+                .border_color(Theme::BORDER_HOVER())
         })
         .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
             on_click(window, app);
@@ -1521,10 +1521,10 @@ fn deck_card(
                         .px(px(6.0))
                         .py(px(1.0))
                         .rounded(px(6.0))
-                        .bg(Theme::ACCENT_ALPHA_10)
+                        .bg(Theme::ACCENT_ALPHA_10())
                         .text_size(px(11.0))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::ACCENT_PRIMARY)
+                        .text_color(Theme::ACCENT_PRIMARY())
                         .child(deck.tier.clone()),
                 )
                 .child(
@@ -1533,7 +1533,7 @@ fn deck_card(
                         .min_w(px(0.0))
                         .text_size(px(13.0))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .child(deck.name.clone()),
                 )
                 .when(deck.cost > 0, |this| {
@@ -1545,13 +1545,13 @@ fn deck_card(
                 .flex()
                 .gap(px(12.0))
                 .when_some(win_rate, |this, text| {
-                    this.child(deck_stat("胜率", &text, Theme::WIN_TEXT))
+                    this.child(deck_stat("胜率", &text, Theme::WIN_TEXT()))
                 })
                 .when_some(top4_rate, |this, text| {
-                    this.child(deck_stat("Top4", &text, Theme::ACCENT_PRIMARY))
+                    this.child(deck_stat("Top4", &text, Theme::ACCENT_PRIMARY()))
                 })
                 .when_some(avg_placement, |this, text| {
-                    this.child(deck_stat("平均名次", &text, Theme::TEXT_PRIMARY))
+                    this.child(deck_stat("平均名次", &text, Theme::TEXT_PRIMARY()))
                 }),
         )
         .when(!deck.badges.is_empty(), |this| {
@@ -1577,7 +1577,7 @@ fn deck_stat(label: &str, value: &str, color: Hsla) -> Div {
         .child(
             div()
                 .text_size(px(10.0))
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .child(label.to_string()),
         )
         .child(
@@ -1594,9 +1594,9 @@ fn board_cell(unit: Option<&MetaDeckUnit>) -> Div {
         .relative()
         .size(px(52.0))
         .rounded(px(6.0))
-        .bg(Theme::ITEM_SLOT_BG)
+        .bg(Theme::ITEM_SLOT_BG())
         .border_1()
-        .border_color(Theme::ITEM_SLOT_BORDER)
+        .border_color(Theme::ITEM_SLOT_BORDER())
         .flex()
         .items_center()
         .justify_center();
@@ -1609,9 +1609,9 @@ fn board_cell(unit: Option<&MetaDeckUnit>) -> Div {
         LcuImage::new(unit.icon_url.clone())
             .size(px(40.0))
             .border_color(if unit.is_core {
-                Theme::GOLD
+                Theme::GOLD()
             } else {
-                Theme::CARD_BORDER
+                Theme::CARD_BORDER()
             })
             .placeholder(unit.name.chars().take(2).collect::<String>()),
     );
@@ -1620,9 +1620,9 @@ fn board_cell(unit: Option<&MetaDeckUnit>) -> Div {
             div()
                 .text_size(px(8.5))
                 .text_color(if unit.tier >= 3 {
-                    Theme::GOLD
+                    Theme::GOLD()
                 } else {
-                    Theme::TEXT_SECONDARY
+                    Theme::TEXT_SECONDARY()
                 })
                 .child("★".repeat(unit.tier.min(3) as usize)),
         );
@@ -1636,7 +1636,7 @@ fn board_cell(unit: Option<&MetaDeckUnit>) -> Div {
                 .right(px(2.0))
                 .text_size(px(8.5))
                 .font_weight(FontWeight::BOLD)
-                .text_color(Theme::ACCENT_PRIMARY)
+                .text_color(Theme::ACCENT_PRIMARY())
                 .child(format!("P{}", unit.priority)),
         );
     }
@@ -1700,7 +1700,7 @@ fn section_title(text: &str) -> Div {
     div()
         .text_size(px(12.0))
         .font_weight(FontWeight::BOLD)
-        .text_color(Theme::TEXT_PRIMARY)
+        .text_color(Theme::TEXT_PRIMARY())
         .child(text.to_string())
 }
 
@@ -1716,9 +1716,9 @@ fn overlay_shell() -> Div {
         .min_h_0()
         .p(px(16.0))
         .rounded(px(12.0))
-        .bg(Theme::BG_APP)
+        .bg(Theme::BG_APP())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .shadow_md()
 }
 
@@ -1728,12 +1728,12 @@ fn close_button(on_click: impl Fn(&mut Window, &mut App) + 'static) -> Div {
         .py(px(3.0))
         .rounded(px(6.0))
         .border_1()
-        .border_color(Theme::CARD_BORDER)
-        .bg(Theme::CARD_BG)
+        .border_color(Theme::CARD_BORDER())
+        .bg(Theme::CARD_BG())
         .text_size(px(11.5))
-        .text_color(Theme::TEXT_SECONDARY)
+        .text_color(Theme::TEXT_SECONDARY())
         .cursor_pointer()
-        .hover(|style| style.bg(Theme::HOVER_BG_STRONG))
+        .hover(|style| style.bg(Theme::HOVER_BG_STRONG()))
         .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
             on_click(window, app)
         })
@@ -1746,13 +1746,13 @@ fn action_pill(label: &str, on_click: impl Fn(&mut Window, &mut App) + 'static) 
         .py(px(3.0))
         .rounded(px(6.0))
         .border_1()
-        .border_color(Theme::ACCENT_ALPHA_20)
-        .bg(Theme::ACCENT_ALPHA_10)
+        .border_color(Theme::ACCENT_ALPHA_20())
+        .bg(Theme::ACCENT_ALPHA_10())
         .text_size(px(11.5))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(Theme::ACCENT_PRIMARY)
+        .text_color(Theme::ACCENT_PRIMARY())
         .cursor_pointer()
-        .hover(|style| style.bg(Theme::ACCENT_ALPHA_20))
+        .hover(|style| style.bg(Theme::ACCENT_ALPHA_20()))
         .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
             on_click(window, app)
         })
@@ -1765,17 +1765,17 @@ fn nav_pill(label: &str, enabled: bool, on_click: impl Fn(&mut Window, &mut App)
         .py(px(3.0))
         .rounded(px(6.0))
         .border_1()
-        .border_color(Theme::CARD_BORDER)
-        .bg(Theme::CARD_BG)
+        .border_color(Theme::CARD_BORDER())
+        .bg(Theme::CARD_BG())
         .text_size(px(11.5))
         .text_color(if enabled {
-            Theme::TEXT_PRIMARY
+            Theme::TEXT_PRIMARY()
         } else {
-            Theme::TEXT_MUTED
+            Theme::TEXT_MUTED()
         })
         .when(enabled, |this| {
             this.cursor_pointer()
-                .hover(|style| style.bg(Theme::HOVER_BG_STRONG))
+                .hover(|style| style.bg(Theme::HOVER_BG_STRONG()))
                 .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                     on_click(window, app)
                 })
@@ -1793,7 +1793,7 @@ fn error_banner(message: &str) -> Div {
         .w_full()
         .pb(px(8.0))
         .text_size(px(12.0))
-        .text_color(Theme::LOSS_TEXT)
+        .text_color(Theme::LOSS_TEXT())
         .child(format!("刷新失败，展示上次数据: {message}"))
 }
 
@@ -1814,7 +1814,7 @@ fn centered_state(
         .child(
             div()
                 .text_size(px(13.0))
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .child(message.to_string()),
         );
     if let (Some(label), Some(action)) = (action_label, action) {
@@ -1823,10 +1823,10 @@ fn centered_state(
                 .px(px(12.0))
                 .py(px(4.0))
                 .rounded(px(6.0))
-                .bg(Theme::ACCENT_PRIMARY)
+                .bg(Theme::ACCENT_PRIMARY())
                 .text_size(px(12.0))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(Theme::TEXT_ON_PRIMARY)
+                .text_color(Theme::TEXT_ON_PRIMARY())
                 .cursor_pointer()
                 .hover(|style| style.opacity(0.85))
                 .on_mouse_down(MouseButton::Left, move |_ev, window, app| {

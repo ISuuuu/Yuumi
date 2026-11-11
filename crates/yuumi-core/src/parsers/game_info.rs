@@ -1463,6 +1463,39 @@ pub async fn fetch_ranked_stats(client: &LcuClient, puuid: &str) -> Result<Ranke
     serde_json::from_value(value).map_err(|e| format!("解析排位数据失败: {}", e))
 }
 
+/// 批量并发拉取多名玩家的段位（并发 3，对齐旧版战绩查询限流），失败或未定级者跳过。
+/// 返回 puuid -> 该玩家最优先队列的段位项。
+pub async fn fetch_ranked_stats_batch(
+    client: &LcuClient,
+    puuids: Vec<String>,
+) -> HashMap<String, RankedQueueEntry> {
+    stream::iter(puuids)
+        .map(|puuid| async move {
+            let ranked = client
+                .get(&format!("/lol-ranked/v1/ranked-stats/{}", puuid))
+                .await
+                .ok()?;
+            let stats = serde_json::from_value::<RankedStats>(ranked).ok()?;
+            Some((puuid, stats))
+        })
+        .buffer_unordered(3)
+        .filter_map(|result| async move {
+            result.and_then(|(puuid, stats)| placed_ranked_entry(&stats).map(|e| (puuid, e)))
+        })
+        .collect::<HashMap<_, _>>()
+        .await
+}
+
+/// 从段位统计中取最优先队列的段位项；未定级（NONE/UNRANKED）视为无段位。
+pub fn placed_ranked_entry(stats: &RankedStats) -> Option<RankedQueueEntry> {
+    let entry = stats.preferred_entry()?;
+    let tier = entry.tier.trim().to_ascii_uppercase();
+    if tier.is_empty() || tier == "NONE" || tier == "UNRANKED" {
+        return None;
+    }
+    Some(entry.clone())
+}
+
 /// 拉取单个玩家的排位与近期对局（任一失败均降级为空）
 async fn fetch_player_data(
     client: &LcuClient,
@@ -1889,5 +1922,31 @@ mod tests {
 
         let fate_players: Vec<_> = demo.players().filter(|p| p.fate.is_some()).collect();
         assert_eq!(fate_players.len(), 2, "应包含一名队友宿命和一名对手宿命");
+    }
+
+    #[test]
+    fn placed_ranked_entry_prefers_solo_and_rejects_unranked() {
+        let placed: RankedStats = serde_json::from_str(RANKED_FIXTURE).expect("段位 fixture 应能反序列化");
+        let entry = placed_ranked_entry(&placed).expect("单双排钻石应有效");
+        assert_eq!(entry.tier, "DIAMOND");
+        assert_eq!(entry.division, "I");
+        assert_eq!(rank_tier_label(&entry.tier, &entry.division), "钻石 I");
+
+        // 仅灵活组排时回落到 flex
+        let flex_only: RankedStats = serde_json::from_value(serde_json::json!({
+            "queueMap": { "RANKED_FLEX_SR": { "queueType": "RANKED_FLEX_SR", "tier": "GOLD", "division": "II" } }
+        }))
+        .unwrap();
+        assert_eq!(placed_ranked_entry(&flex_only).unwrap().tier, "GOLD");
+
+        // NONE / UNRANKED / 空均视为未定级
+        for tier in ["NONE", "UNRANKED", ""] {
+            let unranked: RankedStats = serde_json::from_value(serde_json::json!({
+                "queueMap": { "RANKED_SOLO_5x5": { "queueType": "RANKED_SOLO_5x5", "tier": tier, "division": "I" } }
+            }))
+            .unwrap();
+            assert!(placed_ranked_entry(&unranked).is_none(), "tier={:?} 应视为未定级", tier);
+        }
+        assert!(placed_ranked_entry(&RankedStats::default()).is_none());
     }
 }

@@ -358,7 +358,7 @@ impl ToolsView {
                                         div()
                                             .text_size(px(20.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY)
+                                            .text_color(Theme::TEXT_PRIMARY())
                                             .child("其他功能"),
                                     )
                                     .when(!connected, |this| {
@@ -459,7 +459,7 @@ impl ToolsView {
         div()
             .text_size(px(12.0))
             .font_weight(FontWeight::BOLD)
-            .text_color(Theme::TEXT_MUTED)
+            .text_color(Theme::TEXT_MUTED())
             .mt(px(12.0))
             .mb(px(2.0))
             .px(px(4.0))

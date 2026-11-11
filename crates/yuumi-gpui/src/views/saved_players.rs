@@ -29,22 +29,22 @@ pub const SAVED_PLAYERS_PAGE_SIZE: usize = 30;
 /// 标签颜色映射
 pub(crate) fn tag_badge_colors(tag: &str) -> (Hsla, Hsla, Hsla) {
     match tag {
-        "大腿" => (Theme::WIN_BG, Theme::WIN_TEXT, Theme::WIN_BORDER), // 翡翠绿
-        "避坑" | "演员/挂机" => (Theme::LOSS_BG, Theme::LOSS_TEXT, Theme::LOSS_BORDER), // 珊瑚红 / 绯红
+        "大腿" => (Theme::WIN_BG(), Theme::WIN_TEXT(), Theme::WIN_BORDER()), // 翡翠绿
+        "避坑" | "演员/挂机" => (Theme::LOSS_BG(), Theme::LOSS_TEXT(), Theme::LOSS_BORDER()), // 珊瑚红 / 绯红
         "绝活" => (
-            Theme::ACCENT_LIGHT,
-            Theme::ACCENT_PRIMARY,
-            Theme::AURORA_CYAN.opacity(0.6),
+            Theme::ACCENT_LIGHT(),
+            Theme::ACCENT_PRIMARY(),
+            Theme::AURORA_CYAN().opacity(0.6),
         ), // 极光蓝青
         "置顶" => (
-            Theme::PREMADE_COLOR_2.opacity(0.15),
-            Theme::GOLD,
-            Theme::GOLD.opacity(0.4),
+            Theme::PREMADE_COLOR_2().opacity(0.15),
+            Theme::GOLD(),
+            Theme::GOLD().opacity(0.4),
         ), // 琥珀金
         _ => (
-            Theme::AURORA_CYAN.opacity(0.15),
-            Theme::ACCENT_PRIMARY,
-            Theme::AURORA_CYAN.opacity(0.35),
+            Theme::AURORA_CYAN().opacity(0.15),
+            Theme::ACCENT_PRIMARY(),
+            Theme::AURORA_CYAN().opacity(0.35),
         ),
     }
 }
@@ -647,7 +647,7 @@ impl SavedPlayersView {
                         div()
                             .text_xl()
                             .font_weight(FontWeight::EXTRA_BOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child("路人集"),
                     )
                     .when(self.total_count > 0, |this| {
@@ -656,12 +656,12 @@ impl SavedPlayersView {
                                 .px_2()
                                 .py_0p5()
                                 .rounded_full()
-                                .bg(Theme::AURORA_CYAN.opacity(0.15))
+                                .bg(Theme::AURORA_CYAN().opacity(0.15))
                                 .border_1()
-                                .border_color(Theme::AURORA_CYAN.opacity(0.35))
+                                .border_color(Theme::AURORA_CYAN().opacity(0.35))
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::ACCENT_PRIMARY)
+                                .text_color(Theme::ACCENT_PRIMARY())
                                 .child(self.total_count.to_string()),
                         )
                     })
@@ -669,13 +669,13 @@ impl SavedPlayersView {
                         div()
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child("·"),
                     )
                     .child(
                         div()
                             .text_xs()
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child("记录并标记曾与你同局竞技的召唤师"),
                     ),
             )
@@ -691,16 +691,16 @@ impl SavedPlayersView {
                             .py_1p5()
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .bg(Theme::CARD_BG)
-                            .hover(|s| s.bg(Theme::CARD_BG_HOVER).border_color(Theme::AURORA_CYAN))
+                            .border_color(Theme::CARD_BORDER())
+                            .bg(Theme::CARD_BG())
+                            .hover(|s| s.bg(Theme::CARD_BG_HOVER()).border_color(Theme::AURORA_CYAN()))
                             .cursor_pointer()
                             .flex()
                             .items_center()
                             .gap_1p5()
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                 on_action_import(SavedPlayersAction::ImportTagged, win, app);
                             })
@@ -713,16 +713,16 @@ impl SavedPlayersView {
                             .py_1p5()
                             .rounded_md()
                             .border_1()
-                            .border_color(Theme::CARD_BORDER)
-                            .bg(Theme::CARD_BG)
-                            .hover(|s| s.bg(Theme::CARD_BG_HOVER).border_color(Theme::AURORA_CYAN))
+                            .border_color(Theme::CARD_BORDER())
+                            .bg(Theme::CARD_BG())
+                            .hover(|s| s.bg(Theme::CARD_BG_HOVER()).border_color(Theme::AURORA_CYAN()))
                             .cursor_pointer()
                             .flex()
                             .items_center()
                             .gap_1p5()
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                 on_action_export(SavedPlayersAction::ExportTagged, win, app);
                             })
@@ -759,12 +759,12 @@ impl SavedPlayersView {
                     .justify_between()
                     .w(px(320.0))
                     .h(px(32.0))
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
                     .border_color(if is_search_focused {
-                        Theme::AURORA_CYAN
+                        Theme::AURORA_CYAN()
                     } else {
-                        Theme::CARD_BORDER
+                        Theme::CARD_BORDER()
                     })
                     .rounded_md()
                     .px_2p5()
@@ -799,14 +799,14 @@ impl SavedPlayersView {
                             .items_center()
                             .gap_2()
                             .overflow_hidden()
-                            .child(div().text_xs().text_color(Theme::TEXT_MUTED).child("🔍"))
+                            .child(div().text_xs().text_color(Theme::TEXT_MUTED()).child("🔍"))
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(if self.search_query.is_empty() {
-                                        Theme::TEXT_MUTED
+                                        Theme::TEXT_MUTED()
                                     } else {
-                                        Theme::TEXT_PRIMARY
+                                        Theme::TEXT_PRIMARY()
                                     })
                                     .child(if self.search_query.is_empty() {
                                         if is_search_focused {
@@ -828,15 +828,15 @@ impl SavedPlayersView {
                             div()
                                 .size(px(16.0))
                                 .rounded_full()
-                                .bg(Theme::CARD_BORDER)
+                                .bg(Theme::CARD_BORDER())
                                 .hover(|s| {
-                                    s.bg(Theme::AURORA_CYAN).text_color(Theme::TEXT_ON_PRIMARY)
+                                    s.bg(Theme::AURORA_CYAN()).text_color(Theme::TEXT_ON_PRIMARY())
                                 })
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .text_xs()
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                     on_action_clear(SavedPlayersAction::SearchClear, win, app);
@@ -853,9 +853,9 @@ impl SavedPlayersView {
                     .gap_1()
                     .p_1()
                     .rounded_lg()
-                    .bg(Theme::HOVER_BG)
+                    .bg(Theme::HOVER_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .children(FILTER_OPTIONS.iter().map(|&opt| {
                         let is_active = self.active_tag_filter == opt;
                         let on_action_opt = on_action.clone();
@@ -871,18 +871,18 @@ impl SavedPlayersView {
                                 FontWeight::NORMAL
                             })
                             .bg(if is_active {
-                                Theme::ACCENT_PRIMARY
+                                Theme::ACCENT_PRIMARY()
                             } else {
                                 hsla(0.0, 0.0, 0.0, 0.0)
                             })
                             .text_color(if is_active {
-                                Theme::TEXT_ON_PRIMARY
+                                Theme::TEXT_ON_PRIMARY()
                             } else {
-                                Theme::TEXT_MUTED
+                                Theme::TEXT_MUTED()
                             })
                             .hover(|s| {
                                 if !is_active {
-                                    s.text_color(Theme::TEXT_PRIMARY)
+                                    s.text_color(Theme::TEXT_PRIMARY())
                                 } else {
                                     s
                                 }
@@ -920,9 +920,9 @@ impl SavedPlayersView {
                 .items_center()
                 .justify_center()
                 .gap_3()
-                .bg(Theme::CARD_BG)
+                .bg(Theme::CARD_BG())
                 .border_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .rounded_xl()
                 .p_8()
                 .child(div().text_3xl().child("🔍"))
@@ -930,7 +930,7 @@ impl SavedPlayersView {
                     div()
                         .text_sm()
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .child(format!("未找到包含 \"{}\" 的玩家", kw)),
                 )
                 .child(
@@ -938,15 +938,15 @@ impl SavedPlayersView {
                         .px_4()
                         .py_1p5()
                         .rounded_md()
-                        .bg(Theme::CARD_BG)
+                        .bg(Theme::CARD_BG())
                         .border_1()
-                        .border_color(Theme::CARD_BORDER)
+                        .border_color(Theme::CARD_BORDER())
                         .text_xs()
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .hover(|s| {
-                            s.bg(Theme::CARD_BG_HOVER)
-                                .border_color(Theme::AURORA_CYAN)
-                                .text_color(Theme::ACCENT_PRIMARY)
+                            s.bg(Theme::CARD_BG_HOVER())
+                                .border_color(Theme::AURORA_CYAN())
+                                .text_color(Theme::ACCENT_PRIMARY())
                         })
                         .cursor_pointer()
                         .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
@@ -966,9 +966,9 @@ impl SavedPlayersView {
                 .items_center()
                 .justify_center()
                 .gap_2()
-                .bg(Theme::CARD_BG)
+                .bg(Theme::CARD_BG())
                 .border_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .rounded_xl()
                 .p_8()
                 .child(div().text_3xl().child("📑"))
@@ -976,13 +976,13 @@ impl SavedPlayersView {
                     div()
                         .text_sm()
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .child("暂无记录的同局玩家"),
                 )
                 .child(
                     div()
                         .text_xs()
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child("在对局结束后，曾同局的玩家将会自动记录在此"),
                 )
                 .into_any_element();
@@ -1031,7 +1031,7 @@ impl SavedPlayersView {
                         .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                             on_more(SavedPlayersAction::LoadMore, win, app);
                         })
-                        .child(div().text_xs().text_color(Theme::TEXT_MUTED).child(
+                        .child(div().text_xs().text_color(Theme::TEXT_MUTED()).child(
                             if is_loading {
                                 "正在加载更多..."
                             } else {
@@ -1045,7 +1045,7 @@ impl SavedPlayersView {
                     div().flex().items_center().justify_center().py_3().child(
                         div()
                             .text_xs()
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child("已加载全部玩家"),
                     ),
                 )
@@ -1097,10 +1097,10 @@ impl SavedPlayersView {
         div()
             .p(px(14.0))
             .rounded_lg()
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .border_1()
-            .border_color(Theme::CARD_BORDER)
-            .hover(|s| s.border_color(Theme::AURORA_CYAN.opacity(0.35)))
+            .border_color(Theme::CARD_BORDER())
+            .hover(|s| s.border_color(Theme::AURORA_CYAN().opacity(0.35)))
             .child(
                 div()
                     .flex()
@@ -1132,8 +1132,8 @@ impl SavedPlayersView {
                                             .size(px(44.0))
                                             .rounded_full()
                                             .border_2()
-                                            .border_color(Theme::CARD_BORDER)
-                                            .bg(Theme::ACCENT_LIGHT)
+                                            .border_color(Theme::CARD_BORDER())
+                                            .bg(Theme::ACCENT_LIGHT())
                                             .overflow_hidden()
                                             .flex()
                                             .items_center()
@@ -1153,8 +1153,8 @@ impl SavedPlayersView {
                                                 .size(px(34.0))
                                                 .rounded(px(8.0))
                                                 .border_1()
-                                                .border_color(Theme::CARD_BORDER)
-                                                .bg(Theme::ITEM_SLOT_BG)
+                                                .border_color(Theme::CARD_BORDER())
+                                                .bg(Theme::ITEM_SLOT_BG())
                                                 .overflow_hidden()
                                                 .flex()
                                                 .items_center()
@@ -1184,13 +1184,13 @@ impl SavedPlayersView {
                                                         div()
                                                             .text_sm()
                                                             .font_weight(FontWeight::BOLD)
-                                                            .text_color(Theme::TEXT_PRIMARY)
+                                                            .text_color(Theme::TEXT_PRIMARY())
                                                             .child(p.summoner_name.clone()),
                                                     )
                                                     .child(
                                                         div()
                                                             .text_xs()
-                                                            .text_color(Theme::TEXT_MUTED)
+                                                            .text_color(Theme::TEXT_MUTED())
                                                             .child(if p.tag_line.is_empty() {
                                                                 "#—".to_string()
                                                             } else {
@@ -1211,14 +1211,14 @@ impl SavedPlayersView {
                                                                 .px_2()
                                                                 .py_0p5()
                                                                 .rounded_full()
-                                                                .bg(Theme::GOLD.opacity(0.15))
+                                                                .bg(Theme::GOLD().opacity(0.15))
                                                                 .border_1()
                                                                 .border_color(
-                                                                    Theme::GOLD.opacity(0.4),
+                                                                    Theme::GOLD().opacity(0.4),
                                                                 )
                                                                 .text_xs()
                                                                 .font_weight(FontWeight::BOLD)
-                                                                .text_color(Theme::GOLD)
+                                                                .text_color(Theme::GOLD())
                                                                 .child("置顶"),
                                                         )
                                                     })
@@ -1250,10 +1250,10 @@ impl SavedPlayersView {
                                                                     .px_2()
                                                                     .py_0p5()
                                                                     .rounded_sm()
-                                                                    .bg(Theme::CARD_BORDER)
+                                                                    .bg(Theme::CARD_BORDER())
                                                                     .text_xs()
                                                                     .text_color(
-                                                                        Theme::TEXT_SECONDARY,
+                                                                        Theme::TEXT_SECONDARY(),
                                                                     )
                                                                     .child(
                                                                         queue_type_display_name(q),
@@ -1268,10 +1268,10 @@ impl SavedPlayersView {
                                                                 .px_2()
                                                                 .py_0p5()
                                                                 .rounded_sm()
-                                                                .bg(Theme::CARD_BORDER)
+                                                                .bg(Theme::CARD_BORDER())
                                                                 .text_xs()
                                                                 .font_weight(FontWeight::MEDIUM)
-                                                                .text_color(Theme::TEXT_MUTED)
+                                                                .text_color(Theme::TEXT_MUTED())
                                                                 .child(format!(
                                                                     "相遇 {} 次",
                                                                     p.encountered_count
@@ -1290,13 +1290,13 @@ impl SavedPlayersView {
                                     .child(
                                         div()
                                             .text_xs()
-                                            .text_color(Theme::TEXT_MUTED)
+                                            .text_color(Theme::TEXT_MUTED())
                                             .child(format_time(p.last_met_timestamp)),
                                     )
                                     .child(
                                         div()
                                             .text_xs()
-                                            .text_color(Theme::TEXT_MUTED)
+                                            .text_color(Theme::TEXT_MUTED())
                                             .child(if is_expanded { "▾" } else { "▸" }),
                                     ),
                             ),
@@ -1325,11 +1325,11 @@ impl SavedPlayersView {
                                     .rounded_sm()
                                     .border_1()
                                     .border_color(if is_tag_focused {
-                                        Theme::AURORA_CYAN
+                                        Theme::AURORA_CYAN()
                                     } else {
-                                        Theme::CARD_BORDER
+                                        Theme::CARD_BORDER()
                                     })
-                                    .bg(Theme::CARD_BG)
+                                    .bg(Theme::CARD_BG())
                                     .px_2()
                                     .cursor_text()
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, _app| {
@@ -1378,9 +1378,9 @@ impl SavedPlayersView {
                                         div()
                                             .text_xs()
                                             .text_color(if self.editing_tag_buffer.is_empty() {
-                                                Theme::TEXT_MUTED
+                                                Theme::TEXT_MUTED()
                                             } else {
-                                                Theme::TEXT_PRIMARY
+                                                Theme::TEXT_PRIMARY()
                                             })
                                             .child(if self.editing_tag_buffer.is_empty() {
                                                 if is_tag_focused {
@@ -1402,8 +1402,8 @@ impl SavedPlayersView {
                                     .px_3()
                                     .py_1()
                                     .rounded_sm()
-                                    .bg(Theme::ACCENT_PRIMARY)
-                                    .text_color(Theme::TEXT_ON_PRIMARY)
+                                    .bg(Theme::ACCENT_PRIMARY())
+                                    .text_color(Theme::TEXT_ON_PRIMARY())
                                     .text_xs()
                                     .cursor_pointer()
                                     .hover(|s| s.opacity(0.9))
@@ -1422,12 +1422,12 @@ impl SavedPlayersView {
                                     .py_1()
                                     .rounded_sm()
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .bg(Theme::CARD_BG)
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .border_color(Theme::CARD_BORDER())
+                                    .bg(Theme::CARD_BG())
+                                    .text_color(Theme::TEXT_MUTED())
                                     .text_xs()
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(Theme::CARD_BG_HOVER))
+                                    .hover(|s| s.bg(Theme::CARD_BG_HOVER()))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         on_cancel(SavedPlayersAction::CancelEdit, win, app);
                                     })
@@ -1447,26 +1447,26 @@ impl SavedPlayersView {
                                     .rounded_sm()
                                     .border_1()
                                     .border_color(if p.is_pinned {
-                                        Theme::GOLD.opacity(0.6)
+                                        Theme::GOLD().opacity(0.6)
                                     } else {
-                                        Theme::CARD_BORDER
+                                        Theme::CARD_BORDER()
                                     })
                                     .bg(if p.is_pinned {
-                                        Theme::GOLD.opacity(0.12)
+                                        Theme::GOLD().opacity(0.12)
                                     } else {
-                                        Theme::CARD_BG
+                                        Theme::CARD_BG()
                                     })
                                     .text_color(if p.is_pinned {
-                                        Theme::GOLD
+                                        Theme::GOLD()
                                     } else {
-                                        Theme::TEXT_MUTED
+                                        Theme::TEXT_MUTED()
                                     })
                                     .text_xs()
                                     .cursor_pointer()
                                     .hover(|s| {
-                                        s.bg(Theme::CARD_BG_HOVER)
-                                            .border_color(Theme::GOLD)
-                                            .text_color(Theme::GOLD)
+                                        s.bg(Theme::CARD_BG_HOVER())
+                                            .border_color(Theme::GOLD())
+                                            .text_color(Theme::GOLD())
                                     })
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         on_action_pin(
@@ -1487,15 +1487,15 @@ impl SavedPlayersView {
                                     .py_1()
                                     .rounded_sm()
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .bg(Theme::CARD_BG)
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .border_color(Theme::CARD_BORDER())
+                                    .bg(Theme::CARD_BG())
+                                    .text_color(Theme::TEXT_MUTED())
                                     .text_xs()
                                     .cursor_pointer()
                                     .hover(|s| {
-                                        s.bg(Theme::CARD_BG_HOVER)
-                                            .border_color(Theme::AURORA_CYAN)
-                                            .text_color(Theme::ACCENT_PRIMARY)
+                                        s.bg(Theme::CARD_BG_HOVER())
+                                            .border_color(Theme::AURORA_CYAN())
+                                            .text_color(Theme::ACCENT_PRIMARY())
                                     })
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         on_action_edit(
@@ -1512,13 +1512,13 @@ impl SavedPlayersView {
                                     .py_1()
                                     .rounded_sm()
                                     .border_1()
-                                    .border_color(Theme::LOSS_BORDER.opacity(0.5))
-                                    .bg(Theme::CARD_BG)
-                                    .text_color(Theme::LOSS_TEXT)
+                                    .border_color(Theme::LOSS_BORDER().opacity(0.5))
+                                    .bg(Theme::CARD_BG())
+                                    .text_color(Theme::LOSS_TEXT())
                                     .text_xs()
                                     .cursor_pointer()
                                     .hover(|s| {
-                                        s.bg(Theme::LOSS_BG).border_color(Theme::LOSS_BORDER)
+                                        s.bg(Theme::LOSS_BG()).border_color(Theme::LOSS_BORDER())
                                     })
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         on_action_delete(
@@ -1547,7 +1547,7 @@ impl SavedPlayersView {
             .pt_2p5()
             .border_t_1()
             .border_dashed()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .child(if self.is_games_loading {
                 div()
                     .flex()
@@ -1555,14 +1555,14 @@ impl SavedPlayersView {
                     .justify_center()
                     .py_4()
                     .text_xs()
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child("正在加载相遇记录...")
                     .into_any_element()
             } else if self.expanded_games.is_empty() {
                 div()
                     .py_3()
                     .text_xs()
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child("暂无详细相遇记录")
                     .into_any_element()
             } else {
@@ -1581,17 +1581,17 @@ impl SavedPlayersView {
                             .px_2p5()
                             .py_1p5()
                             .rounded_sm()
-                            .bg(Theme::HOVER_BG)
+                            .bg(Theme::HOVER_BG())
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(queue_type_display_name(&game.queue_type)),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(format_time(game.timestamp)),
                             )
                     }))
@@ -1603,14 +1603,14 @@ impl SavedPlayersView {
                                     .py_1()
                                     .rounded_sm()
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .bg(Theme::CARD_BG)
+                                    .border_color(Theme::CARD_BORDER())
+                                    .bg(Theme::CARD_BG())
                                     .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .hover(|s| {
-                                        s.bg(Theme::CARD_BG_HOVER)
-                                            .border_color(Theme::AURORA_CYAN)
-                                            .text_color(Theme::ACCENT_PRIMARY)
+                                        s.bg(Theme::CARD_BG_HOVER())
+                                            .border_color(Theme::AURORA_CYAN())
+                                            .text_color(Theme::ACCENT_PRIMARY())
                                     })
                                     .cursor_pointer()
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
@@ -1644,9 +1644,9 @@ impl SavedPlayersView {
                     .w(px(320.0))
                     .p_5()
                     .rounded_xl()
-                    .bg(Theme::CARD_BG_HOVER)
+                    .bg(Theme::CARD_BG_HOVER())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .shadow_lg()
                     .flex()
                     .flex_col()
@@ -1655,13 +1655,13 @@ impl SavedPlayersView {
                         div()
                             .text_base()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child("删除确认"),
                     )
                     .child(
                         div()
                             .text_sm()
-                            .text_color(Theme::TEXT_SECONDARY)
+                            .text_color(Theme::TEXT_SECONDARY())
                             .child("确定要删除该玩家吗？"),
                     )
                     .child(
@@ -1676,12 +1676,12 @@ impl SavedPlayersView {
                                     .py_1p5()
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(Theme::CARD_BORDER)
-                                    .bg(Theme::CARD_BG)
+                                    .border_color(Theme::CARD_BORDER())
+                                    .bg(Theme::CARD_BG())
                                     .text_xs()
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(Theme::CARD_BG_HOVER))
+                                    .hover(|s| s.bg(Theme::CARD_BG_HOVER()))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         on_cancel(SavedPlayersAction::CancelDelete, win, app);
                                     })
@@ -1692,12 +1692,12 @@ impl SavedPlayersView {
                                     .px_3()
                                     .py_1p5()
                                     .rounded_md()
-                                    .bg(Theme::LOSS_BG)
+                                    .bg(Theme::LOSS_BG())
                                     .border_1()
-                                    .border_color(Theme::LOSS_BORDER)
+                                    .border_color(Theme::LOSS_BORDER())
                                     .text_xs()
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::LOSS_TEXT)
+                                    .text_color(Theme::LOSS_TEXT())
                                     .cursor_pointer()
                                     .hover(|s| s.opacity(0.9))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {

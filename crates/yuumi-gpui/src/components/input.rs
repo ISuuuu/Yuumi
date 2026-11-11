@@ -43,12 +43,12 @@ impl SearchInput {
             .h(px(32.0))
             .w(px(240.0))
             .rounded_lg()
-            .bg(Theme::CARD_BG)
+            .bg(Theme::CARD_BG())
             .border_1()
             .border_color(if is_focused {
-                Theme::AURORA_CYAN
+                Theme::AURORA_CYAN()
             } else {
-                Theme::CARD_BORDER
+                Theme::CARD_BORDER()
             })
             .px_3()
             .flex()
@@ -59,14 +59,14 @@ impl SearchInput {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().text_xs().text_color(Theme::TEXT_MUTED).child("🔍"))
+                    .child(div().text_xs().text_color(Theme::TEXT_MUTED()).child("🔍"))
                     .child(
                         div()
                             .text_xs()
                             .text_color(if has_text {
-                                Theme::TEXT_PRIMARY
+                                Theme::TEXT_PRIMARY()
                             } else {
-                                Theme::TEXT_MUTED
+                                Theme::TEXT_MUTED()
                             })
                             .child(if has_text { text } else { placeholder }),
                     ),
@@ -75,9 +75,9 @@ impl SearchInput {
                 this.child(
                     div()
                         .text_xs()
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .cursor_pointer()
-                        .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
+                        .hover(|s| s.text_color(Theme::TEXT_PRIMARY()))
                         .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                             on_clear(window, app);
                         })

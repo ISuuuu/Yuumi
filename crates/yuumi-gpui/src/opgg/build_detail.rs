@@ -38,9 +38,9 @@ fn card() -> Div {
         .my(px(10.0))
         .px(px(16.0))
         .py(px(12.0))
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .rounded(px(8.0))
         .shadow_sm()
 }
@@ -55,20 +55,20 @@ fn stat_column(label: &'static str, value: String) -> impl IntoElement {
         .child(
             div()
                 .text_size(px(10.4))
-                .text_color(Theme::TEXT_MUTED)
+                .text_color(Theme::TEXT_MUTED())
                 .child(label),
         )
         .child(
             div()
                 .text_size(px(13.12))
                 .font_weight(FontWeight::BOLD)
-                .text_color(Theme::TEXT_PRIMARY)
+                .text_color(Theme::TEXT_PRIMARY())
                 .child(value),
         )
 }
 
 fn stat_divider() -> impl IntoElement {
-    div().w(px(1.0)).h(px(24.0)).bg(Theme::CARD_BORDER)
+    div().w(px(1.0)).h(px(24.0)).bg(Theme::CARD_BORDER())
 }
 
 /// 英雄摘要标题栏
@@ -101,7 +101,7 @@ fn title_bar(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
             LcuImage::new(champion_icon(id))
                 .size(px(46.0))
                 .circle()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .border_width(px(2.0)),
         );
     }
@@ -116,13 +116,13 @@ fn title_bar(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
                 div()
                     .text_size(px(15.2))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(Theme::TEXT_PRIMARY)
+                    .text_color(Theme::TEXT_PRIMARY())
                     .child(name),
             )
             .children(ctx.position.map(|position| {
                 div()
                     .text_size(px(11.2))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child(position.to_string())
             })),
     );
@@ -188,7 +188,7 @@ fn summoner_spells(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
                 .py(px(6.0))
                 .bg(Palette::spell_pair_bg())
                 .border_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .rounded(px(6.0))
                 .child(
                     div()
@@ -197,7 +197,7 @@ fn summoner_spells(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
                         .children(entry.ids.iter().take(2).map(|spell_id| {
                             LcuImage::new(spell_icon(ctx.assets, *spell_id))
                                 .size(px(28.0))
-                                .border_color(Theme::CARD_BORDER)
+                                .border_color(Theme::CARD_BORDER())
                         })),
                 )
                 .child(
@@ -210,13 +210,13 @@ fn summoner_spells(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
                             div()
                                 .text_size(px(12.48))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY)
+                                .text_color(Theme::TEXT_PRIMARY())
                                 .child(pct(entry.win_rate)),
                         )
                         .child(
                             div()
                                 .text_size(px(9.92))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child(games_count(entry.play)),
                         ),
                 )
@@ -225,7 +225,7 @@ fn summoner_spells(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
                         .text_right()
                         .text_size(px(12.0))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_SECONDARY)
+                        .text_color(Theme::TEXT_SECONDARY())
                         .child(pct(entry.pick_rate)),
                 )
         });
@@ -256,7 +256,7 @@ fn counters(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
                     .mb(px(4.0))
                     .text_size(px(11.2))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child(title),
             )
             .children(entries.into_iter().map(|entry| {
@@ -280,12 +280,12 @@ fn counters(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
                                 LcuImage::new(champion_icon(entry.champion_id))
                                     .size(px(22.0))
                                     .circle()
-                                    .border_color(Theme::CARD_BORDER),
+                                    .border_color(Theme::CARD_BORDER()),
                             )
                             .child(
                                 div()
                                     .text_size(px(11.52))
-                                    .text_color(Theme::TEXT_SECONDARY)
+                                    .text_color(Theme::TEXT_SECONDARY())
                                     .child(name),
                             ),
                     )
@@ -295,7 +295,7 @@ fn counters(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
                             .min_w(px(45.0))
                             .text_center()
                             .text_size(px(9.92))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child(games_count(entry.play)),
                     )
                     .child(
@@ -323,7 +323,7 @@ fn counters(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
                         div()
                             .w(px(1.0))
                             .mx(px(8.0))
-                            .bg(Theme::CARD_BORDER),
+                            .bg(Theme::CARD_BORDER()),
                     )
                     .child(column("被克制", weak, ctx.champion_names)),
             )

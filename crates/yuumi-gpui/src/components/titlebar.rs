@@ -14,21 +14,23 @@ pub const APP_NAME: &str = "Yummi";
 /// 游戏阶段英文枚举 → 旧版中文文案（`src/locales/zh-CN.json` 的 `phase.*`）
 pub fn phase_label(phase: &str) -> Option<&'static str> {
     match phase {
-        "Lobby" => Some("房间组队中"),
-        "Matchmaking" => Some("匹配中"),
-        "CheckedIntoTournament" => Some("锦标赛签到"),
-        "ReadyCheck" => Some("确认对局"),
-        "ChampSelect" => Some("选择英雄"),
-        "GameStart" => Some("游戏加载"),
-        "FailedToLaunch" => Some("启动失败"),
-        "InProgress" => Some("游戏中"),
-        "Reconnect" => Some("重新连接"),
-        "WaitingForStats" => Some("等待数据"),
-        "PreEndOfGame" => Some("结算中"),
-        "EndOfGame" => Some("对局结束"),
-        "TerminatedInError" | "TerminatedByError" => Some("对局异常终止"),
-        "TerminatedInSeries" => Some("系列赛终止"),
-        "WatchInProgress" => Some("观战中"),
+        "Lobby" => Some(crate::i18n::t("phase.Lobby")),
+        "Matchmaking" => Some(crate::i18n::t("phase.Matchmaking")),
+        "CheckedIntoTournament" => Some(crate::i18n::t("phase.CheckedIntoTournament")),
+        "ReadyCheck" => Some(crate::i18n::t("phase.ReadyCheck")),
+        "ChampSelect" => Some(crate::i18n::t("phase.ChampSelect")),
+        "GameStart" => Some(crate::i18n::t("phase.GameStart")),
+        "FailedToLaunch" => Some(crate::i18n::t("phase.FailedToLaunch")),
+        "InProgress" => Some(crate::i18n::t("phase.InProgress")),
+        "Reconnect" => Some(crate::i18n::t("phase.Reconnect")),
+        "WaitingForStats" => Some(crate::i18n::t("phase.WaitingForStats")),
+        "PreEndOfGame" => Some(crate::i18n::t("phase.PreEndOfGame")),
+        "EndOfGame" => Some(crate::i18n::t("phase.EndOfGame")),
+        "TerminatedInError" | "TerminatedByError" => {
+            Some(crate::i18n::t("phase.TerminatedInError"))
+        }
+        "TerminatedInSeries" => Some(crate::i18n::t("phase.TerminatedInSeries")),
+        "WatchInProgress" => Some(crate::i18n::t("phase.WatchInProgress")),
         _ => None,
     }
 }
@@ -84,9 +86,9 @@ impl TitleBar {
             .h(Theme::TITLEBAR_HEIGHT)
             .flex_shrink_0()
             .px(px(8.0))
-            .bg(Theme::TITLEBAR_BG)
+            .bg(Theme::TITLEBAR_BG())
             .border_b_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             // 原生托管拖拽区：利用 GPUI 的 WindowControlArea::Drag
             // Windows 底层 hit test 命中 HTCAPTION，由系统原生处理平滑拖拽、Aero Snap 与双击最大化/还原，
             // 彻底避免在 GPUI 事件回调持有 AppCell 借用时同步调用 SendMessageW 造成 "RefCell already borrowed" 冲突。
@@ -107,13 +109,13 @@ impl TitleBar {
                                 .w(px(32.0))
                                 .h(px(26.0))
                                 .rounded(px(4.0))
-                                .hover(|s| s.bg(Theme::HOVER_BG))
+                                .hover(|s| s.bg(Theme::HOVER_BG()))
                                 .cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                                     app.stop_propagation();
                                     back_cb(window, app);
                                 })
-                                .child(icon("icons/back.svg", 14.0, Theme::TEXT_MUTED)),
+                                .child(icon("icons/back.svg", 14.0, Theme::TEXT_MUTED())),
                         )
                     })
                     .child(match logo_image() {
@@ -134,7 +136,7 @@ impl TitleBar {
                                 div()
                                     .text_size(px(12.8))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(title),
                             )
                             .when_some(phase_badge, |el, label| {
@@ -144,10 +146,10 @@ impl TitleBar {
                                         .px(px(6.0))
                                         .py(px(1.0))
                                         .rounded(px(4.0))
-                                        .bg(Theme::ACCENT_LIGHT)
+                                        .bg(Theme::ACCENT_LIGHT())
                                         .text_size(px(12.5))
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(Theme::ACCENT_PRIMARY)
+                                        .text_color(Theme::ACCENT_PRIMARY())
                                         .child(format!("· {}", label)),
                                 )
                             }),
@@ -168,13 +170,13 @@ impl TitleBar {
                             .w(px(32.0))
                             .h(px(26.0))
                             .rounded(px(4.0))
-                            .hover(|s| s.bg(Theme::HOVER_BG))
+                            .hover(|s| s.bg(Theme::HOVER_BG()))
                             .cursor_pointer()
                             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                                 app.stop_propagation();
                                 min_cb(window, app);
                             })
-                            .child(icon("icons/minimize.svg", 14.0, Theme::TEXT_MUTED)),
+                            .child(icon("icons/minimize.svg", 14.0, Theme::TEXT_MUTED())),
                     )
                     .child(
                         div()
@@ -186,7 +188,7 @@ impl TitleBar {
                             .w(px(32.0))
                             .h(px(26.0))
                             .rounded(px(4.0))
-                            .hover(|s| s.bg(Theme::HOVER_BG))
+                            .hover(|s| s.bg(Theme::HOVER_BG()))
                             .cursor_pointer()
                             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                                 app.stop_propagation();
@@ -199,7 +201,7 @@ impl TitleBar {
                                     "icons/maximize.svg"
                                 },
                                 14.0,
-                                Theme::TEXT_MUTED,
+                                Theme::TEXT_MUTED(),
                             )),
                     )
                     .child(
@@ -212,13 +214,13 @@ impl TitleBar {
                             .w(px(32.0))
                             .h(px(26.0))
                             .rounded(px(4.0))
-                            .hover(|s| s.bg(Theme::LOSS_BAR))
+                            .hover(|s| s.bg(Theme::LOSS_BAR()))
                             .cursor_pointer()
                             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                                 app.stop_propagation();
                                 close_cb(window, app);
                             })
-                            .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED)),
+                            .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED())),
                     ),
             )
     }

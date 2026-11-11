@@ -71,9 +71,9 @@ impl AgentSettingsView {
             .child(
                 div()
                     .w_full()
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .rounded_xl()
                     .p_4()
                     .shadow_sm()
@@ -83,12 +83,12 @@ impl AgentSettingsView {
                             .items_center()
                             .gap_2()
                             .mb_3()
-                            .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_CYAN))
+                            .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_CYAN()))
                             .child(
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child("对局流程自动化 (Auto Matchflow)"),
                             ),
                     )
@@ -124,9 +124,9 @@ impl AgentSettingsView {
             .child(
                 div()
                     .w_full()
-                    .bg(Theme::CARD_BG)
+                    .bg(Theme::CARD_BG())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .rounded_xl()
                     .p_4()
                     .shadow_sm()
@@ -136,12 +136,12 @@ impl AgentSettingsView {
                             .items_center()
                             .gap_2()
                             .mb_3()
-                            .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_BLUE))
+                            .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_BLUE()))
                             .child(
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child("选人与禁选自动化 (Auto BP & Spells)"),
                             ),
                     )
@@ -189,7 +189,7 @@ fn render_toggle_row(
         .justify_between()
         .p_3()
         .rounded_lg()
-        .bg(Theme::BADGE_BG)
+        .bg(Theme::BADGE_BG())
         .child(
             div()
                 .flex()
@@ -199,13 +199,13 @@ fn render_toggle_row(
                     div()
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .child(title),
                 )
                 .child(
                     div()
                         .text_size(px(10.0))
-                        .text_color(Theme::TEXT_MUTED)
+                        .text_color(Theme::TEXT_MUTED())
                         .child(desc),
                 ),
         )
@@ -216,22 +216,22 @@ fn render_toggle_row(
                 .py(px(4.0))
                 .rounded_md()
                 .bg(if checked {
-                    Theme::ACCENT_LIGHT
+                    Theme::ACCENT_LIGHT()
                 } else {
                     hsla(0.0, 0.0, 0.0, 0.05)
                 })
                 .border_1()
                 .border_color(if checked {
-                    Theme::ACCENT_PRIMARY
+                    Theme::ACCENT_PRIMARY()
                 } else {
-                    Theme::CARD_BORDER
+                    Theme::CARD_BORDER()
                 })
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
                 .text_color(if checked {
-                    Theme::ACCENT_PRIMARY
+                    Theme::ACCENT_PRIMARY()
                 } else {
-                    Theme::TEXT_MUTED
+                    Theme::TEXT_MUTED()
                 })
                 .on_mouse_down(MouseButton::Left, handler)
                 .child(if checked { "已启用" } else { "已禁用" }),

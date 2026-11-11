@@ -945,6 +945,7 @@ impl Window {
             window_background,
             app_id,
             window_min_size,
+            scale_factor_override,
             window_decorations,
             #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
             tabbing_identifier,
@@ -966,6 +967,7 @@ impl Window {
                 show,
                 display_id,
                 window_min_size,
+                scale_factor_override,
                 #[cfg(target_os = "macos")]
                 tabbing_identifier,
             },
@@ -1705,6 +1707,13 @@ impl Window {
     /// Set the content size of the window.
     pub fn resize(&mut self, size: Size<Pixels>) {
         self.platform_window.resize(size);
+    }
+
+    /// [Yuumi patch] Overrides the window's scale factor at runtime; `None` restores
+    /// the platform default (system DPI). Used by the settings page's DPI scale option.
+    pub fn set_scale_factor_override(&self, scale_factor_override: Option<f32>) {
+        self.platform_window
+            .set_scale_factor_override(scale_factor_override);
     }
 
     /// Returns whether or not the window is currently fullscreen

@@ -34,10 +34,10 @@ pub enum ToastKind {
 impl ToastKind {
     fn color(self) -> gpui::Hsla {
         match self {
-            ToastKind::Success => Theme::WIN_BAR,
-            ToastKind::Error => Theme::LOSS_BAR,
-            ToastKind::Warning => Theme::GOLD,
-            ToastKind::Info => Theme::ACCENT_PRIMARY,
+            ToastKind::Success => Theme::WIN_BAR(),
+            ToastKind::Error => Theme::LOSS_BAR(),
+            ToastKind::Warning => Theme::GOLD(),
+            ToastKind::Info => Theme::ACCENT_PRIMARY(),
         }
     }
 
@@ -187,9 +187,9 @@ pub fn toast_overlay(stack: &ToastStack) -> impl IntoElement {
                 .py(px(9.0))
                 .rounded(Theme::RADIUS_MD)
                 .max_w(MAX_PILL_WIDTH)
-                .bg(Theme::CARD_BG_HOVER)
+                .bg(Theme::CARD_BG_HOVER())
                 .border_1()
-                .border_color(Theme::CARD_BORDER)
+                .border_color(Theme::CARD_BORDER())
                 .shadow_md()
                 .child(
                     div()
@@ -201,7 +201,7 @@ pub fn toast_overlay(stack: &ToastStack) -> impl IntoElement {
                 .child(
                     div()
                         .text_size(px(13.0))
-                        .text_color(Theme::TEXT_PRIMARY)
+                        .text_color(Theme::TEXT_PRIMARY())
                         .child(toast.message),
                 )
         }))

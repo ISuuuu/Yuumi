@@ -372,7 +372,7 @@ impl BenchOverlayView {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_CYAN))
+                    .child(div().size(px(8.0)).rounded_full().bg(Theme::AURORA_CYAN()))
                     .child(
                         div()
                             .text_xs()
@@ -386,7 +386,7 @@ impl BenchOverlayView {
                             .rounded(px(3.0))
                             .bg(rgba(0x00f5d430))
                             .text_size(px(9.0))
-                            .text_color(Theme::AURORA_CYAN)
+                            .text_color(Theme::AURORA_CYAN())
                             .child(queue_label),
                     ),
             )
@@ -398,7 +398,7 @@ impl BenchOverlayView {
                     .child(
                         div()
                             .text_size(px(9.0))
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child(format!(
                                 "板凳 {} · 本方 {} · 剩余摇号 {}",
                                 self.bench.len(),
@@ -436,7 +436,7 @@ impl BenchOverlayView {
                             .hover(|s| s.bg(rgba(0x00f5d466)))
                             .text_size(px(10.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::AURORA_CYAN)
+                            .text_color(Theme::AURORA_CYAN())
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _ev, _window, cx| {
@@ -454,9 +454,9 @@ impl BenchOverlayView {
         let is_pending = self.pending_champion == Some(champion_id);
         let highlight = is_pending || champion_id == self.my_champion_id || slot.is_mine;
         let border_color = if highlight {
-            Theme::AURORA_CYAN
+            Theme::AURORA_CYAN()
         } else {
-            Theme::CARD_BORDER
+            Theme::CARD_BORDER()
         };
 
         div()
@@ -478,7 +478,7 @@ impl BenchOverlayView {
             .opacity(if is_pending { 0.4 } else { 1.0 })
             .when(!is_pending, |this| {
                 this.cursor_pointer()
-                    .hover(|s| s.border_color(Theme::AURORA_CYAN))
+                    .hover(|s| s.border_color(Theme::AURORA_CYAN()))
             })
             .child(
                 LcuImage::new(champion_icon_path(champion_id))
@@ -513,7 +513,7 @@ impl Render for BenchOverlayView {
             .items_center()
             .bg(rgba(0x0f172af2)) // 深色半透水晶极光底色
             .border_1()
-            .border_color(Theme::CARD_BORDER)
+            .border_color(Theme::CARD_BORDER())
             .rounded(px(12.0))
             .px(px(8.0))
             .py(px(5.0))
@@ -538,7 +538,7 @@ impl Render for BenchOverlayView {
                     .cursor_move()
                     .opacity(0.55)
                     .hover(|s| s.opacity(1.0).text_color(rgb(0xffffff)))
-                    .child(icon("icons/drag.svg", 16.0, Theme::TEXT_MUTED))
+                    .child(icon("icons/drag.svg", 16.0, Theme::TEXT_MUTED()))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _ev, window, cx| {
@@ -564,7 +564,7 @@ impl Render for BenchOverlayView {
                         this.child(
                             div()
                                 .text_size(px(12.0))
-                                .text_color(Theme::TEXT_MUTED)
+                                .text_color(Theme::TEXT_MUTED())
                                 .child("板凳席空空如也"),
                         )
                     })
@@ -618,7 +618,7 @@ impl Render for BenchOverlayView {
                             .cursor_pointer()
                             .text_size(px(10.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::AURORA_CYAN)
+                            .text_color(Theme::AURORA_CYAN())
                             .when(is_pending, |s| s.opacity(0.5))
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -639,9 +639,9 @@ impl Render for BenchOverlayView {
                             .rounded(px(4.0))
                             .cursor_pointer()
                             .opacity(0.55)
-                            .hover(|s| s.opacity(1.0).text_color(Theme::LOSS_BAR))
-                            .text_color(Theme::TEXT_MUTED)
-                            .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED))
+                            .hover(|s| s.opacity(1.0).text_color(Theme::LOSS_BAR()))
+                            .text_color(Theme::TEXT_MUTED())
+                            .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED()))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 |_ev, window, _app| {

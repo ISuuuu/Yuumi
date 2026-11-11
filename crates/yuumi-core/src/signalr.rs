@@ -73,12 +73,7 @@ impl HubConfig {
             return Ok(None);
         }
         let general = &config.general;
-        let address = general.signalr_server_url.trim();
-        let address = if address.is_empty() {
-            general.upload_api_url.trim()
-        } else {
-            address
-        };
+        let address = general.upload_api_url.trim();
         if address.is_empty() {
             return Err("未配置云端服务地址".into());
         }
@@ -469,20 +464,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn uses_configured_hub_and_legacy_user_fallback() {
+    fn uses_shared_server_address_and_legacy_user_fallback() {
         let mut config = AppConfig::default();
         config.general.upload_api_url = "https://example.test/path/api/lol/upload-batch".into();
         assert!(HubConfig::from_app(&config).unwrap().is_none());
         config.functions.lcu_realtime_enabled = true;
         config.functions.lcu_user_id = "player + /".into();
+        config.general.signalr_server_url = "https://old.example.test".into();
         let hub = HubConfig::from_app(&config).unwrap().unwrap();
         assert_eq!(hub.hub.as_str(), "https://example.test/path/lcuHub");
         assert_eq!(hub.user_id, "player + /");
-        config.general.signalr_server_url = "http://example.test".into();
+        config.general.upload_api_url.clear();
         assert!(HubConfig::from_app(&config).is_err());
-        config.general.signalr_server_url = "http://127.0.0.1:1234".into();
+        config.general.upload_api_url = "http://example.test".into();
+        assert!(HubConfig::from_app(&config).is_err());
+        config.general.upload_api_url = "http://127.0.0.1:1234".into();
         assert!(HubConfig::from_app(&config).is_ok());
-        config.general.signalr_server_url = "file:///test".into();
+        config.general.upload_api_url = "file:///test".into();
         assert!(HubConfig::from_app(&config).is_err());
     }
 
@@ -525,7 +523,7 @@ mod tests {
         });
         let mut config = AppConfig::default();
         config.functions.lcu_realtime_enabled = true;
-        config.general.signalr_server_url = format!("http://{address}");
+        config.general.upload_api_url = format!("http://{address}");
         let hub = HubConfig::from_app(&config).unwrap().unwrap();
         let (events, receiver) = broadcast::channel(8);
         let _events = events;

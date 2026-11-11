@@ -45,22 +45,22 @@ impl TrayManager {
         let mut menu_actions = HashMap::new();
 
         // 1. 主页
-        let item_home = MenuItem::new("主页", true, None);
+        let item_home = MenuItem::new(crate::i18n::t("tray.home"), true, None);
         menu_actions.insert(item_home.id().clone(), TrayAction::Navigate(Route::Home));
         tray_menu.append(&item_home).map_err(|e| e.to_string())?;
 
         // 2. 生涯
-        let item_career = MenuItem::new("生涯", true, None);
+        let item_career = MenuItem::new(crate::i18n::t("nav.career"), true, None);
         menu_actions.insert(item_career.id().clone(), TrayAction::Navigate(Route::Career));
         tray_menu.append(&item_career).map_err(|e| e.to_string())?;
 
         // 3. 战绩查询
-        let item_search = MenuItem::new("战绩查询", true, None);
+        let item_search = MenuItem::new(crate::i18n::t("nav.search"), true, None);
         menu_actions.insert(item_search.id().clone(), TrayAction::Navigate(Route::Search));
         tray_menu.append(&item_search).map_err(|e| e.to_string())?;
 
         // 4. 对局信息
-        let item_gameinfo = MenuItem::new("对局信息", true, None);
+        let item_gameinfo = MenuItem::new(crate::i18n::t("nav.gameinfo"), true, None);
         menu_actions.insert(item_gameinfo.id().clone(), TrayAction::Navigate(Route::GameInfo));
         tray_menu.append(&item_gameinfo).map_err(|e| e.to_string())?;
 
@@ -72,7 +72,7 @@ impl TrayManager {
         }
 
         // 6. 其他功能
-        let item_tools = MenuItem::new("其他功能", true, None);
+        let item_tools = MenuItem::new(crate::i18n::t("nav.tools"), true, None);
         menu_actions.insert(item_tools.id().clone(), TrayAction::Navigate(Route::Tools));
         tray_menu.append(&item_tools).map_err(|e| e.to_string())?;
 
@@ -81,7 +81,7 @@ impl TrayManager {
         tray_menu.append(&sep1).map_err(|e| e.to_string())?;
 
         // 7. 设置
-        let item_settings = MenuItem::new("设置", true, None);
+        let item_settings = MenuItem::new(crate::i18n::t("nav.settings"), true, None);
         menu_actions.insert(item_settings.id().clone(), TrayAction::Navigate(Route::Settings));
         tray_menu.append(&item_settings).map_err(|e| e.to_string())?;
 
@@ -90,7 +90,7 @@ impl TrayManager {
         tray_menu.append(&sep2).map_err(|e| e.to_string())?;
 
         // 8. 退出
-        let item_quit = MenuItem::new("退出", true, None);
+        let item_quit = MenuItem::new(crate::i18n::t("tray.quit"), true, None);
         menu_actions.insert(item_quit.id().clone(), TrayAction::Quit);
         tray_menu.append(&item_quit).map_err(|e| e.to_string())?;
 

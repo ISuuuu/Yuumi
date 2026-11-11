@@ -51,7 +51,7 @@ fn tier_badge(tier: Option<&str>) -> AnyElement {
                 .text_center()
                 .text_size(px(11.2))
                 .font_weight(FontWeight::BOLD)
-                .text_color(Theme::TEXT_SECONDARY)
+                .text_color(Theme::TEXT_SECONDARY())
                 .child(tier.unwrap_or("-").to_string())
                 .into_any_element();
         }
@@ -97,9 +97,9 @@ fn header() -> impl IntoElement {
         .mb(px(3.0))
         .text_size(px(11.52))
         .font_weight(FontWeight::BOLD)
-        .text_color(Theme::TEXT_SECONDARY)
+        .text_color(Theme::TEXT_SECONDARY())
         .border_b_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .child(header_cell("#", COL_RANK))
         .child(div().flex_1().child("英雄"))
         .child(div().flex_1())
@@ -146,7 +146,7 @@ pub fn tier_list(
                     .rounded(px(6.0))
                     .bg(background)
                     .text_size(px(12.48))
-                    .text_color(Theme::TEXT_SECONDARY)
+                    .text_color(Theme::TEXT_SECONDARY())
                     .cursor_pointer()
                     .hover(move |style| style.bg(hover_background))
                     .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
@@ -158,21 +158,21 @@ pub fn tier_list(
                             .w(px(COL_RANK))
                             .flex_none()
                             .text_center()
-                            .text_color(Theme::TEXT_MUTED)
+                            .text_color(Theme::TEXT_MUTED())
                             .child((index + 1).to_string()),
                     )
                     .child(
                         LcuImage::new(champion_icon(champion_id))
                             .size(px(34.0))
                             .circle()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .border_width(px(2.0)),
                     )
                     .child(
                         div()
                             .flex_none()
                             .font_weight(FontWeight::MEDIUM)
-                            .text_color(Theme::TEXT_PRIMARY)
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child(name),
                     )
                     .child(div().flex_1())
@@ -193,7 +193,7 @@ pub fn tier_list(
                                 LcuImage::new(champion_icon(*counter_id))
                                     .size(px(22.0))
                                     .circle()
-                                    .border_color(Theme::CARD_BORDER)
+                                    .border_color(Theme::CARD_BORDER())
                             })),
                     )
             }),

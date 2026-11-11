@@ -24,9 +24,9 @@ fn card() -> Div {
         .my(px(10.0))
         .px(px(16.0))
         .py(px(12.0))
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(Theme::CARD_BORDER)
+        .border_color(Theme::CARD_BORDER())
         .rounded(px(8.0))
         .shadow_sm()
 }
@@ -301,17 +301,17 @@ pub fn runes_section(
                     .rounded(px(6.0))
                     .border_1()
                     .border_color(if is_active {
-                        Theme::ACCENT_PRIMARY
+                        Theme::ACCENT_PRIMARY()
                     } else {
-                        Theme::CARD_BORDER
+                        Theme::CARD_BORDER()
                     })
                     .bg(if is_active {
-                        Theme::ACCENT_LIGHT
+                        Theme::ACCENT_LIGHT()
                     } else {
-                        Theme::BG_APP
+                        Theme::BG_APP()
                     })
                     .cursor_pointer()
-                    .hover(|style| style.border_color(Theme::ACCENT_PRIMARY))
+                    .hover(|style| style.border_color(Theme::ACCENT_PRIMARY()))
                     .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                         select(index, window, app)
                     })
@@ -331,13 +331,13 @@ pub fn runes_section(
                                 div()
                                     .text_size(px(11.52))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY)
+                                    .text_color(Theme::TEXT_PRIMARY())
                                     .child(pct(preset.win_rate)),
                             )
                             .child(
                                 div()
                                     .text_size(px(9.6))
-                                    .text_color(Theme::TEXT_MUTED)
+                                    .text_color(Theme::TEXT_MUTED())
                                     .child(games_count(preset.play)),
                             ),
                     )
@@ -345,7 +345,7 @@ pub fn runes_section(
                         div()
                             .text_size(px(11.52))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_SECONDARY)
+                            .text_color(Theme::TEXT_SECONDARY())
                             .child(pct(preset.pick_rate)),
                     )
             }),
@@ -377,7 +377,7 @@ pub fn runes_section(
                     .p(px(16.0))
                     .bg(Palette::rune_tree_bg())
                     .border_1()
-                    .border_color(Theme::CARD_BORDER)
+                    .border_color(Theme::CARD_BORDER())
                     .rounded(px(6.0))
                     .child(left)
                     .child(
@@ -386,7 +386,7 @@ pub fn runes_section(
                             .flex_none()
                             .pl(px(16.0))
                             .border_l_1()
-                            .border_color(Theme::CARD_BORDER)
+                            .border_color(Theme::CARD_BORDER())
                             .flex()
                             .flex_col()
                             .justify_between()

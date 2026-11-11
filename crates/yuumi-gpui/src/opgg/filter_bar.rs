@@ -123,18 +123,18 @@ fn trigger(
                 .py(px(4.0))
                 .border_1()
                 .border_color(if is_open {
-                    Theme::ACCENT_PRIMARY
+                    Theme::ACCENT_PRIMARY()
                 } else {
-                    Theme::CARD_BORDER
+                    Theme::CARD_BORDER()
                 })
                 .rounded(px(6.0))
-                .bg(Theme::CARD_BG)
+                .bg(Theme::CARD_BG())
                 .text_size(px(12.48))
-                .text_color(Theme::TEXT_PRIMARY)
+                .text_color(Theme::TEXT_PRIMARY())
                 // 触发器文案不折行（对照 Vue `.filter-trigger` 的 inline-flex 单行排布）
                 .whitespace_nowrap()
                 .cursor_pointer()
-                .hover(|style| style.border_color(Theme::ACCENT_PRIMARY))
+                .hover(|style| style.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                     app.stop_propagation();
                     toggle(kind, window, app);
@@ -147,7 +147,7 @@ fn trigger(
                         "icons/chevron-down.svg"
                     },
                     11.0,
-                    Theme::TEXT_MUTED,
+                    Theme::TEXT_MUTED(),
                 )),
         )
         .when(is_open, |el| {
@@ -166,9 +166,9 @@ fn trigger(
                         // Vue 用 `min-width: max-content` 让菜单按最长项撑开；
                         // GPUI 无 max-content，这里给一个足够容纳最长选项的宽度并禁止折行
                         .min_w(px(150.0))
-                        .bg(Theme::CARD_BG_HOVER)
+                        .bg(Theme::CARD_BG_HOVER())
                         .border_1()
-                        .border_color(Theme::CARD_BORDER)
+                        .border_color(Theme::CARD_BORDER())
                         .rounded(px(8.0))
                         .shadow_lg()
                         .on_mouse_down(MouseButton::Left, |_ev, _window, app| {
@@ -187,18 +187,18 @@ fn trigger(
                                 .whitespace_nowrap()
                                 .when(is_active, |style| {
                                     style
-                                        .text_color(Theme::ACCENT_PRIMARY)
+                                        .text_color(Theme::ACCENT_PRIMARY())
                                         .font_weight(FontWeight::BOLD)
-                                        .bg(Theme::ACCENT_LIGHT)
+                                        .bg(Theme::ACCENT_LIGHT())
                                 })
                                 .when(!is_active, |style| {
-                                    style.text_color(Theme::TEXT_SECONDARY)
+                                    style.text_color(Theme::TEXT_SECONDARY())
                                 })
                                 .cursor_pointer()
                                 .hover(|style| {
                                     style
-                                        .bg(Theme::HOVER_BG)
-                                        .text_color(Theme::TEXT_PRIMARY)
+                                        .bg(Theme::HOVER_BG())
+                                        .text_color(Theme::TEXT_PRIMARY())
                                 })
                                 .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                                     app.stop_propagation();
@@ -236,8 +236,8 @@ pub fn filter_bar(
         .px(px(16.0))
         .py(px(8.0))
         .border_b_1()
-        .border_color(Theme::CARD_BORDER)
-        .bg(Theme::BG_APP)
+        .border_color(Theme::CARD_BORDER())
+        .bg(Theme::BG_APP())
         .child(trigger(
             "opgg-filter-region",
             FilterKind::Region,

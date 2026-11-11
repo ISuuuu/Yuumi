@@ -34,6 +34,7 @@ image = "0.25"
 smallvec = "1"
 
 [target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
 xcap = "=0.0.14"
 windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
@@ -45,6 +46,8 @@ windows = { version = "0.58", features = [
     "Win32_Security",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
+    "Win32_System_Registry",
+    "Win32_Globalization",
 ] }
 
 # 本地打过补丁的 gpui 0.2.2（crates.io 上无更新版本）：

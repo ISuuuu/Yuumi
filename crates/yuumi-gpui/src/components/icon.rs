@@ -10,7 +10,7 @@ use gpui::*;
 ///
 /// - `path`：`crate::assets::Assets` 中登记的路径，例如 `icons/home.svg`
 /// - `size`：图标边长（Vue 侧为 18px 导航图标 / 14px 标题栏按钮图标）
-/// - `color`：着色，通常取 `Theme::TEXT_MUTED` 或品牌青
+/// - `color`：着色，通常取 `Theme::TEXT_MUTED()` 或品牌青
 pub fn icon(path: &'static str, size: f32, color: Hsla) -> impl IntoElement {
     svg()
         .path(path)

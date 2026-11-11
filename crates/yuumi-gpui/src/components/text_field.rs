@@ -192,12 +192,12 @@ pub fn text_field(
         .h(px(30.0))
         .w(width)
         .rounded_lg()
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
         .border_color(if disabled || is_focused {
-            Theme::ACCENT_PRIMARY
+            Theme::ACCENT_PRIMARY()
         } else {
-            Theme::CARD_BORDER
+            Theme::CARD_BORDER()
         })
         .px(px(10.0))
         .flex()
@@ -214,7 +214,7 @@ pub fn text_field(
                 div()
                     .flex_none()
                     .text_size(px(12.0))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .child(glyph),
             )
         })
@@ -226,9 +226,9 @@ pub fn text_field(
                 .whitespace_nowrap()
                 .text_size(px(12.5))
                 .text_color(if has_text {
-                    Theme::TEXT_PRIMARY
+                    Theme::TEXT_PRIMARY()
                 } else {
-                    Theme::TEXT_MUTED
+                    Theme::TEXT_MUTED()
                 })
                 .child(if has_text {
                     current
@@ -241,7 +241,7 @@ pub fn text_field(
                 div()
                     .flex_none()
                     .text_size(px(12.0))
-                    .text_color(Theme::ACCENT_PRIMARY)
+                    .text_color(Theme::ACCENT_PRIMARY())
                     .child("⏳"),
             )
         })
@@ -250,9 +250,9 @@ pub fn text_field(
                 div()
                     .flex_none()
                     .text_size(px(12.0))
-                    .text_color(Theme::TEXT_MUTED)
+                    .text_color(Theme::TEXT_MUTED())
                     .cursor_pointer()
-                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY))
+                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY()))
                     .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                         clear_cb(window, app);
                     })
@@ -372,17 +372,17 @@ pub fn search_input_field(
         .w_full()
         .max_w(max_width)
         .rounded(px(10.0))
-        .bg(Theme::CARD_BG)
+        .bg(Theme::CARD_BG())
         .border_1()
         .border_color(if is_focused {
-            Theme::ACCENT_PRIMARY
+            Theme::ACCENT_PRIMARY()
         } else {
-            Theme::CARD_BORDER
+            Theme::CARD_BORDER()
         })
         .map(|mut el| {
             if is_focused {
                 el.style().box_shadow = Some(vec![BoxShadow {
-                    color: Theme::ACCENT_LIGHT,
+                    color: Theme::ACCENT_LIGHT(),
                     offset: point(px(0.0), px(0.0)),
                     blur_radius: px(0.0),
                     spread_radius: px(3.0),
@@ -392,7 +392,7 @@ pub fn search_input_field(
         })
         .hover(|s| {
             if !disabled && !is_focused {
-                s.border_color(Theme::ACCENT_PRIMARY)
+                s.border_color(Theme::ACCENT_PRIMARY())
             } else {
                 s
             }
@@ -415,9 +415,9 @@ pub fn search_input_field(
                 .whitespace_nowrap()
                 .text_size(px(14.0))
                 .text_color(if has_text {
-                    Theme::TEXT_PRIMARY
+                    Theme::TEXT_PRIMARY()
                 } else {
-                    Theme::TEXT_MUTED
+                    Theme::TEXT_MUTED()
                 })
                 .child(if has_text {
                     current
@@ -444,8 +444,8 @@ pub fn search_input_field(
                             .items_center()
                             .justify_center()
                             .cursor_pointer()
-                            .text_color(Theme::TEXT_MUTED)
-                            .hover(|s| s.text_color(Theme::TEXT_PRIMARY).bg(Theme::HOVER_BG))
+                            .text_color(Theme::TEXT_MUTED())
+                            .hover(|s| s.text_color(Theme::TEXT_PRIMARY()).bg(Theme::HOVER_BG()))
                             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                                 app.stop_propagation();
                                 clear_cb(window, app);

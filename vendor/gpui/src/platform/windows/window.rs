@@ -38,6 +38,8 @@ pub struct WindowsWindowState {
     pub border_offset: WindowBorderOffset,
     pub appearance: WindowAppearance,
     pub scale_factor: f32,
+    // [Yuumi patch] 设置页 DPI 缩放覆盖；None 表示跟随系统 DPI
+    pub scale_factor_override: Option<f32>,
     pub restore_from_minimized: Option<Box<dyn FnMut(RequestFrameOptions)>>,
 
     pub callbacks: Callbacks,
@@ -84,13 +86,15 @@ impl WindowsWindowState {
         current_cursor: Option<HCURSOR>,
         display: WindowsDisplay,
         min_size: Option<Size<Pixels>>,
+        scale_factor_override: Option<f32>,
         appearance: WindowAppearance,
         disable_direct_composition: bool,
     ) -> Result<Self> {
-        let scale_factor = {
+        // [Yuumi patch] 有覆盖时使用固定缩放，否则跟随系统 DPI
+        let scale_factor = scale_factor_override.unwrap_or_else(|| {
             let monitor_dpi = unsafe { GetDpiForWindow(hwnd) } as f32;
             monitor_dpi / USER_DEFAULT_SCREEN_DPI as f32
-        };
+        });
         let origin = logical_point(window_params.x as f32, window_params.y as f32, scale_factor);
         let logical_size = {
             let physical_size = size(
@@ -126,6 +130,7 @@ impl WindowsWindowState {
             border_offset,
             appearance,
             scale_factor,
+            scale_factor_override,
             restore_from_minimized,
             min_size,
             callbacks,
@@ -214,6 +219,7 @@ impl WindowsWindowInner {
             context.current_cursor,
             context.display,
             context.min_size,
+            context.scale_factor_override,
             context.appearance,
             context.disable_direct_composition,
         )?);
@@ -346,6 +352,7 @@ struct WindowCreateContext {
     display: WindowsDisplay,
     is_movable: bool,
     min_size: Option<Size<Pixels>>,
+    scale_factor_override: Option<f32>,
     executor: ForegroundExecutor,
     current_cursor: Option<HCURSOR>,
     windows_version: WindowsVersion,
@@ -425,6 +432,7 @@ impl WindowsWindow {
             display,
             is_movable: params.is_movable,
             min_size: params.window_min_size,
+            scale_factor_override: params.scale_factor_override,
             executor,
             current_cursor,
             windows_version,
@@ -564,6 +572,35 @@ impl PlatformWindow for WindowsWindow {
 
     fn scale_factor(&self) -> f32 {
         self.0.state.borrow().scale_factor
+    }
+
+    // [Yuumi patch] 运行时切换 DPI 缩放：更新状态后 PostMessage 一次 WM_SIZE，
+    // 复用既有 WM_SIZE → handle_size_change → resize 回调 → GPUI bounds_changed
+    // 重布局链路；异步投递避免在实体 update 内同步回调造成二次 lease panic。
+    fn set_scale_factor_override(&self, scale_factor_override: Option<f32>) {
+        let hwnd = self.0.hwnd;
+        {
+            let mut lock = self.0.state.borrow_mut();
+            lock.scale_factor_override = scale_factor_override;
+            lock.scale_factor = scale_factor_override.unwrap_or_else(|| {
+                (unsafe { GetDpiForWindow(hwnd) } as f32) / USER_DEFAULT_SCREEN_DPI as f32
+            });
+        }
+        let mut rect = RECT::default();
+        if unsafe { GetClientRect(hwnd, &mut rect) }.is_err() {
+            return;
+        }
+        let width = (rect.right - rect.left).max(1) as u32 & 0xFFFF;
+        let height = (rect.bottom - rect.top).max(1) as u32 & 0xFFFF;
+        unsafe {
+            PostMessageW(
+                Some(hwnd),
+                WM_SIZE,
+                WPARAM(SIZE_RESTORED as usize),
+                LPARAM(((height << 16) | width) as isize),
+            )
+            .log_err();
+        }
     }
 
     fn appearance(&self) -> WindowAppearance {
