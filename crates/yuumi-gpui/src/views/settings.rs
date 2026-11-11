@@ -472,9 +472,6 @@ impl SettingsView {
                     .child(self.render_about_group(config, on_action.clone()))
                     .child(div().h(px(32.0))),
             )
-            .when(self.show_changelog, |this| {
-                this.child(self.render_changelog_modal(on_action.clone()))
-            })
     }
 
     /// 分组小标题（全中文、统一上边距与粗体）
@@ -1812,98 +1809,101 @@ impl SettingsView {
     }
 
     // ─── 更新日志模态浮层 (F-V07) ───
-    fn render_changelog_modal<F>(&self, on_action: F) -> impl IntoElement
+    pub fn render_changelog_modal<F>(&self, on_action: F) -> impl IntoElement
     where
         F: Fn(SettingsAction, &mut Window, &mut App) + 'static + Clone,
     {
         let act_close = on_action.clone();
         let act_refresh = on_action.clone();
 
-        div()
-            .id("changelog-modal-backdrop")
-            .absolute()
-            .inset_0()
-            .bg(rgba(0x00000066))
-            .flex()
-            .items_center()
-            .justify_center()
-            .occlude()
-            .child(
-                div()
-                    .w(px(640.0))
-                    .max_w(px(760.0))
-                    .max_h(px(520.0))
-                    .bg(rgb(0xffffff))
-                    .rounded_xl()
-                    .shadow_xl()
-                    .border_1()
-                    .border_color(Theme::CARD_BORDER())
-                    .overflow_hidden()
-                    .flex()
-                    .flex_col()
-                    // 弹窗头部
-                    .child(
-                        div()
-                            .w_full()
-                            .px(px(20.0))
-                            .py(px(14.0))
-                            .border_b_1()
-                            .border_color(Theme::CARD_BORDER().opacity(0.6))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div().flex().items_center().gap(px(10.0)).child(
+        deferred(
+            div()
+                .id("changelog-modal-backdrop")
+                .absolute()
+                .inset_0()
+                .bg(rgba(0x00000066))
+                .flex()
+                .items_center()
+                .justify_center()
+                .occlude()
+                .child(
+                    div()
+                        .w(px(640.0))
+                        .max_w(px(760.0))
+                        .max_h(px(520.0))
+                        .bg(rgb(0xffffff))
+                        .rounded_xl()
+                        .shadow_xl()
+                        .border_1()
+                        .border_color(Theme::CARD_BORDER())
+                        .overflow_hidden()
+                        .flex()
+                        .flex_col()
+                        // 弹窗头部
+                        .child(
+                            div()
+                                .w_full()
+                                .px(px(20.0))
+                                .py(px(14.0))
+                                .border_b_1()
+                                .border_color(Theme::CARD_BORDER().opacity(0.6))
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div().flex().items_center().gap(px(10.0)).child(
+                                        div()
+                                            .text_size(px(15.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::TEXT_PRIMARY())
+                                            .child(crate::i18n::t("settings.aboutHistoryTitle")),
+                                    ),
+                                )
+                                .child(
                                     div()
-                                        .text_size(px(15.0))
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::TEXT_PRIMARY())
-                                        .child(crate::i18n::t("settings.aboutHistoryTitle")),
+                                        .size(px(24.0))
+                                        .rounded_md()
+                                        .cursor_pointer()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_size(px(14.0))
+                                        .text_color(Theme::TEXT_MUTED())
+                                        .hover(|s| {
+                                            s.bg(Theme::HOVER_BG()).text_color(Theme::TEXT_PRIMARY())
+                                        })
+                                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                            act_close(SettingsAction::ToggleChangelog, win, app)
+                                        })
+                                        .child("✕"),
                                 ),
-                            )
-                            .child(
-                                div()
-                                    .size(px(24.0))
-                                    .rounded_md()
-                                    .cursor_pointer()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_size(px(14.0))
-                                    .text_color(Theme::TEXT_MUTED())
-                                    .hover(|s| {
-                                        s.bg(Theme::HOVER_BG()).text_color(Theme::TEXT_PRIMARY())
-                                    })
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        act_close(SettingsAction::ToggleChangelog, win, app)
-                                    })
-                                    .child("✕"),
-                            ),
-                    )
-                    // 日志内容列表
-                    .child(
-                        div()
-                            .id("changelog-body-scroll")
-                            .flex_1()
-                            .overflow_y_scroll()
-                            .p(px(20.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(14.0))
-                            .child(action_button(crate::i18n::t("common.refresh"), false, move |_, win, app| {
-                                act_refresh(SettingsAction::RefreshChangelog, win, app)
-                            }))
-                            .when(self.release_loading, |d| d.child(crate::i18n::t("settings.aboutHistoryLoading")))
-                            .when_some(self.release_error.clone(), |d, error| d.child(error))
-                            .children(self.release_notes.iter().map(|release| {
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(6.0))
-                                    .child(format!("{}  {}", release.tag, release.published_at))
-                                    .child(release.body.clone())
-                            })),
-                    ),
-            )
+                        )
+                        // 日志内容列表
+                        .child(
+                            div()
+                                .id("changelog-body-scroll")
+                                .flex_1()
+                                .overflow_y_scroll()
+                                .p(px(20.0))
+                                .flex()
+                                .flex_col()
+                                .gap(px(14.0))
+                                .child(action_button(crate::i18n::t("common.refresh"), false, move |_, win, app| {
+                                    act_refresh(SettingsAction::RefreshChangelog, win, app)
+                                }))
+                                .when(self.release_loading, |d| d.child(crate::i18n::t("settings.aboutHistoryLoading")))
+                                .when_some(self.release_error.clone(), |d, error| d.child(error))
+                                .children(self.release_notes.iter().map(|release| {
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(6.0))
+                                        .child(format!("{}  {}", release.tag, release.published_at))
+                                        .child(release.body.clone())
+                                })),
+                        ),
+                ),
+        )
+        .with_priority(10)
     }
 }

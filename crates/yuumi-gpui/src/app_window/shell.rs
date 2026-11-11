@@ -251,7 +251,66 @@ impl Render for MainWindow {
                                     ),
                             )
                         })
-                    }),
+                    })
+                    // ── 页面模态弹窗（脱离内部滚动视口，覆盖可见工作区居中展示） ──
+                    .when(
+                        self.current_route == Route::Tools && self.tools_view.show_badges_modal,
+                        |this| {
+                            let v_close = view_entity.clone();
+                            let v_toggle = view_entity.clone();
+                            let v_clear = view_entity.clone();
+                            let v_save = view_entity.clone();
+                            this.child(crate::views::tools::components::badges_modal(
+                                &self.tools_view.selected_badges,
+                                &self.tools_view.selected_title,
+                                move |_ev, _win, app| {
+                                    v_close.update(app, |this, cx| {
+                                        this.handle_tools_action(
+                                            ToolsAction::ToggleBadgesModal(false),
+                                            cx,
+                                        );
+                                    });
+                                },
+                                move |bid, _win, app| {
+                                    v_toggle.update(app, |this, cx| {
+                                        this.handle_tools_action(
+                                            ToolsAction::ToggleBadgeItem(bid),
+                                            cx,
+                                        );
+                                    });
+                                },
+                                move |_ev, _win, app| {
+                                    v_clear.update(app, |this, cx| {
+                                        this.handle_tools_action(
+                                            ToolsAction::ClearBadgesModal,
+                                            cx,
+                                        );
+                                    });
+                                },
+                                move |_ev, _win, app| {
+                                    v_save.update(app, |this, cx| {
+                                        this.handle_tools_action(
+                                            ToolsAction::SaveBadgesPreferences,
+                                            cx,
+                                        );
+                                    });
+                                },
+                            ))
+                        },
+                    )
+                    .when(
+                        self.current_route == Route::Settings && self.settings_view.show_changelog,
+                        |this| {
+                            let v = view_entity.clone();
+                            this.child(self.settings_view.render_changelog_modal(
+                                move |action, win, app| {
+                                    v.update(app, |this, cx| {
+                                        this.handle_settings_action(action, win, cx);
+                                    });
+                                },
+                            ))
+                        },
+                    ),
             )
             // 3. 右下角公告通知弹窗 (NoticePopup)
             .when(self.notice_popup_open, |this| {

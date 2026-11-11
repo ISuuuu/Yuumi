@@ -429,22 +429,6 @@ impl ToolsView {
                     .child(self.render_clear_border_row(on_action.clone()))
                     .child(div().h(px(32.0))),
             )
-            // 模态弹窗：自定义称号与挑战勋章装配
-            .when(self.show_badges_modal, |this| {
-                let act_close = on_action.clone();
-                let act_toggle_b = on_action.clone();
-                let act_clear = on_action.clone();
-                let act_save = on_action.clone();
-
-                this.child(badges_modal(
-                    &self.selected_badges,
-                    &self.selected_title,
-                    move |_ev, win, app| act_close(ToolsAction::ToggleBadgesModal(false), win, app),
-                    move |bid, win, app| act_toggle_b(ToolsAction::ToggleBadgeItem(bid.to_string()), win, app),
-                    move |_ev, win, app| act_clear(ToolsAction::ClearBadgesModal, win, app),
-                    move |_ev, win, app| act_save(ToolsAction::SaveBadgesPreferences, win, app),
-                ))
-            })
     }
 
     /// 分组标题小组件
