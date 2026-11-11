@@ -158,23 +158,15 @@ pub struct SavedPlayersView {
 }
 
 impl SavedPlayersView {
+    /// [P2-1] 构造不再做任何同步 SQLite I/O：storage 打开与首查全部移至
+    /// `MainWindow::init_saved_players_storage`（后台 Tokio 阻塞池），完成后回写并刷新。
+    /// 首次运行时此处的建库 + WAL + 迁移检查曾直接卡住首帧渲染（P0-6 同源）。
     pub fn new(cx: &mut App) -> Self {
-        let storage = SavedPlayersStorage::open_default().ok();
-        let (total_count, players) = if let Some(ref s) = storage {
-            let total = s.count_players(None, None, None).unwrap_or(0);
-            let list = s
-                .query_players(None, None, None, SAVED_PLAYERS_PAGE_SIZE, 0)
-                .unwrap_or_default();
-            (total, list)
-        } else {
-            (0, Vec::new())
-        };
-
         Self {
-            storage,
+            storage: None,
             self_puuid: None,
-            players,
-            total_count,
+            players: Vec::new(),
+            total_count: 0,
             current_page: 1,
             active_tag_filter: "全部".to_string(),
             search_query: String::new(),
@@ -512,9 +504,7 @@ impl SavedPlayersView {
     /// 导出标记玩家到 JSON 文件。
     /// 返回 `None` 表示用户取消了文件对话框（无提示）；`Ok(路径)` 供调用方发成功 Toast。
     pub fn export_tagged_to_file(&mut self) -> Option<Result<String, String>> {
-        let Some(ref s) = self.storage else {
-            return None;
-        };
+        let s = self.storage.as_ref()?;
         match s.export_tagged_players() {
             Ok(data) => {
                 if let Some(path) = rfd::FileDialog::new()
@@ -541,9 +531,7 @@ impl SavedPlayersView {
     /// 从 JSON 文件导入标记玩家。
     /// 返回 `None` 表示用户取消了文件对话框（无提示）；`Ok(数量)` 供调用方发成功 Toast。
     pub fn import_tagged_from_file(&mut self) -> Option<Result<u32, String>> {
-        let Some(ref s) = self.storage else {
-            return None;
-        };
+        let s = self.storage.as_ref()?;
         if let Some(path) = rfd::FileDialog::new()
             .set_title("导入标记玩家")
             .add_filter("JSON", &["json"])

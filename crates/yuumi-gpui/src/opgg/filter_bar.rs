@@ -109,6 +109,7 @@ fn trigger(
     let toggle = std::rc::Rc::new(on_toggle);
     let select = on_select;
     let toggle_click = toggle.clone();
+    let is_open_at_render = is_open;
 
     div()
         .id(id)
@@ -137,6 +138,12 @@ fn trigger(
                 .cursor_pointer()
                 .hover(|style| style.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+                    // [P1-1] 展开态点击自身触发按钮：Capture 阶段 dismiss 已收起，跳过 toggle
+                    // 防止「先关后开」；收起态需要 stop_propagation 挡住窗口根节点的
+                    // 「空白点击收起」Bubble 处理器，否则刚打开就立即被关掉。
+                    if is_open_at_render {
+                        return;
+                    }
                     app.stop_propagation();
                     toggle_click(kind, window, app);
                 })
@@ -174,15 +181,15 @@ fn trigger(
                         .rounded(px(8.0))
                         .shadow_lg()
                         .on_mouse_down_out(move |_ev, window, app| {
-                            app.stop_propagation();
+                            // [P1-1] 不再 stop_propagation：Capture 阶段吞掉外部第一次点击
                             toggle_dismiss(kind, window, app);
                         })
                         .on_mouse_down(MouseButton::Left, |_ev, _window, app| {
                             app.stop_propagation();
                         })
                         .children(options.iter().map(|(value, label)| {
-                            let value: &'static str = *value;
-                            let label: &'static str = *label;
+                            let value: &'static str = value;
+                            let label: &'static str = label;
                             let is_active = *value == *current;
                             let select = select.clone();
                             div()

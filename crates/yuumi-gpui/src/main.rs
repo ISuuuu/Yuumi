@@ -30,6 +30,9 @@ use app_window::{main_window_bounds, scale_factor_override_for, MainWindow};
 pub use app_window::{BENCH_WINDOW_TITLE, MAIN_WINDOW_TITLE};
 
 fn main() {
+    // [P0-6] 启动分段计时起点：用于定位便携版首次启动卡顿的耗时分布
+    let startup = std::time::Instant::now();
+
     if yuumi_core::update::run_portable_helper_if_requested() {
         return;
     }
@@ -65,18 +68,25 @@ fn main() {
 
     // 2. 初始化平台日志系统（输出到标准错误与调试输出）
     yuumi_core::runtime::init();
-    if let Err(error) =
-        services::logging::init(yuumi_core::config::AppConfig::load().general.log_level)
-    {
+    // [P0-6] 配置只加载一次并全程传递（原先 main.rs 内 load 两次 + MainWindow::new 内第三次）
+    let (config, config_error) = yuumi_core::config::AppConfig::load_with_error();
+    if let Err(error) = services::logging::init(config.general.log_level) {
         eprintln!("日志初始化失败: {error}");
     }
-    log::info!("Yuumi 原生 Direct3D 11/DirectWrite 渲染宿主正在启动...");
+    log::info!(
+        "[Startup] Tokio 运行时 / 单实例 / 配置加载 / 日志系统就绪: {:?}",
+        startup.elapsed()
+    );
 
     // 3. 创建 GPUI 原生应用程序宿主（挂载内嵌图标与 Logo 资源）
     let app = Application::new().with_assets(assets::Assets);
+    log::info!("[Startup] Application::new 完成: {:?}", startup.elapsed());
+
+    // 供 app.run 闭包内、config 被移入 MainWindow 前读取的两项配置
+    let minimize_on_start = config.general.enable_game_start_minimize;
+    let api_concurrency = config.functions.api_concurrency_number;
 
     app.run(move |cx| {
-        let config = yuumi_core::config::AppConfig::load();
         // 创建主应用窗口（无边框，1200×910 居中，可调整大小）
         let window_options = WindowOptions {
             window_bounds: Some(main_window_bounds(cx)),
@@ -99,17 +109,32 @@ fn main() {
         };
 
         cx.open_window(window_options, |window, cx| {
+            log::info!(
+                "[Startup] 进入 open_window 首帧回调: {:?}",
+                startup.elapsed()
+            );
             cx.new(|cx| {
-                let mut view = MainWindow::new(cx);
+                let mut view = MainWindow::new(config, config_error, cx);
+                log::info!(
+                    "[Startup] MainWindow::new 完成（含托盘/LiveLcuService/子视图构造）: {:?}",
+                    startup.elapsed()
+                );
                 view.initialize_window_appearance(window);
                 view
             })
         })
         .expect("创建 Yuumi 主窗口失败");
 
+        // [P0-5] 「启动后隐藏主窗口并最小化到系统托盘」语义对齐设置页文案：
+        // 在启动初始化主窗口后按配置隐藏（此前误实现为进入对局时最小化）
+        if minimize_on_start {
+            if let Some(hwnd) = platform::find_main_window_hwnd() {
+                platform::hide_window(hwnd);
+                log::info!("[Startup] 已按配置隐藏主窗口到系统托盘");
+            }
+        }
+
         // 应用全局 API 并发限制。
-        yuumi_core::lcu::client::set_api_concurrency(
-            config.functions.api_concurrency_number as usize,
-        );
+        yuumi_core::lcu::client::set_api_concurrency(api_concurrency as usize);
     });
 }

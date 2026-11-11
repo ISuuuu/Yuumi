@@ -22,6 +22,9 @@ impl MainWindow {
             log::warn!("[Platform] 无法获取主窗口句柄");
             return;
         };
+        // [P0-5] 登记主窗句柄：托盘/单实例/回顶等场景查找时优先命中缓存，
+        // 避免按类名枚举误命中其他 Zed 类名窗口
+        platform::cache_main_window_hwnd(hwnd);
         platform::set_window_rounded_corners(hwnd);
         if self.app_config.personalization.mica_enabled {
             match platform::set_mica(hwnd, true) {
@@ -339,7 +342,7 @@ impl MainWindow {
                         .background_executor()
                         .spawn(async move {
                             services::screenshot::screenshot_dir(&path)
-                                .and_then(|dir| services::open_folder(dir))
+                                .and_then(services::open_folder)
                         })
                         .await;
                     if let Err(e) = res {

@@ -145,10 +145,11 @@ impl TrayManager {
                         last_action = Some(TrayAction::ToggleWindow);
                     }
                 }
-                TrayIconEvent::DoubleClick { button, .. } => {
-                    if button == tray_icon::MouseButton::Left {
-                        last_action = Some(TrayAction::ShowWindow);
-                    }
+                TrayIconEvent::DoubleClick {
+                    button: tray_icon::MouseButton::Left,
+                    ..
+                } => {
+                    last_action = Some(TrayAction::ShowWindow);
                 }
                 _ => {}
             }

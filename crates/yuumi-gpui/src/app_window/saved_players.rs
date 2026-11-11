@@ -2,6 +2,45 @@
 use super::*;
 
 impl MainWindow {
+    /// [P2-1] 后台打开路人集 SQLite（建库 / WAL / 迁移检查均为阻塞 I/O），
+    /// 打开完成后回写 `storage` 并触发首屏异步加载。启动与首帧渲染 0 同步磁盘 I/O。
+    pub(super) fn init_saved_players_storage(&mut self, cx: &mut Context<Self>) {
+        if self.saved_players_view.storage.is_some() {
+            return;
+        }
+        let handle = yuumi_core::runtime::tokio_handle();
+        cx.spawn(async move |entity, cx| {
+            let Some(handle) = handle else {
+                return;
+            };
+            let opened = handle
+                .spawn(async move {
+                    tokio::task::spawn_blocking(
+                        yuumi_core::storage::SavedPlayersStorage::open_default,
+                    )
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()))
+                })
+                .await
+                .unwrap_or_else(|e| Err(e.to_string()));
+
+            let _ = entity.update(cx, |this, cx| {
+                match opened {
+                    Ok(storage) => {
+                        this.saved_players_view.storage = Some(storage);
+                        // 打开就绪后按当前 self_puuid 异步加载首屏
+                        this.reload_saved_players(cx);
+                    }
+                    Err(e) => {
+                        log::error!("[MainWindow] 路人集数据库打开失败: {}", e);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// 异步拉取路人集首屏（完全剥离到 Tokio 阻塞池，0 阻塞 UI 主线程）
     pub(super) fn reload_saved_players(&mut self, cx: &mut Context<Self>) {
         let storage = self.saved_players_view.storage.clone();

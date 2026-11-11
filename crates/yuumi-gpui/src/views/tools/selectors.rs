@@ -9,6 +9,7 @@ impl ToolsView {
     pub(super) fn render_auto_hover_card<F>(
         &self,
         config: &AppConfig,
+        window: &Window,
         on_action: F,
     ) -> impl IntoElement
     where
@@ -93,6 +94,7 @@ impl ToolsView {
                     self.open_hover_picker,
                     &hover_search,
                     hover_focus,
+                    window,
                     move |next, window, _app| {
                         *hover_search_live.borrow_mut() = next;
                         window.refresh();
@@ -139,6 +141,7 @@ impl ToolsView {
     pub(super) fn render_auto_ban_card<F>(
         &self,
         config: &AppConfig,
+        window: &Window,
         on_action: F,
     ) -> impl IntoElement
     where
@@ -247,6 +250,7 @@ impl ToolsView {
                     self.open_ban_picker,
                     &ban_search,
                     ban_focus,
+                    window,
                     move |next, window, _app| {
                         *ban_search_live.borrow_mut() = next;
                         window.refresh();

@@ -162,6 +162,8 @@ pub struct ToolsView {
     pub cleaner_search_focus: std::rc::Rc<std::cell::OnceCell<FocusHandle>>, // [D01]
 
     pub signature_buffer: String,
+    /// 个性签名输入框焦点（首次点击惰性创建） // [P0-3]
+    pub signature_focus: std::rc::Rc<std::cell::OnceCell<FocusHandle>>, // [P0-3]
     pub profile_skin_id_buffer: String,
     pub bg_selected_champion: Option<i32>,
     pub bg_selected_skin_id: Option<i32>,
@@ -257,6 +259,7 @@ impl ToolsView {
             cleaner_search_focus: std::rc::Rc::new(std::cell::OnceCell::new()), // [D01]
 
             signature_buffer: String::new(),
+            signature_focus: std::rc::Rc::new(std::cell::OnceCell::new()), // [P0-3]
             profile_skin_id_buffer: String::new(),
             bg_selected_champion: Some(157),
             bg_selected_skin_id: Some(157003),
@@ -319,7 +322,7 @@ impl ToolsView {
         &self,
         config: &AppConfig,
         connected: bool,
-        _window: &mut Window,
+        window: &mut Window,
         on_action: F,
     ) -> impl IntoElement
     where
@@ -327,8 +330,8 @@ impl ToolsView {
     {
         div()
             .id("tools-scroll-view")
-            .size_full()
-            .overflow_y_scroll()
+            // [P1-2] 不再自带 overflow_y_scroll：统一由外层 main-scroll-view 滚动，
+            // 否则 main_scroll_handle.offset() 恒为 0，回到顶部按钮永不出现
             .p(px(24.0))
             // 离线禁用样式：保持可滚动查看，但整页置灰并禁用未连接时的操作
             .when(!connected, |this| this.opacity(0.6))
@@ -376,9 +379,9 @@ impl ToolsView {
                     // 行 2: 折叠「自动接受交换请求」
                     .child(self.render_auto_swap_card(config, on_action.clone()))
                     // 行 3: 折叠「自动选用/预选英雄」
-                    .child(self.render_auto_hover_card(config, on_action.clone()))
+                    .child(self.render_auto_hover_card(config, window, on_action.clone()))
                     // 行 4: 折叠「自动禁用英雄」
-                    .child(self.render_auto_ban_card(config, on_action.clone()))
+                    .child(self.render_auto_ban_card(config, window, on_action.clone()))
                     // 行 5: 折叠「自动设置召唤师技能」
                     .child(self.render_auto_spell_card(config, on_action.clone()))
                     // ─────────────────────────────────────────────────────────────
@@ -388,9 +391,9 @@ impl ToolsView {
                     // 行 6: 折叠「自动游戏流程」
                     .child(self.render_auto_gameflow_card(config, on_action.clone()))
                     // 行 7: 折叠「观战」
-                    .child(self.render_spectate_card(on_action.clone()))
+                    .child(self.render_spectate_card(window, on_action.clone()))
                     // 行 8: 折叠「好友管理与僵尸号清理」
-                    .child(self.render_friend_cleaner_card(on_action.clone()))
+                    .child(self.render_friend_cleaner_card(window, on_action.clone()))
                     // 行 9: 直显板凳席开关 (贴合上方)
                     .child(self.render_bench_overlay_row(config, on_action.clone()))
                     // 行 10: 直显自动重连开关 (贴合下方)
@@ -412,7 +415,7 @@ impl ToolsView {
                     // ─────────────────────────────────────────────────────────────
                     .child(self.render_group_header("个人主页"))
                     // 行 15: 折叠「个性签名」
-                    .child(self.render_signature_card(on_action.clone()))
+                    .child(self.render_signature_card(window, on_action.clone()))
                     // 行 16: 折叠「主页背景」
                     .child(self.render_profile_bg_card(on_action.clone()))
                     // 行 17: 折叠「段位伪装/展示」

@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 impl ToolsView {
     // 行 7: 实时直接观战召唤师 (折叠卡 - T-V07)
-    pub(super) fn render_spectate_card<F>(&self, on_action: F) -> impl IntoElement
+    pub(super) fn render_spectate_card<F>(&self, window: &Window, on_action: F) -> impl IntoElement
     where
         F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -63,6 +63,7 @@ impl ToolsView {
                             216.0,
                             40,
                             &focus_cell,
+                            window,
                             move |next, win, app| {
                                 act_input(ToolsAction::SpectateSummonerNameInput(next), win, app)
                             },
@@ -147,7 +148,11 @@ impl ToolsView {
     }
 
     // 行 8: 好友管理与僵尸号清理 (折叠卡 - T-V08)
-    pub(super) fn render_friend_cleaner_card<F>(&self, on_action: F) -> impl IntoElement
+    pub(super) fn render_friend_cleaner_card<F>(
+        &self,
+        window: &Window,
+        on_action: F,
+    ) -> impl IntoElement
     where
         F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -369,6 +374,7 @@ impl ToolsView {
                                         170.0,
                                         32,
                                         &search_focus,
+                                        window,
                                         move |next, window, _app| {
                                             *change_cell.borrow_mut() = next;
                                             window.refresh();
@@ -544,20 +550,24 @@ impl ToolsView {
 /// 首次点击时惰性创建焦点句柄的单行输入框。
 ///
 /// gpui 0.2 的 `FocusHandle` 只能由 `App` 创建，而 `ToolsView::new()` 没有 `App`，
-/// 因此先渲染同尺寸占位，点击时创建句柄并立即聚焦；`Window::focus` 会触发重绘，
-/// 下一帧改为真实 `text_field`（沿用统一样式）。
-fn lazy_text_field(
+/// 因此先渲染同尺寸占位，点击时创建句柄并立即聚焦；`Window::focus` 后显式 `refresh()`
+/// 触发重绘，下一帧改为真实 `text_field`（沿用统一样式）。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn lazy_text_field(
     id: &'static str,
     text: &str,
     placeholder: &str,
     width: f32,
     max_chars: usize,
     focus_cell: &Rc<OnceCell<FocusHandle>>,
+    window: &Window,
     on_change: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
     on_clear: impl Fn(&mut Window, &mut App) + 'static + Clone,
     on_submit: impl Fn(&str, &mut Window, &mut App) + 'static + Clone,
 ) -> AnyElement {
     if let Some(handle) = focus_cell.get().cloned() {
+        // [P1-4] 聚焦态实时接入：不再传死 false，边框高亮与光标竖线随焦点变化
+        let is_focused = handle.is_focused(window);
         return div()
             .w(px(width))
             .child(text_field(
@@ -566,7 +576,7 @@ fn lazy_text_field(
                 placeholder,
                 px(width),
                 &handle,
-                false,
+                is_focused,
                 TextFieldOptions {
                     max_chars: Some(max_chars),
                     ..Default::default()
@@ -595,6 +605,8 @@ fn lazy_text_field(
         .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
             let handle = cell.get_or_init(|| app.focus_handle()).clone();
             window.focus(&handle);
+            // [P1-4] 首次点击创建句柄后立即重绘，下一帧切到真实 text_field 并显示聚焦态
+            window.refresh();
         })
         .child(
             div()

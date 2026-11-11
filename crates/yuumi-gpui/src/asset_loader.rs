@@ -6,9 +6,9 @@
 use gpui::RenderImage;
 use image::Frame;
 use smallvec::SmallVec;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use yuumi_core::lcu::AssetCache;
 
 /// 全局单例 AssetLoader
@@ -28,6 +28,8 @@ pub fn init_global_asset_loader(core_cache: Arc<AssetCache>) {
 pub struct AssetLoader {
     core_cache: Arc<AssetCache>,
     decoded_cache: Arc<RwLock<HashMap<String, Arc<RenderImage>>>>,
+    /// 正在加载的资源路径集合：同一资源并发请求只发起一次实际加载（P0-2）
+    inflight: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Default for AssetLoader {
@@ -41,6 +43,7 @@ impl AssetLoader {
         Self {
             core_cache,
             decoded_cache: Arc::new(RwLock::new(HashMap::new())),
+            inflight: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -178,7 +181,7 @@ impl AssetLoader {
         None
     }
 
-    /// 异步拉取并解码图片（在后台 Tokio 线程池执行磁盘/网络 I/O 与 CPU 图像解码）
+    /// 异步拉取并解码图片（磁盘读 / CPU 解码放 `spawn_blocking` 阻塞池，网络 I/O 留在 Tokio 异步线程）
     pub async fn load_render_image(&self, path: &str) -> Result<Arc<RenderImage>, String> {
         let trimmed = path.trim();
         if trimmed.is_empty() {
@@ -189,21 +192,76 @@ impl AssetLoader {
             return Ok(cached);
         }
 
-        let bytes = if let Some(builtin) = Self::get_builtin_image_bytes(trimmed) {
-            builtin.to_vec()
-        } else if let Some(raw) = self.core_cache.try_read_disk_cache(trimmed) {
-            raw
-        } else {
-            self.core_cache.fetch_asset_bytes(trimmed).await?
-        };
-
-        let render_img = Self::decode_bytes_to_render_image(&bytes)?;
-
-        if let Ok(mut lock) = self.decoded_cache.write() {
-            lock.insert(trimmed.to_string(), render_img.clone());
+        // P0-2 inflight 去重：同一资源并发预热只发起一次实际加载，跟随者等首个请求落缓存
+        let is_leader = self.try_mark_inflight(trimmed);
+        if !is_leader {
+            return self.await_inflight_result(trimmed).await;
         }
 
-        Ok(render_img)
+        let result = self.load_uncached(trimmed).await;
+        // 先落缓存再移出 inflight：跟随者轮询「缓存未命中且 inflight 已空」即判定失败，
+        // 此顺序保证不会观察到「既不在缓存也不在加载中」的中间态
+        if let Ok(render_img) = &result {
+            if let Ok(mut lock) = self.decoded_cache.write() {
+                lock.insert(trimmed.to_string(), render_img.clone());
+            }
+        }
+        if let Ok(mut inflight) = self.inflight.lock() {
+            inflight.remove(trimmed);
+        }
+        result
+    }
+
+    /// 标记资源进入加载队列；已在队列中（他人正在加载）返回 false
+    fn try_mark_inflight(&self, path: &str) -> bool {
+        self.inflight
+            .lock()
+            .map(|mut set| set.insert(path.to_string()))
+            .unwrap_or(false)
+    }
+
+    /// 等待其他任务完成同一资源的加载并取其缓存结果
+    async fn await_inflight_result(&self, path: &str) -> Result<Arc<RenderImage>, String> {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            if let Some(cached) = self.get_cached_render_image(path) {
+                return Ok(cached);
+            }
+            let still_loading = self
+                .inflight
+                .lock()
+                .map(|set| set.contains(path))
+                .unwrap_or(false);
+            if !still_loading {
+                // 首个请求已结束但未产出缓存（加载失败）
+                return Err(format!("图片加载失败（跟随任务）: {}", path));
+            }
+        }
+    }
+
+    /// 实际执行磁盘缓存读取、网络拉取与 BGRA 解码（结果不落缓存的裸路径）
+    async fn load_uncached(&self, path: &str) -> Result<Arc<RenderImage>, String> {
+        let bytes = if let Some(builtin) = Self::get_builtin_image_bytes(path) {
+            builtin.to_vec()
+        } else {
+            let core_cache = Arc::clone(&self.core_cache);
+            let path_owned = path.to_string();
+            // 磁盘缓存读取是阻塞文件 I/O，放阻塞池避免占用 Tokio 异步线程
+            let disk_hit =
+                tokio::task::spawn_blocking(move || core_cache.try_read_disk_cache(&path_owned))
+                    .await
+                    .map_err(|e| format!("后台读取磁盘缓存失败: {}", e))?;
+
+            match disk_hit {
+                Some(raw) => raw,
+                None => self.core_cache.fetch_asset_bytes(path).await?,
+            }
+        };
+
+        // CPU 图像解码放阻塞池，100+ 图标并发预热时不阻塞 Tokio I/O 线程
+        tokio::task::spawn_blocking(move || Self::decode_bytes_to_render_image(&bytes))
+            .await
+            .map_err(|e| format!("后台解码任务失败: {}", e))?
     }
 
     /// 获取底层 core 缓存引用

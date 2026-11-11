@@ -408,7 +408,12 @@ fn render_color_picker(
                 .gap(px(6.0))
                 .cursor_pointer()
                 .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
-                .on_mouse_down(MouseButton::Left, on_toggle)
+                // [P1-1] 展开态点击自身按钮：Capture 阶段 dismiss 已收起，跳过 toggle 防止「关了又开」
+                .on_mouse_down(MouseButton::Left, move |ev, win, app| {
+                    if !open {
+                        on_toggle(ev, win, app);
+                    }
+                })
                 .child(
                     div()
                         .flex()
@@ -471,7 +476,6 @@ fn render_color_picker(
                         .gap(px(10.0))
                         .w(px(280.0))
                         .on_mouse_down_out(move |_ev, win, app| {
-                            app.stop_propagation();
                             dismiss_cb(win, app);
                         })
                         // 1. 顶部取样状态预览与关闭
@@ -1131,8 +1135,8 @@ impl SettingsView {
     {
         div()
             .id("settings-scroll-view")
-            .size_full()
-            .overflow_y_scroll()
+            // [P1-2] 不再自带 overflow_y_scroll：统一由外层 main-scroll-view 滚动，
+            // 否则 main_scroll_handle.offset() 恒为 0，回到顶部按钮永不出现
             .p(px(24.0))
             .relative()
             .child(

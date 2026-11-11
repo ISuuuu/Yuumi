@@ -22,6 +22,56 @@ fn rank_badge_info(entry: &RankedQueueEntry) -> ParticipantRankInfo {
     }
 }
 
+/// 收集战绩列表需要预热的图标路径（与渲染同源：英雄/技能/符文/装备/海克斯）
+fn match_list_asset_paths(items: &[MatchItem]) -> Vec<String> {
+    let mut paths = Vec::new();
+    for m in items {
+        let d = &m.display;
+        for url in [
+            &d.champion_icon_url,
+            &d.spell1_icon_url,
+            &d.spell2_icon_url,
+            &d.rune_icon_url,
+        ] {
+            if !url.is_empty() {
+                paths.push(url.clone());
+            }
+        }
+        paths.extend(d.item_icon_urls.iter().filter(|u| !u.is_empty()).cloned());
+        paths.extend(
+            d.augment_icon_urls
+                .iter()
+                .filter(|u| !u.is_empty())
+                .cloned(),
+        );
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// 收集对局详情 10 人需要预热的图标路径（英雄/技能/符文/装备/饰品）
+fn match_detail_asset_paths(detail: &GameDetail) -> Vec<String> {
+    let mut paths = Vec::new();
+    for p in detail.blue.players.iter().chain(detail.red.players.iter()) {
+        for url in [
+            &p.champion_icon_url,
+            &p.spell1_icon_url,
+            &p.spell2_icon_url,
+            &p.rune_icon_url,
+            &p.ward_icon_url,
+        ] {
+            if !url.is_empty() {
+                paths.push(url.clone());
+            }
+        }
+        paths.extend(p.item_icon_urls.iter().filter(|u| !u.is_empty()).cloned());
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 impl MainWindow {
     /// 对局详情玩家段位后台拉取（对照 Vue loadRanksInBackground）。
     /// 关闭「对局信息显示段位」开关时不发任何请求；部分玩家查询失败不影响基础详情展示。
@@ -194,12 +244,21 @@ impl MainWindow {
         self.search_view.set_searching(true);
         self.search_view.detail_error = None;
         if let Some(gid) = target_game_id {
+            // [P1-3] 记录跳转目标：set_search_results 命中后按列表下标自动翻页定位
+            self.search_view.target_select_game_id = Some(gid);
             self.search_view.selected_game_id = Some(gid);
         }
         cx.notify();
 
         let live_service = self.live_service.clone();
         let query_name = trimmed.clone();
+        // [P1-3] 拉取范围至少覆盖生涯页设置的对局数量：生涯第 11~50 场跳转查询页时才能命中
+        let fetch_end = self
+            .app_config
+            .functions
+            .career_games_number
+            .max(20)
+            .saturating_sub(1);
 
         cx.spawn(async move |entity, cx| {
             let client_opt = live_service.get_client().await;
@@ -224,12 +283,12 @@ impl MainWindow {
             {
                 Ok(summoner) => {
                     let full_name = summoner.full_name();
-                    // 2. 查询近期战绩 (0..20)
+                    // 2. 查询近期战绩 (0..=career_games_number.max(20)-1)
                     match yuumi_core::parsers::match_parser::fetch_match_history(
                         &client,
                         &summoner.puuid,
                         Some(0),
-                        Some(19),
+                        Some(fetch_end),
                         &assets,
                     )
                     .await
@@ -253,6 +312,9 @@ impl MainWindow {
                                     summoner.summoner_id.unwrap_or(0),
                                     items,
                                 );
+                                // 列表图标异步预热（与渲染同源路径），避免右栏只显示占位文字
+                                let list_paths = match_list_asset_paths(&this.search_view.matches);
+                                prewarm_assets(list_paths, cx);
                                 this.upload_current_search_page();
                                 if let Some(gid) = selected_game_id {
                                     this.search_view.selected_game_id = Some(gid);
@@ -273,6 +335,8 @@ impl MainWindow {
                                             this.search_view
                                                 .insert_game_detail(gid, detail.clone());
                                             this.load_detail_ranks(&detail, cx);
+                                            // 详情 10 人全套图标预热
+                                            prewarm_assets(match_detail_asset_paths(&detail), cx);
                                             cx.notify();
                                         }
                                     });
@@ -338,6 +402,8 @@ impl MainWindow {
                         if this.search_view.select_request_id == req_id {
                             this.search_view.insert_game_detail(game_id, detail.clone());
                             this.load_detail_ranks(&detail, cx);
+                            // 详情 10 人全套图标预热
+                            prewarm_assets(match_detail_asset_paths(&detail), cx);
                             this.search_view.is_loading_detail = false;
                             this.search_view.detail_error = None;
                             cx.notify();

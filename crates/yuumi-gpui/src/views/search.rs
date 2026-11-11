@@ -330,19 +330,26 @@ impl SearchView {
         self.is_searching = false;
         self.is_background_refreshing = false;
         self.search_error = None;
-        self.current_page = 1;
-
-        if let Some(target) = self.target_select_game_id.take() {
-            if matches.iter().any(|m| m.display.game_id == target) {
-                self.selected_game_id = Some(target);
-            } else {
-                self.selected_game_id = matches.first().map(|m| m.display.game_id);
-            }
-        } else {
-            self.selected_game_id = matches.first().map(|m| m.display.game_id);
-        }
 
         self.matches = matches;
+
+        if let Some(target) = self.target_select_game_id.take() {
+            // [P1-3] 命中跳转目标时按列表下标自动翻页，避免目标对局不在第 1 页切片内丢失选中态
+            let idx = self
+                .filtered_matches()
+                .iter()
+                .position(|m| m.display.game_id == target);
+            if let Some(idx) = idx {
+                self.current_page = (idx / self.matches_per_page) + 1;
+                self.selected_game_id = Some(target);
+            } else {
+                self.current_page = 1;
+                self.selected_game_id = self.matches.first().map(|m| m.display.game_id);
+            }
+        } else {
+            self.current_page = 1;
+            self.selected_game_id = self.matches.first().map(|m| m.display.game_id);
+        }
     }
 
     /// 添加单局详情缓存
@@ -693,7 +700,6 @@ impl SearchView {
                                             .flex_col()
                                             .gap(px(10.0))
                                             .on_mouse_down_out(move |_ev, win, app| {
-                                                app.stop_propagation();
                                                 dismiss_cb(win, app);
                                             })
                                             .child(
@@ -996,7 +1002,6 @@ impl SearchView {
                             .rounded(px(8.0))
                             .shadow_md()
                             .on_mouse_down_out(move |_ev, win, app| {
-                                app.stop_propagation();
                                 dismiss_cb(false, win, app);
                             })
                             .children(SEARCH_QUEUE_OPTIONS.into_iter().map(|option| {

@@ -155,6 +155,28 @@ impl TftView {
         }
     }
 
+    /// [P1-2] 当前激活页签（含对局/阵容详情浮层）的滚动句柄，
+    /// 供外壳「回到顶部」按钮做偏移检测与点击复位。
+    pub fn active_scroll_handle(&self) -> &ScrollHandle {
+        match self.active_tab {
+            TftTab::Career => {
+                if self.detail_game_id.is_some() {
+                    &self.detail_scroll
+                } else {
+                    &self.career_scroll
+                }
+            }
+            TftTab::Comps => {
+                if self.deck_detail.is_some() {
+                    &self.deck_scroll
+                } else {
+                    &self.comps_scroll
+                }
+            }
+            TftTab::Augments => &self.augments_scroll,
+        }
+    }
+
     /// 当前筛选后的海克斯列表长度
     fn filtered_augments(&self) -> Vec<&TftAugmentInfo> {
         let query = self.aug_query.trim().to_lowercase();

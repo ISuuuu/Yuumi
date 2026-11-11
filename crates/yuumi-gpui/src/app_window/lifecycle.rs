@@ -28,8 +28,9 @@ impl MainWindow {
                         if !self.career_view.is_viewing_other {
                             self.career_view.summoner = Some(s.clone());
                         }
-                        self.saved_players_view
-                            .set_self_puuid(Some(s.puuid.clone()));
+                        // [P2-1] 记录本人 PUUID 后走异步重载（不再同步查库阻塞 UI）
+                        self.saved_players_view.self_puuid = Some(s.puuid.clone());
+                        self.reload_saved_players(cx);
                         // 资料卡头像也要预热，否则 LcuImage 只显示占位文字
                         prewarm_assets(vec![s.icon_path()], cx);
                         // 连接新账号后触发路人身份异步补齐
@@ -199,11 +200,36 @@ impl MainWindow {
                     balances.orange_essence,
                     items.len()
                 );
+                // 战利品格子图标预热，避免整页只显示「碎」占位文字
+                let tile_paths: Vec<String> = items
+                    .iter()
+                    .filter_map(|item| item.tile_path.clone())
+                    .filter(|p| !p.is_empty())
+                    .collect();
+                prewarm_assets(tile_paths, cx);
                 self.career_view.essences = balances;
                 self.career_view.loot_items = items;
                 cx.notify();
             }
             LiveLcuEvent::GameDataReady(assets) => {
+                // 预热召唤师技能图标与英雄头像（供工具箱技能/英雄选择器使用）
+                let mut asset_paths: Vec<String> = assets
+                    .spells
+                    .values()
+                    .filter(|p| !p.is_empty())
+                    .cloned()
+                    .collect();
+                for champion_id in assets.champions.keys() {
+                    if *champion_id > 0 {
+                        asset_paths.push(format!(
+                            "/lol-game-data/assets/v1/champion-icons/{}.png",
+                            champion_id
+                        ));
+                    }
+                }
+                asset_paths.sort();
+                asset_paths.dedup();
+                prewarm_assets(asset_paths, cx);
                 self.game_assets = Some(assets);
                 cx.notify();
             }
@@ -254,18 +280,8 @@ impl MainWindow {
                     self.close_bench_overlay(cx);
                 }
 
-                // 开局最小化：游戏开始或进入游戏中时自动最小化窗口
-                if matches!(phase, GamePhase::GameStart | GamePhase::InProgress)
-                    && self.app_config.general.enable_game_start_minimize
-                {
-                    log::info!(
-                        "[MainWindow] 检测到开局阶段 {:?} 且开启开局最小化，执行最小化窗口",
-                        phase
-                    );
-                    if let Some(hwnd) = platform::find_main_window_hwnd() {
-                        platform::minimize_window(hwnd);
-                    }
-                }
+                // [P0-5] 「开局最小化」语义已对齐设置页文案：改为「软件启动后自动隐藏主窗口」，
+                // 在 main.rs 启动初始化主窗口后按配置执行；不再在进入对局时误触发最小化。
 
                 // 离开对局阶段（返回大厅/未在对局）：根据配置项决定是否保留上一局看板
                 if matches!(
@@ -281,7 +297,7 @@ impl MainWindow {
                     phase,
                     GamePhase::PreEndOfGame | GamePhase::EndOfGame | GamePhase::WaitingForStats
                 ) {
-                    self.try_record_encounters();
+                    self.try_record_encounters(cx);
                 }
                 cx.notify();
             }
@@ -320,7 +336,7 @@ impl MainWindow {
                 }
                 self.game_info = Some(info);
                 self.game_info_loading = false;
-                self.try_record_encounters();
+                self.try_record_encounters(cx);
                 cx.notify();
             }
             LiveLcuEvent::ChampSelectUpdated(session) => {
@@ -430,28 +446,27 @@ impl MainWindow {
             ..Default::default()
         };
 
-        let new_handle = cx.open_window(window_options, move |_window, cx| {
+        let new_handle = cx.open_window(window_options, move |window, cx| {
+            // [P0-5] 直接取原生句柄设置置顶与工具窗样式（替代原 100ms sleep 轮询线程），
+            // 并绑定窗口边界监听以持久化拖拽后的坐标
+            if let Ok(hwnd) = platform::native_window_handle(window) {
+                platform::set_window_topmost(hwnd, true);
+                platform::set_window_toolwindow(hwnd);
+            } else {
+                log::warn!("[BenchOverlay] 未找到悬浮窗 HWND，置顶样式未应用");
+            }
             cx.new(move |cx| {
                 let mut view = BenchOverlayView::new(service);
                 if let Some(session) = &session {
                     view.apply_session(session, assets.as_deref(), cx);
                 }
+                view.bind_window(window, cx);
                 view
             })
         });
 
         if let Ok(handle) = new_handle {
             self.overlay_window = Some(handle);
-            // 异步将板凳席小窗设置为 Windows 原生置顶与工具窗口（隐藏任务栏图标）
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                if let Some(hwnd) = platform::find_window_by_title(BENCH_WINDOW_TITLE) {
-                    platform::set_window_topmost(hwnd, true);
-                    platform::set_window_toolwindow(hwnd);
-                } else {
-                    log::warn!("[BenchOverlay] 未找到悬浮窗 HWND，置顶样式未应用");
-                }
-            });
         }
     }
 
@@ -781,8 +796,10 @@ impl MainWindow {
         cx.notify();
     }
 
-    /// 对局结束（结算阶段）：若存在 10 人快照且未记录过本局，自动持久化记录同局相遇玩家
-    pub(super) fn try_record_encounters(&mut self) {
+    /// 对局结束（结算阶段）：若存在 10 人快照且未记录过本局，自动持久化记录同局相遇玩家。
+    ///
+    /// [P2-1] SQLite 写入完全剥离到 Tokio 阻塞池，完成后异步刷新路人集列表。
+    pub(super) fn try_record_encounters(&mut self, cx: &mut Context<Self>) {
         if !matches!(
             self.current_phase.as_str(),
             "PreEndOfGame" | "EndOfGame" | "WaitingForStats"
@@ -798,7 +815,7 @@ impl MainWindow {
             return;
         }
 
-        let Some(ref s) = self.saved_players_view.storage else {
+        let Some(storage) = self.saved_players_view.storage.clone() else {
             return;
         };
 
@@ -806,15 +823,15 @@ impl MainWindow {
         let self_puuid = self
             .own_summoner
             .as_ref()
-            .map(|sum| sum.puuid.as_str())
+            .map(|sum| sum.puuid.clone())
             .or_else(|| {
                 self.career_view
                     .summoner
                     .as_ref()
                     .filter(|_| !self.career_view.is_viewing_other)
-                    .map(|sum| sum.puuid.as_str())
+                    .map(|sum| sum.puuid.clone())
             })
-            .unwrap_or("");
+            .unwrap_or_default();
 
         let game_id = info.game_id.unwrap_or(0);
         let queue_type = info.queue_id.to_string();
@@ -842,20 +859,52 @@ impl MainWindow {
                 .collect();
 
             if !players_to_record.is_empty() {
-                match s.record_encounters(&players_to_record, self_puuid, game_id, &queue_type) {
-                    Ok(rec) => {
-                        log::info!(
-                            "[MainWindow] 对局结束自动记录相遇玩家: 共 {} 人 (game_id={})",
-                            rec,
-                            game_id
-                        );
-                        self.last_recorded_encounter_game_id = Some(game_id);
-                        self.saved_players_view.reload(Some(self_puuid));
-                    }
-                    Err(e) => {
-                        log::warn!("[MainWindow] 自动记录相遇玩家失败: {}", e);
-                    }
-                }
+                // 先占位防重：结算阶段可能连发多个事件，避免并发重复写入
+                self.last_recorded_encounter_game_id = Some(game_id);
+                let handle = yuumi_core::runtime::tokio_handle();
+                cx.spawn(async move |entity, cx| {
+                    let Some(handle) = handle else {
+                        return;
+                    };
+                    let res = handle
+                        .spawn(async move {
+                            tokio::task::spawn_blocking(move || {
+                                storage.record_encounters(
+                                    &players_to_record,
+                                    &self_puuid,
+                                    game_id,
+                                    &queue_type,
+                                )
+                            })
+                            .await
+                            .unwrap_or_else(|e| Err(e.to_string()))
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(e.to_string()));
+
+                    let _ = entity.update(cx, |this, cx| {
+                        match res {
+                            Ok(rec) => {
+                                log::info!(
+                                    "[MainWindow] 对局结束自动记录相遇玩家: 共 {} 人 (game_id={})",
+                                    rec,
+                                    game_id
+                                );
+                            }
+                            Err(e) => {
+                                // 写入失败清除占位标记，后续结算事件可重试（对齐旧行为）
+                                log::warn!("[MainWindow] 自动记录相遇玩家失败: {}", e);
+                                if this.last_recorded_encounter_game_id == Some(game_id) {
+                                    this.last_recorded_encounter_game_id = None;
+                                }
+                            }
+                        }
+                        // 写入完成后异步刷新路人集列表（storage 就绪时生效）
+                        this.reload_saved_players(cx);
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
         }
     }

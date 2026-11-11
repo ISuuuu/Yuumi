@@ -179,6 +179,7 @@ fn slot_rows(
 }
 
 /// 符文区块；数据不足（缺少方案或主副系）时整块不渲染
+#[allow(clippy::type_complexity)]
 pub fn runes_section(
     runes: &[RunePreset],
     rune_index: usize,

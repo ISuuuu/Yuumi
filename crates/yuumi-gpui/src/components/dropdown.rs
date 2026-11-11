@@ -14,6 +14,10 @@ use gpui::*;
 const PADDING_X: f32 = 10.0;
 
 /// 下拉触发按钮 + 浮层菜单
+///
+/// [P1-1] 点击外部收起不再 `stop_propagation()`（那是 Capture 阶段，会吞掉外部第一次点击）。
+/// 触发按钮在展开态的 Bubble `on_mouse_down` 不再重复触发 toggle：
+/// 展开时点击自身按钮，由菜单的 Capture 阶段 dismiss 先关闭，Bubble 阶段直接跳过。
 pub fn dropdown_trigger(
     id: &'static str,
     label: String,
@@ -22,6 +26,7 @@ pub fn dropdown_trigger(
     on_toggle: impl Fn(&mut Window, &mut App) + 'static + Clone,
 ) -> impl IntoElement {
     let on_click = on_toggle.clone();
+    let open_at_render = open;
 
     div()
         .id(id)
@@ -49,7 +54,12 @@ pub fn dropdown_trigger(
                 .text_color(Theme::TEXT_SECONDARY())
                 .cursor_pointer()
                 .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
-                .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
+                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                    // 展开态：Capture 阶段的 dismiss 已把菜单收起，这里跳过避免「关了又开」
+                    if !open_at_render {
+                        on_click(win, app);
+                    }
+                })
                 .child(label)
                 .child(icon(
                     if open {
@@ -79,7 +89,6 @@ pub fn dropdown_trigger(
                         .rounded_lg()
                         .shadow_md()
                         .on_mouse_down_out(move |_ev, win, app| {
-                            app.stop_propagation();
                             on_dismiss(win, app);
                         })
                         .child(menu),
@@ -131,6 +140,8 @@ pub fn dropdown_menu(
 /// 表单下拉选择框（固定宽度，对齐 Naive UI n-select）
 ///
 /// 触发区显示当前选中项文本与展开/收起箭头，点击触发展开浮层菜单，菜单与触发框等宽并精确锚定在正下方。
+/// [P1-1] dismiss 不再 `stop_propagation()`；展开态点击自身触发按钮时由 Capture dismiss
+/// 关闭、Bubble 阶段跳过 toggle，避免「先关后开」。
 pub fn select_dropdown(
     id: ElementId,
     width_px: f32,
@@ -142,6 +153,7 @@ pub fn select_dropdown(
     let current_label = current_label.into();
     let on_toggle = std::rc::Rc::new(on_toggle);
     let on_click = on_toggle.clone();
+    let open_at_render = open;
 
     div()
         .id(id)
@@ -169,7 +181,10 @@ pub fn select_dropdown(
                 .cursor_pointer()
                 .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, move |ev, win, app| {
-                    on_click(ev, win, app)
+                    // 展开态：Capture 阶段的 dismiss 已把菜单收起，这里跳过避免「关了又开」
+                    if !open_at_render {
+                        on_click(ev, win, app);
+                    }
                 })
                 .child(
                     div()
@@ -206,7 +221,6 @@ pub fn select_dropdown(
                         .overflow_hidden()
                         .py(px(4.0))
                         .on_mouse_down_out(move |ev, win, app| {
-                            app.stop_propagation();
                             on_dismiss(ev, win, app);
                         })
                         .child(menu),

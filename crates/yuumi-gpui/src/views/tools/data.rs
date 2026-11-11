@@ -362,7 +362,7 @@ pub const GAME_MODES: [(u32, &str); 11] = [
 ];
 
 /// 下拉模式选项
-pub const GAME_MODE_OPTIONS: [(&'static str, &'static str); 11] = [
+pub const GAME_MODE_OPTIONS: [(&str, &str); 11] = [
     ("2400", "海克斯大乱斗"),
     ("2450", "经典海斗"),
     ("450", "极地大乱斗"),

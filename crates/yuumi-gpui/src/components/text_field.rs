@@ -231,6 +231,9 @@ pub fn text_field(
                 .min_w(px(0.0))
                 .overflow_hidden()
                 .whitespace_nowrap()
+                .flex()
+                .items_center()
+                .gap(px(1.0))
                 .text_size(px(12.5))
                 .text_color(if has_text {
                     Theme::TEXT_PRIMARY()
@@ -241,6 +244,17 @@ pub fn text_field(
                     current
                 } else {
                     placeholder.to_string()
+                })
+                // [P1-4] 聚焦时的文本输入光标指示（静态细竖线）
+                .when(is_focused && !disabled, |this| {
+                    this.child(
+                        div()
+                            .flex_none()
+                            .w(px(1.5))
+                            .h(px(14.0))
+                            .rounded(px(1.0))
+                            .bg(Theme::ACCENT_PRIMARY()),
+                    )
                 }),
         )
         .when(options.loading, |this| {
@@ -426,6 +440,9 @@ pub fn search_input_field(
                 .min_w(px(0.0))
                 .overflow_hidden()
                 .whitespace_nowrap()
+                .flex()
+                .items_center()
+                .gap(px(1.0))
                 .text_size(px(14.0))
                 .text_color(if has_text {
                     Theme::TEXT_PRIMARY()
@@ -436,6 +453,17 @@ pub fn search_input_field(
                     current
                 } else {
                     placeholder.to_string()
+                })
+                // [P1-4] 聚焦时的文本输入光标指示（静态细竖线）
+                .when(is_focused && !disabled, |this| {
+                    this.child(
+                        div()
+                            .flex_none()
+                            .w(px(1.5))
+                            .h(px(14.0))
+                            .rounded(px(1.0))
+                            .bg(Theme::ACCENT_PRIMARY()),
+                    )
                 }),
         )
         // 右侧操作区：清除按钮 + 放大镜搜索按钮 (Vue quaternary circle tiny 1:1)

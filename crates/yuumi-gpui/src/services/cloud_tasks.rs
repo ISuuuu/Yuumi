@@ -281,6 +281,7 @@ async fn upload_scope_changed(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn upload(
     url: &str,
     owner: &str,

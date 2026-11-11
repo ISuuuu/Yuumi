@@ -194,6 +194,8 @@ impl Render for MainWindow {
                                     -self.career_view.mastery_scroll_handle.offset().y
                                 }
                             },
+                            // [P1-2] TFT 页各页签内部滚动，取当前激活页签的句柄
+                            Route::Tft => -self.tft_view.active_scroll_handle().offset().y,
                             _ => -self.main_scroll_handle.offset().y,
                         };
                         let show_btn = scroll_y > px(180.0);
@@ -242,6 +244,12 @@ impl Render for MainWindow {
                                                                 .set_offset(Point::default());
                                                         }
                                                     }
+                                                }
+                                                // [P1-2] TFT 页签内部滚动复位
+                                                Route::Tft => {
+                                                    this.tft_view
+                                                        .active_scroll_handle()
+                                                        .set_offset(Point::default());
                                                 }
                                                 _ => {
                                                     this.main_scroll_handle

@@ -172,13 +172,14 @@ pub async fn scan_friends(client: &LcuClient) -> Result<Vec<CleanerFriend>, Stri
     while index < friends.len() {
         let end = (index + SCAN_CHUNK_SIZE).min(friends.len());
         let mut set = JoinSet::new();
-        for i in index..end {
-            let puuid = friends[i].puuid.clone();
+        for (offset, friend) in friends[index..end].iter().enumerate() {
+            let puuid = friend.puuid.clone();
             if puuid.is_empty() {
                 continue;
             }
-            let availability = friends[i].availability.clone();
+            let availability = friend.availability.clone();
             let client = client.clone();
+            let i = index + offset;
             set.spawn(async move {
                 let (activity, last_game_ms) =
                     classify_friend(&client, &puuid, &availability).await;

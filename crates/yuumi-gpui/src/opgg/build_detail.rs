@@ -17,6 +17,7 @@ use yuumi_core::lcu::game_data::GameDataAssets;
 use yuumi_core::opgg::{ChampionBuild, CounterEntry, Stats};
 
 /// 详情渲染所需的上下文
+#[allow(clippy::type_complexity)]
 pub struct BuildDetailContext<'a> {
     pub build: &'a ChampionBuild,
     pub champion_id: Option<i32>,

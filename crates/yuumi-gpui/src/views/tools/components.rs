@@ -125,6 +125,7 @@ pub fn danger_button(
 }
 
 /// 统一下拉选择框组件（支持固定宽度和禁用态）
+#[allow(clippy::too_many_arguments)]
 pub fn select_dropdown<F>(
     id: &'static str,
     width_px: f32,
@@ -139,6 +140,7 @@ where
     F: Fn(&mut Window, &mut App) + 'static + Clone,
 {
     let toggle_cb = on_toggle.clone();
+    let open_at_render = open && !disabled;
 
     div()
         .id(id)
@@ -176,7 +178,12 @@ where
                 })
                 .when(!disabled, |this| {
                     this.hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
-                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| toggle_cb(win, app))
+                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                            // [P1-1] 展开态点击自身按钮：Capture 阶段 dismiss 已收起，跳过 toggle
+                            if !open_at_render {
+                                toggle_cb(win, app);
+                            }
+                        })
                 })
                 .child(
                     div()
@@ -219,7 +226,7 @@ where
                         .flex_col()
                         .gap(px(2.0))
                         .on_mouse_down_out(move |_ev, win, app| {
-                            app.stop_propagation();
+                            // [P1-1] 不再 stop_propagation：Capture 阶段吞掉外部第一次点击
                             dismiss_cb(win, app);
                         })
                         .children(options.into_iter().map(|(val, label)| {
@@ -244,81 +251,11 @@ where
         })
 }
 
-/// 内嵌后缀按钮输入框容器（对齐 Vue `n-input #suffix`）
-pub fn suffix_input<FBtn>(
-    id: ElementId,
-    text: &str,
-    placeholder: &'static str,
-    button_label: &'static str,
-    button_disabled: bool,
-    width_px: f32,
-    on_btn_click: FBtn,
-) -> impl IntoElement
-where
-    FBtn: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-{
-    div()
-        .id(id)
-        .w(px(width_px))
-        .h(px(32.0))
-        .rounded_md()
-        .border_1()
-        .border_color(Theme::CARD_BORDER())
-        .bg(Theme::CARD_BG())
-        .px(px(8.0))
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(8.0))
-        .child(
-            div()
-                .flex_1()
-                .text_size(px(12.5))
-                .text_color(if text.is_empty() {
-                    Theme::TEXT_MUTED()
-                } else {
-                    Theme::TEXT_PRIMARY()
-                })
-                .child(if text.is_empty() {
-                    placeholder.to_string()
-                } else {
-                    text.to_string()
-                }),
-        )
-        .child(
-            div()
-                .px(px(10.0))
-                .py(px(3.0))
-                .rounded(px(4.0))
-                .bg(if button_disabled {
-                    Theme::HOVER_BG()
-                } else {
-                    Theme::ACCENT_PRIMARY()
-                })
-                .text_size(px(11.5))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(if button_disabled {
-                    Theme::TEXT_MUTED()
-                } else {
-                    gpui::white()
-                })
-                .cursor(if button_disabled {
-                    CursorStyle::OperationNotAllowed
-                } else {
-                    CursorStyle::PointingHand
-                })
-                .when(!button_disabled, |this| {
-                    this.hover(|s| s.opacity(0.85))
-                        .on_mouse_down(MouseButton::Left, on_btn_click)
-                })
-                .child(button_label),
-        )
-}
-
 /// [D06-b] 英雄候选上限（Vue ChampionPicker 语义：点选加入、达上限忽略、点已选移除）
 pub const PICKER_MAX_COUNT: usize = 5;
 
 /// 英雄选择器（兼容签名：bg_champ 等既有调用点；✕ / 收起 / 完成统一走 on_close）
+#[allow(clippy::too_many_arguments)]
 pub fn champion_picker<FClear, FOpen, FClose, FSelect, FRemove>(
     id: ElementId,
     selected_ids: &[i32],
@@ -345,6 +282,8 @@ where
         is_open,
         search_query,
         None,
+        // 无搜索输入框，无需窗口焦点查询
+        None,
         |_q: String, _win: &mut Window, _app: &mut App| {},
         on_clear,
         on_open,
@@ -363,6 +302,7 @@ pub fn champion_picker_searchable<FClear, FOpen, FConfirm, FCancel, FSelect, FRe
     is_open: bool,
     search_query: &str,
     search_focus: Rc<OnceCell<FocusHandle>>,
+    window: &Window,
     on_search: FSearch,
     on_clear: FClear,
     on_open: FOpen,
@@ -386,6 +326,7 @@ where
         is_open,
         search_query,
         Some(search_focus),
+        Some(window),
         on_search,
         on_clear,
         on_open,
@@ -404,6 +345,7 @@ fn champion_picker_inner<FClear, FOpen, FConfirm, FCancel, FSelect, FRemove, FSe
     is_open: bool,
     search_query: &str,
     search_focus: Option<Rc<OnceCell<FocusHandle>>>,
+    window: Option<&Window>,
     on_search: FSearch,
     on_clear: FClear,
     on_open: FOpen,
@@ -570,11 +512,7 @@ where
                                     gpui::white()
                                 })
                                 .border_1()
-                                .border_color(if is_open {
-                                    Theme::ACCENT_PRIMARY()
-                                } else {
-                                    Theme::ACCENT_PRIMARY()
-                                })
+                                .border_color(Theme::ACCENT_PRIMARY())
                                 .cursor_pointer()
                                 .hover(|s| s.opacity(0.85))
                                 .on_mouse_down(MouseButton::Left, move |ev, win, app| {
@@ -639,6 +577,7 @@ where
                             "champ-picker-search",
                             search_query,
                             focus,
+                            window,
                             on_change,
                         ))
                     })
@@ -757,10 +696,13 @@ fn picker_search_field(
     id: &'static str,
     text: &str,
     focus_cell: Rc<OnceCell<FocusHandle>>,
+    window: Option<&Window>,
     on_change: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
 ) -> AnyElement {
     if let Some(handle) = focus_cell.get().cloned() {
         let clear_cb = on_change.clone();
+        // [P1-4] 聚焦态实时接入：不再传死 false，边框高亮与光标竖线随焦点变化
+        let is_focused = window.map(|w| handle.is_focused(w)).unwrap_or(false);
         return div()
             .w(px(240.0))
             .child(text_field(
@@ -769,7 +711,7 @@ fn picker_search_field(
                 "搜索英雄名称 / 拼音 / ID…",
                 px(240.0),
                 &handle,
-                false,
+                is_focused,
                 TextFieldOptions {
                     max_chars: Some(40),
                     ..Default::default()
@@ -798,6 +740,8 @@ fn picker_search_field(
         .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
             let handle = cell.get_or_init(|| app.focus_handle()).clone();
             window.focus(&handle);
+            // [P1-4] 首次点击创建句柄后立即重绘，下一帧切到真实 text_field 并显示聚焦态
+            window.refresh();
         })
         .child(
             div()

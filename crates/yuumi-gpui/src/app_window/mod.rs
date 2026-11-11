@@ -65,7 +65,7 @@ mod tools;
 pub const MAIN_WINDOW_TITLE: &str = components::titlebar::APP_NAME;
 pub const BENCH_WINDOW_TITLE: &str = "Yuumi - 大乱斗板凳席悬浮窗";
 
-/// 预热图片资源：在 Tokio 运行时高并发异步拉取并解码为 RenderImage，完成后回到主线程重绘。
+/// 预热图片资源：在 Tokio 运行时受控并发（最多 16 路）异步拉取并解码为 RenderImage，完成后回到主线程统一重绘。
 ///
 /// 彻底禁止在 UI 主线程读磁盘和解码图片，所有 I/O 与图像算法全部在后台 Tokio 线程池完成。
 fn prewarm_assets(paths: Vec<String>, cx: &mut Context<MainWindow>) {
@@ -82,19 +82,29 @@ fn prewarm_assets(paths: Vec<String>, cx: &mut Context<MainWindow>) {
         let _ = handle
             .spawn(async move {
                 let loader = asset_loader::global_asset_loader();
-                let mut tasks = Vec::with_capacity(paths.len());
-                for path in paths {
+                // 已缓存的路径直接跳过，避免重复解码占满并发窗口
+                let pending: Vec<String> = paths
+                    .into_iter()
+                    .filter(|p| loader.get_cached_render_image(p).is_none())
+                    .collect();
+                // P0-2：受控并发（信号量限流 16 路，等价 buffer_unordered(16)），
+                // 防止单张慢图拖慢整批图标上屏
+                let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(16));
+                let mut joins = Vec::with_capacity(pending.len());
+                for path in pending {
                     let l = loader.clone();
-                    tasks.push(tokio::spawn(async move {
+                    let sem = semaphore.clone();
+                    joins.push(tokio::spawn(async move {
+                        let _permit = sem.acquire_owned().await;
                         let _ = l.load_render_image(&path).await;
                     }));
                 }
-                for t in tasks {
+                for t in joins {
                     let _ = t.await;
                 }
             })
             .await;
-        // 解码落地后重绘，避免图片资源加载完成却不刷新
+        // 解码落地后统一重绘一次，避免图片资源加载完成却不刷新
         let _ = this.update(cx, |_this, cx| cx.notify());
     })
     .detach();
@@ -178,7 +188,15 @@ pub struct MainWindow {
 }
 
 impl MainWindow {
-    pub(super) fn new(cx: &mut Context<Self>) -> Self {
+    /// 全局配置由 main.rs 一次性加载后传入（P0-6：消除启动路径重复读盘），
+    /// `config_error` 携带配置读取/解析异常信息，留给首帧 Toast（对照 Vue A01）。
+    pub(super) fn new(
+        app_config: AppConfig,
+        config_error: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        // [P0-6] 启动分段计时：MainWindow 构造内部各阶段耗时
+        let new_start = std::time::Instant::now();
         // 战绩与 10 人对局信息全部来自真实 LCU 数据，启动时保持平滑空态
         let matches: Vec<MatchItem> = Vec::new();
 
@@ -194,8 +212,6 @@ impl MainWindow {
         let loot_value_focus = cx.focus_handle();
         let tft_augment_focus = cx.focus_handle();
 
-        // 加载持久化的全局配置与自动化配置（异常信息留给首帧 Toast）
-        let (app_config, config_error) = AppConfig::load_with_error();
         // 尽早初始化全局语言：首帧 Toast（如配置异常提示）与后续渲染都要用配置里的语言
         crate::i18n::set_language(crate::i18n::Lang::from_config(
             &app_config.personalization.language,
@@ -241,6 +257,7 @@ impl MainWindow {
                 None
             }
         };
+        log::info!("[Startup] 托盘创建完成: {:?}", new_start.elapsed());
 
         // 检查「启动时自动运行 LOL」配置
         if app_config.general.enable_start_lol_with_app {
@@ -260,6 +277,10 @@ impl MainWindow {
         let asset_cache = std::sync::Arc::new(yuumi_core::lcu::asset_cache::AssetCache::default());
         asset_loader::init_global_asset_loader(asset_cache.clone());
         let live_service = LiveLcuService::new(asset_cache);
+        log::info!(
+            "[Startup] LiveLcuService::new 完成: {:?}",
+            new_start.elapsed()
+        );
         let mut cloud_tasks = services::cloud_tasks::CloudTasks::new(live_service.clone());
         let mut cloud_status = cloud_tasks.subscribe_status();
         cloud_tasks.apply(&app_config);
@@ -336,6 +357,12 @@ impl MainWindow {
         // 启动即静默检查版本更新（手动检查走设置页）
         cx.spawn(async move |entity, cx| {
             let _ = entity.update(cx, |view, cx| view.check_updates(false, cx));
+        })
+        .detach();
+
+        // [P2-1] 路人集 SQLite 后台打开（建库/迁移/首查全部离开 UI 主线程）
+        cx.spawn(async move |entity, cx| {
+            let _ = entity.update(cx, |this, cx| this.init_saved_players_storage(cx));
         })
         .detach();
 

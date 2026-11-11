@@ -3,6 +3,7 @@
 //! 归属工单 D09/D10/D11（预览确认回读、重复写入、真实成就读取与确认框）。
 //! 自 `views/tools.rs` 按工单边界搬移，行为未改动。
 
+use super::spectate::lazy_text_field;
 use super::*;
 use std::sync::{OnceLock, RwLock};
 
@@ -52,13 +53,20 @@ impl ToolsView {
     // ─────────────────────────────────────────────────────────────
 
     // 行 15: 自定义个性签名 (折叠卡 - T-V10)
-    pub(super) fn render_signature_card<F>(&self, on_action: F) -> impl IntoElement
+    //
+    // [P0-3] 真实可输入：lazy_text_field 绑定 signature_focus，on_change 写入
+    // SignatureInput，on_submit 与右侧按钮触发 ApplySignature。
+    pub(super) fn render_signature_card<F>(&self, window: &Window, on_action: F) -> impl IntoElement
     where
         F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
     {
         let open = self.open_cards.contains("signature");
         let act_toggle = on_action.clone();
+        let act_input = on_action.clone();
+        let act_clear = on_action.clone();
         let act_apply = on_action.clone();
+        let act_apply_btn = on_action.clone();
+        let signature_focus = self.signature_focus.clone();
 
         collapse_card(
             "tools-card-signature".into(),
@@ -71,15 +79,43 @@ impl ToolsView {
             setting_row(
                 "输入新的个性化签名:",
                 Some("留空将清空当前展示的状态签名"),
-                suffix_input(
-                    "input-signature".into(),
-                    &self.signature_buffer,
-                    "输入新签名...",
-                    "保存签名",
-                    false,
-                    300.0,
-                    move |_ev, win, app| act_apply(ToolsAction::ApplySignature, win, app),
-                ),
+                div()
+                    .w(px(300.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(lazy_text_field(
+                        "input-signature",
+                        &self.signature_buffer,
+                        "输入新签名...",
+                        216.0,
+                        40,
+                        &signature_focus,
+                        window,
+                        move |next, win, app| {
+                            act_input(ToolsAction::SignatureInput(next), win, app)
+                        },
+                        move |win, app| {
+                            act_clear(ToolsAction::SignatureInput(String::new()), win, app)
+                        },
+                        move |_text, win, app| act_apply(ToolsAction::ApplySignature, win, app),
+                    ))
+                    .child(
+                        div()
+                            .px(px(10.0))
+                            .py(px(4.0))
+                            .rounded(px(4.0))
+                            .bg(Theme::ACCENT_PRIMARY())
+                            .text_size(px(11.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(gpui::white())
+                            .cursor(CursorStyle::PointingHand)
+                            .hover(|s| s.opacity(0.85))
+                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                act_apply_btn(ToolsAction::ApplySignature, win, app)
+                            })
+                            .child("保存签名"),
+                    ),
             ),
         )
     }

@@ -213,6 +213,15 @@ impl MainWindow {
                 view.tft_view.aug_loading = false;
                 match result {
                     Ok(augments) => {
+                        // 海克斯图标预热，避免百科页整页「⚡」占位
+                        let mut icon_paths: Vec<String> = augments
+                            .iter()
+                            .map(|a| a.icon_path.clone())
+                            .filter(|p| !p.is_empty())
+                            .collect();
+                        icon_paths.sort();
+                        icon_paths.dedup();
+                        prewarm_assets(icon_paths, cx);
                         view.tft_view.aug_error.clear();
                         view.tft_view.augments = augments;
                     }
@@ -252,6 +261,17 @@ impl MainWindow {
                 view.tft_view.comps_loading = false;
                 match result {
                     Ok(decks) => {
+                        // 棋子图标预热（阵容详情棋盘用 unit.icon_url 渲染；
+                        // 装备 item_icons 与羁绊以文字 pill 呈现，无图标路径可预热）
+                        let mut icon_paths: Vec<String> = decks
+                            .decks
+                            .iter()
+                            .flat_map(|deck| deck.units.iter().map(|unit| unit.icon_url.clone()))
+                            .filter(|p| !p.is_empty())
+                            .collect();
+                        icon_paths.sort();
+                        icon_paths.dedup();
+                        prewarm_assets(icon_paths, cx);
                         view.tft_view.comps_error.clear();
                         view.tft_view.deck_detail = None;
                         view.tft_view.decks = decks.decks;
