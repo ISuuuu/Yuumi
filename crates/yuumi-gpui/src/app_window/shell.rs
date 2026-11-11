@@ -276,6 +276,7 @@ impl Render for MainWindow {
                             move |_win, app| {
                                 v_retry.update(app, |this, cx| {
                                     this.fetch_notice(cx);
+                                    this.schedule_notice_dismiss(cx);
                                 });
                             },
                         )),
@@ -290,10 +291,30 @@ impl Render for MainWindow {
 impl MainWindow {
     pub(super) fn toggle_notice_popup(&mut self, open: bool, cx: &mut Context<Self>) {
         self.notice_popup_open = open;
-        if open && self.notice_content.is_none() && !self.notice_loading {
-            self.fetch_notice(cx);
+        if open {
+            if self.notice_content.is_none() && !self.notice_loading {
+                self.fetch_notice(cx);
+            }
+            self.schedule_notice_dismiss(cx);
+        } else {
+            self.notice_dismiss_epoch = self.notice_dismiss_epoch.wrapping_add(1);
         }
         cx.notify();
+    }
+
+    /// 启动公告弹窗自动关闭倒计时（对照 Vue AUTO_DISMISS_MS = 8000：8 秒后平滑自动隐藏）
+    pub(super) fn schedule_notice_dismiss(&mut self, cx: &mut Context<Self>) {
+        self.notice_dismiss_epoch = self.notice_dismiss_epoch.wrapping_add(1);
+        let epoch = self.notice_dismiss_epoch;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(8)).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.notice_dismiss_epoch == epoch && this.notice_popup_open {
+                    this.toggle_notice_popup(false, cx);
+                }
+            });
+        })
+        .detach();
     }
 
     pub(super) fn switch_route(&mut self, route: Route, cx: &mut Context<Self>) {

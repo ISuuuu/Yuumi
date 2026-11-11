@@ -103,9 +103,11 @@ impl ToastQueue {
         }
     }
 
-    /// 到期移除指定条目；空出的槽位从队列补位，补位条目的 id 随结果返回（需起新计时器）。
-    /// 返回 None 表示 id 不存在（旧计时器迟到/已清理），调用方无需处理。
-    fn expire(&mut self, id: u64) -> Option<u64> {
+    /// 到期移除指定条目；空出的槽位从队列补位。
+    /// - 返回 None 表示 id 不存在（旧计时器迟到/已清理），调用方无需处理；
+    /// - 返回 Some(Some(promoted_id)) 表示成功移除，且从 pending 中补位了新条目（需为其启动计时器）；
+    /// - 返回 Some(None) 表示成功移除，但 pending 为空无补位。
+    fn expire(&mut self, id: u64) -> Option<Option<u64>> {
         let removed = self.visible.len();
         self.visible.retain(|t| t.id != id);
         if self.visible.len() == removed {
@@ -116,7 +118,7 @@ impl ToastQueue {
             self.visible.push_back(t);
             promoted_id
         });
-        Some(promoted.unwrap_or(id))
+        Some(promoted)
     }
 }
 
@@ -149,7 +151,10 @@ impl ToastStack {
 
     /// 到期移除指定条目；空出的槽位从队列补位，新条目从补位时刻开始计时。
     fn expire(&mut self, id: u64, cx: &mut Context<Self>) {
-        if self.queue.expire(id).is_some() {
+        if let Some(promoted) = self.queue.expire(id) {
+            if let Some(promoted_id) = promoted {
+                self.schedule_expire(promoted_id, cx);
+            }
             cx.notify();
         }
     }
@@ -241,7 +246,7 @@ mod tests {
             ids.push(queue.enqueue(ToastKind::Info, msg).id);
         }
         // 最早一条到期 → d 从队列补位，其余不动
-        assert_eq!(queue.expire(ids[0]), Some(ids[3]));
+        assert_eq!(queue.expire(ids[0]), Some(Some(ids[3])));
         let order: Vec<&str> = queue.visible.iter().map(|t| t.message.as_ref()).collect();
         assert_eq!(order, vec!["b", "c", "d"]);
         assert!(queue.pending.is_empty());
@@ -263,7 +268,7 @@ mod tests {
         queue.enqueue(ToastKind::Info, "new");
         let old_id = queue.visible[0].id;
         // 旧计时器迟到：先移除旧条目，再触发同一次到期回调不应影响新条目
-        assert!(queue.expire(old_id).is_some());
+        assert_eq!(queue.expire(old_id), Some(None));
         assert_eq!(queue.expire(old_id), None);
         let msgs: Vec<&str> = queue.visible.iter().map(|t| t.message.as_ref()).collect();
         assert_eq!(msgs, vec!["new"]);
@@ -278,7 +283,7 @@ mod tests {
         }
         // 逐条到期：每次只补位一条，d → e → f 依次上屏
         for (round, front, expect) in [(0, "b", "d"), (1, "c", "e"), (2, "d", "f")] {
-            assert_eq!(queue.expire(ids[round]), Some(ids[3 + round]));
+            assert_eq!(queue.expire(ids[round]), Some(Some(ids[3 + round])));
             assert_eq!(
                 queue.visible.front().map(|t| t.message.as_ref()),
                 Some(front)
@@ -290,5 +295,26 @@ mod tests {
         }
         assert!(queue.pending.is_empty());
         assert_eq!(queue.visible.len(), 3);
+    }
+
+    #[test]
+    fn drain_all_with_promotions() {
+        let mut queue = ToastQueue::new();
+        let mut ids = Vec::new();
+        for msg in ["1", "2", "3", "4", "5"] {
+            ids.push(queue.enqueue(ToastKind::Info, msg).id);
+        }
+        // 当前 visible: [0, 1, 2], pending: [3, 4]
+        // 0 到期 -> 3 补位，visible: [1, 2, 3], pending: [4]
+        assert_eq!(queue.expire(ids[0]), Some(Some(ids[3])));
+        // 1 到期 -> 4 补位，visible: [2, 3, 4], pending: []
+        assert_eq!(queue.expire(ids[1]), Some(Some(ids[4])));
+        // 2 到期 -> 无补位，visible: [3, 4], pending: []
+        assert_eq!(queue.expire(ids[2]), Some(None));
+        // 3 到期 -> 无补位，visible: [4], pending: []
+        assert_eq!(queue.expire(ids[3]), Some(None));
+        // 4 到期 -> 无补位，visible: [], pending: []
+        assert_eq!(queue.expire(ids[4]), Some(None));
+        assert!(queue.visible.is_empty());
     }
 }

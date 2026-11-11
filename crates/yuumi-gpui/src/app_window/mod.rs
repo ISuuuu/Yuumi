@@ -163,6 +163,8 @@ pub struct MainWindow {
     notice_loading: bool,
     /// 公告是否加载出错
     notice_error: bool,
+    /// 公告弹窗自动关闭的时钟纪元（用于防止旧计时器误关新打开的公告）
+    notice_dismiss_epoch: u64,
     /// OP.GG 独立窗口句柄（存在即复用并聚焦）
     opgg_window: Option<WindowHandle<OpggWindow>>,
     mica_active: bool,
@@ -376,6 +378,7 @@ impl MainWindow {
             notice_content: None,
             notice_loading: false,
             notice_error: false,
+            notice_dismiss_epoch: 0,
             opgg_window: None,
             mica_active: false,
             toast_stack,
