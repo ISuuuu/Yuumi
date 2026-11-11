@@ -380,55 +380,207 @@ impl MainWindow {
                 self.persist_config(cx);
             }
             SettingsAction::SetThemeColor(color) => {
-                self.settings_view.open_theme_color_picker = false;
+                self.settings_view.color_hex_input = color.clone();
                 self.app_config.personalization.theme_color = color;
                 self.persist_config(cx);
             }
             SettingsAction::SetWinCardColor(color) => {
-                self.settings_view.open_win_color_picker = false;
+                self.settings_view.color_hex_input = color.clone();
                 self.app_config.personalization.win_card_color = color;
                 self.persist_config(cx);
             }
             SettingsAction::SetLoseCardColor(color) => {
-                self.settings_view.open_lose_color_picker = false;
+                self.settings_view.color_hex_input = color.clone();
                 self.app_config.personalization.lose_card_color = color;
                 self.persist_config(cx);
             }
             SettingsAction::SetRemakeCardColor(color) => {
-                self.settings_view.open_remake_color_picker = false;
+                self.settings_view.color_hex_input = color.clone();
                 self.app_config.personalization.remake_card_color = color;
                 self.persist_config(cx);
             }
             SettingsAction::SetLightDeathsColor(color) => {
-                self.settings_view.open_light_death_color_picker = false;
+                self.settings_view.color_hex_input = color.clone();
                 self.app_config.personalization.light_deaths_number_color = color;
                 self.persist_config(cx);
             }
             SettingsAction::SetDarkDeathsColor(color) => {
-                self.settings_view.open_dark_death_color_picker = false;
+                self.settings_view.color_hex_input = color.clone();
                 self.app_config.personalization.dark_deaths_number_color = color;
                 self.persist_config(cx);
             }
             SettingsAction::ResetThemeColor => {
-                self.settings_view.open_theme_color_picker = false;
+                self.settings_view.close_all_color_pickers();
                 self.app_config.personalization.theme_color = "#009faa".to_string();
+                self.settings_view.color_hex_input = "#009faa".to_string();
                 self.persist_config(cx);
             }
             SettingsAction::ResetCardColors => {
-                self.settings_view.open_win_color_picker = false;
-                self.settings_view.open_lose_color_picker = false;
-                self.settings_view.open_remake_color_picker = false;
+                self.settings_view.close_all_color_pickers();
                 self.app_config.personalization.win_card_color = "#3339B01B".to_string();
                 self.app_config.personalization.lose_card_color = "#33D3190C".to_string();
                 self.app_config.personalization.remake_card_color = "#33A2A2A2".to_string();
                 self.persist_config(cx);
             }
             SettingsAction::ResetDeathsColors => {
-                self.settings_view.open_light_death_color_picker = false;
-                self.settings_view.open_dark_death_color_picker = false;
+                self.settings_view.close_all_color_pickers();
                 self.app_config.personalization.light_deaths_number_color = "#ffb60000".to_string();
                 self.app_config.personalization.dark_deaths_number_color = "#ffff8d8d".to_string();
                 self.persist_config(cx);
+            }
+            SettingsAction::SampleSv(key, s, v) => {
+                self.settings_view.color_picker_s = s.clamp(0.0, 1.0);
+                self.settings_view.color_picker_v = v.clamp(0.0, 1.0);
+                let h = self.settings_view.color_picker_h;
+                let a = self.settings_view.color_picker_a;
+                let supports_alpha = matches!(key, "win_color" | "lose_color" | "remake_color");
+                let hex = crate::views::settings::hsva_to_hex(
+                    h,
+                    self.settings_view.color_picker_s,
+                    self.settings_view.color_picker_v,
+                    a,
+                    supports_alpha,
+                );
+                self.settings_view.color_hex_input = hex.clone();
+                match key {
+                    "theme_color" => self.app_config.personalization.theme_color = hex,
+                    "win_color" => self.app_config.personalization.win_card_color = hex,
+                    "lose_color" => self.app_config.personalization.lose_card_color = hex,
+                    "remake_color" => self.app_config.personalization.remake_card_color = hex,
+                    "light_death" => {
+                        self.app_config.personalization.light_deaths_number_color = hex
+                    }
+                    "dark_death" => {
+                        self.app_config.personalization.dark_deaths_number_color = hex
+                    }
+                    _ => return,
+                }
+                self.persist_config_silent(cx);
+            }
+            SettingsAction::SampleHue(key, h) => {
+                self.settings_view.color_picker_h = h.rem_euclid(360.0);
+                let s = self.settings_view.color_picker_s;
+                let v = self.settings_view.color_picker_v;
+                let a = self.settings_view.color_picker_a;
+                let supports_alpha = matches!(key, "win_color" | "lose_color" | "remake_color");
+                let hex = crate::views::settings::hsva_to_hex(
+                    self.settings_view.color_picker_h,
+                    s,
+                    v,
+                    a,
+                    supports_alpha,
+                );
+                self.settings_view.color_hex_input = hex.clone();
+                match key {
+                    "theme_color" => self.app_config.personalization.theme_color = hex,
+                    "win_color" => self.app_config.personalization.win_card_color = hex,
+                    "lose_color" => self.app_config.personalization.lose_card_color = hex,
+                    "remake_color" => self.app_config.personalization.remake_card_color = hex,
+                    "light_death" => {
+                        self.app_config.personalization.light_deaths_number_color = hex
+                    }
+                    "dark_death" => {
+                        self.app_config.personalization.dark_deaths_number_color = hex
+                    }
+                    _ => return,
+                }
+                self.persist_config_silent(cx);
+            }
+            SettingsAction::SampleAlpha(key, a) => {
+                self.settings_view.color_picker_a = a.clamp(0.0, 1.0);
+                let h = self.settings_view.color_picker_h;
+                let s = self.settings_view.color_picker_s;
+                let v = self.settings_view.color_picker_v;
+                let hex = crate::views::settings::hsva_to_hex(
+                    h,
+                    s,
+                    v,
+                    self.settings_view.color_picker_a,
+                    true,
+                );
+                self.settings_view.color_hex_input = hex.clone();
+                match key {
+                    "win_color" => self.app_config.personalization.win_card_color = hex,
+                    "lose_color" => self.app_config.personalization.lose_card_color = hex,
+                    "remake_color" => self.app_config.personalization.remake_card_color = hex,
+                    _ => return,
+                }
+                self.persist_config_silent(cx);
+            }
+            SettingsAction::SelectColorPreset(key, hex) => {
+                let (h, s, v, a) = crate::views::settings::hex_to_hsva(&hex);
+                self.settings_view.color_picker_key = key;
+                self.settings_view.color_picker_h = h;
+                self.settings_view.color_picker_s = s;
+                self.settings_view.color_picker_v = v;
+                self.settings_view.color_picker_a = a;
+                self.settings_view.color_hex_input = hex.clone();
+                match key {
+                    "theme_color" => self.app_config.personalization.theme_color = hex,
+                    "win_color" => self.app_config.personalization.win_card_color = hex,
+                    "lose_color" => self.app_config.personalization.lose_card_color = hex,
+                    "remake_color" => self.app_config.personalization.remake_card_color = hex,
+                    "light_death" => {
+                        self.app_config.personalization.light_deaths_number_color = hex
+                    }
+                    "dark_death" => {
+                        self.app_config.personalization.dark_deaths_number_color = hex
+                    }
+                    _ => return,
+                }
+                self.persist_config(cx);
+            }
+            SettingsAction::EditColorPickerHex(val) => {
+                self.settings_view.color_hex_input = val;
+                cx.notify();
+            }
+            SettingsAction::ApplyColorPickerHex(key) => {
+                let input = self.settings_view.color_hex_input.trim();
+                let supports_alpha = matches!(key, "win_color" | "lose_color" | "remake_color");
+                let cur_alpha = (self.settings_view.color_picker_a * 100.0).round() as u32;
+                if let Some(valid) =
+                    crate::views::settings::normalize_hex_input(input, supports_alpha, cur_alpha)
+                {
+                    let (h, s, v, a) = crate::views::settings::hex_to_hsva(&valid);
+                    self.settings_view.color_picker_h = h;
+                    self.settings_view.color_picker_s = s;
+                    self.settings_view.color_picker_v = v;
+                    self.settings_view.color_picker_a = a;
+                    self.settings_view.color_hex_input = valid.clone();
+                    match key {
+                        "theme_color" => {
+                            self.app_config.personalization.theme_color = valid
+                        }
+                        "win_color" => {
+                            self.app_config.personalization.win_card_color = valid
+                        }
+                        "lose_color" => {
+                            self.app_config.personalization.lose_card_color = valid
+                        }
+                        "remake_color" => {
+                            self.app_config.personalization.remake_card_color = valid
+                        }
+                        "light_death" => {
+                            self.app_config.personalization.light_deaths_number_color = valid
+                        }
+                        "dark_death" => {
+                            self.app_config.personalization.dark_deaths_number_color = valid
+                        }
+                        _ => return,
+                    }
+                    self.persist_config(cx);
+                } else {
+                    self.toast(
+                        ToastKind::Error,
+                        "请输入合法的十六进制颜色代码（如 #1890FF 或 #3339B01B）",
+                        cx,
+                    );
+                    cx.notify();
+                }
+            }
+            SettingsAction::CloseColorPicker => {
+                self.settings_view.close_all_color_pickers();
+                cx.notify();
             }
             SettingsAction::SetDpiScale(s) => {
                 self.settings_view.open_scale_dropdown = false;
@@ -505,28 +657,106 @@ impl MainWindow {
                             !self.settings_view.open_lang_dropdown;
                     }
                     "theme_color" => {
-                        self.settings_view.open_theme_color_picker =
-                            !self.settings_view.open_theme_color_picker;
+                        let next = !self.settings_view.open_theme_color_picker;
+                        self.settings_view.close_all_color_pickers();
+                        self.settings_view.open_theme_color_picker = next;
+                        if next {
+                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                                &self.app_config.personalization.theme_color,
+                            );
+                            self.settings_view.color_picker_key = "theme_color";
+                            self.settings_view.color_picker_h = h;
+                            self.settings_view.color_picker_s = s;
+                            self.settings_view.color_picker_v = v;
+                            self.settings_view.color_picker_a = a;
+                            self.settings_view.color_hex_input =
+                                self.app_config.personalization.theme_color.clone();
+                        }
                     }
                     "win_color" => {
-                        self.settings_view.open_win_color_picker =
-                            !self.settings_view.open_win_color_picker;
+                        let next = !self.settings_view.open_win_color_picker;
+                        self.settings_view.close_all_color_pickers();
+                        self.settings_view.open_win_color_picker = next;
+                        if next {
+                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                                &self.app_config.personalization.win_card_color,
+                            );
+                            self.settings_view.color_picker_key = "win_color";
+                            self.settings_view.color_picker_h = h;
+                            self.settings_view.color_picker_s = s;
+                            self.settings_view.color_picker_v = v;
+                            self.settings_view.color_picker_a = a;
+                            self.settings_view.color_hex_input =
+                                self.app_config.personalization.win_card_color.clone();
+                        }
                     }
                     "lose_color" => {
-                        self.settings_view.open_lose_color_picker =
-                            !self.settings_view.open_lose_color_picker;
+                        let next = !self.settings_view.open_lose_color_picker;
+                        self.settings_view.close_all_color_pickers();
+                        self.settings_view.open_lose_color_picker = next;
+                        if next {
+                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                                &self.app_config.personalization.lose_card_color,
+                            );
+                            self.settings_view.color_picker_key = "lose_color";
+                            self.settings_view.color_picker_h = h;
+                            self.settings_view.color_picker_s = s;
+                            self.settings_view.color_picker_v = v;
+                            self.settings_view.color_picker_a = a;
+                            self.settings_view.color_hex_input =
+                                self.app_config.personalization.lose_card_color.clone();
+                        }
                     }
                     "remake_color" => {
-                        self.settings_view.open_remake_color_picker =
-                            !self.settings_view.open_remake_color_picker;
+                        let next = !self.settings_view.open_remake_color_picker;
+                        self.settings_view.close_all_color_pickers();
+                        self.settings_view.open_remake_color_picker = next;
+                        if next {
+                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                                &self.app_config.personalization.remake_card_color,
+                            );
+                            self.settings_view.color_picker_key = "remake_color";
+                            self.settings_view.color_picker_h = h;
+                            self.settings_view.color_picker_s = s;
+                            self.settings_view.color_picker_v = v;
+                            self.settings_view.color_picker_a = a;
+                            self.settings_view.color_hex_input =
+                                self.app_config.personalization.remake_card_color.clone();
+                        }
                     }
                     "light_death" => {
-                        self.settings_view.open_light_death_color_picker =
-                            !self.settings_view.open_light_death_color_picker;
+                        let next = !self.settings_view.open_light_death_color_picker;
+                        self.settings_view.close_all_color_pickers();
+                        self.settings_view.open_light_death_color_picker = next;
+                        if next {
+                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                                &self.app_config.personalization.light_deaths_number_color,
+                            );
+                            self.settings_view.color_picker_key = "light_death";
+                            self.settings_view.color_picker_h = h;
+                            self.settings_view.color_picker_s = s;
+                            self.settings_view.color_picker_v = v;
+                            self.settings_view.color_picker_a = a;
+                            self.settings_view.color_hex_input =
+                                self.app_config.personalization.light_deaths_number_color.clone();
+                        }
                     }
                     "dark_death" => {
-                        self.settings_view.open_dark_death_color_picker =
-                            !self.settings_view.open_dark_death_color_picker;
+                        let next = !self.settings_view.open_dark_death_color_picker;
+                        self.settings_view.close_all_color_pickers();
+                        self.settings_view.open_dark_death_color_picker = next;
+                        if next {
+                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                                &self.app_config.personalization.dark_deaths_number_color,
+                            );
+                            self.settings_view.color_picker_key = "dark_death";
+                            self.settings_view.color_picker_h = h;
+                            self.settings_view.color_picker_s = s;
+                            self.settings_view.color_picker_v = v;
+                            self.settings_view.color_picker_a = a;
+                            self.settings_view.color_hex_input =
+                                self.app_config.personalization.dark_deaths_number_color.clone();
+                        }
                     }
                     _ => {}
                 }

@@ -1362,6 +1362,19 @@ where
                     })
                     // 称号区（真实拥有列表 + 搜索）
                     .when(!loading, |this| {
+                        let cur_title_display = if selected_title.is_empty()
+                            || selected_title == "0"
+                            || selected_title == "-1"
+                        {
+                            "无称号"
+                        } else {
+                            state
+                                .owned_titles
+                                .iter()
+                                .find(|t| t.id == selected_title)
+                                .map(|t| t.name.as_str())
+                                .unwrap_or(selected_title)
+                        };
                         this.child(
                             div()
                                 .flex()
@@ -1372,8 +1385,7 @@ where
                                         .text_size(px(12.5))
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(Theme::TEXT_PRIMARY())
-                                        .child(format!("佩戴称号（当前: {}）",
-                                            if selected_title.is_empty() { "无称号" } else { selected_title })),
+                                        .child(format!("佩戴称号（当前: {}）", cur_title_display)),
                                 )
                                 .child(title_search_box)
                                 .child(

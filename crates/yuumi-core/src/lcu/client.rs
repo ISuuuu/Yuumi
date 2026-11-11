@@ -203,7 +203,9 @@ impl LcuClient {
                         let expected_unavailable = (status.as_u16() == 404
                             && (path.contains("pickable-champion-ids")
                                 || path.contains("/lol-champ-select/v1/session")
-                                || path.contains("/lol-summoner/v2/summoners/puuid/")))
+                                || path.contains("/lol-summoner/v2/summoners/puuid/")
+                                || path.contains("/lol-challenges/v1/preferences/local-player")
+                                || path.contains("champion-milestone-progress")))
                             || (status.as_u16() == 403
                                 && path.contains("/lol-gameflow/v1/reconnect"));
                         if expected_unavailable {

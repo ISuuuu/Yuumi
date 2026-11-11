@@ -77,21 +77,39 @@ async fn read_banner_accent(client: &LcuClient) -> Option<String> {
     }
 }
 
-/// 回读当前佩戴偏好（写入后校验账号状态）
+/// 回读当前佩戴偏好（从 summary-player-data/local-player 获取称号与已佩戴勋章）
 pub async fn read_preferences(client: &LcuClient) -> Result<(String, Vec<String>), String> {
-    let prefs = client
-        .request("GET", "/lol-challenges/v1/preferences/local-player", None, false)
+    let summary = client
+        .request(
+            "GET",
+            "/lol-challenges/v1/summary-player-data/local-player",
+            None,
+            false,
+        )
         .await?;
-    let title = prefs
+    let title = summary
         .get("title")
-        .and_then(as_string)
+        .and_then(|t| {
+            if t.is_object() {
+                t.get("itemId").or_else(|| t.get("id")).and_then(as_string)
+            } else {
+                as_string(t)
+            }
+        })
+        .map(|s| {
+            if s == "-1" || s == "0" {
+                String::new()
+            } else {
+                s
+            }
+        })
         .unwrap_or_default();
-    let ids: Vec<String> = prefs
-        .get("challengeIds")
+    let ids: Vec<String> = summary
+        .get("topChallenges")
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(as_string)
+                .filter_map(|item| item.get("id").and_then(as_string))
                 .filter(|id| valid_challenge_id(id))
                 .collect()
         })
@@ -140,7 +158,7 @@ pub async fn load(client: &LcuClient) -> Result<ChallengesData, String> {
         });
     }
 
-    // 2. 称号列表与当前称号
+    // 2. 称号列表、当前称号与佩戴勋章（由 summary-player-data 统一切片返回）
     let summary = client
         .request(
             "GET",
@@ -167,23 +185,41 @@ pub async fn load(client: &LcuClient) -> Result<ChallengesData, String> {
             }
         }
     }
-    let mut current_title = summary
+    let current_title = summary
         .get("title")
-        .and_then(|t| t.get("itemId").or_else(|| t.get("id")))
-        .and_then(as_string)
+        .and_then(|t| {
+            if t.is_object() {
+                t.get("itemId").or_else(|| t.get("id")).and_then(as_string)
+            } else {
+                as_string(t)
+            }
+        })
+        .map(|s| {
+            if s == "-1" || s == "0" {
+                String::new()
+            } else {
+                s
+            }
+        })
         .unwrap_or_default();
 
-    // 3. 当前佩戴偏好（回读），优先级高于 summary 的当前称号
-    let (pref_title, pref_badges) = read_preferences(client).await?;
-    if !pref_title.is_empty() {
-        current_title = pref_title;
+    // 从 summary-player-data 提取当前佩戴勋章 (topChallenges)
+    let mut current_badges = Vec::new();
+    if let Some(arr) = summary.get("topChallenges").and_then(|v| v.as_array()) {
+        for item in arr {
+            if let Some(id) = item.get("id").and_then(as_string) {
+                if valid_challenge_id(&id) {
+                    current_badges.push(id);
+                }
+            }
+        }
     }
 
     Ok(ChallengesData {
         badges,
         titles,
         current_title,
-        current_badges: pref_badges,
+        current_badges,
     })
 }
 
@@ -193,9 +229,19 @@ pub async fn save_preferences(
     title: &str,
     challenge_ids: &[String],
 ) -> Result<(), String> {
+    let clean_title = if title == "-1" || title == "0" {
+        ""
+    } else {
+        title
+    };
+    let clean_badges: Vec<String> = challenge_ids
+        .iter()
+        .filter(|id| valid_challenge_id(id))
+        .cloned()
+        .collect();
     let mut body = serde_json::json!({
-        "title": title,
-        "challengeIds": challenge_ids,
+        "title": clean_title,
+        "challengeIds": clean_badges,
     });
     if let Some(banner) = read_banner_accent(client).await {
         body["bannerAccent"] = Value::String(banner);
@@ -216,8 +262,42 @@ pub async fn save_preferences(
 pub async fn clear_badges(client: &LcuClient) -> Result<(), String> {
     let mut body = serde_json::json!({ "challengeIds": [] });
     if let Ok((title, _)) = read_preferences(client).await {
-        if !title.is_empty() {
-            body["title"] = Value::String(title);
+        let clean = if title == "-1" || title == "0" {
+            ""
+        } else {
+            &title
+        };
+        if !clean.is_empty() {
+            body["title"] = Value::String(clean.to_string());
+        }
+    }
+    // 若 preferences 回读为空，尝试从 summary 回读当前称号
+    if !body.get("title").map(|v| v.is_string()).unwrap_or(false) {
+        if let Ok(summary) = client
+            .request(
+                "GET",
+                "/lol-challenges/v1/summary-player-data/local-player",
+                None,
+                false,
+            )
+            .await
+        {
+            if let Some(cur) = summary.get("title").and_then(|t| {
+                if t.is_object() {
+                    t.get("itemId").or_else(|| t.get("id")).and_then(as_string)
+                } else {
+                    as_string(t)
+                }
+            }) {
+                let clean = if cur == "-1" || cur == "0" {
+                    ""
+                } else {
+                    &cur
+                };
+                if !clean.is_empty() {
+                    body["title"] = Value::String(clean.to_string());
+                }
+            }
         }
     }
     if let Some(banner) = read_banner_accent(client).await {

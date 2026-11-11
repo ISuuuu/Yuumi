@@ -764,4 +764,77 @@ mod tests {
 
         restore_default_palette();
     }
+
+    #[test]
+    fn color_picker_helpers_extract_and_build() {
+        use crate::views::settings::{
+            build_color_with_alpha, extract_alpha_percent, extract_pure_rgb, normalize_hex_input,
+        };
+
+        assert_eq!(extract_pure_rgb("#3339B01B"), "#39B01B");
+        assert_eq!(extract_pure_rgb("#009FAA"), "#009FAA");
+        assert_eq!(extract_pure_rgb("39B01B"), "#39B01B");
+        assert_eq!(extract_pure_rgb("FF1890FF"), "#1890FF");
+
+        assert_eq!(extract_alpha_percent("#3339B01B"), 20);
+        assert_eq!(extract_alpha_percent("#FF1890FF"), 100);
+        assert_eq!(extract_alpha_percent("#009FAA"), 100);
+        assert_eq!(extract_alpha_percent("#8039B01B"), 50);
+
+        assert_eq!(build_color_with_alpha("#39B01B", 20), "#3339B01B");
+        assert_eq!(build_color_with_alpha("#39B01B", 100), "#FF39B01B");
+        assert_eq!(build_color_with_alpha("#39B01B", 0), "#0039B01B");
+        assert_eq!(build_color_with_alpha("#1890FF", 50), "#801890FF");
+
+        // 不支持 alpha（主题色）
+        assert_eq!(
+            normalize_hex_input("1890ff", false, 100),
+            Some("#1890FF".to_string())
+        );
+        assert_eq!(
+            normalize_hex_input("#1890ff", false, 100),
+            Some("#1890FF".to_string())
+        );
+        assert_eq!(
+            normalize_hex_input("#FF1890FF", false, 100),
+            Some("#1890FF".to_string())
+        );
+        assert_eq!(normalize_hex_input("invalid", false, 100), None);
+
+        // 支持 alpha（对局卡片）
+        assert_eq!(
+            normalize_hex_input("1890ff", true, 20),
+            Some("#331890FF".to_string())
+        );
+        assert_eq!(
+            normalize_hex_input("#1890ff", true, 25),
+            Some("#401890FF".to_string())
+        );
+        assert_eq!(
+            normalize_hex_input("#401890ff", true, 20),
+            Some("#401890FF".to_string())
+        );
+
+        // HSV 取样与双向转换测试
+        use crate::views::settings::{hex_to_hsva, hsv_to_rgb, hsva_to_hex, rgb_to_hsv};
+        let (h, s, v) = rgb_to_hsv(1.0, 0.0, 0.0);
+        assert!((h - 0.0).abs() < 0.1);
+        assert!((s - 1.0).abs() < 0.01);
+        assert!((v - 1.0).abs() < 0.01);
+
+        let (r, g, b) = hsv_to_rgb(120.0, 1.0, 1.0);
+        assert!((r - 0.0).abs() < 0.01);
+        assert!((g - 1.0).abs() < 0.01);
+        assert!((b - 0.0).abs() < 0.01);
+
+        let (h, s, v, a) = hex_to_hsva("#3339B01B");
+        assert!((a - 0.2).abs() < 0.02);
+        let back_hex = hsva_to_hex(h, s, v, a, true);
+        assert_eq!(back_hex, "#3339B01B");
+
+        let (h, s, v, a) = hex_to_hsva("#009FAA");
+        assert!((a - 1.0).abs() < 0.01);
+        let back_hex = hsva_to_hex(h, s, v, a, false);
+        assert_eq!(back_hex, "#009FAA");
+    }
 }

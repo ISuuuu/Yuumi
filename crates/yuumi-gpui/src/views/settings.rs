@@ -21,6 +21,7 @@ use crate::components::text_field::{text_field, TextFieldOptions};
 use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use std::cell::Cell;
 use std::collections::HashSet;
 use yuumi_core::config::{AppConfig, WEGAME_MARKER};
 
@@ -87,6 +88,13 @@ pub enum SettingsAction {
     ResetThemeColor,
     ResetCardColors,
     ResetDeathsColors,
+    SampleSv(&'static str, f32, f32),
+    SampleHue(&'static str, f32),
+    SampleAlpha(&'static str, f32),
+    SelectColorPreset(&'static str, String),
+    EditColorPickerHex(String),
+    ApplyColorPickerHex(&'static str),
+    CloseColorPicker,
     SetDpiScale(String),
     SetLanguage(String),
 
@@ -102,9 +110,19 @@ pub enum SettingsAction {
     OpenRepo,
 }
 
-/// 推荐调色盘配置
-pub const THEME_PALETTE: [(&str, &str); 8] = [
-    ("#009FAA", "极光青"),
+/// 24 色全色谱调色盘（覆盖暖色、冷色、粉紫与灰阶全光谱）
+pub const FULL_SPECTRUM_PALETTE: [&str; 24] = [
+    // 暖色 / 红橙黄
+    "#F43F5E", "#EF4444", "#EA580C", "#F97316", "#F59E0B", "#EAB308", "#84CC16", "#22C55E",
+    // 冷色 / 绿青蓝
+    "#10B981", "#14B8A6", "#009FAA", "#06B6D4", "#0EA5E9", "#3B82F6", "#1890FF", "#6366F1",
+    // 紫色 / 粉色 / 中性色
+    "#8B5CF6", "#722ED1", "#A855F7", "#D946EF", "#EC4899", "#0F172A", "#64748B", "#CBD5E1",
+];
+
+/// 推荐主题色预设
+pub const THEME_PALETTE: [(&str, &str); 12] = [
+    ("#009FAA", "极光青 (默认)"),
     ("#1890FF", "极光蓝"),
     ("#722ED1", "幻影紫"),
     ("#FA8C16", "暖阳金"),
@@ -112,41 +130,60 @@ pub const THEME_PALETTE: [(&str, &str); 8] = [
     ("#F5222D", "烈焰红"),
     ("#EB2F96", "樱花粉"),
     ("#13C2C2", "青碧色"),
+    ("#0EA5E9", "天蓝色"),
+    ("#8B5CF6", "星灵紫"),
+    ("#F97316", "暮霞橙"),
+    ("#10B981", "翡翠绿"),
 ];
 
-pub const WIN_CARD_PALETTE: [(&str, &str); 4] = [
-    ("#3339B01B", "默认绿"),
-    ("#4039B01B", "加深绿"),
-    ("#2539B01B", "淡雅绿"),
-    ("#3352C41A", "翠青绿"),
+/// 胜利卡片推荐预设
+pub const WIN_CARD_PALETTE: [(&str, &str); 6] = [
+    ("#3339B01B", "默认绿 (20%)"),
+    ("#4039B01B", "加深绿 (25%)"),
+    ("#2539B01B", "淡雅绿 (15%)"),
+    ("#3352C41A", "翠青绿 (20%)"),
+    ("#3310B981", "薄荷绿 (20%)"),
+    ("#331890FF", "胜利蓝 (20%)"),
 ];
 
-pub const LOSE_CARD_PALETTE: [(&str, &str); 4] = [
-    ("#33D3190C", "默认红"),
-    ("#40D3190C", "加深红"),
-    ("#25D3190C", "淡雅红"),
-    ("#33F5222D", "绯红"),
+/// 失败卡片推荐预设
+pub const LOSE_CARD_PALETTE: [(&str, &str); 6] = [
+    ("#33D3190C", "默认红 (20%)"),
+    ("#40D3190C", "加深红 (25%)"),
+    ("#25D3190C", "淡雅红 (15%)"),
+    ("#33F5222D", "绯红 (20%)"),
+    ("#33E11D48", "玫瑰红 (20%)"),
+    ("#33722ED1", "败北紫 (20%)"),
 ];
 
-pub const REMAKE_CARD_PALETTE: [(&str, &str); 4] = [
-    ("#33A2A2A2", "默认灰"),
-    ("#40A2A2A2", "加深灰"),
-    ("#25A2A2A2", "淡雅灰"),
-    ("#338C8C8C", "冷月灰"),
+/// 重开卡片推荐预设
+pub const REMAKE_CARD_PALETTE: [(&str, &str); 6] = [
+    ("#33A2A2A2", "默认灰 (20%)"),
+    ("#40A2A2A2", "加深灰 (25%)"),
+    ("#25A2A2A2", "淡雅灰 (15%)"),
+    ("#338C8C8C", "冷月灰 (20%)"),
+    ("#3364748B", "蓝灰 (20%)"),
+    ("#33D97706", "重开金 (20%)"),
 ];
 
-pub const LIGHT_DEATH_PALETTE: [(&str, &str); 4] = [
+/// 浅色主题死亡数字字体推荐预设
+pub const LIGHT_DEATH_PALETTE: [(&str, &str); 6] = [
     ("#FFB60000", "默认深红"),
     ("#FFD3190C", "猩红"),
     ("#FFCF1322", "暗赤"),
     ("#FFF5222D", "鲜红"),
+    ("#FFE11D48", "玫瑰红"),
+    ("#FF991B1B", "酒红"),
 ];
 
-pub const DARK_DEATH_PALETTE: [(&str, &str); 4] = [
+/// 深色主题死亡数字字体推荐预设
+pub const DARK_DEATH_PALETTE: [(&str, &str); 6] = [
     ("#FFFF8D8D", "默认浅红"),
     ("#FFFF7875", "柔粉红"),
     ("#FFFFA39E", "浅桃红"),
     ("#FFFFBB96", "浅珊瑚"),
+    ("#FFFB7185", "亮粉红"),
+    ("#FFF87171", "亮珊瑚"),
 ];
 
 /// 预设主题色（兼容外部引用）
@@ -159,15 +196,189 @@ pub const THEME_COLOR_PRESETS: [(&str, &str); 4] = [
 
 pub use crate::theme::parse_hex_color;
 
-/// 清除/展示输入框
+/// 从 #AARRGGBB 或 #RRGGBB 中提取纯 RGB 部分（如 "#39B01B"）
+pub fn extract_pure_rgb(hex: &str) -> String {
+    let s = hex.trim().trim_start_matches('#');
+    if s.len() == 8 {
+        format!("#{}", &s[2..8]).to_uppercase()
+    } else if s.len() == 6 {
+        format!("#{}", s).to_uppercase()
+    } else {
+        "#000000".to_string()
+    }
+}
+
+/// 从 #AARRGGBB 提取透明度百分比 (0..=100)；若为 6 位则默认 100
+pub fn extract_alpha_percent(hex: &str) -> u32 {
+    let s = hex.trim().trim_start_matches('#');
+    if s.len() == 8 {
+        if let Ok(a) = u8::from_str_radix(&s[0..2], 16) {
+            return ((a as f32 / 255.0) * 100.0).round() as u32;
+        }
+    }
+    100
+}
+
+/// 合成带透明度的颜色：将纯 RGB (如 "#39B01B") 与百分比 (0..=100) 合成为 "#AARRGGBB"
+pub fn build_color_with_alpha(pure_rgb: &str, percent: u32) -> String {
+    let clean = pure_rgb.trim().trim_start_matches('#');
+    let rgb6 = if clean.len() >= 6 {
+        &clean[clean.len() - 6..]
+    } else {
+        "000000"
+    };
+    let clamped = percent.clamp(0, 100);
+    let alpha_byte = ((clamped as f32 / 100.0) * 255.0).round() as u8;
+    format!("#{alpha_byte:02X}{rgb6}").to_uppercase()
+}
+
+/// 校验并规范化用户输入的颜色 Hex
+pub fn normalize_hex_input(
+    input: &str,
+    supports_alpha: bool,
+    current_alpha_percent: u32,
+) -> Option<String> {
+    let clean = input.trim().trim_start_matches('#');
+    if clean.len() == 6 {
+        if u32::from_str_radix(clean, 16).is_ok() {
+            if supports_alpha {
+                Some(build_color_with_alpha(&format!("#{clean}"), current_alpha_percent))
+            } else {
+                Some(format!("#{clean}").to_uppercase())
+            }
+        } else {
+            None
+        }
+    } else if clean.len() == 8 {
+        if u32::from_str_radix(clean, 16).is_ok() {
+            if supports_alpha {
+                Some(format!("#{clean}").to_uppercase())
+            } else {
+                Some(format!("#{}", &clean[2..8]).to_uppercase())
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+/// 将 RGB [0.0..=1.0] 转换为 HSV (h: 0..360, s: 0..1, v: 0..1)
+pub fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let h = if delta > 0.00001 {
+        let raw = if (max - r).abs() < 0.00001 {
+            ((g - b) / delta).rem_euclid(6.0)
+        } else if (max - g).abs() < 0.00001 {
+            (b - r) / delta + 2.0
+        } else {
+            (r - g) / delta + 4.0
+        };
+        (raw * 60.0).rem_euclid(360.0)
+    } else {
+        0.0
+    };
+    let s = if max > 0.00001 { delta / max } else { 0.0 };
+    let v = max;
+    (h, s, v)
+}
+
+/// 将 HSV (h: 0..360, s: 0..1, v: 0..1) 转换为 RGB [0.0..=1.0]
+pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    let c = v * s;
+    let h_prime = (h.rem_euclid(360.0)) / 60.0;
+    let x = c * (1.0 - (h_prime.rem_euclid(2.0) - 1.0).abs());
+    let m = v - c;
+    let (r1, g1, b1) = match h_prime.floor() as i32 % 6 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    (r1 + m, g1 + m, b1 + m)
+}
+
+/// 解析 Hex 色值为 (h, s, v, a)
+pub fn hex_to_hsva(hex: &str) -> (f32, f32, f32, f32) {
+    let s = hex.trim().trim_start_matches('#');
+    let mut a = 1.0;
+    let (r, g, b) = if s.len() == 8 {
+        let a_byte = u8::from_str_radix(&s[0..2], 16).unwrap_or(255);
+        let r_byte = u8::from_str_radix(&s[2..4], 16).unwrap_or(0);
+        let g_byte = u8::from_str_radix(&s[4..6], 16).unwrap_or(0);
+        let b_byte = u8::from_str_radix(&s[6..8], 16).unwrap_or(0);
+        a = a_byte as f32 / 255.0;
+        (
+            r_byte as f32 / 255.0,
+            g_byte as f32 / 255.0,
+            b_byte as f32 / 255.0,
+        )
+    } else if s.len() == 6 {
+        let r_byte = u8::from_str_radix(&s[0..2], 16).unwrap_or(0);
+        let g_byte = u8::from_str_radix(&s[2..4], 16).unwrap_or(0);
+        let b_byte = u8::from_str_radix(&s[4..6], 16).unwrap_or(0);
+        (
+            r_byte as f32 / 255.0,
+            g_byte as f32 / 255.0,
+            b_byte as f32 / 255.0,
+        )
+    } else {
+        (0.0, 0.62, 0.67)
+    };
+    let (h, s_val, v) = rgb_to_hsv(r, g, b);
+    (h, s_val, v, a)
+}
+
+/// 将 HSVA 合成为十六进制字符串（6 位 #RRGGBB 或 8 位 #AARRGGBB）
+pub fn hsva_to_hex(h: f32, s: f32, v: f32, a: f32, include_alpha: bool) -> String {
+    let (r, g, b) = hsv_to_rgb(h, s, v);
+    let r_byte = (r * 255.0).round().clamp(0.0, 255.0) as u8;
+    let g_byte = (g * 255.0).round().clamp(0.0, 255.0) as u8;
+    let b_byte = (b * 255.0).round().clamp(0.0, 255.0) as u8;
+    let a_byte = (a * 255.0).round().clamp(0.0, 255.0) as u8;
+    if include_alpha {
+        format!("#{a_byte:02X}{r_byte:02X}{g_byte:02X}{b_byte:02X}")
+    } else {
+        format!("#{r_byte:02X}{g_byte:02X}{b_byte:02X}")
+    }
+}
+
+thread_local! {
+    static SV_BOUNDS: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
+    static HUE_BOUNDS: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
+    static ALPHA_BOUNDS: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
+}
+
+/// HSV 连续取样调色浮层控件（1:1 复刻 Vue 原版二维画板取样 + 色相彩虹条取样 + 透明度取样体验）
+#[allow(clippy::too_many_arguments)]
 fn render_color_picker(
     id: ElementId,
+    picker_key: &'static str,
     width_px: f32,
     color_hex: &str,
+    supports_alpha: bool,
     open: bool,
+    h: f32,
+    s: f32,
+    v: f32,
+    a: f32,
     palette: &[(&'static str, &'static str)],
+    hex_input: &str,
+    hex_focus: Option<&FocusHandle>,
+    window: &Window,
     on_toggle: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + Clone,
-    on_select: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
+    on_sample_sv: impl Fn(f32, f32, &mut Window, &mut App) + 'static + Clone,
+    on_sample_hue: impl Fn(f32, &mut Window, &mut App) + 'static + Clone,
+    on_sample_alpha: impl Fn(f32, &mut Window, &mut App) + 'static + Clone,
+    on_select_preset: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
+    on_edit_hex: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
+    on_apply_hex: impl Fn(&'static str, &mut Window, &mut App) + 'static + Clone,
+    on_close: impl Fn(&mut Window, &mut App) + 'static + Clone,
 ) -> impl IntoElement {
     let swatch_color = parse_hex_color(color_hex);
     let hex_display = color_hex.to_uppercase();
@@ -190,29 +401,53 @@ fn render_color_picker(
                 .bg(Theme::CARD_BG())
                 .flex()
                 .items_center()
-                .gap(px(8.0))
+                .justify_between()
+                .gap(px(6.0))
                 .cursor_pointer()
                 .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, on_toggle)
-                // 色块预览
                 .child(
                     div()
-                        .w(px(18.0))
-                        .h(px(16.0))
-                        .rounded(px(3.0))
-                        .border_1()
-                        .border_color(Theme::CARD_BORDER())
-                        .bg(swatch_color),
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .w(px(18.0))
+                                .h(px(16.0))
+                                .rounded(px(3.0))
+                                .border_1()
+                                .border_color(Theme::CARD_BORDER())
+                                .bg(swatch_color),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.5))
+                                .text_color(Theme::TEXT_SECONDARY())
+                                .child(hex_display.clone()),
+                        ),
                 )
-                // 色值文本
-                .child(
-                    div()
-                        .text_size(px(11.5))
-                        .text_color(Theme::TEXT_SECONDARY())
-                        .child(hex_display),
-                ),
+                .when(supports_alpha, |this| {
+                    this.child(
+                        div()
+                            .text_size(px(10.5))
+                            .text_color(Theme::TEXT_MUTED())
+                            .child(format!("{:.0}%", a * 100.0)),
+                    )
+                }),
         )
         .when(open, |this| {
+            // 当前色相的纯色底色 (Hue, S=1, V=1)
+            let pure_hue = hsv_to_rgb(h, 1.0, 1.0);
+            let pure_hue_rgba = Rgba {
+                r: pure_hue.0,
+                g: pure_hue.1,
+                b: pure_hue.2,
+                a: 1.0,
+            };
+            // 当前实际纯 RGB 色
+            let cur_rgb = hsv_to_rgb(h, s, v);
+
             this.child(
                 deferred(
                     div()
@@ -220,45 +455,410 @@ fn render_color_picker(
                         .top_full()
                         .right_0()
                         .mt(px(4.0))
-                        .p(px(8.0))
-                        .rounded_lg()
+                        .p(px(12.0))
+                        .rounded_xl()
                         .border_1()
                         .border_color(Theme::CARD_BORDER())
                         .bg(rgb(0xffffff))
-                        .shadow_lg()
+                        .shadow_xl()
                         .occlude()
                         .flex()
                         .flex_col()
-                        .gap(px(6.0))
+                        .gap(px(10.0))
+                        .w(px(280.0))
+                        // 1. 顶部取样状态预览与关闭
                         .child(
                             div()
-                                .text_size(px(11.0))
-                                .text_color(Theme::TEXT_MUTED())
-                                .child(crate::i18n::t("settings.paletteHint")),
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .pb(px(8.0))
+                                .border_b_1()
+                                .border_color(Theme::CARD_BORDER())
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(8.0))
+                                        .child(
+                                            div()
+                                                .w(px(26.0))
+                                                .h(px(22.0))
+                                                .rounded_md()
+                                                .border_1()
+                                                .border_color(Theme::CARD_BORDER())
+                                                .bg(swatch_color),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(12.5))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(Theme::TEXT_PRIMARY())
+                                                .child(hex_display.clone()),
+                                        )
+                                        .when(supports_alpha, |t| {
+                                            t.child(
+                                                div()
+                                                    .px(px(6.0))
+                                                    .py(px(1.0))
+                                                    .rounded_md()
+                                                    .bg(Theme::HOVER_BG())
+                                                    .text_size(px(10.5))
+                                                    .text_color(Theme::TEXT_MUTED())
+                                                    .child(format!("透明度: {:.0}%", a * 100.0)),
+                                            )
+                                        }),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(13.0))
+                                        .text_color(Theme::TEXT_MUTED())
+                                        .cursor_pointer()
+                                        .hover(|s| s.text_color(Theme::TEXT_PRIMARY()))
+                                        .on_mouse_down(MouseButton::Left, {
+                                            let close = on_close.clone();
+                                            move |_ev, win, app| close(win, app)
+                                        })
+                                        .child("✕"),
+                                ),
                         )
-                        .child(div().flex().flex_wrap().gap(px(6.0)).w(px(180.0)).children(
-                            palette.iter().map(|(hex, _name)| {
-                                let h = hex.to_string();
-                                let c = parse_hex_color(hex);
-                                let is_cur = color_hex.eq_ignore_ascii_case(hex);
-                                let sel = on_select.clone();
+                        // 2. 二维饱和度 / 明度取样画板 (S-V 采样板)
+                        .child(
+                            div()
+                                .id("cp-sv-board")
+                                .relative()
+                                .w(px(256.0))
+                                .h(px(120.0))
+                                .rounded_md()
+                                .overflow_hidden()
+                                .cursor(CursorStyle::Crosshair)
+                                // 底色为当前色相对应的纯光谱色
+                                .bg(pure_hue_rgba)
+                                // 水平白渐变：白色 -> 透明 (S: 0 -> 1)
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .inset_0()
+                                        .bg(linear_gradient(
+                                            90.0,
+                                            linear_color_stop(rgba(0xffffffff), 0.0),
+                                            linear_color_stop(rgba(0xffffff00), 1.0),
+                                        )),
+                                )
+                                // 垂直黑渐变：透明 -> 黑色 (V: 1 -> 0)
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .inset_0()
+                                        .bg(linear_gradient(
+                                            180.0,
+                                            linear_color_stop(rgba(0x00000000), 0.0),
+                                            linear_color_stop(rgba(0x000000ff), 1.0),
+                                        )),
+                                )
+                                .child(
+                                    canvas(
+                                        |bounds, _win, _app| {
+                                            SV_BOUNDS.with(|c| c.set(Some(bounds)));
+                                        },
+                                        |_bounds, _, _win, _app| {},
+                                    )
+                                    .size_full()
+                                    .absolute()
+                                    .inset_0(),
+                                )
+                                // 取样指针十字环
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .left(px((s * 256.0 - 6.0).clamp(0.0, 244.0)))
+                                        .top(px(((1.0 - v) * 120.0 - 6.0).clamp(0.0, 108.0)))
+                                        .size(px(12.0))
+                                        .rounded_full()
+                                        .border_2()
+                                        .border_color(gpui::white())
+                                        .shadow_sm(),
+                                )
+                                .on_mouse_down(MouseButton::Left, {
+                                    let on_sv = on_sample_sv.clone();
+                                    move |ev, win, app| {
+                                        if let Some(bounds) = SV_BOUNDS.with(|c| c.get()) {
+                                            let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
+                                            let ry = ((f32::from(ev.position.y) - f32::from(bounds.origin.y)) / f32::from(bounds.size.height)).clamp(0.0, 1.0);
+                                            on_sv(rx, 1.0 - ry, win, app);
+                                        }
+                                    }
+                                })
+                                .on_mouse_move({
+                                    let on_sv = on_sample_sv.clone();
+                                    move |ev, win, app| {
+                                        if ev.dragging() {
+                                            if let Some(bounds) = SV_BOUNDS.with(|c| c.get()) {
+                                                let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
+                                                let ry = ((f32::from(ev.position.y) - f32::from(bounds.origin.y)) / f32::from(bounds.size.height)).clamp(0.0, 1.0);
+                                                on_sv(rx, 1.0 - ry, win, app);
+                                            }
+                                        }
+                                    }
+                                }),
+                        )
+                        // 3. 一维色相彩虹取样条 (Hue 渐变滑块)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(3.0))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .child(
+                                            div()
+                                                .text_size(px(10.5))
+                                                .text_color(Theme::TEXT_MUTED())
+                                                .child("色相 (Hue)"),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(10.5))
+                                                .text_color(Theme::TEXT_MUTED())
+                                                .child(format!("{:.0}°", h)),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .id("cp-hue-bar")
+                                        .relative()
+                                        .w(px(256.0))
+                                        .h(px(12.0))
+                                        .rounded_md()
+                                        .overflow_hidden()
+                                        .cursor_pointer()
+                                        .flex()
+                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0xff0000ff), 0.0), linear_color_stop(rgba(0xffff00ff), 1.0))))
+                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0xffff00ff), 0.0), linear_color_stop(rgba(0x00ff00ff), 1.0))))
+                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0x00ff00ff), 0.0), linear_color_stop(rgba(0x00ffffff), 1.0))))
+                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0x00ffffff), 0.0), linear_color_stop(rgba(0x0000ffff), 1.0))))
+                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0x0000ffff), 0.0), linear_color_stop(rgba(0xff00ffff), 1.0))))
+                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0xff00ffff), 0.0), linear_color_stop(rgba(0xff0000ff), 1.0))))
+                                        .child(
+                                            canvas(
+                                                |bounds, _win, _app| {
+                                                    HUE_BOUNDS.with(|c| c.set(Some(bounds)));
+                                                },
+                                                |_bounds, _, _win, _app| {},
+                                            )
+                                            .size_full()
+                                            .absolute()
+                                            .inset_0(),
+                                        )
+                                        .child(
+                                            div()
+                                                .absolute()
+                                                .left(px(((h / 360.0) * 256.0 - 6.0).clamp(0.0, 244.0)))
+                                                .top(px(0.0))
+                                                .size(px(12.0))
+                                                .rounded_full()
+                                                .border_2()
+                                                .border_color(gpui::white())
+                                                .shadow_sm(),
+                                        )
+                                        .on_mouse_down(MouseButton::Left, {
+                                            let on_h = on_sample_hue.clone();
+                                            move |ev, win, app| {
+                                                if let Some(bounds) = HUE_BOUNDS.with(|c| c.get()) {
+                                                    let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
+                                                    on_h((rx * 360.0).min(359.9), win, app);
+                                                }
+                                            }
+                                        })
+                                        .on_mouse_move({
+                                            let on_h = on_sample_hue.clone();
+                                            move |ev, win, app| {
+                                                if ev.dragging() {
+                                                    if let Some(bounds) = HUE_BOUNDS.with(|c| c.get()) {
+                                                        let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
+                                                        on_h((rx * 360.0).min(359.9), win, app);
+                                                    }
+                                                }
+                                            }
+                                        }),
+                                ),
+                        )
+                        // 4. 透明度滑条 (针对支持透明度的对局卡片)
+                        .when(supports_alpha, |this| {
+                            this.child(
                                 div()
-                                    .size(px(24.0))
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(if is_cur {
-                                        Theme::ACCENT_PRIMARY()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(3.0))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .child(
+                                                div()
+                                                    .text_size(px(10.5))
+                                                    .text_color(Theme::TEXT_MUTED())
+                                                    .child("透明度 (Alpha)"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(10.5))
+                                                    .text_color(Theme::TEXT_MUTED())
+                                                    .child(format!("{:.0}%", a * 100.0)),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("cp-alpha-bar")
+                                            .relative()
+                                            .w(px(256.0))
+                                            .h(px(12.0))
+                                            .rounded_md()
+                                            .overflow_hidden()
+                                            .cursor_pointer()
+                                            .bg(linear_gradient(
+                                                90.0,
+                                                linear_color_stop(Rgba { r: cur_rgb.0, g: cur_rgb.1, b: cur_rgb.2, a: 0.0 }, 0.0),
+                                                linear_color_stop(Rgba { r: cur_rgb.0, g: cur_rgb.1, b: cur_rgb.2, a: 1.0 }, 1.0),
+                                            ))
+                                            .child(
+                                                canvas(
+                                                    |bounds, _win, _app| {
+                                                        ALPHA_BOUNDS.with(|c| c.set(Some(bounds)));
+                                                    },
+                                                    |_bounds, _, _win, _app| {},
+                                                )
+                                                .size_full()
+                                                .absolute()
+                                                .inset_0(),
+                                            )
+                                            .child(
+                                                div()
+                                                    .absolute()
+                                                    .left(px((a * 256.0 - 6.0).clamp(0.0, 244.0)))
+                                                    .top(px(0.0))
+                                                    .size(px(12.0))
+                                                    .rounded_full()
+                                                    .border_2()
+                                                    .border_color(gpui::white())
+                                                    .shadow_sm(),
+                                            )
+                                            .on_mouse_down(MouseButton::Left, {
+                                                let on_a = on_sample_alpha.clone();
+                                                move |ev, win, app| {
+                                                    if let Some(bounds) = ALPHA_BOUNDS.with(|c| c.get()) {
+                                                        let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
+                                                        on_a(rx, win, app);
+                                                    }
+                                                }
+                                            })
+                                            .on_mouse_move({
+                                                let on_a = on_sample_alpha.clone();
+                                                move |ev, win, app| {
+                                                    if ev.dragging() {
+                                                        if let Some(bounds) = ALPHA_BOUNDS.with(|c| c.get()) {
+                                                            let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
+                                                            on_a(rx, win, app);
+                                                        }
+                                                    }
+                                                }
+                                            }),
+                                    ),
+                            )
+                        })
+                        // 5. 十六进制直接输入行
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .child(
+                                    if let Some(focus) = hex_focus {
+                                        let is_focused = focus.is_focused(window);
+                                        let on_edit = on_edit_hex.clone();
+                                        let on_app = on_apply_hex.clone();
+                                        text_field(
+                                            "color-hex-field",
+                                            hex_input,
+                                            if supports_alpha { "#AARRGGBB 或 #RRGGBB" } else { "#RRGGBB" },
+                                            px(196.0),
+                                            focus,
+                                            is_focused,
+                                            TextFieldOptions::default(),
+                                            move |val, win, app| on_edit(val, win, app),
+                                            move |_win, _app| {},
+                                            move |_val, win, app| on_app(picker_key, win, app),
+                                        ).into_any_element()
                                     } else {
-                                        Theme::CARD_BORDER()
+                                        div().into_any_element()
+                                    }
+                                )
+                                .child(
+                                    action_button("应用", false, {
+                                        let on_app = on_apply_hex.clone();
+                                        move |_ev, win, app| on_app(picker_key, win, app)
                                     })
-                                    .bg(c)
-                                    .cursor_pointer()
-                                    .hover(|s| s.opacity(0.8))
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        sel(h.clone(), win, app)
+                                ),
+                        )
+                        // 6. 快捷推荐预设
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(4.0))
+                                .child(
+                                    div()
+                                        .text_size(px(10.5))
+                                        .text_color(Theme::TEXT_MUTED())
+                                        .child("常用预设"),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_wrap()
+                                        .gap(px(5.0))
+                                        .children(palette.iter().map(|(hex, _name)| {
+                                            let h_str = hex.to_string();
+                                            let c = parse_hex_color(hex);
+                                            let is_cur = color_hex.eq_ignore_ascii_case(hex);
+                                            let sel = on_select_preset.clone();
+                                            div()
+                                                .size(px(20.0))
+                                                .rounded_md()
+                                                .border_1()
+                                                .border_color(if is_cur {
+                                                    Theme::ACCENT_PRIMARY()
+                                                } else {
+                                                    Theme::CARD_BORDER()
+                                                })
+                                                .bg(c)
+                                                .cursor_pointer()
+                                                .hover(|s| s.opacity(0.8))
+                                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                                    sel(h_str.clone(), win, app)
+                                                })
+                                        })),
+                                ),
+                        )
+                        // 7. 底部完成按钮
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .pt(px(2.0))
+                                .border_t_1()
+                                .border_color(Theme::CARD_BORDER())
+                                .child(
+                                    action_button("完成", false, {
+                                        let close = on_close.clone();
+                                        move |_ev, win, app| close(win, app)
                                     })
-                            }),
-                        )),
+                                ),
+                        ),
                 )
                 .with_priority(25),
             )
@@ -284,6 +884,15 @@ pub struct SettingsView {
     pub open_remake_color_picker: bool,
     pub open_light_death_color_picker: bool,
     pub open_dark_death_color_picker: bool,
+
+    // 取样器交互状态 (HSV 取样)
+    pub color_picker_key: &'static str,
+    pub color_picker_h: f32,
+    pub color_picker_s: f32,
+    pub color_picker_v: f32,
+    pub color_picker_a: f32,
+    pub color_hex_input: String,
+    pub color_hex_focus: Option<FocusHandle>,
 
     // 更新日志弹窗
     pub show_changelog: bool,
@@ -324,6 +933,14 @@ impl SettingsView {
             open_light_death_color_picker: false,
             open_dark_death_color_picker: false,
 
+            color_picker_key: "theme_color",
+            color_picker_h: 184.0,
+            color_picker_s: 1.0,
+            color_picker_v: 0.67,
+            color_picker_a: 1.0,
+            color_hex_input: String::new(),
+            color_hex_focus: None,
+
             show_changelog: false,
             release_loading: false,
             release_notes: Vec::new(),
@@ -334,6 +951,16 @@ impl SettingsView {
         }
     }
 
+    /// 关闭所有打开的调色浮层
+    pub fn close_all_color_pickers(&mut self) {
+        self.open_theme_color_picker = false;
+        self.open_win_color_picker = false;
+        self.open_lose_color_picker = false;
+        self.open_remake_color_picker = false;
+        self.open_light_death_color_picker = false;
+        self.open_dark_death_color_picker = false;
+    }
+
     pub fn bind_f_inputs(&mut self, config: &AppConfig, cx: &mut App) {
         self.f_inputs = [
             config.general.upload_api_url.clone(),
@@ -342,6 +969,7 @@ impl SettingsView {
             config.functions.screenshot_save_path.clone(),
         ];
         self.f_focus = Some(std::array::from_fn(|_| cx.focus_handle()));
+        self.color_hex_focus = Some(cx.focus_handle());
     }
 
     fn f_input<F>(
@@ -461,7 +1089,7 @@ impl SettingsView {
                     .child(self.render_log_group(config, on_action.clone()))
                     // ─── 5. 个性化 ───
                     .child(self.render_group_header(crate::i18n::t("settings.personalizationGroup")))
-                    .child(self.render_personalization_group(config, on_action.clone()))
+                    .child(self.render_personalization_group(config, window, on_action.clone()))
                     // ─── 6. 软件更新 ───
                     .child(self.render_group_header(crate::i18n::t("settings.softwareUpdateGroup")))
                     .child(self.render_update_group(config, on_action.clone()))
@@ -1143,7 +1771,7 @@ impl SettingsView {
     }
 
     // ─── 5. 个性化设置组 (F-V05 ~ F-V06) ───
-    fn render_personalization_group<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
+    fn render_personalization_group<F>(&self, config: &AppConfig, window: &Window, on_action: F) -> impl IntoElement
     where
         F: Fn(SettingsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -1183,6 +1811,48 @@ impl SettingsView {
             "zh_TW" => "繁體中文",
             "en_US" => "English",
             _ => crate::i18n::t("settings.langAuto"),
+        };
+
+        let make_color_picker = |picker_id: ElementId,
+                                 picker_key: &'static str,
+                                 width_px: f32,
+                                 color_hex: &str,
+                                 supports_alpha: bool,
+                                 open: bool,
+                                 palette: &'static [(&'static str, &'static str)]| {
+            let act_toggle = on_action.clone();
+            let act_sv = on_action.clone();
+            let act_h = on_action.clone();
+            let act_a = on_action.clone();
+            let act_preset = on_action.clone();
+            let act_edit = on_action.clone();
+            let act_apply = on_action.clone();
+            let act_close = on_action.clone();
+
+            render_color_picker(
+                picker_id,
+                picker_key,
+                width_px,
+                color_hex,
+                supports_alpha,
+                open,
+                self.color_picker_h,
+                self.color_picker_s,
+                self.color_picker_v,
+                self.color_picker_a,
+                palette,
+                &self.color_hex_input,
+                self.color_hex_focus.as_ref(),
+                window,
+                move |_ev, win, app| act_toggle(SettingsAction::ToggleDropdown(picker_key), win, app),
+                move |s, v, win, app| act_sv(SettingsAction::SampleSv(picker_key, s, v), win, app),
+                move |h, win, app| act_h(SettingsAction::SampleHue(picker_key, h), win, app),
+                move |a, win, app| act_a(SettingsAction::SampleAlpha(picker_key, a), win, app),
+                move |hex, win, app| act_preset(SettingsAction::SelectColorPreset(picker_key, hex), win, app),
+                move |val, win, app| act_edit(SettingsAction::EditColorPickerHex(val), win, app),
+                move |key, win, app| act_apply(SettingsAction::ApplyColorPickerHex(key), win, app),
+                move |win, app| act_close(SettingsAction::CloseColorPicker, win, app),
+            )
         };
 
         div()
@@ -1289,24 +1959,14 @@ impl SettingsView {
                     .child(setting_row(
                         crate::i18n::t("settings.themeColorPickerLabel"),
                         None,
-                        render_color_picker(
+                        make_color_picker(
                             "picker-themecolor".into(),
+                            "theme_color",
                             100.0,
                             &p.theme_color,
+                            false,
                             self.open_theme_color_picker,
                             &THEME_PALETTE,
-                            {
-                                let act = on_action.clone();
-                                move |_ev, win, app| {
-                                    act(SettingsAction::ToggleDropdown("theme_color"), win, app)
-                                }
-                            },
-                            {
-                                let act = on_action.clone();
-                                move |hex, win, app| {
-                                    act(SettingsAction::SetThemeColor(hex), win, app)
-                                }
-                            },
                         ),
                     ))
                     .child(div().flex().justify_end().child(action_button(
@@ -1335,70 +1995,40 @@ impl SettingsView {
                     .child(setting_row(
                         crate::i18n::t("settings.winCard"),
                         None,
-                        render_color_picker(
+                        make_color_picker(
                             "picker-win-card".into(),
+                            "win_color",
                             120.0,
                             &p.win_card_color,
+                            true,
                             self.open_win_color_picker,
                             &WIN_CARD_PALETTE,
-                            {
-                                let act = on_action.clone();
-                                move |_ev, win, app| {
-                                    act(SettingsAction::ToggleDropdown("win_color"), win, app)
-                                }
-                            },
-                            {
-                                let act = on_action.clone();
-                                move |hex, win, app| {
-                                    act(SettingsAction::SetWinCardColor(hex), win, app)
-                                }
-                            },
                         ),
                     ))
                     .child(setting_row(
                         crate::i18n::t("settings.loseCard"),
                         None,
-                        render_color_picker(
+                        make_color_picker(
                             "picker-lose-card".into(),
+                            "lose_color",
                             120.0,
                             &p.lose_card_color,
+                            true,
                             self.open_lose_color_picker,
                             &LOSE_CARD_PALETTE,
-                            {
-                                let act = on_action.clone();
-                                move |_ev, win, app| {
-                                    act(SettingsAction::ToggleDropdown("lose_color"), win, app)
-                                }
-                            },
-                            {
-                                let act = on_action.clone();
-                                move |hex, win, app| {
-                                    act(SettingsAction::SetLoseCardColor(hex), win, app)
-                                }
-                            },
                         ),
                     ))
                     .child(setting_row(
                         crate::i18n::t("settings.remakeCard"),
                         None,
-                        render_color_picker(
+                        make_color_picker(
                             "picker-remake-card".into(),
+                            "remake_color",
                             120.0,
                             &p.remake_card_color,
+                            true,
                             self.open_remake_color_picker,
                             &REMAKE_CARD_PALETTE,
-                            {
-                                let act = on_action.clone();
-                                move |_ev, win, app| {
-                                    act(SettingsAction::ToggleDropdown("remake_color"), win, app)
-                                }
-                            },
-                            {
-                                let act = on_action.clone();
-                                move |hex, win, app| {
-                                    act(SettingsAction::SetRemakeCardColor(hex), win, app)
-                                }
-                            },
                         ),
                     ))
                     .child(div().flex().justify_end().child(action_button(
@@ -1427,47 +2057,27 @@ impl SettingsView {
                     .child(setting_row(
                         crate::i18n::t("settings.lightDeathLabel"),
                         None,
-                        render_color_picker(
+                        make_color_picker(
                             "picker-light-death".into(),
+                            "light_death",
                             100.0,
                             &p.light_deaths_number_color,
+                            false,
                             self.open_light_death_color_picker,
                             &LIGHT_DEATH_PALETTE,
-                            {
-                                let act = on_action.clone();
-                                move |_ev, win, app| {
-                                    act(SettingsAction::ToggleDropdown("light_death"), win, app)
-                                }
-                            },
-                            {
-                                let act = on_action.clone();
-                                move |hex, win, app| {
-                                    act(SettingsAction::SetLightDeathsColor(hex), win, app)
-                                }
-                            },
                         ),
                     ))
                     .child(setting_row(
                         crate::i18n::t("settings.darkDeathLabel"),
                         None,
-                        render_color_picker(
+                        make_color_picker(
                             "picker-dark-death".into(),
+                            "dark_death",
                             100.0,
                             &p.dark_deaths_number_color,
+                            false,
                             self.open_dark_death_color_picker,
                             &DARK_DEATH_PALETTE,
-                            {
-                                let act = on_action.clone();
-                                move |_ev, win, app| {
-                                    act(SettingsAction::ToggleDropdown("dark_death"), win, app)
-                                }
-                            },
-                            {
-                                let act = on_action.clone();
-                                move |hex, win, app| {
-                                    act(SettingsAction::SetDarkDeathsColor(hex), win, app)
-                                }
-                            },
                         ),
                     ))
                     .child(div().flex().justify_end().child(action_button(

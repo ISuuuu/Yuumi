@@ -1017,13 +1017,19 @@ impl MainWindow {
                 cx.notify();
             }
             ToolsAction::SaveBadgesPreferences => {
-                let title = self.tools_view.selected_title.clone();
+                let title = if self.tools_view.selected_title == "-1"
+                    || self.tools_view.selected_title == "0"
+                {
+                    String::new()
+                } else {
+                    self.tools_view.selected_title.clone()
+                };
                 let challenge_ids = self.tools_view.selected_badges.clone();
                 let live = self.live_service.clone();
                 self.toast(ToastKind::Info, "正在保存称号与勋章装配…", cx);
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
-                    // 真实写入 + 回读当前偏好，成功才关弹层，失败保留选择与弹层便于重试
+                    // 真实写入，成功才关弹层，失败保留选择与弹层便于重试
                     let result: Result<(String, Vec<String>), String> =
                         match live.get_client().await {
                             Some(client) => {
@@ -1034,9 +1040,7 @@ impl MainWindow {
                                 )
                                 .await
                                 {
-                                    Ok(()) => {
-                                        crate::services::challenges::read_preferences(&client).await
-                                    }
+                                    Ok(()) => Ok((title.clone(), challenge_ids.clone())),
                                     Err(e) => Err(e),
                                 }
                             }
@@ -1044,17 +1048,15 @@ impl MainWindow {
                         };
                     let _ = entity.update(cx, |this, cx| {
                         match result {
-                            Ok((read_title, read_ids)) => {
-                                this.tools_view.selected_title = read_title;
-                                this.tools_view.selected_badges = read_ids;
-                                this.tools_view.badges_snapshot_title =
-                                    this.tools_view.selected_title.clone();
-                                this.tools_view.badges_snapshot_badges =
-                                    this.tools_view.selected_badges.clone();
+                            Ok((saved_title, saved_ids)) => {
+                                this.tools_view.selected_title = saved_title.clone();
+                                this.tools_view.selected_badges = saved_ids.clone();
+                                this.tools_view.badges_snapshot_title = saved_title;
+                                this.tools_view.badges_snapshot_badges = saved_ids;
                                 this.tools_view.show_badges_modal = false;
                                 this.toast(
                                     ToastKind::Success,
-                                    "称号与挑战勋章装配成功（已回读）",
+                                    "称号与挑战勋章装配成功！",
                                     cx,
                                 );
                             }
@@ -1143,8 +1145,13 @@ impl MainWindow {
                             s.error = None;
                         });
                         // 回读的真实当前佩戴覆盖临时选择（不重置打开时的取消快照）
+                        let clean_title = if data.current_title == "-1" || data.current_title == "0" {
+                            String::new()
+                        } else {
+                            data.current_title
+                        };
                         this.tools_view.selected_badges = data.current_badges;
-                        this.tools_view.selected_title = data.current_title;
+                        this.tools_view.selected_title = clean_title;
                     }
                     Err(e) => {
                         crate::views::tools::personalization::update_badges_view_state(|s| {
