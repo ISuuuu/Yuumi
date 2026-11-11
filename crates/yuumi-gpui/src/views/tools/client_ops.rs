@@ -61,7 +61,10 @@ impl ToolsView {
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(Theme::TEXT_PRIMARY())
                 .cursor_pointer()
-                .hover(|s| s.bg(Theme::HOVER_BG()).border_color(Theme::ACCENT_PRIMARY()))
+                .hover(|s| {
+                    s.bg(Theme::HOVER_BG())
+                        .border_color(Theme::ACCENT_PRIMARY())
+                })
                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                     act_fix(ToolsAction::FixClientWindow, win, app)
                 })
@@ -93,7 +96,10 @@ impl ToolsView {
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(Theme::TEXT_PRIMARY())
                 .cursor_pointer()
-                .hover(|s| s.bg(Theme::HOVER_BG()).border_color(Theme::ACCENT_PRIMARY()))
+                .hover(|s| {
+                    s.bg(Theme::HOVER_BG())
+                        .border_color(Theme::ACCENT_PRIMARY())
+                })
                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                     act_restart(ToolsAction::RestartClient, win, app)
                 })

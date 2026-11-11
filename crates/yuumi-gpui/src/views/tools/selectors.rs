@@ -6,7 +6,11 @@
 use super::*;
 
 impl ToolsView {
-    pub(super) fn render_auto_hover_card<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
+    pub(super) fn render_auto_hover_card<F>(
+        &self,
+        config: &AppConfig,
+        on_action: F,
+    ) -> impl IntoElement
     where
         F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -93,8 +97,12 @@ impl ToolsView {
                         *hover_search_live.borrow_mut() = next;
                         window.refresh();
                     },
-                    move |_ev, win, app| act_clear(ToolsAction::ClearPickChampion(current_lane), win, app),
-                    move |_ev, win, app| act_open_picker(ToolsAction::TogglePicker("hover"), win, app),
+                    move |_ev, win, app| {
+                        act_clear(ToolsAction::ClearPickChampion(current_lane), win, app)
+                    },
+                    move |_ev, win, app| {
+                        act_open_picker(ToolsAction::TogglePicker("hover"), win, app)
+                    },
                     move |_ev, win, app| {
                         act_confirm_picker(ToolsAction::TogglePicker("confirm_hover"), win, app)
                     },
@@ -128,7 +136,11 @@ impl ToolsView {
     }
 
     // 行 4: 自动禁用英雄 (折叠卡 - T-V04)
-    pub(super) fn render_auto_ban_card<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
+    pub(super) fn render_auto_ban_card<F>(
+        &self,
+        config: &AppConfig,
+        on_action: F,
+    ) -> impl IntoElement
     where
         F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -210,10 +222,18 @@ impl ToolsView {
                         delay > 0.0,
                         delay < 15.0,
                         move |_ev, win, app| {
-                            act_dec(ToolsAction::SetAutoBanDelay((delay - 0.5).max(0.0)), win, app)
+                            act_dec(
+                                ToolsAction::SetAutoBanDelay((delay - 0.5).max(0.0)),
+                                win,
+                                app,
+                            )
                         },
                         move |_ev, win, app| {
-                            act_inc(ToolsAction::SetAutoBanDelay((delay + 0.5).min(15.0)), win, app)
+                            act_inc(
+                                ToolsAction::SetAutoBanDelay((delay + 0.5).min(15.0)),
+                                win,
+                                app,
+                            )
                         },
                     ),
                 ))
@@ -231,8 +251,12 @@ impl ToolsView {
                         *ban_search_live.borrow_mut() = next;
                         window.refresh();
                     },
-                    move |_ev, win, app| act_clear(ToolsAction::ClearBanChampion(current_lane), win, app),
-                    move |_ev, win, app| act_open_picker(ToolsAction::TogglePicker("ban"), win, app),
+                    move |_ev, win, app| {
+                        act_clear(ToolsAction::ClearBanChampion(current_lane), win, app)
+                    },
+                    move |_ev, win, app| {
+                        act_open_picker(ToolsAction::TogglePicker("ban"), win, app)
+                    },
                     move |_ev, win, app| {
                         act_confirm_picker(ToolsAction::TogglePicker("confirm_ban"), win, app)
                     },
@@ -266,7 +290,11 @@ impl ToolsView {
     }
 
     // 行 5: 自动设置召唤师技能 (折叠卡 - T-V05)
-    pub(super) fn render_auto_spell_card<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
+    pub(super) fn render_auto_spell_card<F>(
+        &self,
+        config: &AppConfig,
+        on_action: F,
+    ) -> impl IntoElement
     where
         F: Fn(ToolsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -287,7 +315,11 @@ impl ToolsView {
         let spell2 = spell_list.get(1).copied().unwrap_or(14);
 
         let status = if enabled {
-            format!("D: {} · F: {}", get_spell_name(spell1), get_spell_name(spell2))
+            format!(
+                "D: {} · F: {}",
+                get_spell_name(spell1),
+                get_spell_name(spell2)
+            )
         } else {
             "未启用".to_string()
         };
@@ -354,7 +386,9 @@ impl ToolsView {
                             app,
                         )
                     },
-                    move |_ev, win, app| act_close(ToolsAction::TogglePicker("close_spell"), win, app),
+                    move |_ev, win, app| {
+                        act_close(ToolsAction::TogglePicker("close_spell"), win, app)
+                    },
                 )),
         )
     }

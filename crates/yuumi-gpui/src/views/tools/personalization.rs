@@ -47,7 +47,6 @@ pub fn update_badges_view_state(f: impl FnOnce(&mut BadgesViewState)) {
 }
 
 impl ToolsView {
-
     // ─────────────────────────────────────────────────────────────
     // 个人主页与社交装扮组实现 (T-V10, T-V11, T-V03)
     // ─────────────────────────────────────────────────────────────
@@ -151,9 +150,15 @@ impl ToolsView {
                     self.open_bg_champion_picker,
                     "",
                     move |_ev, _win, _app| {},
-                    move |_ev, win, app| act_open_picker(ToolsAction::TogglePicker("bg_champ"), win, app),
-                    move |_ev, win, app| act_close_picker(ToolsAction::TogglePicker("bg_champ"), win, app),
-                    move |cid, win, app| act_select_champ(ToolsAction::SelectBgChampion(cid), win, app),
+                    move |_ev, win, app| {
+                        act_open_picker(ToolsAction::TogglePicker("bg_champ"), win, app)
+                    },
+                    move |_ev, win, app| {
+                        act_close_picker(ToolsAction::TogglePicker("bg_champ"), win, app)
+                    },
+                    move |cid, win, app| {
+                        act_select_champ(ToolsAction::SelectBgChampion(cid), win, app)
+                    },
                     move |_cid, _win, _app| {},
                 ))
                 // 加载态
@@ -202,7 +207,11 @@ impl ToolsView {
                                     .cursor_pointer()
                                     .hover(|s| s.bg(Theme::CARD_BG()))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        act(ToolsAction::ProfileBgSkinInput("retry".to_string()), win, app)
+                                        act(
+                                            ToolsAction::ProfileBgSkinInput("retry".to_string()),
+                                            win,
+                                            app,
+                                        )
                                     })
                                     .child("重试加载"),
                             ),
@@ -228,9 +237,11 @@ impl ToolsView {
                                     .items_center()
                                     .gap(px(10.0))
                                     .child(
-                                        crate::components::lcu_image::LcuImage::new(preview_path.clone())
-                                            .size(px(48.0))
-                                            .placeholder("🖼️"),
+                                        crate::components::lcu_image::LcuImage::new(
+                                            preview_path.clone(),
+                                        )
+                                        .size(px(48.0))
+                                        .placeholder("🖼️"),
                                     )
                                     .child(
                                         div()
@@ -270,7 +281,11 @@ impl ToolsView {
                                     .cursor_pointer()
                                     .hover(|s| s.opacity(0.85))
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        act(ToolsAction::ProfileBgSkinInput("open".to_string()), win, app)
+                                        act(
+                                            ToolsAction::ProfileBgSkinInput("open".to_string()),
+                                            win,
+                                            app,
+                                        )
                                     })
                                     .child("选择皮肤"),
                             ),
@@ -342,7 +357,11 @@ impl ToolsView {
                             .cursor_pointer()
                             .hover(|s| s.text_color(Theme::TEXT_PRIMARY()))
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                act_close(ToolsAction::ProfileBgSkinInput("cancel".to_string()), win, app)
+                                act_close(
+                                    ToolsAction::ProfileBgSkinInput("cancel".to_string()),
+                                    win,
+                                    app,
+                                )
                             })
                             .child("✕"),
                     ),
@@ -403,7 +422,11 @@ impl ToolsView {
                             .cursor_pointer()
                             .hover(|s| s.bg(Theme::HOVER_BG()))
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                act_prev(ToolsAction::ProfileBgSkinInput("prev".to_string()), win, app)
+                                act_prev(
+                                    ToolsAction::ProfileBgSkinInput("prev".to_string()),
+                                    win,
+                                    app,
+                                )
                             })
                             .child("← 上一个"),
                     )
@@ -420,44 +443,43 @@ impl ToolsView {
                             .cursor_pointer()
                             .hover(|s| s.bg(Theme::HOVER_BG()))
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                act_next(ToolsAction::ProfileBgSkinInput("next".to_string()), win, app)
+                                act_next(
+                                    ToolsAction::ProfileBgSkinInput("next".to_string()),
+                                    win,
+                                    app,
+                                )
                             })
                             .child("下一个 →"),
                     ),
             )
             // 缩略图条：点击仅改预览态（SelectBgSkin 零写入）
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(6.0))
-                    .children(skins.iter().enumerate().map(move |(i, s)| {
-                        let sid = s.id;
-                        let thumb_path = s.load_screen_path.clone();
-                        let act = act_thumb.clone();
-                        let active = i == idx;
-                        div()
-                            .flex_none()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(if active {
-                                Theme::ACCENT_PRIMARY()
-                            } else {
-                                Theme::CARD_BORDER()
-                            })
-                            .cursor_pointer()
-                            .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
-                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                act(ToolsAction::SelectBgSkin(sid), win, app)
-                            })
-                            .child(
-                                crate::components::lcu_image::LcuImage::new(thumb_path)
-                                    .size(px(40.0))
-                                    .placeholder("·"),
-                            )
-                    })),
-            )
+            .child(div().w_full().flex().flex_wrap().gap(px(6.0)).children(
+                skins.iter().enumerate().map(move |(i, s)| {
+                    let sid = s.id;
+                    let thumb_path = s.load_screen_path.clone();
+                    let act = act_thumb.clone();
+                    let active = i == idx;
+                    div()
+                        .flex_none()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(if active {
+                            Theme::ACCENT_PRIMARY()
+                        } else {
+                            Theme::CARD_BORDER()
+                        })
+                        .cursor_pointer()
+                        .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
+                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                            act(ToolsAction::SelectBgSkin(sid), win, app)
+                        })
+                        .child(
+                            crate::components::lcu_image::LcuImage::new(thumb_path)
+                                .size(px(40.0))
+                                .placeholder("·"),
+                        )
+                }),
+            ))
             // 写入失败：保留弹层 + 真实错误文案 + 重试应用
             .when_some(self.bg_error.clone(), |this, err| {
                 let act = act_retry.clone();
@@ -517,7 +539,11 @@ impl ToolsView {
                             .cursor_pointer()
                             .hover(|s| s.bg(Theme::HOVER_BG()))
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                act_cancel(ToolsAction::ProfileBgSkinInput("cancel".to_string()), win, app)
+                                act_cancel(
+                                    ToolsAction::ProfileBgSkinInput("cancel".to_string()),
+                                    win,
+                                    app,
+                                )
                             })
                             .child("取消（不写入）"),
                     )
@@ -596,8 +622,12 @@ impl ToolsView {
                         self.open_spoof_queue_dropdown,
                         false,
                         SPOOF_QUEUES.to_vec(),
-                        move |win, app| act_toggle_q(ToolsAction::ToggleDropdownMenu("spoof_queue"), win, app),
-                        move |val, win, app| act_select_q(ToolsAction::SetSpoofQueue(val.to_string()), win, app),
+                        move |win, app| {
+                            act_toggle_q(ToolsAction::ToggleDropdownMenu("spoof_queue"), win, app)
+                        },
+                        move |val, win, app| {
+                            act_select_q(ToolsAction::SetSpoofQueue(val.to_string()), win, app)
+                        },
                     ),
                 ))
                 // 行 2: 段位与阶位 (130px 段位 + 80px 小段 + 应用按钮)
@@ -615,8 +645,16 @@ impl ToolsView {
                             self.open_spoof_tier_dropdown,
                             false,
                             SPOOF_TIERS.to_vec(),
-                            move |win, app| act_toggle_t(ToolsAction::ToggleDropdownMenu("spoof_tier"), win, app),
-                            move |val, win, app| act_select_t(ToolsAction::SetSpoofTier(val.to_string()), win, app),
+                            move |win, app| {
+                                act_toggle_t(
+                                    ToolsAction::ToggleDropdownMenu("spoof_tier"),
+                                    win,
+                                    app,
+                                )
+                            },
+                            move |val, win, app| {
+                                act_select_t(ToolsAction::SetSpoofTier(val.to_string()), win, app)
+                            },
                         ))
                         .child(select_dropdown(
                             "dropdown-spoof-div",
@@ -625,8 +663,20 @@ impl ToolsView {
                             self.open_spoof_division_dropdown,
                             division_disabled,
                             SPOOF_DIVISIONS.iter().map(|&d| (d, d)).collect(),
-                            move |win, app| act_toggle_d(ToolsAction::ToggleDropdownMenu("spoof_division"), win, app),
-                            move |val, win, app| act_select_d(ToolsAction::SetSpoofDivision(val.to_string()), win, app),
+                            move |win, app| {
+                                act_toggle_d(
+                                    ToolsAction::ToggleDropdownMenu("spoof_division"),
+                                    win,
+                                    app,
+                                )
+                            },
+                            move |val, win, app| {
+                                act_select_d(
+                                    ToolsAction::SetSpoofDivision(val.to_string()),
+                                    win,
+                                    app,
+                                )
+                            },
                         ))
                         .child(
                             div()
@@ -680,15 +730,31 @@ impl ToolsView {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(self.render_status_btn("设为在线", self.online_status == "chat", move |win, app| {
-                        act_chat(ToolsAction::SetOnlineStatus("chat".to_string()), win, app)
-                    }))
-                    .child(self.render_status_btn("设为离开", self.online_status == "away", move |win, app| {
-                        act_away(ToolsAction::SetOnlineStatus("away".to_string()), win, app)
-                    }))
-                    .child(self.render_status_btn("设为离线", self.online_status == "offline", move |win, app| {
-                        act_offline(ToolsAction::SetOnlineStatus("offline".to_string()), win, app)
-                    })),
+                    .child(self.render_status_btn(
+                        "设为在线",
+                        self.online_status == "chat",
+                        move |win, app| {
+                            act_chat(ToolsAction::SetOnlineStatus("chat".to_string()), win, app)
+                        },
+                    ))
+                    .child(self.render_status_btn(
+                        "设为离开",
+                        self.online_status == "away",
+                        move |win, app| {
+                            act_away(ToolsAction::SetOnlineStatus("away".to_string()), win, app)
+                        },
+                    ))
+                    .child(self.render_status_btn(
+                        "设为离线",
+                        self.online_status == "offline",
+                        move |win, app| {
+                            act_offline(
+                                ToolsAction::SetOnlineStatus("offline".to_string()),
+                                win,
+                                app,
+                            )
+                        },
+                    )),
             ),
         )
     }
