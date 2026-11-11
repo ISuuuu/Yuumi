@@ -691,16 +691,16 @@ impl UploadQueue {
                         match response.json::<serde_json::Value>().await {
                             Ok(json) => {
                                 if json.get("success").and_then(|v| v.as_bool()) == Some(true) {
-                                    return Ok(
-                                        if json.pointer("/data/isNewMatch").and_then(|v| v.as_bool())
-                                            == Some(true)
-                                        {
-                                            "new"
-                                        } else {
-                                            "exists"
-                                        }
-                                        .into(),
-                                    );
+                                    return Ok(if json
+                                        .pointer("/data/isNewMatch")
+                                        .and_then(|v| v.as_bool())
+                                        == Some(true)
+                                    {
+                                        "new"
+                                    } else {
+                                        "exists"
+                                    }
+                                    .into());
                                 }
                                 last_err = json
                                     .get("message")
@@ -764,7 +764,10 @@ impl UploadQueue {
         let mut success = 0;
         for payload in payloads {
             if let Err(e) = self.send_pending(base_url, &payload).await {
-                log::warn!("[Upload] 待传对局 {} 重试失败: {e}", payload.match_info.match_id);
+                log::warn!(
+                    "[Upload] 待传对局 {} 重试失败: {e}",
+                    payload.match_info.match_id
+                );
             } else {
                 success += 1;
             }

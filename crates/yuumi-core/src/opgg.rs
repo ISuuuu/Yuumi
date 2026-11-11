@@ -256,11 +256,7 @@ impl<'de> Deserialize<'de> for FlexNumber {
         let value = Option::<Value>::deserialize(deserializer)?;
         Ok(Self(match value {
             Some(Value::Number(number)) => number.as_f64(),
-            Some(Value::String(text)) => text
-                .trim()
-                .trim_end_matches('%')
-                .parse::<f64>()
-                .ok(),
+            Some(Value::String(text)) => text.trim().trim_end_matches('%').parse::<f64>().ok(),
             _ => None,
         }))
     }
@@ -524,7 +520,10 @@ impl RawTierList {
                         .positions
                         .into_iter()
                         .find(|p| p.name.eq_ignore_ascii_case(target))?;
-                    let stats = position_entry.stats.map(|s| s.normalize()).unwrap_or_default();
+                    let stats = position_entry
+                        .stats
+                        .map(|s| s.normalize())
+                        .unwrap_or_default();
                     Some(TierListEntry {
                         champion_id: champion.id,
                         name: champion.name,
@@ -557,10 +556,7 @@ impl RawTierList {
         entries.sort_by_key(|entry| entry.stats.rank.unwrap_or(999));
 
         TierList {
-            version: self
-                .meta
-                .and_then(|meta| meta.version)
-                .unwrap_or_default(),
+            version: self.meta.and_then(|meta| meta.version).unwrap_or_default(),
             entries,
         }
     }
@@ -622,11 +618,27 @@ impl RawBuild {
                 .into_iter()
                 .map(|mastery| SkillMastery { ids: mastery.ids })
                 .collect(),
-            summoner_spells: self.summoner_spells.into_iter().map(normalize_id_win_rate).collect(),
-            starter_items: self.starter_items.into_iter().map(normalize_id_win_rate).collect(),
-            core_items: self.core_items.into_iter().map(normalize_id_win_rate).collect(),
+            summoner_spells: self
+                .summoner_spells
+                .into_iter()
+                .map(normalize_id_win_rate)
+                .collect(),
+            starter_items: self
+                .starter_items
+                .into_iter()
+                .map(normalize_id_win_rate)
+                .collect(),
+            core_items: self
+                .core_items
+                .into_iter()
+                .map(normalize_id_win_rate)
+                .collect(),
             boots: self.boots.into_iter().map(normalize_id_win_rate).collect(),
-            last_items: self.last_items.into_iter().map(normalize_id_win_rate).collect(),
+            last_items: self
+                .last_items
+                .into_iter()
+                .map(normalize_id_win_rate)
+                .collect(),
         }
     }
 }
@@ -940,10 +952,7 @@ pub async fn fetch_champion_build(
         mode.as_str()
     );
     let raw: RawBuildPayload = get_typed(&url, &[("tier", tier)], &cache_key, proxy).await?;
-    let version = raw
-        .meta
-        .and_then(|meta| meta.version)
-        .unwrap_or_default();
+    let version = raw.meta.and_then(|meta| meta.version).unwrap_or_default();
     let build = raw
         .data
         .map(|data| data.normalize(version))
@@ -981,10 +990,7 @@ fn push_unique(ids: &[i32], entries: &mut Vec<ItemSetEntry>, seen: &mut Vec<Stri
         let key = id.to_string();
         if !seen.contains(&key) {
             seen.push(key.clone());
-            entries.push(ItemSetEntry {
-                id: key,
-                count: 1,
-            });
+            entries.push(ItemSetEntry { id: key, count: 1 });
         }
     }
 }
@@ -1001,10 +1007,7 @@ pub fn build_item_set_blocks(build: &ChampionBuild) -> Vec<ItemSetBlock> {
             let key = id.to_string();
             if !seen_starter.contains(&key) {
                 seen_starter.push(key.clone());
-                starter_items.push(ItemSetEntry {
-                    id: key,
-                    count: 1,
-                });
+                starter_items.push(ItemSetEntry { id: key, count: 1 });
             }
         }
     }
@@ -1025,10 +1028,7 @@ pub fn build_item_set_blocks(build: &ChampionBuild) -> Vec<ItemSetBlock> {
             let key = id.to_string();
             if !seen_core.contains(&key) && !seen_last.contains(&key) {
                 seen_last.push(key.clone());
-                last_items.push(ItemSetEntry {
-                    id: key,
-                    count: 1,
-                });
+                last_items.push(ItemSetEntry { id: key, count: 1 });
             }
         }
     }
@@ -1314,6 +1314,9 @@ mod tests {
             stat_mod_ids: vec![5008, 5008, 5002],
             ..Default::default()
         };
-        assert_eq!(rune_perk_ids(&preset), vec![8214, 8226, 8347, 5008, 5008, 5002]);
+        assert_eq!(
+            rune_perk_ids(&preset),
+            vec![8214, 8226, 8347, 5008, 5008, 5002]
+        );
     }
 }

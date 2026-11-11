@@ -3,11 +3,9 @@
 *.rs text eol=lf
 *.toml text eol=lf
 *.json text eol=lf
-*.vue text eol=lf
-*.ts text eol=lf
-*.js text eol=lf
-*.css text eol=lf
-*.html text eol=lf
+*.mjs text eol=lf
+*.sh text eol=lf
+.githooks/* text eol=lf
 *.md text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf

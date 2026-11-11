@@ -645,14 +645,11 @@ impl Render for BenchOverlayView {
                             .hover(|s| s.opacity(1.0).text_color(Theme::LOSS_BAR()))
                             .text_color(Theme::TEXT_MUTED())
                             .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED()))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                |_ev, window, _app| {
-                                    // [D07-a] 用户主动隐藏：置位后本轮选人不再被重复事件自动打开
-                                    mark_bench_user_hidden();
-                                    window.remove_window();
-                                },
-                            ),
+                            .on_mouse_down(MouseButton::Left, |_ev, window, _app| {
+                                // [D07-a] 用户主动隐藏：置位后本轮选人不再被重复事件自动打开
+                                mark_bench_user_hidden();
+                                window.remove_window();
+                            }),
                     ),
             )
             // 4. 底部迷你悬浮提示小药丸

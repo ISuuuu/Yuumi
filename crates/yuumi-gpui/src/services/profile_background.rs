@@ -38,8 +38,8 @@ struct LcuChampionDetails {
 pub async fn load_skins(client: &LcuClient, champion_id: i32) -> Result<Vec<SkinInfo>, String> {
     let path = format!("/lol-game-data/assets/v1/champions/{}.json", champion_id);
     let value = client.request("GET", &path, None, false).await?;
-    let details: LcuChampionDetails = serde_json::from_value(value)
-        .map_err(|e| format!("皮肤列表解析失败: {}", e))?;
+    let details: LcuChampionDetails =
+        serde_json::from_value(value).map_err(|e| format!("皮肤列表解析失败: {}", e))?;
     Ok(details
         .skins
         .into_iter()

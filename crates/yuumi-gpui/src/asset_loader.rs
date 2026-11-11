@@ -95,15 +95,11 @@ impl AssetLoader {
             "images/arena-victory.png" => {
                 Some(include_bytes!("../assets/images/arena-victory.png"))
             }
-            "images/arena-defeat.png" => {
-                Some(include_bytes!("../assets/images/arena-defeat.png"))
-            }
+            "images/arena-defeat.png" => Some(include_bytes!("../assets/images/arena-defeat.png")),
             "images/other-victory.png" => {
                 Some(include_bytes!("../assets/images/other-victory.png"))
             }
-            "images/other-defeat.png" => {
-                Some(include_bytes!("../assets/images/other-defeat.png"))
-            }
+            "images/other-defeat.png" => Some(include_bytes!("../assets/images/other-defeat.png")),
             "assets/ranked-icons/iron.png" => {
                 Some(include_bytes!("../assets/ranked-icons/iron.png"))
             }

@@ -569,7 +569,11 @@ impl MainWindow {
         log::info!("[MainWindow] 用户触发重新连接/修复流程");
         // 对照 Vue A03：未连接时手动重连只提示警告，不发起请求
         if !matches!(self.connection_status, ConnectionStatus::Connected { .. }) {
-            self.toast(ToastKind::Warning, crate::i18n::t("common.lcuNotConnected"), cx);
+            self.toast(
+                ToastKind::Warning,
+                crate::i18n::t("common.lcuNotConnected"),
+                cx,
+            );
             cx.notify();
             return;
         }
@@ -579,7 +583,11 @@ impl MainWindow {
             let Some(client) = live.get_client().await else {
                 let _ = entity.update(cx, |this, cx| {
                     // 对照 Vue A03
-                    this.toast(ToastKind::Warning, crate::i18n::t("common.lcuNotConnected"), cx);
+                    this.toast(
+                        ToastKind::Warning,
+                        crate::i18n::t("common.lcuNotConnected"),
+                        cx,
+                    );
                 });
                 return;
             };

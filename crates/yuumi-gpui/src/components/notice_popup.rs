@@ -55,9 +55,13 @@ pub fn notice_popup(
                     .text_color(Theme::LOSS_TEXT())
                     .child(crate::i18n::t("noticePage.errorText")),
             )
-            .child(action_button(crate::i18n::t("noticePage.retryBtn"), false, move |_ev, win, app| {
-                retry_cb(win, app);
-            }))
+            .child(action_button(
+                crate::i18n::t("noticePage.retryBtn"),
+                false,
+                move |_ev, win, app| {
+                    retry_cb(win, app);
+                },
+            ))
             .into_any_element()
     } else {
         let display_content = if content.is_empty() {

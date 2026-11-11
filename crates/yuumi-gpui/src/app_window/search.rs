@@ -82,7 +82,11 @@ impl MainWindow {
             }
             let _ = entity.update(cx, |this, cx| {
                 if this.search_view.rank_request_id == req_id {
-                    results.extend(fetched.iter().map(|(puuid, e)| (puuid.clone(), rank_badge_info(e))));
+                    results.extend(
+                        fetched
+                            .iter()
+                            .map(|(puuid, e)| (puuid.clone(), rank_badge_info(e))),
+                    );
                     this.search_view.participant_ranks = results;
                     cx.notify();
                 }
@@ -140,7 +144,8 @@ impl MainWindow {
         let (items, _, _) = self.search_view.paged_filtered_matches();
         let ids: Vec<u64> = items.iter().map(|item| item.display.game_id).collect();
         log::info!("[Upload] 查询触发批量上传: {} 场对局", ids.len());
-        self.cloud_tasks.upload_matches(owner.puuid.clone(), ids, true);
+        self.cloud_tasks
+            .upload_matches(owner.puuid.clone(), ids, true);
     }
     /// 控制战绩查询页队列下拉的开合
     pub(super) fn set_search_queue_menu(&mut self, open: bool, cx: &mut Context<Self>) {
@@ -265,7 +270,8 @@ impl MainWindow {
                                 {
                                     let _ = entity.update(cx, |this, cx| {
                                         if this.search_view.search_generation == current_gen {
-                                            this.search_view.insert_game_detail(gid, detail.clone());
+                                            this.search_view
+                                                .insert_game_detail(gid, detail.clone());
                                             this.load_detail_ranks(&detail, cx);
                                             cx.notify();
                                         }

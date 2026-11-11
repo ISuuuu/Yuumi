@@ -154,8 +154,11 @@ fn slot_rows(
         .map(|(_, slot)| slot)
         .collect();
 
-    div().flex().flex_col().gap(px(10.0)).children(
-        slots.into_iter().enumerate().map(|(offset, slot)| {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(10.0))
+        .children(slots.into_iter().enumerate().map(|(offset, slot)| {
             let is_keystone = keystone_first && offset == 0;
             let size = if is_keystone { 38.0 } else { 28.0 };
             div()
@@ -172,8 +175,7 @@ fn slot_rows(
                         assets,
                     )
                 }))
-        }),
-    )
+        }))
 }
 
 /// 符文区块；数据不足（缺少方案或主副系）时整块不渲染
@@ -260,35 +262,31 @@ pub fn runes_section(
                 .flex_col()
                 .items_center()
                 .child(div().h(px(36.0)).mb(px(12.0)))
-                .child(
-                    div().flex().flex_col().gap(px(10.0)).children(
-                        primary
-                            .slots
-                            .iter()
-                            .skip(4)
-                            .take(3)
-                            .map(|slot| {
-                                div().flex().items_center().justify_center().gap(px(8.0)).children(
-                                    slot.perks.iter().map(|perk_id| {
-                                        shard_cell(
-                                            *perk_id,
-                                            active.stat_mod_ids.contains(perk_id),
-                                            catalog,
-                                            assets,
-                                        )
-                                    }),
+                .child(div().flex().flex_col().gap(px(10.0)).children(
+                    primary.slots.iter().skip(4).take(3).map(|slot| {
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .gap(px(8.0))
+                            .children(slot.perks.iter().map(|perk_id| {
+                                shard_cell(
+                                    *perk_id,
+                                    active.stat_mod_ids.contains(perk_id),
+                                    catalog,
+                                    assets,
                                 )
-                            }),
-                    ),
-                ),
+                            }))
+                    }),
+                )),
         );
 
-    let presets = div().flex().flex_col().gap(px(6.0)).children(
-        runes
-            .iter()
-            .take(3)
-            .enumerate()
-            .map(|(index, preset)| {
+    let presets =
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .children(runes.iter().take(3).enumerate().map(|(index, preset)| {
                 let is_active = index == rune_index;
                 let select = on_select.clone();
                 div()
@@ -348,8 +346,7 @@ pub fn runes_section(
                             .text_color(Theme::TEXT_SECONDARY())
                             .child(pct(preset.pick_rate)),
                     )
-            }),
-    );
+            }));
 
     let apply_button = div()
         .id("opgg-apply-rune")
@@ -365,7 +362,9 @@ pub fn runes_section(
         .text_color(rgb(0xffffff))
         .cursor_pointer()
         .hover(|style| style.bg(Palette::tab_active_hover()))
-        .on_mouse_down(MouseButton::Left, move |_ev, window, app| on_apply(window, app))
+        .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+            on_apply(window, app)
+        })
         .child("设为当前符文页");
 
     Some(

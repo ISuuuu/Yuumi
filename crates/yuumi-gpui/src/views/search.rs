@@ -642,25 +642,28 @@ impl SearchView {
                             .child({
                                 let on_submit = on_search.clone();
                                 let on_change = on_input_change.clone();
-                                div().id("search-input-click-area").on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    if !is_disabled {
-                                        on_open_history(win, app);
-                                    }
-                                }).child(search_input_field(
-                                    "search-bar-input",
-                                    &query_text,
-                                    "输入召唤师名称进行搜索...",
-                                    px(580.0),
-                                    &self.focus_handle,
-                                    is_search_focused,
-                                    is_disabled,
-                                    self.is_searching,
-                                    move |val, win, app| on_change(val, win, app),
-                                    move |win, app| {
-                                        on_input_change(String::new(), win, app);
-                                    },
-                                    move |val, win, app| on_submit(val, win, app),
-                                ))
+                                div()
+                                    .id("search-input-click-area")
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        if !is_disabled {
+                                            on_open_history(win, app);
+                                        }
+                                    })
+                                    .child(search_input_field(
+                                        "search-bar-input",
+                                        &query_text,
+                                        "输入召唤师名称进行搜索...",
+                                        px(580.0),
+                                        &self.focus_handle,
+                                        is_search_focused,
+                                        is_disabled,
+                                        self.is_searching,
+                                        move |val, win, app| on_change(val, win, app),
+                                        move |win, app| {
+                                            on_input_change(String::new(), win, app);
+                                        },
+                                        move |val, win, app| on_submit(val, win, app),
+                                    ))
                             })
                             // 搜索历史下拉浮层 (5.2: show_history 唯一开关，自然换行，顶接缝底圆角，260px上限)
                             .when(is_history_open, |this| {
@@ -730,7 +733,9 @@ impl SearchView {
                                                         .max_w(px(260.0))
                                                         .hover(|s| {
                                                             s.bg(Theme::ACCENT_LIGHT())
-                                                                .border_color(Theme::ACCENT_PRIMARY())
+                                                                .border_color(
+                                                                    Theme::ACCENT_PRIMARY(),
+                                                                )
                                                         })
                                                         .on_mouse_down(
                                                             MouseButton::Left,
@@ -759,9 +764,10 @@ impl SearchView {
                                                                 .text_size(px(10.0))
                                                                 .text_color(Theme::TEXT_MUTED())
                                                                 .hover(|s| {
-                                                                    s.bg(Theme::LOSS_BG()).text_color(
-                                                                        Theme::LOSS_TEXT(),
-                                                                    )
+                                                                    s.bg(Theme::LOSS_BG())
+                                                                        .text_color(
+                                                                            Theme::LOSS_TEXT(),
+                                                                        )
                                                                 })
                                                                 .on_mouse_down(
                                                                     MouseButton::Left,
@@ -1394,27 +1400,33 @@ impl SearchView {
                                 "当前队列暂无对局记录".to_string()
                             }),
                     )
-                    .when(self.detail_error.is_some() && selected_game_id.is_some(), |this| {
-                        let gid = selected_game_id.unwrap();
-                        this.child(
-                            div()
-                                .px_3()
-                                .py_1p5()
-                                .rounded(px(6.0))
-                                .bg(Theme::CARD_BG())
-                                .border_1()
-                                .border_color(Theme::CARD_BORDER())
-                                .hover(|s| s.bg(Theme::CARD_BG_HOVER()).border_color(Theme::ACCENT_PRIMARY()))
-                                .text_xs()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(Theme::TEXT_PRIMARY())
-                                .cursor_pointer()
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    retry_cb(gid, win, app);
-                                })
-                                .child("重试载入详情"),
-                        )
-                    })
+                    .when(
+                        self.detail_error.is_some() && selected_game_id.is_some(),
+                        |this| {
+                            let gid = selected_game_id.unwrap();
+                            this.child(
+                                div()
+                                    .px_3()
+                                    .py_1p5()
+                                    .rounded(px(6.0))
+                                    .bg(Theme::CARD_BG())
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER())
+                                    .hover(|s| {
+                                        s.bg(Theme::CARD_BG_HOVER())
+                                            .border_color(Theme::ACCENT_PRIMARY())
+                                    })
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(Theme::TEXT_PRIMARY())
+                                    .cursor_pointer()
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        retry_cb(gid, win, app);
+                                    })
+                                    .child("重试载入详情"),
+                            )
+                        },
+                    )
                     .into_any_element()
             }
         })
@@ -1437,7 +1449,11 @@ impl SearchView {
             .w_full()
             .rounded(px(8.0))
             .p_3()
-            .bg(if win { Theme::WIN_BG() } else { Theme::LOSS_BG() })
+            .bg(if win {
+                Theme::WIN_BG()
+            } else {
+                Theme::LOSS_BG()
+            })
             .border_1()
             .border_color(if win {
                 Theme::WIN_BORDER()
@@ -1555,7 +1571,9 @@ impl SearchView {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(match replay_state {
                                         crate::match_model::ReplayState::Watch => Theme::WIN_TEXT(),
-                                        crate::match_model::ReplayState::Error => Theme::LOSS_TEXT(),
+                                        crate::match_model::ReplayState::Error => {
+                                            Theme::LOSS_TEXT()
+                                        }
                                         crate::match_model::ReplayState::Downloading
                                         | crate::match_model::ReplayState::Checking => {
                                             Theme::ACCENT_PRIMARY()
@@ -1632,7 +1650,11 @@ impl SearchView {
                     .rounded_t(px(7.0))
                     .px(px(16.0))
                     .py(px(8.0))
-                    .bg(if win { Theme::WIN_BG() } else { Theme::LOSS_BG() })
+                    .bg(if win {
+                        Theme::WIN_BG()
+                    } else {
+                        Theme::LOSS_BG()
+                    })
                     .border_b_1()
                     .border_color(if win {
                         Theme::WIN_BORDER()
@@ -1945,10 +1967,8 @@ impl SearchView {
                                         .gap(px(2.0))
                                         .when(rank_icon_path.is_some(), |this| {
                                             this.child(
-                                                LcuImage::new(
-                                                    rank_icon_path.unwrap().to_string(),
-                                                )
-                                                .size(px(13.0)),
+                                                LcuImage::new(rank_icon_path.unwrap().to_string())
+                                                    .size(px(13.0)),
                                             )
                                         })
                                         .child(

@@ -58,10 +58,7 @@ fn group_column(assets: Option<&GameDataAssets>, groups: &[IdWinRate]) -> impl I
 }
 
 fn horizontal_divider() -> impl IntoElement {
-    div()
-        .h(px(1.0))
-        .my(px(6.0))
-        .bg(Theme::CARD_BORDER())
+    div().h(px(1.0)).my(px(6.0)).bg(Theme::CARD_BORDER())
 }
 
 /// 装备区块；四类装备数据都为空时不渲染
@@ -72,7 +69,10 @@ pub fn items_section(
     last_items: &[IdWinRate],
     assets: Option<&GameDataAssets>,
 ) -> Option<AnyElement> {
-    if starter_items.is_empty() && core_items.is_empty() && boots.is_empty() && last_items.is_empty()
+    if starter_items.is_empty()
+        && core_items.is_empty()
+        && boots.is_empty()
+        && last_items.is_empty()
     {
         return None;
     }
@@ -81,23 +81,15 @@ pub fn items_section(
         div()
             .flex()
             .child(group_column(assets, starter_items))
-            .child(
-                div()
-                    .w(px(1.0))
-                    .mx(px(8.0))
-                    .bg(Theme::CARD_BORDER()),
-            )
+            .child(div().w(px(1.0)).mx(px(8.0)).bg(Theme::CARD_BORDER()))
             .child(group_column(assets, boots))
     });
 
     let core_rows = core_items.iter().take(5).map(|entry| {
-        let chain = div()
-            .flex()
-            .items_center()
-            .gap(px(3.0))
-            .children(entry.ids.iter().enumerate().flat_map(|(index, item_id)| {
-                let mut children: Vec<AnyElement> = vec![item_icon_element(assets, *item_id)
-                    .into_any_element()];
+        let chain = div().flex().items_center().gap(px(3.0)).children(
+            entry.ids.iter().enumerate().flat_map(|(index, item_id)| {
+                let mut children: Vec<AnyElement> =
+                    vec![item_icon_element(assets, *item_id).into_any_element()];
                 if index + 1 < entry.ids.len() {
                     children.push(
                         div()
@@ -109,7 +101,8 @@ pub fn items_section(
                     );
                 }
                 children
-            }));
+            }),
+        );
 
         div()
             .flex()

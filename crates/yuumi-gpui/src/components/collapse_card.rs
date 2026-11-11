@@ -167,7 +167,12 @@ pub fn setting_row(
                         .child(title),
                 )
                 .when_some(desc, |this, d| {
-                    this.child(div().text_size(px(11.5)).text_color(Theme::TEXT_MUTED()).child(d))
+                    this.child(
+                        div()
+                            .text_size(px(11.5))
+                            .text_color(Theme::TEXT_MUTED())
+                            .child(d),
+                    )
                 }),
         )
         .child(control)
@@ -190,7 +195,8 @@ pub fn settings_card_item(
         // Vue .setting-row 的 --settings-row-bg 叠在折叠卡展开区之上
         .bg(Theme::SETTINGS_ROW_BG())
         .when(border_bottom, |s| {
-            s.border_b_1().border_color(Theme::CARD_BORDER().opacity(0.5))
+            s.border_b_1()
+                .border_color(Theme::CARD_BORDER().opacity(0.5))
         })
         .flex()
         .items_center()

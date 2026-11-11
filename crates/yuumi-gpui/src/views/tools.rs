@@ -202,7 +202,7 @@ pub struct ToolsView {
     pub badges_snapshot_title: String, // [D09/D11]
     /// 清除勋章 / 清除边框的二次确认框 // [D09/D11]
     pub confirm_clear_badges: bool, // [D09/D11]
-    pub confirm_clear_border: bool, // [D09/D11]
+    pub confirm_clear_border: bool,    // [D09/D11]
 
     // 临时操作反馈文本
     pub status_feedback: Option<(String, bool)>,
@@ -277,26 +277,26 @@ impl ToolsView {
 
             show_badges_modal: false,
             // 不再使用 b1/b2/t1 模拟数据：打开弹层时由真实偏好回读覆盖 // [D09/D11]
-            selected_badges: Vec::new(), // [D09/D11]
+            selected_badges: Vec::new(),   // [D09/D11]
             selected_title: String::new(), // [D09/D11]
 
-            bg_skins: Vec::new(), // [D09/D11]
-            bg_preview_index: 0, // [D09/D11]
-            bg_loading: false, // [D09/D11]
-            bg_error: None, // [D09/D11]
-            bg_current_skin_id: None, // [D09/D11]
-            badges_snapshot_badges: Vec::new(), // [D09/D11]
+            bg_skins: Vec::new(),                 // [D09/D11]
+            bg_preview_index: 0,                  // [D09/D11]
+            bg_loading: false,                    // [D09/D11]
+            bg_error: None,                       // [D09/D11]
+            bg_current_skin_id: None,             // [D09/D11]
+            badges_snapshot_badges: Vec::new(),   // [D09/D11]
             badges_snapshot_title: String::new(), // [D09/D11]
-            confirm_clear_badges: false, // [D09/D11]
-            confirm_clear_border: false, // [D09/D11]
+            confirm_clear_badges: false,          // [D09/D11]
+            confirm_clear_border: false,          // [D09/D11]
 
             status_feedback: None,
 
             hover_picker_search_live: std::rc::Rc::new(std::cell::RefCell::new(String::new())), // [D04-D07]
             ban_picker_search_live: std::rc::Rc::new(std::cell::RefCell::new(String::new())), // [D04-D07]
             hover_picker_focus: std::rc::Rc::new(std::cell::OnceCell::new()), // [D04-D07]
-            ban_picker_focus: std::rc::Rc::new(std::cell::OnceCell::new()), // [D04-D07]
-            picker_backup: None, // [D04-D07]
+            ban_picker_focus: std::rc::Rc::new(std::cell::OnceCell::new()),   // [D04-D07]
+            picker_backup: None,                                              // [D04-D07]
         }
     }
 
@@ -486,10 +486,18 @@ impl ToolsView {
                         delay > 0,
                         delay < 11,
                         move |_ev, win, app| {
-                            act_dec(ToolsAction::SetAutoAcceptDelay(delay.saturating_sub(1)), win, app)
+                            act_dec(
+                                ToolsAction::SetAutoAcceptDelay(delay.saturating_sub(1)),
+                                win,
+                                app,
+                            )
                         },
                         move |_ev, win, app| {
-                            act_inc(ToolsAction::SetAutoAcceptDelay((delay + 1).min(11)), win, app)
+                            act_inc(
+                                ToolsAction::SetAutoAcceptDelay((delay + 1).min(11)),
+                                win,
+                                app,
+                            )
                         },
                     ),
                 ))
@@ -595,7 +603,14 @@ impl ToolsView {
             Some("icons/gamepad.svg"),
             "自动游戏流程与大厅",
             "自动接受组队邀请、游戏结算自动点赞、再来一局及 ARAM 阵营预测",
-            Some(if any_enabled { "已配置" } else { "未启用" }.to_string()),
+            Some(
+                if any_enabled {
+                    "已配置"
+                } else {
+                    "未启用"
+                }
+                .to_string(),
+            ),
             move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("autogameflow"), win, app),
             div()
                 .flex()
@@ -665,7 +680,6 @@ impl ToolsView {
                 )),
         )
     }
-
 
     // 行 9: 大乱斗板凳席悬浮窗 (直显行 - T-V02)
     fn render_bench_overlay_row<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
@@ -744,7 +758,9 @@ impl ToolsView {
             } else {
                 "未启用".to_string()
             }),
-            move |_ev, win, app| act_toggle(ToolsAction::ToggleCollapse("autocreatelobby"), win, app),
+            move |_ev, win, app| {
+                act_toggle(ToolsAction::ToggleCollapse("autocreatelobby"), win, app)
+            },
             div()
                 .flex()
                 .flex_col()
@@ -770,7 +786,9 @@ impl ToolsView {
                         self.open_lobby_mode_dropdown,
                         !enabled,
                         GAME_MODE_OPTIONS.to_vec(),
-                        move |win, app| act_toggle_dd(ToolsAction::ToggleDropdownMenu("lobby_mode"), win, app),
+                        move |win, app| {
+                            act_toggle_dd(ToolsAction::ToggleDropdownMenu("lobby_mode"), win, app)
+                        },
                         move |val, win, app| {
                             if let Ok(mid) = val.parse::<u32>() {
                                 act_select_mode(ToolsAction::SetDefaultGameMode(mid), win, app);
@@ -780,5 +798,4 @@ impl ToolsView {
                 )),
         )
     }
-
 }

@@ -16,10 +16,10 @@ use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
 use crate::components::offline_state::render_lcu_offline_state;
 use crate::theme::Theme;
+use crate::views::saved_players::tag_badge_colors;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::collections::HashMap;
-use crate::views::saved_players::tag_badge_colors;
 use yuumi_core::gameflow::team_builder::MapSide;
 use yuumi_core::parsers::game_info::{GameInfoPlayer, LiveGameInfo};
 use yuumi_core::parsers::match_parser::MatchDisplay;
@@ -106,9 +106,17 @@ impl GameInfoView {
                 return Self::render_offline_state(on_load_demo);
             }
             if is_loading {
-                return Self::render_tip_container("⏳", "正在读取对局玩家信息…", Some(on_load_demo));
+                return Self::render_tip_container(
+                    "⏳",
+                    "正在读取对局玩家信息…",
+                    Some(on_load_demo),
+                );
             }
-            return Self::render_tip_container("⏳", "对局暂未开始，等待对局中…", Some(on_load_demo));
+            return Self::render_tip_container(
+                "⏳",
+                "对局暂未开始，等待对局中…",
+                Some(on_load_demo),
+            );
         }
 
         if let Some(info) = data {
@@ -116,12 +124,20 @@ impl GameInfoView {
                 || info.queue_name.contains("云顶")
                 || info.queue_name.contains("TFT");
             if is_tft {
-                return Self::render_tip_container("♟️", "云顶之弈对局中，对局信息页面不显示数据", None as Option<F5>);
+                return Self::render_tip_container(
+                    "♟️",
+                    "云顶之弈对局中，对局信息页面不显示数据",
+                    None as Option<F5>,
+                );
             }
         }
 
         let Some(info) = data else {
-            return Self::render_tip_container("⏳", "对局暂未开始，等待对局中…", Some(on_load_demo));
+            return Self::render_tip_container(
+                "⏳",
+                "对局暂未开始，等待对局中…",
+                Some(on_load_demo),
+            );
         };
 
         // 对局队伍划分
@@ -555,8 +571,7 @@ impl GameInfoView {
                                     .border_1()
                                     .border_color(Theme::CARD_BORDER())
                                     .hover(|this| {
-                                        this.bg(Theme::HOVER_BG())
-                                            .border_color(Theme::TEXT_MUTED())
+                                        this.bg(Theme::HOVER_BG()).border_color(Theme::TEXT_MUTED())
                                     })
                                     .cursor_pointer()
                                     .on_mouse_down(MouseButton::Left, on_exit_demo.clone())
@@ -938,7 +953,11 @@ impl GameInfoView {
                                                         if is_local_player {
                                                             on_career(None, win, app);
                                                         } else {
-                                                            on_career(Some(target_puuid.clone()), win, app);
+                                                            on_career(
+                                                                Some(target_puuid.clone()),
+                                                                win,
+                                                                app,
+                                                            );
                                                         }
                                                     },
                                                 );
@@ -993,19 +1012,26 @@ impl GameInfoView {
                                         )
                                     })
                                     // 相遇次数徽标（无自定义 tag 且同局相遇 >= 2 次）
-                                    .when(player.saved_tag.is_none() && player.saved_encounter_count >= 2, |el| {
-                                        el.child(
-                                            div()
-                                                .px(px(4.0))
-                                                .py(px(1.0))
-                                                .rounded(px(3.0))
-                                                .bg(Theme::CARD_BORDER())
-                                                .text_size(px(9.0))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(Theme::TEXT_MUTED())
-                                                .child(format!("相遇{}次", player.saved_encounter_count)),
-                                        )
-                                    })
+                                    .when(
+                                        player.saved_tag.is_none()
+                                            && player.saved_encounter_count >= 2,
+                                        |el| {
+                                            el.child(
+                                                div()
+                                                    .px(px(4.0))
+                                                    .py(px(1.0))
+                                                    .rounded(px(3.0))
+                                                    .bg(Theme::CARD_BORDER())
+                                                    .text_size(px(9.0))
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(Theme::TEXT_MUTED())
+                                                    .child(format!(
+                                                        "相遇{}次",
+                                                        player.saved_encounter_count
+                                                    )),
+                                            )
+                                        },
+                                    )
                                     // 连胜 / 连败微徽标 (>=2 场显示, G06)
                                     .when_some(player.streak_text.clone(), |el, streak| {
                                         el.child(
@@ -1483,14 +1509,21 @@ impl GameInfoView {
                                         name_el = name_el
                                             .cursor_pointer()
                                             .hover(|s| s.text_color(Theme::ACCENT_PRIMARY()))
-                                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                on_search(
-                                                    p_name.clone(),
-                                                    if p_tag.is_empty() { None } else { Some(p_tag.clone()) },
-                                                    win,
-                                                    app,
-                                                );
-                                            });
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                move |_ev, win, app| {
+                                                    on_search(
+                                                        p_name.clone(),
+                                                        if p_tag.is_empty() {
+                                                            None
+                                                        } else {
+                                                            Some(p_tag.clone())
+                                                        },
+                                                        win,
+                                                        app,
+                                                    );
+                                                },
+                                            );
                                     }
                                     name_el.child(display_name)
                                 })
@@ -1538,19 +1571,25 @@ impl GameInfoView {
                                             .child(tag),
                                     )
                                 })
-                                .when(player.saved_tag.is_none() && player.saved_encounter_count >= 2, |el| {
-                                    el.child(
-                                        div()
-                                            .px(px(3.0))
-                                            .py(px(0.5))
-                                            .rounded(px(2.0))
-                                            .bg(Theme::CARD_BORDER())
-                                            .text_size(px(8.5))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(Theme::TEXT_MUTED())
-                                            .child(format!("相遇{}次", player.saved_encounter_count)),
-                                    )
-                                }),
+                                .when(
+                                    player.saved_tag.is_none() && player.saved_encounter_count >= 2,
+                                    |el| {
+                                        el.child(
+                                            div()
+                                                .px(px(3.0))
+                                                .py(px(0.5))
+                                                .rounded(px(2.0))
+                                                .bg(Theme::CARD_BORDER())
+                                                .text_size(px(8.5))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(Theme::TEXT_MUTED())
+                                                .child(format!(
+                                                    "相遇{}次",
+                                                    player.saved_encounter_count
+                                                )),
+                                        )
+                                    },
+                                ),
                         )
                         .child(
                             div()
@@ -2204,7 +2243,11 @@ fn kda_color(kda: f64) -> Hsla {
 /// KDA 倍率与样式
 fn format_kda_ratio(kills: i32, deaths: i32, assists: i32) -> (String, Hsla, Hsla) {
     if deaths == 0 {
-        ("Perf".to_string(), Theme::GOLD(), Theme::GOLD().opacity(0.12))
+        (
+            "Perf".to_string(),
+            Theme::GOLD(),
+            Theme::GOLD().opacity(0.12),
+        )
     } else {
         let r = (kills + assists) as f32 / deaths as f32;
         let text = if r >= 10.0 {

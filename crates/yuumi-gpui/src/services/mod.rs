@@ -1,8 +1,8 @@
 //! 应用后台服务模块
 
 pub mod agent_runtime;
-pub mod champion_alias;
 pub mod challenges;
+pub mod champion_alias;
 pub mod cloud_tasks;
 pub mod friend_cleaner;
 pub mod live_lcu;

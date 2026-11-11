@@ -296,16 +296,20 @@ impl LiveLcuService {
                         *self.agent_runtime.write().await = Some(runtime);
 
                         // 获取初始游戏阶段并分发给 Agent、Lifecycle 与 UI
-                        let initial_phase = match client.get("/lol-gameflow/v1/gameflow-phase").await {
-                            Ok(serde_json::Value::String(p)) => p,
-                            _ => "None".to_string(),
-                        };
+                        let initial_phase =
+                            match client.get("/lol-gameflow/v1/gameflow-phase").await {
+                                Ok(serde_json::Value::String(p)) => p,
+                                _ => "None".to_string(),
+                            };
                         log::info!("[LiveLcu] 获取到初始游戏阶段: {}", initial_phase);
                         *self.current_phase.write().await = initial_phase.clone();
                         let initial_game_phase = GamePhase::from(initial_phase.as_str());
                         let _ = self.lifecycle.on_phase_changed(&initial_phase).await;
-                        dispatcher.dispatch_match(MatchAgentEvent::PhaseChanged(initial_phase.clone()));
-                        let _ = self.event_tx.send(LiveLcuEvent::GamePhaseChanged(initial_game_phase));
+                        dispatcher
+                            .dispatch_match(MatchAgentEvent::PhaseChanged(initial_phase.clone()));
+                        let _ = self
+                            .event_tx
+                            .send(LiveLcuEvent::GamePhaseChanged(initial_game_phase));
 
                         // 处于选人阶段时，主动拉取一次会话以激活 BP Agent 与 UI
                         if initial_phase == "ChampSelect" {
@@ -315,11 +319,13 @@ impl LiveLcuService {
                                 >(val)
                                 {
                                     dispatcher.dispatch_bp(
-                                        super::agent_runtime::BpAgentEvent::ChampSelect(
-                                            Box::new(session.clone()),
-                                        ),
+                                        super::agent_runtime::BpAgentEvent::ChampSelect(Box::new(
+                                            session.clone(),
+                                        )),
                                     );
-                                    let _ = self.event_tx.send(LiveLcuEvent::ChampSelectUpdated(session));
+                                    let _ = self
+                                        .event_tx
+                                        .send(LiveLcuEvent::ChampSelectUpdated(session));
                                 }
                             }
                         } else if initial_phase == "ReadyCheck" {
@@ -336,7 +342,8 @@ impl LiveLcuService {
                         }
 
                         // 重连后若正处于对局，补拉当前 10 人对局信息
-                        self.schedule_game_info_refresh(initial_phase, Duration::ZERO).await;
+                        self.schedule_game_info_refresh(initial_phase, Duration::ZERO)
+                            .await;
 
                         // 建立 WebSocket 连接
                         let ws_handle = start_ws(info.port, info.token.clone());
@@ -551,7 +558,9 @@ impl LiveLcuService {
                                     summoner: Box::new(Some(s)),
                                 };
                                 let _ = this.status.send(new_status.clone());
-                                let _ = this.event_tx.send(LiveLcuEvent::ConnectionChanged(new_status));
+                                let _ = this
+                                    .event_tx
+                                    .send(LiveLcuEvent::ConnectionChanged(new_status));
                             }
                             this.refresh_career_data().await;
                         }
@@ -956,13 +965,17 @@ impl LiveLcuService {
         if src.phase != "ChampSelect" && src.detected_side.is_none() {
             let matched_direct = src.blue.iter().chain(src.red.iter()).any(|p| {
                 p.resolved_puuid() == Some(summoner.puuid.as_str())
-                    || (self_summoner_id.is_some()
-                        && p.resolved_summoner_id() == self_summoner_id)
+                    || (self_summoner_id.is_some() && p.resolved_summoner_id() == self_summoner_id)
             });
             if !matched_direct {
                 let fallback_side = match detect_liveclient_map_side().await {
                     Some(side) => Some(side),
-                    None => self.game_info.read().await.as_ref().and_then(|g| g.user_side),
+                    None => self
+                        .game_info
+                        .read()
+                        .await
+                        .as_ref()
+                        .and_then(|g| g.user_side),
                 };
                 if let Some(side) = fallback_side {
                     src.detected_side = Some(side);

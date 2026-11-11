@@ -982,12 +982,9 @@ mod tests {
     ];
 
     const SYNTHETIC_ARAM: &str = include_str!("../../testdata/match/synthetic/aram-450.json");
-    const SYNTHETIC_ARENA: &str =
-        include_str!("../../testdata/match/synthetic/arena-1700.json");
-    const SYNTHETIC_RANKED: &str =
-        include_str!("../../testdata/match/synthetic/ranked-420.json");
-    const SYNTHETIC_MINIMAL: &str =
-        include_str!("../../testdata/match/synthetic/minimal-420.json");
+    const SYNTHETIC_ARENA: &str = include_str!("../../testdata/match/synthetic/arena-1700.json");
+    const SYNTHETIC_RANKED: &str = include_str!("../../testdata/match/synthetic/ranked-420.json");
+    const SYNTHETIC_MINIMAL: &str = include_str!("../../testdata/match/synthetic/minimal-420.json");
 
     fn load_fixture(raw: &str) -> LcuMatchGame {
         let response: LcuMatchHistoryResponse =

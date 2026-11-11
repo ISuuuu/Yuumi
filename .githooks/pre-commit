@@ -1,0 +1,36 @@
+#!/usr/bin/env sh
+set -e
+
+staged_files=$(git diff --cached --name-only --diff-filter=ACMR || true)
+[ -z "$staged_files" ] && exit 0
+
+staged_rs=$(printf '%s\n' "$staged_files" | grep '\.rs$' || true)
+needs_clippy=$(printf '%s\n' "$staged_files" | grep -E '(\.rs$|Cargo\.toml$|Cargo\.lock$)' || true)
+
+if [ -n "$staged_rs" ]; then
+    echo "[pre-commit] 正在格式化暂存的 Rust 文件..."
+    printf '%s\n' "$staged_rs" | while IFS= read -r file; do
+        [ -f "$file" ] || continue
+        if git diff --quiet -- "$file"; then
+            tmp=$(mktemp)
+            if rustfmt --edition 2021 --emit stdout < "$file" > "$tmp"; then
+                if ! cmp -s "$file" "$tmp"; then
+                    mv "$tmp" "$file"
+                    git add -- "$file"
+                else
+                    rm -f "$tmp"
+                fi
+            else
+                rm -f "$tmp"
+                exit 1
+            fi
+        else
+            echo "[pre-commit] 跳过部分暂存文件（工作区仍有未暂存改动）: $file"
+        fi
+    done
+fi
+
+if [ -n "$needs_clippy" ]; then
+    echo "[pre-commit] 正在运行 cargo clippy --workspace --all-targets..."
+    cargo clippy --workspace --all-targets
+fi

@@ -121,7 +121,12 @@ pub async fn read_preferences(client: &LcuClient) -> Result<(String, Vec<String>
 pub async fn load(client: &LcuClient) -> Result<ChallengesData, String> {
     // 1. 已拥有挑战：兼容数组与「以 id 为键」的对象两种载荷（对齐 Vue Object.values 兜底）
     let raw = client
-        .request("GET", "/lol-challenges/v1/challenges/local-player", None, false)
+        .request(
+            "GET",
+            "/lol-challenges/v1/challenges/local-player",
+            None,
+            false,
+        )
         .await?;
     let entries: Vec<Value> = match raw {
         Value::Array(arr) => arr,
@@ -289,11 +294,7 @@ pub async fn clear_badges(client: &LcuClient) -> Result<(), String> {
                     as_string(t)
                 }
             }) {
-                let clean = if cur == "-1" || cur == "0" {
-                    ""
-                } else {
-                    &cur
-                };
+                let clean = if cur == "-1" || cur == "0" { "" } else { &cur };
                 if !clean.is_empty() {
                     body["title"] = Value::String(clean.to_string());
                 }
@@ -319,12 +320,7 @@ pub async fn clear_badges(client: &LcuClient) -> Result<(), String> {
 pub async fn clear_border(client: &LcuClient) -> Result<(), String> {
     let body = serde_json::json!({ "preferredBorderType": "NONE" });
     client
-        .request(
-            "PUT",
-            "/lol-regalia/v2/current-regalia",
-            Some(body),
-            false,
-        )
+        .request("PUT", "/lol-regalia/v2/current-regalia", Some(body), false)
         .await?;
     Ok(())
 }

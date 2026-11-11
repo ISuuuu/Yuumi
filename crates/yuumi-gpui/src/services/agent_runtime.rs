@@ -21,8 +21,8 @@ use yuumi_core::agents::{
     auto_bp::{handle_champ_select_session, ChampSelectSession},
     auto_match::{
         handle_honor_ballot, handle_invitations, handle_phase_change, handle_ready_check,
-        handle_reset_lobby_state, handle_tag_reminders, AutoMatchState, HonorBallot, ReadyCheckData,
-        ReceivedInvitation,
+        handle_reset_lobby_state, handle_tag_reminders, AutoMatchState, HonorBallot,
+        ReadyCheckData, ReceivedInvitation,
     },
     config::{AutoBpConfig, AutoMatchConfig},
     lifecycle::LifecycleManager,
@@ -199,28 +199,14 @@ async fn run_match_worker(
             MatchAgentEvent::PhaseChanged(phase) => {
                 run_guarded(
                     "gameflow-phase",
-                    handle_phase_change(
-                        &client,
-                        &phase,
-                        &cfg,
-                        &supervisor,
-                        &lifecycle,
-                        &mut state,
-                    ),
+                    handle_phase_change(&client, &phase, &cfg, &supervisor, &lifecycle, &mut state),
                 )
                 .await;
             }
             MatchAgentEvent::ReadyCheck(ready) => {
                 run_guarded(
                     "ready-check",
-                    handle_ready_check(
-                        &client,
-                        &ready,
-                        &cfg,
-                        &supervisor,
-                        &lifecycle,
-                        &mut state,
-                    ),
+                    handle_ready_check(&client, &ready, &cfg, &supervisor, &lifecycle, &mut state),
                 )
                 .await;
             }

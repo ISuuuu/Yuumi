@@ -1135,7 +1135,8 @@ impl CareerView {
                             })
                             .when(!is_active, |this| {
                                 this.hover(|s| {
-                                    s.bg(Theme::CARD_BG_HOVER()).text_color(Theme::ACCENT_PRIMARY())
+                                    s.bg(Theme::CARD_BG_HOVER())
+                                        .text_color(Theme::ACCENT_PRIMARY())
                                 })
                             })
                             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
@@ -1597,7 +1598,10 @@ impl CareerView {
                             .border_1()
                             .border_color(Theme::CARD_BORDER())
                             .bg(Theme::CARD_BG())
-                            .hover(|s| s.bg(Theme::HOVER_BG()).border_color(Theme::ACCENT_PRIMARY()))
+                            .hover(|s| {
+                                s.bg(Theme::HOVER_BG())
+                                    .border_color(Theme::ACCENT_PRIMARY())
+                            })
                             .cursor_pointer()
                             .flex()
                             .items_center()
@@ -1699,9 +1703,19 @@ impl CareerView {
                 "重开",
             )
         } else if m.display.win {
-            (Theme::WIN_BG(), Theme::WIN_BORDER(), Theme::WIN_TEXT(), "胜利")
+            (
+                Theme::WIN_BG(),
+                Theme::WIN_BORDER(),
+                Theme::WIN_TEXT(),
+                "胜利",
+            )
         } else {
-            (Theme::LOSS_BG(), Theme::LOSS_BORDER(), Theme::LOSS_TEXT(), "失败")
+            (
+                Theme::LOSS_BG(),
+                Theme::LOSS_BORDER(),
+                Theme::LOSS_TEXT(),
+                "失败",
+            )
         };
         // 半透明胜负底色先合成到页面底色，避免 GPUI 在背景之下绘制的阴影透进卡片内部
         let bg_color = Theme::over_page(bg_color);
@@ -2090,7 +2104,10 @@ impl CareerView {
                                 _ => Theme::CARD_BORDER(),
                             })
                             .bg(Theme::CARD_BG())
-                            .hover(|s| s.bg(Theme::HOVER_BG()).border_color(Theme::ACCENT_PRIMARY()))
+                            .hover(|s| {
+                                s.bg(Theme::HOVER_BG())
+                                    .border_color(Theme::ACCENT_PRIMARY())
+                            })
                             .flex()
                             .items_center()
                             .justify_center()
@@ -2370,7 +2387,8 @@ impl CareerView {
                                     .border_color(Theme::CARD_BORDER())
                                     .bg(Theme::CARD_BG())
                                     .hover(|s| {
-                                        s.bg(Theme::HOVER_BG()).border_color(Theme::ACCENT_PRIMARY())
+                                        s.bg(Theme::HOVER_BG())
+                                            .border_color(Theme::ACCENT_PRIMARY())
                                     })
                                     .flex()
                                     .items_center()
@@ -2395,7 +2413,8 @@ impl CareerView {
                                     .border_color(Theme::CARD_BORDER())
                                     .bg(Theme::CARD_BG())
                                     .hover(|s| {
-                                        s.bg(Theme::HOVER_BG()).border_color(Theme::ACCENT_PRIMARY())
+                                        s.bg(Theme::HOVER_BG())
+                                            .border_color(Theme::ACCENT_PRIMARY())
                                     })
                                     .flex()
                                     .items_center()
@@ -3102,7 +3121,9 @@ impl CareerView {
                                                                 div()
                                                                     .text_size(px(12.5))
                                                                     .font_weight(FontWeight::BOLD)
-                                                                    .text_color(Theme::TEXT_PRIMARY())
+                                                                    .text_color(
+                                                                        Theme::TEXT_PRIMARY(),
+                                                                    )
                                                                     .overflow_hidden()
                                                                     .whitespace_nowrap()
                                                                     .child(item.item_desc.clone()),

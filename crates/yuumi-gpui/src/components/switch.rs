@@ -31,7 +31,10 @@ impl IntoElement for Switch {
         let (track_bg, track_border) = if self.disabled {
             (hsla(0.0, 0.0, 0.9, 0.5), hsla(0.0, 0.0, 0.8, 0.3))
         } else if self.checked {
-            (Theme::ACCENT_PRIMARY(), Theme::ACCENT_PRIMARY().opacity(0.8))
+            (
+                Theme::ACCENT_PRIMARY(),
+                Theme::ACCENT_PRIMARY().opacity(0.8),
+            )
         } else {
             (hsla(210.0, 0.15, 0.88, 0.8), hsla(210.0, 0.15, 0.78, 0.5))
         };

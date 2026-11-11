@@ -194,30 +194,18 @@ pub async fn handle_phase_change(
         }
         GamePhase::WaitingForStats => {
             if config.auto_play_again {
-                spawn_auto_play_again(
-                    client,
-                    PLAY_AGAIN_STATS_DELAY,
-                    supervisor,
-                    lifecycle,
-                )
-                .await;
+                spawn_auto_play_again(client, PLAY_AGAIN_STATS_DELAY, supervisor, lifecycle).await;
             }
         }
         GamePhase::PreEndOfGame => {
             if config.auto_play_again {
-                spawn_auto_play_again(
-                    client,
-                    PLAY_AGAIN_PRE_END_DELAY,
-                    supervisor,
-                    lifecycle,
-                )
-                .await;
+                spawn_auto_play_again(client, PLAY_AGAIN_PRE_END_DELAY, supervisor, lifecycle)
+                    .await;
             }
         }
         GamePhase::EndOfGame => {
             if config.auto_play_again {
-                spawn_auto_play_again(client, PLAY_AGAIN_END_DELAY, supervisor, lifecycle)
-                    .await;
+                spawn_auto_play_again(client, PLAY_AGAIN_END_DELAY, supervisor, lifecycle).await;
             }
         }
         GamePhase::None => {
@@ -518,10 +506,7 @@ async fn spawn_auto_reconnect(
                     if guard.ensure_valid(&snapshot).is_err()
                         || snapshot.phase != GamePhase::Reconnect
                     {
-                        log::info!(
-                            "[Agent] 自动重连放弃: 阶段为 {:?}",
-                            snapshot.phase
-                        );
+                        log::info!("[Agent] 自动重连放弃: 阶段为 {:?}", snapshot.phase);
                         return;
                     }
 
@@ -680,9 +665,7 @@ async fn spawn_auto_play_again(
                 if guard.ensure_valid(&snapshot).is_err()
                     || !matches!(
                         snapshot.phase,
-                        GamePhase::WaitingForStats
-                            | GamePhase::PreEndOfGame
-                            | GamePhase::EndOfGame
+                        GamePhase::WaitingForStats | GamePhase::PreEndOfGame | GamePhase::EndOfGame
                     )
                 {
                     log::info!("[Agent] 再来一局放弃: 阶段为 {:?}", snapshot.phase);
@@ -785,7 +768,9 @@ fn try_create_lobby(client: &LcuClient, queue_id: u32, flags: Arc<Mutex<LobbyFla
                         }
                         return;
                     } else {
-                        log::warn!("[Agent] 自动创建房间后未稳定在大厅（可能被客户端重置），准备重试");
+                        log::warn!(
+                            "[Agent] 自动创建房间后未稳定在大厅（可能被客户端重置），准备重试"
+                        );
                         if let Ok(mut f) = flags_clone.lock() {
                             f.last_create = None;
                         }
@@ -819,7 +804,10 @@ fn try_create_lobby(client: &LcuClient, queue_id: u32, flags: Arc<Mutex<LobbyFla
             f.created = false;
             f.running = false;
         }
-        log::warn!("[Agent] 自动建房 {} 次尝试均失败", LOBBY_CREATE_MAX_ATTEMPTS);
+        log::warn!(
+            "[Agent] 自动建房 {} 次尝试均失败",
+            LOBBY_CREATE_MAX_ATTEMPTS
+        );
     });
 }
 
@@ -873,7 +861,11 @@ async fn spawn_aram_team_side(
                         .unwrap_or(0);
                     if cell_id < 5 { "blue" } else { "red" }.to_string()
                 });
-                let side_name = if side == "blue" { "蓝色方" } else { "红色方" };
+                let side_name = if side == "blue" {
+                    "蓝色方"
+                } else {
+                    "红色方"
+                };
 
                 let room_hint = session
                     .pointer("/chatDetails/chatRoomName")
@@ -895,7 +887,11 @@ async fn spawn_aram_team_side(
                 // 等待本地与队友完成进入聊天室，避免消息被入房初始化冲刷
                 sleep(Duration::from_millis(2000)).await;
 
-                let message_type = if visible_to_team { "chat" } else { "celebration" };
+                let message_type = if visible_to_team {
+                    "chat"
+                } else {
+                    "celebration"
+                };
                 let message = serde_json::json!({
                     "body": format!("[Yuumi] 本局我方在{}", side_name),
                     "type": message_type,
@@ -970,10 +966,7 @@ pub async fn handle_tag_reminders(
 ///
 /// 标记数据来自路人集存储（C 工单契约）：调用方负责把 `puuid → 标签` 映射传入，
 /// 本函数只做选人会话读取与聊天消息发送，不直接访问存储。
-pub async fn send_tag_reminders(
-    client: &LcuClient,
-    tagged: &HashMap<String, String>,
-) -> usize {
+pub async fn send_tag_reminders(client: &LcuClient, tagged: &HashMap<String, String>) -> usize {
     if tagged.is_empty() {
         return 0;
     }
@@ -1002,7 +995,8 @@ pub async fn send_tag_reminders(
         })
         .map(|s| s.to_string());
 
-    let Some(conv_id) = wait_for_champ_select_conv_id(client, room_hint.as_deref(), 10).await else {
+    let Some(conv_id) = wait_for_champ_select_conv_id(client, room_hint.as_deref(), 10).await
+    else {
         log::debug!("[Agent] 标记提醒：未找到选人聊天会话");
         return 0;
     };

@@ -225,7 +225,11 @@ impl MainWindow {
             toast_stack.update(cx, |stack, cx| {
                 stack.push(
                     ToastKind::Warning,
-                    format!("{}:\n{}", crate::i18n::t("settings.configLoadError"), config_error),
+                    format!(
+                        "{}:\n{}",
+                        crate::i18n::t("settings.configLoadError"),
+                        config_error
+                    ),
                     cx,
                 );
             });
@@ -408,7 +412,11 @@ impl MainWindow {
     pub(super) fn sync_home_paths(&mut self) {
         self.home_view.reload_paths_from(
             self.app_config.general.lol_path.clone(),
-            self.app_config.general.wegame_path.clone().unwrap_or_default(),
+            self.app_config
+                .general
+                .wegame_path
+                .clone()
+                .unwrap_or_default(),
         );
     }
 }

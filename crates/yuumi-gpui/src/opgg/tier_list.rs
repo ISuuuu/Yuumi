@@ -61,7 +61,12 @@ fn tier_badge(tier: Option<&str>) -> AnyElement {
         .relative()
         .size(px(24.0))
         .flex_none()
-        .child(svg().path(icon_path).size_full().text_color(tier_badge_color(tier)))
+        .child(
+            svg()
+                .path(icon_path)
+                .size_full()
+                .text_color(tier_badge_color(tier)),
+        )
         .child(
             div()
                 .absolute()
@@ -79,11 +84,7 @@ fn tier_badge(tier: Option<&str>) -> AnyElement {
 }
 
 fn header_cell(label: &'static str, width: f32) -> impl IntoElement {
-    div()
-        .w(px(width))
-        .flex_none()
-        .text_center()
-        .child(label)
+    div().w(px(width)).flex_none().text_center().child(label)
 }
 
 /// 表头
@@ -122,89 +123,89 @@ pub fn tier_list(
         .flex_col()
         .gap(px(3.0))
         .child(header())
-        .child(div().flex().flex_col().gap(px(3.0)).children(
-            entries.iter().enumerate().map(|(index, entry)| {
-                let tier = entry.stats.tier.as_deref();
-                let name = champion_names
-                    .get(&entry.champion_id)
-                    .cloned()
-                    .unwrap_or_else(|| entry.name.clone());
-                let champion_id = entry.champion_id;
-                let select = on_select.clone();
-                let background = tier_card_bg(tier);
-                let hover_background = card_hover_bg(tier);
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(3.0))
+                .children(entries.iter().enumerate().map(|(index, entry)| {
+                    let tier = entry.stats.tier.as_deref();
+                    let name = champion_names
+                        .get(&entry.champion_id)
+                        .cloned()
+                        .unwrap_or_else(|| entry.name.clone());
+                    let champion_id = entry.champion_id;
+                    let select = on_select.clone();
+                    let background = tier_card_bg(tier);
+                    let hover_background = card_hover_bg(tier);
 
-                div()
-                    .id(SharedString::from(format!("opgg-tier-{champion_id}")))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .px(px(14.0))
-                    .py(px(12.0))
-                    .border_1()
-                    .border_color(tier_card_border())
-                    .rounded(px(6.0))
-                    .bg(background)
-                    .text_size(px(12.48))
-                    .text_color(Theme::TEXT_SECONDARY())
-                    .cursor_pointer()
-                    .hover(move |style| style.bg(hover_background))
-                    .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
-                        select(champion_id, window, app)
-                    })
-                    // 序号
-                    .child(
-                        div()
-                            .w(px(COL_RANK))
-                            .flex_none()
-                            .text_center()
-                            .text_color(Theme::TEXT_MUTED())
-                            .child((index + 1).to_string()),
-                    )
-                    .child(
-                        LcuImage::new(champion_icon(champion_id))
-                            .size(px(34.0))
-                            .circle()
-                            .border_color(Theme::CARD_BORDER())
-                            .border_width(px(2.0)),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(Theme::TEXT_PRIMARY())
-                            .child(name),
-                    )
-                    .child(div().flex_1())
-                    .child(tier_badge(tier))
-                    .child(stat_cell(pct(entry.stats.win_rate)))
-                    .child(stat_cell(pct(entry.stats.pick_rate)))
-                    .child(stat_cell(pct(entry.stats.ban_rate)))
-                    .child(stat_cell(fmt_kda(entry.stats.kda)))
-                    .child(
-                        div()
-                            .w(px(COL_COUNTERS))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .gap(px(3.0))
-                            .children(entry.counters.iter().take(3).map(|counter_id| {
-                                LcuImage::new(champion_icon(*counter_id))
-                                    .size(px(22.0))
-                                    .circle()
-                                    .border_color(Theme::CARD_BORDER())
-                            })),
-                    )
-            }),
-        ))
+                    div()
+                        .id(SharedString::from(format!("opgg-tier-{champion_id}")))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .px(px(14.0))
+                        .py(px(12.0))
+                        .border_1()
+                        .border_color(tier_card_border())
+                        .rounded(px(6.0))
+                        .bg(background)
+                        .text_size(px(12.48))
+                        .text_color(Theme::TEXT_SECONDARY())
+                        .cursor_pointer()
+                        .hover(move |style| style.bg(hover_background))
+                        .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+                            select(champion_id, window, app)
+                        })
+                        // 序号
+                        .child(
+                            div()
+                                .w(px(COL_RANK))
+                                .flex_none()
+                                .text_center()
+                                .text_color(Theme::TEXT_MUTED())
+                                .child((index + 1).to_string()),
+                        )
+                        .child(
+                            LcuImage::new(champion_icon(champion_id))
+                                .size(px(34.0))
+                                .circle()
+                                .border_color(Theme::CARD_BORDER())
+                                .border_width(px(2.0)),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(Theme::TEXT_PRIMARY())
+                                .child(name),
+                        )
+                        .child(div().flex_1())
+                        .child(tier_badge(tier))
+                        .child(stat_cell(pct(entry.stats.win_rate)))
+                        .child(stat_cell(pct(entry.stats.pick_rate)))
+                        .child(stat_cell(pct(entry.stats.ban_rate)))
+                        .child(stat_cell(fmt_kda(entry.stats.kda)))
+                        .child(
+                            div()
+                                .w(px(COL_COUNTERS))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .gap(px(3.0))
+                                .children(entry.counters.iter().take(3).map(|counter_id| {
+                                    LcuImage::new(champion_icon(*counter_id))
+                                        .size(px(22.0))
+                                        .circle()
+                                        .border_color(Theme::CARD_BORDER())
+                                })),
+                        )
+                })),
+        )
         .into_any_element()
 }
 
 fn stat_cell(text: String) -> impl IntoElement {
-    div()
-        .w(px(COL_STAT))
-        .flex_none()
-        .text_center()
-        .child(text)
+    div().w(px(COL_STAT)).flex_none().text_center().child(text)
 }

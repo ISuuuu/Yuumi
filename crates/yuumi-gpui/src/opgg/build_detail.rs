@@ -133,20 +133,11 @@ fn title_bar(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .child(stat_column(
-                "胜率",
-                pct(stats.and_then(|s| s.win_rate)),
-            ))
+            .child(stat_column("胜率", pct(stats.and_then(|s| s.win_rate))))
             .child(stat_divider())
-            .child(stat_column(
-                "登场率",
-                pct(stats.and_then(|s| s.pick_rate)),
-            ))
+            .child(stat_column("登场率", pct(stats.and_then(|s| s.pick_rate))))
             .child(stat_divider())
-            .child(stat_column(
-                "禁用率",
-                pct(stats.and_then(|s| s.ban_rate)),
-            )),
+            .child(stat_column("禁用率", pct(stats.and_then(|s| s.ban_rate)))),
     );
 
     if let Some(tier) = tier {
@@ -173,64 +164,63 @@ fn summoner_spells(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
     if ctx.build.summoner_spells.is_empty() {
         return None;
     }
-    let pairs = ctx
-        .build
-        .summoner_spells
-        .iter()
-        .take(2)
-        .map(|entry| {
-            div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .px(px(12.0))
-                .py(px(6.0))
-                .bg(Palette::spell_pair_bg())
-                .border_1()
-                .border_color(Theme::CARD_BORDER())
-                .rounded(px(6.0))
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(4.0))
-                        .children(entry.ids.iter().take(2).map(|spell_id| {
-                            LcuImage::new(spell_icon(ctx.assets, *spell_id))
-                                .size(px(28.0))
-                                .border_color(Theme::CARD_BORDER())
-                        })),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .flex()
-                        .flex_col()
-                        .gap(px(1.0))
-                        .child(
-                            div()
-                                .text_size(px(12.48))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(Theme::TEXT_PRIMARY())
-                                .child(pct(entry.win_rate)),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(9.92))
-                                .text_color(Theme::TEXT_MUTED())
-                                .child(games_count(entry.play)),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_right()
-                        .text_size(px(12.0))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(Theme::TEXT_SECONDARY())
-                        .child(pct(entry.pick_rate)),
-                )
-        });
+    let pairs = ctx.build.summoner_spells.iter().take(2).map(|entry| {
+        div()
+            .flex_1()
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .px(px(12.0))
+            .py(px(6.0))
+            .bg(Palette::spell_pair_bg())
+            .border_1()
+            .border_color(Theme::CARD_BORDER())
+            .rounded(px(6.0))
+            .child(
+                div()
+                    .flex()
+                    .gap(px(4.0))
+                    .children(entry.ids.iter().take(2).map(|spell_id| {
+                        LcuImage::new(spell_icon(ctx.assets, *spell_id))
+                            .size(px(28.0))
+                            .border_color(Theme::CARD_BORDER())
+                    })),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(1.0))
+                    .child(
+                        div()
+                            .text_size(px(12.48))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(Theme::TEXT_PRIMARY())
+                            .child(pct(entry.win_rate)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(9.92))
+                            .text_color(Theme::TEXT_MUTED())
+                            .child(games_count(entry.play)),
+                    ),
+            )
+            .child(
+                div()
+                    .text_right()
+                    .text_size(px(12.0))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(Theme::TEXT_SECONDARY())
+                    .child(pct(entry.pick_rate)),
+            )
+    });
 
-    Some(card().child(div().flex().gap(px(12.0)).children(pairs)).into_any_element())
+    Some(
+        card()
+            .child(div().flex().gap(px(12.0)).children(pairs))
+            .into_any_element(),
+    )
 }
 
 /// 克制 / 被克双列
@@ -319,12 +309,7 @@ fn counters(ctx: &BuildDetailContext<'_>) -> Option<AnyElement> {
                 div()
                     .flex()
                     .child(column("克制", strong, ctx.champion_names))
-                    .child(
-                        div()
-                            .w(px(1.0))
-                            .mx(px(8.0))
-                            .bg(Theme::CARD_BORDER()),
-                    )
+                    .child(div().w(px(1.0)).mx(px(8.0)).bg(Theme::CARD_BORDER()))
                     .child(column("被克制", weak, ctx.champion_names)),
             )
             .into_any_element(),
@@ -392,7 +377,8 @@ pub fn build_detail(ctx: BuildDetailContext<'_>) -> AnyElement {
         ctx.on_select_rune.clone(),
         ctx.on_apply_rune.clone(),
     );
-    let skill_block = skill_order::skill_order_section(&ctx.build.skills, &ctx.build.skill_masteries);
+    let skill_block =
+        skill_order::skill_order_section(&ctx.build.skills, &ctx.build.skill_masteries);
     let item_block = items::items_section(
         &ctx.build.starter_items,
         &ctx.build.core_items,

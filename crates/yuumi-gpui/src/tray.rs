@@ -51,18 +51,29 @@ impl TrayManager {
 
         // 2. 生涯
         let item_career = MenuItem::new(crate::i18n::t("nav.career"), true, None);
-        menu_actions.insert(item_career.id().clone(), TrayAction::Navigate(Route::Career));
+        menu_actions.insert(
+            item_career.id().clone(),
+            TrayAction::Navigate(Route::Career),
+        );
         tray_menu.append(&item_career).map_err(|e| e.to_string())?;
 
         // 3. 战绩查询
         let item_search = MenuItem::new(crate::i18n::t("nav.search"), true, None);
-        menu_actions.insert(item_search.id().clone(), TrayAction::Navigate(Route::Search));
+        menu_actions.insert(
+            item_search.id().clone(),
+            TrayAction::Navigate(Route::Search),
+        );
         tray_menu.append(&item_search).map_err(|e| e.to_string())?;
 
         // 4. 对局信息
         let item_gameinfo = MenuItem::new(crate::i18n::t("nav.gameinfo"), true, None);
-        menu_actions.insert(item_gameinfo.id().clone(), TrayAction::Navigate(Route::GameInfo));
-        tray_menu.append(&item_gameinfo).map_err(|e| e.to_string())?;
+        menu_actions.insert(
+            item_gameinfo.id().clone(),
+            TrayAction::Navigate(Route::GameInfo),
+        );
+        tray_menu
+            .append(&item_gameinfo)
+            .map_err(|e| e.to_string())?;
 
         // 5. TFT (若未隐藏)
         if !hide_tft {
@@ -82,8 +93,13 @@ impl TrayManager {
 
         // 7. 设置
         let item_settings = MenuItem::new(crate::i18n::t("nav.settings"), true, None);
-        menu_actions.insert(item_settings.id().clone(), TrayAction::Navigate(Route::Settings));
-        tray_menu.append(&item_settings).map_err(|e| e.to_string())?;
+        menu_actions.insert(
+            item_settings.id().clone(),
+            TrayAction::Navigate(Route::Settings),
+        );
+        tray_menu
+            .append(&item_settings)
+            .map_err(|e| e.to_string())?;
 
         // 分隔线
         let sep2 = PredefinedMenuItem::separator();

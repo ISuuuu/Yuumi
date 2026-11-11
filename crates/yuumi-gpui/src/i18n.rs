@@ -629,10 +629,7 @@ pub fn set_language(lang: Lang) {
 
 /// 在指定语言表中线性查键。
 fn lookup(table: &'static [(&'static str, &'static str)], key: &str) -> Option<&'static str> {
-    table
-        .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, v)| *v)
+    table.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
 }
 
 /// 查询当前语言的壳层文案：缺键回落 zh-CN，再缺返回键名本身（便于发现漏键）。

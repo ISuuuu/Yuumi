@@ -242,7 +242,10 @@ pub fn normalize_hex_input(
     if clean.len() == 6 {
         if u32::from_str_radix(clean, 16).is_ok() {
             if supports_alpha {
-                Some(build_color_with_alpha(&format!("#{clean}"), current_alpha_percent))
+                Some(build_color_with_alpha(
+                    &format!("#{clean}"),
+                    current_alpha_percent,
+                ))
             } else {
                 Some(format!("#{clean}").to_uppercase())
             }
@@ -540,29 +543,17 @@ fn render_color_picker(
                                 // 底色为当前色相对应的纯光谱色
                                 .bg(pure_hue_rgba)
                                 // 水平白渐变：白色 -> 透明 (S: 0 -> 1)
-                                .child(
-                                    div()
-                                        .absolute()
-                                        .inset_0()
-                                        .rounded_md()
-                                        .bg(linear_gradient(
-                                            90.0,
-                                            linear_color_stop(rgba(0xffffffff), 0.0),
-                                            linear_color_stop(rgba(0xffffff00), 1.0),
-                                        )),
-                                )
+                                .child(div().absolute().inset_0().rounded_md().bg(linear_gradient(
+                                    90.0,
+                                    linear_color_stop(rgba(0xffffffff), 0.0),
+                                    linear_color_stop(rgba(0xffffff00), 1.0),
+                                )))
                                 // 垂直黑渐变：透明 -> 黑色 (V: 1 -> 0)
-                                .child(
-                                    div()
-                                        .absolute()
-                                        .inset_0()
-                                        .rounded_md()
-                                        .bg(linear_gradient(
-                                            180.0,
-                                            linear_color_stop(rgba(0x00000000), 0.0),
-                                            linear_color_stop(rgba(0x000000ff), 1.0),
-                                        )),
-                                )
+                                .child(div().absolute().inset_0().rounded_md().bg(linear_gradient(
+                                    180.0,
+                                    linear_color_stop(rgba(0x00000000), 0.0),
+                                    linear_color_stop(rgba(0x000000ff), 1.0),
+                                )))
                                 .child(
                                     canvas(
                                         |bounds, _win, _app| {
@@ -590,8 +581,14 @@ fn render_color_picker(
                                     let on_sv = on_sample_sv.clone();
                                     move |ev, win, app| {
                                         if let Some(bounds) = SV_BOUNDS.with(|c| c.get()) {
-                                            let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
-                                            let ry = ((f32::from(ev.position.y) - f32::from(bounds.origin.y)) / f32::from(bounds.size.height)).clamp(0.0, 1.0);
+                                            let rx = ((f32::from(ev.position.x)
+                                                - f32::from(bounds.origin.x))
+                                                / f32::from(bounds.size.width))
+                                            .clamp(0.0, 1.0);
+                                            let ry = ((f32::from(ev.position.y)
+                                                - f32::from(bounds.origin.y))
+                                                / f32::from(bounds.size.height))
+                                            .clamp(0.0, 1.0);
                                             on_sv(rx, 1.0 - ry, win, app);
                                         }
                                     }
@@ -601,8 +598,14 @@ fn render_color_picker(
                                     move |ev, win, app| {
                                         if ev.dragging() {
                                             if let Some(bounds) = SV_BOUNDS.with(|c| c.get()) {
-                                                let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
-                                                let ry = ((f32::from(ev.position.y) - f32::from(bounds.origin.y)) / f32::from(bounds.size.height)).clamp(0.0, 1.0);
+                                                let rx = ((f32::from(ev.position.x)
+                                                    - f32::from(bounds.origin.x))
+                                                    / f32::from(bounds.size.width))
+                                                .clamp(0.0, 1.0);
+                                                let ry = ((f32::from(ev.position.y)
+                                                    - f32::from(bounds.origin.y))
+                                                    / f32::from(bounds.size.height))
+                                                .clamp(0.0, 1.0);
                                                 on_sv(rx, 1.0 - ry, win, app);
                                             }
                                         }
@@ -643,12 +646,40 @@ fn render_color_picker(
                                         .overflow_hidden()
                                         .cursor_pointer()
                                         .flex()
-                                        .child(div().flex_1().h_full().rounded_l_md().bg(linear_gradient(90.0, linear_color_stop(rgba(0xff0000ff), 0.0), linear_color_stop(rgba(0xffff00ff), 1.0))))
-                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0xffff00ff), 0.0), linear_color_stop(rgba(0x00ff00ff), 1.0))))
-                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0x00ff00ff), 0.0), linear_color_stop(rgba(0x00ffffff), 1.0))))
-                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0x00ffffff), 0.0), linear_color_stop(rgba(0x0000ffff), 1.0))))
-                                        .child(div().flex_1().h_full().bg(linear_gradient(90.0, linear_color_stop(rgba(0x0000ffff), 0.0), linear_color_stop(rgba(0xff00ffff), 1.0))))
-                                        .child(div().flex_1().h_full().rounded_r_md().bg(linear_gradient(90.0, linear_color_stop(rgba(0xff00ffff), 0.0), linear_color_stop(rgba(0xff0000ff), 1.0))))
+                                        .child(div().flex_1().h_full().rounded_l_md().bg(
+                                            linear_gradient(
+                                                90.0,
+                                                linear_color_stop(rgba(0xff0000ff), 0.0),
+                                                linear_color_stop(rgba(0xffff00ff), 1.0),
+                                            ),
+                                        ))
+                                        .child(div().flex_1().h_full().bg(linear_gradient(
+                                            90.0,
+                                            linear_color_stop(rgba(0xffff00ff), 0.0),
+                                            linear_color_stop(rgba(0x00ff00ff), 1.0),
+                                        )))
+                                        .child(div().flex_1().h_full().bg(linear_gradient(
+                                            90.0,
+                                            linear_color_stop(rgba(0x00ff00ff), 0.0),
+                                            linear_color_stop(rgba(0x00ffffff), 1.0),
+                                        )))
+                                        .child(div().flex_1().h_full().bg(linear_gradient(
+                                            90.0,
+                                            linear_color_stop(rgba(0x00ffffff), 0.0),
+                                            linear_color_stop(rgba(0x0000ffff), 1.0),
+                                        )))
+                                        .child(div().flex_1().h_full().bg(linear_gradient(
+                                            90.0,
+                                            linear_color_stop(rgba(0x0000ffff), 0.0),
+                                            linear_color_stop(rgba(0xff00ffff), 1.0),
+                                        )))
+                                        .child(div().flex_1().h_full().rounded_r_md().bg(
+                                            linear_gradient(
+                                                90.0,
+                                                linear_color_stop(rgba(0xff00ffff), 0.0),
+                                                linear_color_stop(rgba(0xff0000ff), 1.0),
+                                            ),
+                                        ))
                                         .child(
                                             canvas(
                                                 |bounds, _win, _app| {
@@ -663,7 +694,9 @@ fn render_color_picker(
                                         .child(
                                             div()
                                                 .absolute()
-                                                .left(px(((h / 360.0) * 256.0 - 6.0).clamp(0.0, 244.0)))
+                                                .left(px(
+                                                    ((h / 360.0) * 256.0 - 6.0).clamp(0.0, 244.0)
+                                                ))
                                                 .top(px(0.0))
                                                 .size(px(12.0))
                                                 .rounded_full()
@@ -675,7 +708,10 @@ fn render_color_picker(
                                             let on_h = on_sample_hue.clone();
                                             move |ev, win, app| {
                                                 if let Some(bounds) = HUE_BOUNDS.with(|c| c.get()) {
-                                                    let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
+                                                    let rx = ((f32::from(ev.position.x)
+                                                        - f32::from(bounds.origin.x))
+                                                        / f32::from(bounds.size.width))
+                                                    .clamp(0.0, 1.0);
                                                     on_h((rx * 360.0).min(359.9), win, app);
                                                 }
                                             }
@@ -684,8 +720,13 @@ fn render_color_picker(
                                             let on_h = on_sample_hue.clone();
                                             move |ev, win, app| {
                                                 if ev.dragging() {
-                                                    if let Some(bounds) = HUE_BOUNDS.with(|c| c.get()) {
-                                                        let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
+                                                    if let Some(bounds) =
+                                                        HUE_BOUNDS.with(|c| c.get())
+                                                    {
+                                                        let rx = ((f32::from(ev.position.x)
+                                                            - f32::from(bounds.origin.x))
+                                                            / f32::from(bounds.size.width))
+                                                        .clamp(0.0, 1.0);
                                                         on_h((rx * 360.0).min(359.9), win, app);
                                                     }
                                                 }
@@ -729,8 +770,24 @@ fn render_color_picker(
                                             .cursor_pointer()
                                             .bg(linear_gradient(
                                                 90.0,
-                                                linear_color_stop(Rgba { r: cur_rgb.0, g: cur_rgb.1, b: cur_rgb.2, a: 0.0 }, 0.0),
-                                                linear_color_stop(Rgba { r: cur_rgb.0, g: cur_rgb.1, b: cur_rgb.2, a: 1.0 }, 1.0),
+                                                linear_color_stop(
+                                                    Rgba {
+                                                        r: cur_rgb.0,
+                                                        g: cur_rgb.1,
+                                                        b: cur_rgb.2,
+                                                        a: 0.0,
+                                                    },
+                                                    0.0,
+                                                ),
+                                                linear_color_stop(
+                                                    Rgba {
+                                                        r: cur_rgb.0,
+                                                        g: cur_rgb.1,
+                                                        b: cur_rgb.2,
+                                                        a: 1.0,
+                                                    },
+                                                    1.0,
+                                                ),
                                             ))
                                             .child(
                                                 canvas(
@@ -757,8 +814,13 @@ fn render_color_picker(
                                             .on_mouse_down(MouseButton::Left, {
                                                 let on_a = on_sample_alpha.clone();
                                                 move |ev, win, app| {
-                                                    if let Some(bounds) = ALPHA_BOUNDS.with(|c| c.get()) {
-                                                        let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
+                                                    if let Some(bounds) =
+                                                        ALPHA_BOUNDS.with(|c| c.get())
+                                                    {
+                                                        let rx = ((f32::from(ev.position.x)
+                                                            - f32::from(bounds.origin.x))
+                                                            / f32::from(bounds.size.width))
+                                                        .clamp(0.0, 1.0);
                                                         on_a(rx, win, app);
                                                     }
                                                 }
@@ -767,8 +829,13 @@ fn render_color_picker(
                                                 let on_a = on_sample_alpha.clone();
                                                 move |ev, win, app| {
                                                     if ev.dragging() {
-                                                        if let Some(bounds) = ALPHA_BOUNDS.with(|c| c.get()) {
-                                                            let rx = ((f32::from(ev.position.x) - f32::from(bounds.origin.x)) / f32::from(bounds.size.width)).clamp(0.0, 1.0);
+                                                        if let Some(bounds) =
+                                                            ALPHA_BOUNDS.with(|c| c.get())
+                                                        {
+                                                            let rx = ((f32::from(ev.position.x)
+                                                                - f32::from(bounds.origin.x))
+                                                                / f32::from(bounds.size.width))
+                                                            .clamp(0.0, 1.0);
                                                             on_a(rx, win, app);
                                                         }
                                                     }
@@ -783,33 +850,34 @@ fn render_color_picker(
                                 .flex()
                                 .items_center()
                                 .gap(px(6.0))
-                                .child(
-                                    if let Some(focus) = hex_focus {
-                                        let is_focused = focus.is_focused(window);
-                                        let on_edit = on_edit_hex.clone();
-                                        let on_app = on_apply_hex.clone();
-                                        text_field(
-                                            "color-hex-field",
-                                            hex_input,
-                                            if supports_alpha { "#AARRGGBB 或 #RRGGBB" } else { "#RRGGBB" },
-                                            px(196.0),
-                                            focus,
-                                            is_focused,
-                                            TextFieldOptions::default(),
-                                            move |val, win, app| on_edit(val, win, app),
-                                            move |_win, _app| {},
-                                            move |_val, win, app| on_app(picker_key, win, app),
-                                        ).into_any_element()
-                                    } else {
-                                        div().into_any_element()
-                                    }
-                                )
-                                .child(
-                                    action_button("应用", false, {
-                                        let on_app = on_apply_hex.clone();
-                                        move |_ev, win, app| on_app(picker_key, win, app)
-                                    })
-                                ),
+                                .child(if let Some(focus) = hex_focus {
+                                    let is_focused = focus.is_focused(window);
+                                    let on_edit = on_edit_hex.clone();
+                                    let on_app = on_apply_hex.clone();
+                                    text_field(
+                                        "color-hex-field",
+                                        hex_input,
+                                        if supports_alpha {
+                                            "#AARRGGBB 或 #RRGGBB"
+                                        } else {
+                                            "#RRGGBB"
+                                        },
+                                        px(196.0),
+                                        focus,
+                                        is_focused,
+                                        TextFieldOptions::default(),
+                                        move |val, win, app| on_edit(val, win, app),
+                                        move |_win, _app| {},
+                                        move |_val, win, app| on_app(picker_key, win, app),
+                                    )
+                                    .into_any_element()
+                                } else {
+                                    div().into_any_element()
+                                })
+                                .child(action_button("应用", false, {
+                                    let on_app = on_apply_hex.clone();
+                                    move |_ev, win, app| on_app(picker_key, win, app)
+                                })),
                         )
                         // 6. 快捷推荐预设
                         .child(
@@ -823,33 +891,30 @@ fn render_color_picker(
                                         .text_color(Theme::TEXT_MUTED())
                                         .child("常用预设"),
                                 )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_wrap()
-                                        .gap(px(5.0))
-                                        .children(palette.iter().map(|(hex, _name)| {
-                                            let h_str = hex.to_string();
-                                            let c = parse_hex_color(hex);
-                                            let is_cur = color_hex.eq_ignore_ascii_case(hex);
-                                            let sel = on_select_preset.clone();
-                                            div()
-                                                .size(px(20.0))
-                                                .rounded_md()
-                                                .border_1()
-                                                .border_color(if is_cur {
-                                                    Theme::ACCENT_PRIMARY()
-                                                } else {
-                                                    Theme::CARD_BORDER()
-                                                })
-                                                .bg(c)
-                                                .cursor_pointer()
-                                                .hover(|s| s.opacity(0.8))
-                                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                    sel(h_str.clone(), win, app)
-                                                })
-                                        })),
-                                ),
+                                .child(div().flex().flex_wrap().gap(px(5.0)).children(
+                                    palette.iter().map(|(hex, _name)| {
+                                        let h_str = hex.to_string();
+                                        let c = parse_hex_color(hex);
+                                        let is_cur = color_hex.eq_ignore_ascii_case(hex);
+                                        let sel = on_select_preset.clone();
+                                        div()
+                                            .size(px(20.0))
+                                            .rounded_md()
+                                            .border_1()
+                                            .border_color(if is_cur {
+                                                Theme::ACCENT_PRIMARY()
+                                            } else {
+                                                Theme::CARD_BORDER()
+                                            })
+                                            .bg(c)
+                                            .cursor_pointer()
+                                            .hover(|s| s.opacity(0.8))
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                move |_ev, win, app| sel(h_str.clone(), win, app),
+                                            )
+                                    }),
+                                )),
                         )
                         // 7. 底部完成按钮
                         .child(
@@ -859,12 +924,10 @@ fn render_color_picker(
                                 .pt(px(2.0))
                                 .border_t_1()
                                 .border_color(Theme::CARD_BORDER())
-                                .child(
-                                    action_button("完成", false, {
-                                        let close = on_close.clone();
-                                        move |_ev, win, app| close(win, app)
-                                    })
-                                ),
+                                .child(action_button("完成", false, {
+                                    let close = on_close.clone();
+                                    move |_ev, win, app| close(win, app)
+                                })),
                         ),
                 )
                 .with_priority(25),
@@ -1017,9 +1080,11 @@ impl SettingsView {
                 },
                 move |_, win, app| submit(SettingsAction::SaveFInput(key), win, app),
             ))
-            .child(action_button(crate::i18n::t("common.save"), false, move |_, win, app| {
-                save(SettingsAction::SaveFInput(key), win, app)
-            }))
+            .child(action_button(
+                crate::i18n::t("common.save"),
+                false,
+                move |_, win, app| save(SettingsAction::SaveFInput(key), win, app),
+            ))
     }
 
     /// 切换折叠分组
@@ -1035,11 +1100,17 @@ impl SettingsView {
     /// 视图层在本方法内改查 i18n 键，避免改动 yuumi-core）
     fn cloud_status_label(&self) -> &'static str {
         match self.cloud_status {
-            yuumi_core::signalr::HubStatus::Disabled => crate::i18n::t("settings.cloudDisconnected"),
-            yuumi_core::signalr::HubStatus::Connecting => crate::i18n::t("settings.cloudConnecting"),
+            yuumi_core::signalr::HubStatus::Disabled => {
+                crate::i18n::t("settings.cloudDisconnected")
+            }
+            yuumi_core::signalr::HubStatus::Connecting => {
+                crate::i18n::t("settings.cloudConnecting")
+            }
             yuumi_core::signalr::HubStatus::Connected => crate::i18n::t("settings.cloudConnected"),
             yuumi_core::signalr::HubStatus::Retry => crate::i18n::t("settings.cloudConnectFailed"),
-            yuumi_core::signalr::HubStatus::InvalidConfig => crate::i18n::t("settings.cloudInvalidAddr"),
+            yuumi_core::signalr::HubStatus::InvalidConfig => {
+                crate::i18n::t("settings.cloudInvalidAddr")
+            }
         }
     }
 
@@ -1095,7 +1166,9 @@ impl SettingsView {
                     .child(self.render_group_header(crate::i18n::t("settings.logGroup")))
                     .child(self.render_log_group(config, on_action.clone()))
                     // ─── 5. 个性化 ───
-                    .child(self.render_group_header(crate::i18n::t("settings.personalizationGroup")))
+                    .child(
+                        self.render_group_header(crate::i18n::t("settings.personalizationGroup")),
+                    )
                     .child(self.render_personalization_group(config, window, on_action.clone()))
                     // ─── 6. 软件更新 ───
                     .child(self.render_group_header(crate::i18n::t("settings.softwareUpdateGroup")))
@@ -1273,7 +1346,12 @@ impl SettingsView {
     }
 
     // ─── 3. 通用设置组 (F-V01 ~ F-V04) ───
-    fn render_general_group<F>(&self, config: &AppConfig, window: &Window, on_action: F) -> impl IntoElement
+    fn render_general_group<F>(
+        &self,
+        config: &AppConfig,
+        window: &Window,
+        on_action: F,
+    ) -> impl IntoElement
     where
         F: Fn(SettingsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -1321,7 +1399,8 @@ impl SettingsView {
                 Some(if g.lol_path.is_empty() {
                     crate::i18n::t("settings.pathNotSet").to_string()
                 } else {
-                    crate::i18n::t("settings.pathSetCount").replace("{count}", &g.lol_path.len().to_string())
+                    crate::i18n::t("settings.pathSetCount")
+                        .replace("{count}", &g.lol_path.len().to_string())
                 }),
                 move |_ev, win, app| {
                     act_toggle_path(SettingsAction::ToggleCollapse("lolpath"), win, app)
@@ -1386,7 +1465,9 @@ impl SettingsView {
                                             .child(if is_wegame {
                                                 g.wegame_path
                                                     .as_deref()
-                                                    .unwrap_or(crate::i18n::t("settings.wegamePathPlaceholder"))
+                                                    .unwrap_or(crate::i18n::t(
+                                                        "settings.wegamePathPlaceholder",
+                                                    ))
                                                     .to_string()
                                             } else {
                                                 path.clone()
@@ -1403,7 +1484,9 @@ impl SettingsView {
                                     .justify_center()
                                     .text_size(px(11.0))
                                     .text_color(Theme::TEXT_MUTED())
-                                    .hover(|s| s.bg(Theme::HOVER_BG()).text_color(Theme::LOSS_TEXT()))
+                                    .hover(|s| {
+                                        s.bg(Theme::HOVER_BG()).text_color(Theme::LOSS_TEXT())
+                                    })
                                     .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                         act_rm(SettingsAction::RemoveLolPath(idx), win, app)
                                     })
@@ -1461,9 +1544,13 @@ impl SettingsView {
                             crate::i18n::t("settings.clearCacheTitle"),
                             Some(crate::i18n::t("settings.clearCacheDesc")),
                             true,
-                            action_button(crate::i18n::t("settings.deleteBtn"), false, move |_ev, win, app| {
-                                act_clear_cache(SettingsAction::ClearCache, win, app)
-                            }),
+                            action_button(
+                                crate::i18n::t("settings.deleteBtn"),
+                                false,
+                                move |_ev, win, app| {
+                                    act_clear_cache(SettingsAction::ClearCache, win, app)
+                                },
+                            ),
                         ))
                         .child(settings_card_item(
                             crate::i18n::t("settings.closeToTrayTitle"),
@@ -1523,7 +1610,13 @@ impl SettingsView {
                     .child(setting_row(
                         crate::i18n::t("settings.apiServerAddrLabel"),
                         None,
-                        self.f_input(0, "f-upload", "http://example.com", window, on_action.clone()),
+                        self.f_input(
+                            0,
+                            "f-upload",
+                            "http://example.com",
+                            window,
+                            on_action.clone(),
+                        ),
                     ))
                     // 2. LCU 实时服务开关
                     .child(setting_row(
@@ -1540,7 +1633,13 @@ impl SettingsView {
                     .child(setting_row(
                         "userid:",
                         None,
-                        self.f_input(1, "f-user", crate::i18n::t("settings.useridPlaceholder"), window, on_action.clone()),
+                        self.f_input(
+                            1,
+                            "f-user",
+                            crate::i18n::t("settings.useridPlaceholder"),
+                            window,
+                            on_action.clone(),
+                        ),
                     )),
             ))
             // 隐藏菜单折叠卡片 (F-V04)
@@ -1770,15 +1869,22 @@ impl SettingsView {
                     crate::i18n::t("settings.logFileTitle"),
                     Some(crate::i18n::t("settings.logFileDesc")),
                     false,
-                    action_button(crate::i18n::t("settings.openFolderBtn"), false, move |_ev, win, app| {
-                        act_open(SettingsAction::OpenLogFolder, win, app)
-                    }),
+                    action_button(
+                        crate::i18n::t("settings.openFolderBtn"),
+                        false,
+                        move |_ev, win, app| act_open(SettingsAction::OpenLogFolder, win, app),
+                    ),
                 )),
         )
     }
 
     // ─── 5. 个性化设置组 (F-V05 ~ F-V06) ───
-    fn render_personalization_group<F>(&self, config: &AppConfig, window: &Window, on_action: F) -> impl IntoElement
+    fn render_personalization_group<F>(
+        &self,
+        config: &AppConfig,
+        window: &Window,
+        on_action: F,
+    ) -> impl IntoElement
     where
         F: Fn(SettingsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -1820,47 +1926,58 @@ impl SettingsView {
             _ => crate::i18n::t("settings.langAuto"),
         };
 
-        let make_color_picker = |picker_id: ElementId,
-                                 picker_key: &'static str,
-                                 width_px: f32,
-                                 color_hex: &str,
-                                 supports_alpha: bool,
-                                 open: bool,
-                                 palette: &'static [(&'static str, &'static str)]| {
-            let act_toggle = on_action.clone();
-            let act_sv = on_action.clone();
-            let act_h = on_action.clone();
-            let act_a = on_action.clone();
-            let act_preset = on_action.clone();
-            let act_edit = on_action.clone();
-            let act_apply = on_action.clone();
-            let act_close = on_action.clone();
+        let make_color_picker =
+            |picker_id: ElementId,
+             picker_key: &'static str,
+             width_px: f32,
+             color_hex: &str,
+             supports_alpha: bool,
+             open: bool,
+             palette: &'static [(&'static str, &'static str)]| {
+                let act_toggle = on_action.clone();
+                let act_sv = on_action.clone();
+                let act_h = on_action.clone();
+                let act_a = on_action.clone();
+                let act_preset = on_action.clone();
+                let act_edit = on_action.clone();
+                let act_apply = on_action.clone();
+                let act_close = on_action.clone();
 
-            render_color_picker(
-                picker_id,
-                picker_key,
-                width_px,
-                color_hex,
-                supports_alpha,
-                open,
-                self.color_picker_h,
-                self.color_picker_s,
-                self.color_picker_v,
-                self.color_picker_a,
-                palette,
-                &self.color_hex_input,
-                self.color_hex_focus.as_ref(),
-                window,
-                move |_ev, win, app| act_toggle(SettingsAction::ToggleDropdown(picker_key), win, app),
-                move |s, v, win, app| act_sv(SettingsAction::SampleSv(picker_key, s, v), win, app),
-                move |h, win, app| act_h(SettingsAction::SampleHue(picker_key, h), win, app),
-                move |a, win, app| act_a(SettingsAction::SampleAlpha(picker_key, a), win, app),
-                move |hex, win, app| act_preset(SettingsAction::SelectColorPreset(picker_key, hex), win, app),
-                move |val, win, app| act_edit(SettingsAction::EditColorPickerHex(val), win, app),
-                move |key, win, app| act_apply(SettingsAction::ApplyColorPickerHex(key), win, app),
-                move |win, app| act_close(SettingsAction::CloseColorPicker, win, app),
-            )
-        };
+                render_color_picker(
+                    picker_id,
+                    picker_key,
+                    width_px,
+                    color_hex,
+                    supports_alpha,
+                    open,
+                    self.color_picker_h,
+                    self.color_picker_s,
+                    self.color_picker_v,
+                    self.color_picker_a,
+                    palette,
+                    &self.color_hex_input,
+                    self.color_hex_focus.as_ref(),
+                    window,
+                    move |_ev, win, app| {
+                        act_toggle(SettingsAction::ToggleDropdown(picker_key), win, app)
+                    },
+                    move |s, v, win, app| {
+                        act_sv(SettingsAction::SampleSv(picker_key, s, v), win, app)
+                    },
+                    move |h, win, app| act_h(SettingsAction::SampleHue(picker_key, h), win, app),
+                    move |a, win, app| act_a(SettingsAction::SampleAlpha(picker_key, a), win, app),
+                    move |hex, win, app| {
+                        act_preset(SettingsAction::SelectColorPreset(picker_key, hex), win, app)
+                    },
+                    move |val, win, app| {
+                        act_edit(SettingsAction::EditColorPickerHex(val), win, app)
+                    },
+                    move |key, win, app| {
+                        act_apply(SettingsAction::ApplyColorPickerHex(key), win, app)
+                    },
+                    move |win, app| act_close(SettingsAction::CloseColorPicker, win, app),
+                )
+            };
 
         div()
             .flex()
@@ -2309,7 +2426,12 @@ impl SettingsView {
     }
 
     // ─── 7. 网络代理 (F-V08) ───
-    fn render_proxy_group<F>(&self, config: &AppConfig, window: &Window, on_action: F) -> impl IntoElement
+    fn render_proxy_group<F>(
+        &self,
+        config: &AppConfig,
+        window: &Window,
+        on_action: F,
+    ) -> impl IntoElement
     where
         F: Fn(SettingsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -2415,12 +2537,16 @@ impl SettingsView {
                         .flex()
                         .items_center()
                         .gap(px(12.0))
-                        .child(action_button(crate::i18n::t("settings.aboutHistoryBtn"), false, move |_ev, win, app| {
-                            act_log(SettingsAction::ToggleChangelog, win, app)
-                        }))
-                        .child(action_button(crate::i18n::t("settings.aboutRepository"), false, move |_ev, win, app| {
-                            act_repo(SettingsAction::OpenRepo, win, app)
-                        })),
+                        .child(action_button(
+                            crate::i18n::t("settings.aboutHistoryBtn"),
+                            false,
+                            move |_ev, win, app| act_log(SettingsAction::ToggleChangelog, win, app),
+                        ))
+                        .child(action_button(
+                            crate::i18n::t("settings.aboutRepository"),
+                            false,
+                            move |_ev, win, app| act_repo(SettingsAction::OpenRepo, win, app),
+                        )),
                 ),
         )
     }
@@ -2487,7 +2613,8 @@ impl SettingsView {
                                         .text_size(px(14.0))
                                         .text_color(Theme::TEXT_MUTED())
                                         .hover(|s| {
-                                            s.bg(Theme::HOVER_BG()).text_color(Theme::TEXT_PRIMARY())
+                                            s.bg(Theme::HOVER_BG())
+                                                .text_color(Theme::TEXT_PRIMARY())
                                         })
                                         .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                             act_close(SettingsAction::ToggleChangelog, win, app)
@@ -2505,10 +2632,16 @@ impl SettingsView {
                                 .flex()
                                 .flex_col()
                                 .gap(px(14.0))
-                                .child(action_button(crate::i18n::t("common.refresh"), false, move |_, win, app| {
-                                    act_refresh(SettingsAction::RefreshChangelog, win, app)
-                                }))
-                                .when(self.release_loading, |d| d.child(crate::i18n::t("settings.aboutHistoryLoading")))
+                                .child(action_button(
+                                    crate::i18n::t("common.refresh"),
+                                    false,
+                                    move |_, win, app| {
+                                        act_refresh(SettingsAction::RefreshChangelog, win, app)
+                                    },
+                                ))
+                                .when(self.release_loading, |d| {
+                                    d.child(crate::i18n::t("settings.aboutHistoryLoading"))
+                                })
                                 .when_some(self.release_error.clone(), |d, error| d.child(error))
                                 .children(self.release_notes.iter().map(|release| {
                                     div()

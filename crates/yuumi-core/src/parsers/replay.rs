@@ -10,9 +10,7 @@ pub async fn get_replay_status(client: &LcuClient, game_id: u64) -> Result<Strin
         Err(_) => {
             // 若尚未存在本地元数据（LCU 返回 404），先触发元数据创建
             let create_path = format!("/lol-replays/v2/metadata/{}/create", game_id);
-            let _ = client
-                .post(&create_path, Some(serde_json::json!({})))
-                .await;
+            let _ = client.post(&create_path, Some(serde_json::json!({}))).await;
             client.get(&path).await?
         }
     };
@@ -29,9 +27,7 @@ pub async fn get_replay_status(client: &LcuClient, game_id: u64) -> Result<Strin
 pub async fn download_game_replay(client: &LcuClient, game_id: u64) -> Result<(), String> {
     // 确保本地元数据已初始化注册
     let create_path = format!("/lol-replays/v2/metadata/{}/create", game_id);
-    let _ = client
-        .post(&create_path, Some(serde_json::json!({})))
-        .await;
+    let _ = client.post(&create_path, Some(serde_json::json!({}))).await;
 
     let path = format!("/lol-replays/v1/rofls/{}/download", game_id);
     let body = serde_json::json!({ "componentType": "replay-button_match-history" });

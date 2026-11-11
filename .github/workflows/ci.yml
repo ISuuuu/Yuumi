@@ -28,6 +28,9 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
 
+      - name: Rust format check
+        run: cargo fmt --all -- --check
+
       - name: Rust lint (clippy)
         run: cargo clippy --workspace --all-targets
 

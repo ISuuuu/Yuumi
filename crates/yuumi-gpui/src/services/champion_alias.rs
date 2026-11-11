@@ -121,10 +121,7 @@ where
     let value = serde::Deserialize::deserialize(deserializer)?;
     match value {
         serde_json::Value::Number(n) => Ok(n.as_i64().unwrap_or(0) as i32),
-        serde_json::Value::String(s) => s
-            .trim()
-            .parse::<i32>()
-            .map_err(serde::de::Error::custom),
+        serde_json::Value::String(s) => s.trim().parse::<i32>().map_err(serde::de::Error::custom),
         _ => Err(serde::de::Error::custom("heroId 应为数字或数字字符串")),
     }
 }

@@ -371,10 +371,9 @@ impl AppConfig {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("创建配置目录失败 {}: {}", parent.display(), e))?;
         }
-        let raw = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("序列化配置失败: {}", e))?;
-        std::fs::write(path, raw)
-            .map_err(|e| format!("写入配置文件失败 {}: {}", path.display(), e))
+        let raw =
+            serde_json::to_string_pretty(self).map_err(|e| format!("序列化配置失败: {}", e))?;
+        std::fs::write(path, raw).map_err(|e| format!("写入配置文件失败 {}: {}", path.display(), e))
     }
 
     /// 保存配置到默认路径
@@ -442,10 +441,7 @@ impl AppConfig {
         f.auto_accept_matching_delay = s.auto_match.auto_accept_delay as u32;
         f.enable_auto_reconnect = s.auto_match.auto_reconnect;
         f.enable_auto_play_again = s.auto_match.auto_play_again;
-        f.auto_play_again_delay = s
-            .auto_match
-            .auto_play_again_delay
-            .min(u32::MAX as u64) as u32;
+        f.auto_play_again_delay = s.auto_match.auto_play_again_delay.min(u32::MAX as u64) as u32;
         f.enable_auto_honor = s.auto_match.auto_honor;
         f.enable_auto_handle_invite = s.auto_match.auto_handle_invite;
         f.enable_auto_create_lobby = s.auto_match.auto_create_lobby;

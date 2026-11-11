@@ -290,10 +290,7 @@ impl Render for MainWindow {
                                 },
                                 move |_ev, _win, app| {
                                     v_clear.update(app, |this, cx| {
-                                        this.handle_tools_action(
-                                            ToolsAction::ClearBadgesModal,
-                                            cx,
-                                        );
+                                        this.handle_tools_action(ToolsAction::ClearBadgesModal, cx);
                                     });
                                 },
                                 move |_ev, _win, app| {

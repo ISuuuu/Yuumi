@@ -266,10 +266,7 @@ mod tests {
         assert!(!is_not_found("LCU 返回错误 [500]: {}"));
         assert!(!is_not_found("LCU 并发许可等待超时: GET /x"));
         assert!(!is_not_found("连接已断开"));
-        assert_eq!(
-            lcu_status_code("LCU 返回错误 [403]: {}"),
-            Some(403)
-        );
+        assert_eq!(lcu_status_code("LCU 返回错误 [403]: {}"), Some(403));
     }
 
     #[test]

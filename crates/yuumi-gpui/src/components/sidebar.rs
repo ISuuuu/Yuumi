@@ -33,12 +33,7 @@ impl Sidebar {
         on_open_notice: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_select_self: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
-        let mut main_routes = vec![
-            Route::Home,
-            Route::Career,
-            Route::Search,
-            Route::GameInfo,
-        ];
+        let mut main_routes = vec![Route::Home, Route::Career, Route::Search, Route::GameInfo];
         if !config.functions.hide_tft {
             main_routes.push(Route::Tft);
         }
@@ -217,7 +212,11 @@ impl Sidebar {
                     .child(icon(
                         icon_path,
                         18.0,
-                        if is_active { Theme::ACCENT_PRIMARY() } else { fg },
+                        if is_active {
+                            Theme::ACCENT_PRIMARY()
+                        } else {
+                            fg
+                        },
                     ))
                     // 更新提示红点
                     .when(has_dot, |el| {

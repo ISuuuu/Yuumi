@@ -1,4 +1,4 @@
-﻿//! 对局信息解析与实时构建（10 人段位、近期 KDA、宿命对局）
+//! 对局信息解析与实时构建（10 人段位、近期 KDA、宿命对局）
 //!
 //! 数据来源：
 //! - 选人阶段：`/lol-champ-select/v1/session`（myTeam / theirTeam）
@@ -433,7 +433,10 @@ impl GameInfoSource {
                     return MapSide::Blue;
                 }
             }
-            let has_red = snapshot.my_team.iter().any(|p| p.cell_id.unwrap_or(-1) >= 5);
+            let has_red = snapshot
+                .my_team
+                .iter()
+                .any(|p| p.cell_id.unwrap_or(-1) >= 5);
             let has_blue = snapshot.my_team.iter().any(|p| {
                 let cid = p.cell_id.unwrap_or(-1);
                 (0..5).contains(&cid)
@@ -485,7 +488,10 @@ impl GameInfoSource {
             self.phase.clone(),
             self.game_id.unwrap_or(0).to_string(),
             self.queue_id.to_string(),
-            self.detected_side.map(|s| s.as_str()).unwrap_or("none").to_string(),
+            self.detected_side
+                .map(|s| s.as_str())
+                .unwrap_or("none")
+                .to_string(),
         ];
         for group in [&self.blue, &self.red] {
             let slots: Vec<String> = group
@@ -720,7 +726,10 @@ fn make_mock_match(
         time_stamp: 1794000000000,
         total_damage: 26000,
         total_heal: 3200,
-        champion_icon_url: format!("/lol-game-data/assets/v1/champion-icons/{}.png", champion_id),
+        champion_icon_url: format!(
+            "/lol-game-data/assets/v1/champion-icons/{}.png",
+            champion_id
+        ),
         spell1_icon_url: "/lol-game-data/assets/v1/summoner-spells/4.png".to_string(),
         spell2_icon_url: "/lol-game-data/assets/v1/summoner-spells/14.png".to_string(),
         rune_icon_url: String::new(),
@@ -849,19 +858,82 @@ fn make_demo_instance() -> LiveGameInfo {
         is_demo: true,
         blue_team: vec![
             make_mock_player(
-                "demo-p0", 1000, 0, "疾风剑豪", "国服", 157, "疾风剑豪", "中单",
-                Some(1), "大师", "I", 188, 35, 15, 70, 3.8, 8.5, 3.2, 6.1,
-                Some("3连胜"), true, None, true, 125, 1116,
+                "demo-p0",
+                1000,
+                0,
+                "疾风剑豪",
+                "国服",
+                157,
+                "疾风剑豪",
+                "中单",
+                Some(1),
+                "大师",
+                "I",
+                188,
+                35,
+                15,
+                70,
+                3.8,
+                8.5,
+                3.2,
+                6.1,
+                Some("3连胜"),
+                true,
+                None,
+                true,
+                125,
+                1116,
             ),
             make_mock_player(
-                "demo-p1", 1001, 1, "瞎子王", "001", 64, "盲僧", "打野",
-                Some(1), "钻石", "I", 65, 30, 20, 60, 3.2, 6.0, 4.0, 7.0,
-                None, false, None, false, 88, 7025,
+                "demo-p1",
+                1001,
+                1,
+                "瞎子王",
+                "001",
+                64,
+                "盲僧",
+                "打野",
+                Some(1),
+                "钻石",
+                "I",
+                65,
+                30,
+                20,
+                60,
+                3.2,
+                6.0,
+                4.0,
+                7.0,
+                None,
+                false,
+                None,
+                false,
+                88,
+                7025,
             ),
             make_mock_player(
-                "demo-p2", 1002, 2, "九尾天狐", "阿狸", 103, "九尾妖狐", "中单",
-                None, "钻石", "II", 40, 28, 22, 56, 3.5, 7.2, 3.0, 6.5,
-                None, false, Some(FateInfo {
+                "demo-p2",
+                1002,
+                2,
+                "九尾天狐",
+                "阿狸",
+                103,
+                "九尾妖狐",
+                "中单",
+                None,
+                "钻石",
+                "II",
+                40,
+                28,
+                22,
+                56,
+                3.5,
+                7.2,
+                3.0,
+                6.5,
+                None,
+                false,
+                Some(FateInfo {
                     ally: true,
                     is_last_game: true,
                     game_id: 9999999001,
@@ -869,34 +941,144 @@ fn make_demo_instance() -> LiveGameInfo {
                     champion_id: 103,
                     ally_count: 2,
                     enemy_count: 0,
-                }), false, 210, 7037,
+                }),
+                false,
+                210,
+                7037,
             ),
             make_mock_player(
-                "demo-p3", 1003, 3, "暴走小萝莉", "ADC", 222, "暴走萝莉", "下路",
-                None, "翡翠", "I", 88, 25, 25, 50, 2.8, 8.0, 5.0, 6.0,
-                None, false, None, false, 65, 1439,
+                "demo-p3",
+                1003,
+                3,
+                "暴走小萝莉",
+                "ADC",
+                222,
+                "暴走萝莉",
+                "下路",
+                None,
+                "翡翠",
+                "I",
+                88,
+                25,
+                25,
+                50,
+                2.8,
+                8.0,
+                5.0,
+                6.0,
+                None,
+                false,
+                None,
+                false,
+                65,
+                1439,
             ),
             make_mock_player(
-                "demo-p4", 1004, 4, "魂锁典狱长", "辅助", 412, "魂锁典狱长", "辅助",
-                None, "翡翠", "II", 15, 20, 30, 40, 2.5, 1.5, 4.0, 11.0,
-                None, false, None, false, 150, 7210,
+                "demo-p4",
+                1004,
+                4,
+                "魂锁典狱长",
+                "辅助",
+                412,
+                "魂锁典狱长",
+                "辅助",
+                None,
+                "翡翠",
+                "II",
+                15,
+                20,
+                30,
+                40,
+                2.5,
+                1.5,
+                4.0,
+                11.0,
+                None,
+                false,
+                None,
+                false,
+                150,
+                7210,
             ),
         ],
         red_team: vec![
             make_mock_player(
-                "demo-p5", 2000, 5, "熔岩巨兽", "上单", 54, "熔岩巨兽", "上单",
-                Some(2), "钻石", "I", 92, 32, 18, 64, 3.1, 4.5, 3.5, 8.0,
-                None, false, None, false, 95, 7089,
+                "demo-p5",
+                2000,
+                5,
+                "熔岩巨兽",
+                "上单",
+                54,
+                "熔岩巨兽",
+                "上单",
+                Some(2),
+                "钻石",
+                "I",
+                92,
+                32,
+                18,
+                64,
+                3.1,
+                4.5,
+                3.5,
+                8.0,
+                None,
+                false,
+                None,
+                false,
+                95,
+                7089,
             ),
             make_mock_player(
-                "demo-p6", 2001, 6, "德玛西亚皇子", "野王", 59, "德玛西亚皇子", "打野",
-                Some(2), "钻石", "III", 12, 26, 24, 52, 2.9, 5.0, 4.5, 7.5,
-                None, false, None, false, 140, 3158,
+                "demo-p6",
+                2001,
+                6,
+                "德玛西亚皇子",
+                "野王",
+                59,
+                "德玛西亚皇子",
+                "打野",
+                Some(2),
+                "钻石",
+                "III",
+                12,
+                26,
+                24,
+                52,
+                2.9,
+                5.0,
+                4.5,
+                7.5,
+                None,
+                false,
+                None,
+                false,
+                140,
+                3158,
             ),
             make_mock_player(
-                "demo-p7", 2002, 7, "影流之主", "火影", 238, "影流之主", "中单",
-                Some(2), "大师", "I", 240, 40, 10, 80, 4.2, 11.0, 3.0, 4.0,
-                Some("4连胜"), true, Some(FateInfo {
+                "demo-p7",
+                2002,
+                7,
+                "影流之主",
+                "火影",
+                238,
+                "影流之主",
+                "中单",
+                Some(2),
+                "大师",
+                "I",
+                240,
+                40,
+                10,
+                80,
+                4.2,
+                11.0,
+                3.0,
+                4.0,
+                Some("4连胜"),
+                true,
+                Some(FateInfo {
                     ally: false,
                     is_last_game: true,
                     game_id: 9999999002,
@@ -904,17 +1086,64 @@ fn make_demo_instance() -> LiveGameInfo {
                     champion_id: 238,
                     ally_count: 0,
                     enemy_count: 3,
-                }), false, 320, 25,
+                }),
+                false,
+                320,
+                25,
             ),
             make_mock_player(
-                "demo-p8", 2003, 8, "虚空之女", "卡莎", 145, "虚空之女", "下路",
-                None, "钻石", "IV", 55, 24, 26, 48, 2.7, 7.5, 5.5, 5.0,
-                None, false, None, false, 78, 4209,
+                "demo-p8",
+                2003,
+                8,
+                "虚空之女",
+                "卡莎",
+                145,
+                "虚空之女",
+                "下路",
+                None,
+                "钻石",
+                "IV",
+                55,
+                24,
+                26,
+                48,
+                2.7,
+                7.5,
+                5.5,
+                5.0,
+                None,
+                false,
+                None,
+                false,
+                78,
+                4209,
             ),
             make_mock_player(
-                "demo-p9", 2004, 9, "深海泰坦", "诺提", 111, "深海泰坦", "辅助",
-                None, "翡翠", "I", 33, 25, 25, 50, 2.4, 2.0, 5.0, 10.0,
-                None, false, None, false, 112, 1116,
+                "demo-p9",
+                2004,
+                9,
+                "深海泰坦",
+                "诺提",
+                111,
+                "深海泰坦",
+                "辅助",
+                None,
+                "翡翠",
+                "I",
+                33,
+                25,
+                25,
+                50,
+                2.4,
+                2.0,
+                5.0,
+                10.0,
+                None,
+                false,
+                None,
+                false,
+                112,
+                1116,
             ),
         ],
     }
@@ -959,77 +1188,177 @@ fn parse_snapshot_json(content: &str) -> Result<LiveGameInfo, Box<dyn std::error
 
     let map_team = |team_opt: Option<&Vec<serde_json::Value>>| -> Vec<GameInfoPlayer> {
         let mut players = Vec::new();
-        let Some(team_arr) = team_opt else { return players };
+        let Some(team_arr) = team_opt else {
+            return players;
+        };
 
         for (idx, slot) in team_arr.iter().enumerate() {
-            let cell_id = slot.get("CellId").and_then(|v| v.as_i64()).unwrap_or(idx as i64);
-            let puuid = slot.get("Puuid").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let cell_id = slot
+                .get("CellId")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(idx as i64);
+            let puuid = slot
+                .get("Puuid")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let champion_id = slot.get("ChampionId").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
             let party_id = slot.get("PartyId").and_then(|v| v.as_str()).unwrap_or("");
             let premade_group_id = party_group_id_map.get(party_id).copied();
 
             let pd = player_data.and_then(|m| m.get(&cell_id.to_string()));
 
-            let (summoner_name, tag_line, summoner_level, profile_icon_id) = if let Some(info) = pd.and_then(|d| d.get("Info")) {
-                let s_name = info.get("GameName").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let tag = info.get("TagLine").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let lvl = info.get("SummonerLevel").and_then(|v| v.as_u64()).unwrap_or(30) as u32;
-                let icon = info.get("ProfileIconId").and_then(|v| v.as_i64()).unwrap_or(slot.get("ProfileIconId").and_then(|v| v.as_i64()).unwrap_or(29)) as i32;
-                (s_name, tag, lvl, icon)
-            } else {
-                let disp = slot.get("DisplayName").and_then(|v| v.as_str()).unwrap_or("召唤师").to_string();
-                let icon = slot.get("ProfileIconId").and_then(|v| v.as_i64()).unwrap_or(29) as i32;
-                (disp, "".to_string(), 30, icon)
-            };
+            let (summoner_name, tag_line, summoner_level, profile_icon_id) =
+                if let Some(info) = pd.and_then(|d| d.get("Info")) {
+                    let s_name = info
+                        .get("GameName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let tag = info
+                        .get("TagLine")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let lvl = info
+                        .get("SummonerLevel")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(30) as u32;
+                    let icon = info
+                        .get("ProfileIconId")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(
+                            slot.get("ProfileIconId")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(29),
+                        ) as i32;
+                    (s_name, tag, lvl, icon)
+                } else {
+                    let disp = slot
+                        .get("DisplayName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("召唤师")
+                        .to_string();
+                    let icon = slot
+                        .get("ProfileIconId")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(29) as i32;
+                    (disp, "".to_string(), 30, icon)
+                };
 
             let name = if summoner_name.is_empty() {
-                slot.get("DisplayName").and_then(|v| v.as_str()).unwrap_or("召唤师").to_string()
+                slot.get("DisplayName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("召唤师")
+                    .to_string()
             } else {
                 summoner_name
             };
 
-            let (rank_tier, rank_division, rank_lp, ranked_wins, ranked_losses) = if let Some(solo) = pd.and_then(|d| d.get("Solo")) {
-                let tier = solo.get("TierText").and_then(|v| v.as_str()).unwrap_or("未定级").to_string();
-                let div = solo.get("Division").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let lp = solo.get("LeaguePoints").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                let wins = solo.get("Wins").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                let losses = solo.get("Losses").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                (tier, div, lp, wins, losses)
-            } else {
-                ("未定级".to_string(), "".to_string(), 0, 0, 0)
-            };
+            let (rank_tier, rank_division, rank_lp, ranked_wins, ranked_losses) =
+                if let Some(solo) = pd.and_then(|d| d.get("Solo")) {
+                    let tier = solo
+                        .get("TierText")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("未定级")
+                        .to_string();
+                    let div = solo
+                        .get("Division")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let lp = solo
+                        .get("LeaguePoints")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    let wins = solo.get("Wins").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let losses = solo.get("Losses").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    (tier, div, lp, wins, losses)
+                } else {
+                    ("未定级".to_string(), "".to_string(), 0, 0, 0)
+                };
 
-            let win_rate = pd.and_then(|d| d.get("WinRate").and_then(|v| v.as_u64())).unwrap_or(50) as u32;
-            let avg_kda = pd.and_then(|d| d.get("AvgKda").and_then(|v| v.as_f64())).unwrap_or(2.5);
+            let win_rate = pd
+                .and_then(|d| d.get("WinRate").and_then(|v| v.as_u64()))
+                .unwrap_or(50) as u32;
+            let avg_kda = pd
+                .and_then(|d| d.get("AvgKda").and_then(|v| v.as_f64()))
+                .unwrap_or(2.5);
 
             let mut matches = Vec::new();
             if let Some(m_arr) = pd.and_then(|d| d.get("Matches").and_then(|v| v.as_array())) {
                 for m_val in m_arr {
-                    let m_champ_id = m_val.get("ChampionId").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                    let m_champ_id = m_val
+                        .get("ChampionId")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0) as i32;
                     let m_win = m_val.get("Win").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let m_q_name = m_val.get("QueueName").and_then(|v| v.as_str()).unwrap_or("匹配模式").to_string();
-                    let m_map = m_val.get("MapName").and_then(|v| v.as_str()).unwrap_or("召唤师峡谷").to_string();
-                    let m_kda = m_val.get("KdaText").and_then(|v| v.as_str()).unwrap_or("0.0").to_string();
-                    let m_time = m_val.get("TimeText").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let m_short_time = m_val.get("ShortTimeText").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let m_duration = m_val.get("DurationText").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let m_q_name = m_val
+                        .get("QueueName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("匹配模式")
+                        .to_string();
+                    let m_map = m_val
+                        .get("MapName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("召唤师峡谷")
+                        .to_string();
+                    let m_kda = m_val
+                        .get("KdaText")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("0.0")
+                        .to_string();
+                    let m_time = m_val
+                        .get("TimeText")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let m_short_time = m_val
+                        .get("ShortTimeText")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let m_duration = m_val
+                        .get("DurationText")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let m_kills = m_val.get("Kills").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
                     let m_deaths = m_val.get("Deaths").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                    let m_assists = m_val.get("Assists").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                    let m_lvl = m_val.get("ChampionLevel").and_then(|v| v.as_i64()).unwrap_or(18) as i32;
-                    let m_spell1 = m_val.get("Spell1Id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                    let m_spell2 = m_val.get("Spell2Id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                    let m_assists =
+                        m_val.get("Assists").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                    let m_lvl = m_val
+                        .get("ChampionLevel")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(18) as i32;
+                    let m_spell1 =
+                        m_val.get("Spell1Id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                    let m_spell2 =
+                        m_val.get("Spell2Id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
                     let m_qid = m_val.get("QueueId").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
                     let m_gid = m_val.get("GameId").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let m_remake = m_val.get("Remake").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let m_remake = m_val
+                        .get("Remake")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
 
-                    let item_ids: Vec<i32> = m_val.get("ItemIds")
+                    let item_ids: Vec<i32> = m_val
+                        .get("ItemIds")
                         .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter_map(|x| x.as_i64().map(|n| n as i32)).collect())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_i64().map(|n| n as i32))
+                                .collect()
+                        })
                         .unwrap_or_default();
-                    let augment_ids: Vec<i32> = m_val.get("AugmentIds")
+                    let augment_ids: Vec<i32> = m_val
+                        .get("AugmentIds")
                         .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter_map(|x| x.as_i64().map(|n| n as i32)).collect())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_i64().map(|n| n as i32))
+                                .collect()
+                        })
                         .unwrap_or_default();
 
                     matches.push(MatchDisplay {
@@ -1053,18 +1382,45 @@ fn parse_snapshot_json(content: &str) -> Result<LiveGameInfo, Box<dyn std::error
                         kda: m_kda,
                         item_ids: item_ids.clone(),
                         rune_id: 0,
-                        cs: m_val.get("CreepScore").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                        cs: m_val
+                            .get("CreepScore")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0) as i32,
                         gold: m_val.get("Gold").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                        time_stamp: m_val.get("GameCreation").and_then(|v| v.as_u64()).unwrap_or(0),
-                        total_damage: m_val.get("DamageToChampions").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                        total_heal: m_val.get("TotalHeal").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                        champion_icon_url: format!("/lol-game-data/assets/v1/champion-icons/{}.png", m_champ_id),
-                        spell1_icon_url: format!("/lol-game-data/assets/v1/summoner-spells/{}.png", m_spell1),
-                        spell2_icon_url: format!("/lol-game-data/assets/v1/summoner-spells/{}.png", m_spell2),
+                        time_stamp: m_val
+                            .get("GameCreation")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        total_damage: m_val
+                            .get("DamageToChampions")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0) as i32,
+                        total_heal: m_val.get("TotalHeal").and_then(|v| v.as_i64()).unwrap_or(0)
+                            as i32,
+                        champion_icon_url: format!(
+                            "/lol-game-data/assets/v1/champion-icons/{}.png",
+                            m_champ_id
+                        ),
+                        spell1_icon_url: format!(
+                            "/lol-game-data/assets/v1/summoner-spells/{}.png",
+                            m_spell1
+                        ),
+                        spell2_icon_url: format!(
+                            "/lol-game-data/assets/v1/summoner-spells/{}.png",
+                            m_spell2
+                        ),
                         rune_icon_url: String::new(),
-                        item_icon_urls: item_ids.iter().map(|id| format!("/lol-game-data/assets/v1/items/{}.png", id)).collect(),
+                        item_icon_urls: item_ids
+                            .iter()
+                            .map(|id| format!("/lol-game-data/assets/v1/items/{}.png", id))
+                            .collect(),
                         augment_ids: augment_ids.clone(),
-                        augment_icon_urls: augment_ids.iter().map(|id| format!("/lol-game-data/assets/v1/cherry-augments/{}.png", id)).collect(),
+                        augment_icon_urls: augment_ids
+                            .iter()
+                            .map(|id| {
+                                format!("/lol-game-data/assets/v1/cherry-augments/{}.png", id)
+                            })
+                            .collect(),
                         augment_names: vec![],
                         position: None,
                         role_bound_item: None,
@@ -1086,13 +1442,18 @@ fn parse_snapshot_json(content: &str) -> Result<LiveGameInfo, Box<dyn std::error
                     champion_id: cid,
                     champion_name: format!("{}", cid),
                     count,
-                    win_rate: if count > 0 { ((wins as f64 / count as f64) * 100.0).round() as u32 } else { 0 },
+                    win_rate: if count > 0 {
+                        ((wins as f64 / count as f64) * 100.0).round() as u32
+                    } else {
+                        0
+                    },
                 })
                 .collect();
             top_champions.sort_by(|a, b| b.count.cmp(&a.count));
             top_champions.truncate(3);
 
-            let rank_display = if rank_tier == "未定级" || rank_tier == "--" || rank_tier.is_empty() {
+            let rank_display = if rank_tier == "未定级" || rank_tier == "--" || rank_tier.is_empty()
+            {
                 "未定级".to_string()
             } else if rank_tier == "大师" || rank_tier == "宗师" || rank_tier == "王者" {
                 format!("{} · {} LP", rank_tier, rank_lp)
@@ -1447,18 +1808,13 @@ fn build_player(
             } else {
                 0
             };
-            let cname = ctx
-                .assets
-                .champions
-                .get(&cid)
-                .cloned()
-                .unwrap_or_else(|| {
-                    if cid > 0 {
-                        format!("英雄 {}", cid)
-                    } else {
-                        "未知".to_string()
-                    }
-                });
+            let cname = ctx.assets.champions.get(&cid).cloned().unwrap_or_else(|| {
+                if cid > 0 {
+                    format!("英雄 {}", cid)
+                } else {
+                    "未知".to_string()
+                }
+            });
             TopChampion {
                 champion_id: cid,
                 champion_name: cname,
@@ -1467,7 +1823,11 @@ fn build_player(
             }
         })
         .collect();
-    top_champions.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| b.win_rate.cmp(&a.win_rate)));
+    top_champions.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then_with(|| b.win_rate.cmp(&a.win_rate))
+    });
     top_champions.truncate(3);
 
     let (saved_tag, saved_encounter_count) = if !puuid.is_empty() {
@@ -1806,8 +2166,7 @@ mod tests {
         include_str!("../../testdata/session/champ-select-ranked-420.json");
     const GAMEFLOW_FIXTURE: &str =
         include_str!("../../testdata/session/gameflow-in-progress-440.json");
-    const RANKED_FIXTURE: &str =
-        include_str!("../../testdata/session/ranked-stats-solo.json");
+    const RANKED_FIXTURE: &str = include_str!("../../testdata/session/ranked-stats-solo.json");
 
     const SELF_PUUID: &str = "puuid-self-top";
     const SELF_SUMMONER_ID: i64 = 1001;
@@ -2133,7 +2492,8 @@ mod tests {
 
     #[test]
     fn placed_ranked_entry_prefers_solo_and_rejects_unranked() {
-        let placed: RankedStats = serde_json::from_str(RANKED_FIXTURE).expect("段位 fixture 应能反序列化");
+        let placed: RankedStats =
+            serde_json::from_str(RANKED_FIXTURE).expect("段位 fixture 应能反序列化");
         let entry = placed_ranked_entry(&placed).expect("单双排钻石应有效");
         assert_eq!(entry.tier, "DIAMOND");
         assert_eq!(entry.division, "I");
@@ -2152,7 +2512,11 @@ mod tests {
                 "queueMap": { "RANKED_SOLO_5x5": { "queueType": "RANKED_SOLO_5x5", "tier": tier, "division": "I" } }
             }))
             .unwrap();
-            assert!(placed_ranked_entry(&unranked).is_none(), "tier={:?} 应视为未定级", tier);
+            assert!(
+                placed_ranked_entry(&unranked).is_none(),
+                "tier={:?} 应视为未定级",
+                tier
+            );
         }
         assert!(placed_ranked_entry(&RankedStats::default()).is_none());
     }
@@ -2174,12 +2538,15 @@ mod tests {
         );
         assert_eq!(info_pin.user_side, Some(MapSide::Red));
         assert!(info_pin.red_team.iter().any(|p| p.puuid == SELF_PUUID));
-        assert!(info_pin.blue_team.iter().any(|p| p.puuid == "puuid-enemy-top"));
+        assert!(info_pin
+            .blue_team
+            .iter()
+            .any(|p| p.puuid == "puuid-enemy-top"));
 
         // 无 pin-drop 时依据 localPlayerCellId >= 5 判定为红方
         snapshot.local_player_cell_id = Some(6);
-        let source_cell = GameInfoSource::from_champ_select(&snapshot, None)
-            .expect("选人快照应有效");
+        let source_cell =
+            GameInfoSource::from_champ_select(&snapshot, None).expect("选人快照应有效");
         let info_cell = build_live_game_info(
             &source_cell,
             SELF_PUUID,
@@ -2212,8 +2579,8 @@ mod tests {
                 "teamTwo": null
             }
         });
-        let snapshot: GameflowSessionSnapshot =
-            serde_json::from_value(payload).expect("数字 teamParticipantId/partyId 与 null teamTwo 应能反序列化");
+        let snapshot: GameflowSessionSnapshot = serde_json::from_value(payload)
+            .expect("数字 teamParticipantId/partyId 与 null teamTwo 应能反序列化");
         let gd = snapshot.game_data.expect("gameData 应存在");
         assert_eq!(gd.team_one.len(), 1);
         assert_eq!(gd.team_one[0].team_participant_id.as_deref(), Some("0"));

@@ -104,7 +104,11 @@ impl MainWindow {
                         );
                     }
                 } else {
-                    self.toast(ToastKind::Error, crate::i18n::t("settings.lolClientNotFound"), cx);
+                    self.toast(
+                        ToastKind::Error,
+                        crate::i18n::t("settings.lolClientNotFound"),
+                        cx,
+                    );
                 }
                 cx.notify();
             }
@@ -135,7 +139,11 @@ impl MainWindow {
                     self.app_config.general.lol_path.push(wegame_marker);
                     self.sync_home_paths();
                     self.persist_config_silent(cx);
-                    self.toast(ToastKind::Success, crate::i18n::t("settings.wegameAdded"), cx);
+                    self.toast(
+                        ToastKind::Success,
+                        crate::i18n::t("settings.wegameAdded"),
+                        cx,
+                    );
                 }
                 cx.notify();
             }
@@ -153,7 +161,11 @@ impl MainWindow {
             }
             SettingsAction::ClearCache => {
                 let client_path = self.app_config.general.lol_path.first().cloned();
-                self.toast(ToastKind::Info, crate::i18n::t("settings.clearingCache"), cx);
+                self.toast(
+                    ToastKind::Info,
+                    crate::i18n::t("settings.clearingCache"),
+                    cx,
+                );
                 cx.notify();
                 cx.spawn(async move |entity, cx| {
                     let res = cx
@@ -214,7 +226,11 @@ impl MainWindow {
                             .and_then(|rest| rest.split('/').next())
                             .is_none_or(|host| host.is_empty()))
                 {
-                    self.toast(ToastKind::Error, crate::i18n::t("settings.uploadUrlInvalid"), cx);
+                    self.toast(
+                        ToastKind::Error,
+                        crate::i18n::t("settings.uploadUrlInvalid"),
+                        cx,
+                    );
                     cx.notify();
                     return;
                 }
@@ -308,7 +324,11 @@ impl MainWindow {
                     self.settings_view.f_inputs[3] = folder.clone();
                     self.app_config.functions.screenshot_save_path = folder;
                     self.persist_config_silent(cx);
-                    self.toast(ToastKind::Success, crate::i18n::t("settings.screenshotDirUpdated"), cx);
+                    self.toast(
+                        ToastKind::Success,
+                        crate::i18n::t("settings.screenshotDirUpdated"),
+                        cx,
+                    );
                 }
             }
             SettingsAction::OpenScreenshotFolder => {
@@ -326,7 +346,8 @@ impl MainWindow {
                         let _ = entity.update(cx, |this, cx| {
                             this.toast(
                                 ToastKind::Error,
-                                crate::i18n::t("settings.screenshotFolderOpenFailed").replace("{error}", &e),
+                                crate::i18n::t("settings.screenshotFolderOpenFailed")
+                                    .replace("{error}", &e),
                                 cx,
                             );
                         });
@@ -351,7 +372,8 @@ impl MainWindow {
                         let _ = entity.update(cx, |this, cx| {
                             this.toast(
                                 ToastKind::Error,
-                                crate::i18n::t("settings.logFolderOpenFailed").replace("{error}", &e),
+                                crate::i18n::t("settings.logFolderOpenFailed")
+                                    .replace("{error}", &e),
                                 cx,
                             );
                         });
@@ -450,9 +472,7 @@ impl MainWindow {
                     "light_death" => {
                         self.app_config.personalization.light_deaths_number_color = hex
                     }
-                    "dark_death" => {
-                        self.app_config.personalization.dark_deaths_number_color = hex
-                    }
+                    "dark_death" => self.app_config.personalization.dark_deaths_number_color = hex,
                     _ => return,
                 }
                 self.persist_config_silent(cx);
@@ -479,9 +499,7 @@ impl MainWindow {
                     "light_death" => {
                         self.app_config.personalization.light_deaths_number_color = hex
                     }
-                    "dark_death" => {
-                        self.app_config.personalization.dark_deaths_number_color = hex
-                    }
+                    "dark_death" => self.app_config.personalization.dark_deaths_number_color = hex,
                     _ => return,
                 }
                 self.persist_config_silent(cx);
@@ -523,9 +541,7 @@ impl MainWindow {
                     "light_death" => {
                         self.app_config.personalization.light_deaths_number_color = hex
                     }
-                    "dark_death" => {
-                        self.app_config.personalization.dark_deaths_number_color = hex
-                    }
+                    "dark_death" => self.app_config.personalization.dark_deaths_number_color = hex,
                     _ => return,
                 }
                 self.persist_config(cx);
@@ -548,18 +564,10 @@ impl MainWindow {
                     self.settings_view.color_picker_a = a;
                     self.settings_view.color_hex_input = valid.clone();
                     match key {
-                        "theme_color" => {
-                            self.app_config.personalization.theme_color = valid
-                        }
-                        "win_color" => {
-                            self.app_config.personalization.win_card_color = valid
-                        }
-                        "lose_color" => {
-                            self.app_config.personalization.lose_card_color = valid
-                        }
-                        "remake_color" => {
-                            self.app_config.personalization.remake_card_color = valid
-                        }
+                        "theme_color" => self.app_config.personalization.theme_color = valid,
+                        "win_color" => self.app_config.personalization.win_card_color = valid,
+                        "lose_color" => self.app_config.personalization.lose_card_color = valid,
+                        "remake_color" => self.app_config.personalization.remake_card_color = valid,
                         "light_death" => {
                             self.app_config.personalization.light_deaths_number_color = valid
                         }
@@ -590,7 +598,11 @@ impl MainWindow {
                 // 运行时立即生效：Auto=恢复跟随系统 DPI，100/125/150=固定缩放
                 window.set_scale_factor_override(scale_override);
                 // 对照 Vue B12：DPI 专用成功提示
-                self.toast(ToastKind::Success, crate::i18n::t("settings.dpiScaleApplied"), cx);
+                self.toast(
+                    ToastKind::Success,
+                    crate::i18n::t("settings.dpiScaleApplied"),
+                    cx,
+                );
             }
             SettingsAction::SetLanguage(l) => {
                 self.settings_view.open_lang_dropdown = false;
@@ -737,8 +749,11 @@ impl MainWindow {
                             self.settings_view.color_picker_s = s;
                             self.settings_view.color_picker_v = v;
                             self.settings_view.color_picker_a = a;
-                            self.settings_view.color_hex_input =
-                                self.app_config.personalization.light_deaths_number_color.clone();
+                            self.settings_view.color_hex_input = self
+                                .app_config
+                                .personalization
+                                .light_deaths_number_color
+                                .clone();
                         }
                     }
                     "dark_death" => {
@@ -754,8 +769,11 @@ impl MainWindow {
                             self.settings_view.color_picker_s = s;
                             self.settings_view.color_picker_v = v;
                             self.settings_view.color_picker_a = a;
-                            self.settings_view.color_hex_input =
-                                self.app_config.personalization.dark_deaths_number_color.clone();
+                            self.settings_view.color_hex_input = self
+                                .app_config
+                                .personalization
+                                .dark_deaths_number_color
+                                .clone();
                         }
                     }
                     _ => {}

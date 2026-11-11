@@ -41,7 +41,11 @@ impl IntoElement for Badge {
 
     fn into_element(self) -> Self::Element {
         let (bg_color, text_color, border_color) = match self.variant {
-            BadgeVariant::Default => (Theme::BADGE_BG(), Theme::TEXT_SECONDARY(), Theme::CARD_BORDER()),
+            BadgeVariant::Default => (
+                Theme::BADGE_BG(),
+                Theme::TEXT_SECONDARY(),
+                Theme::CARD_BORDER(),
+            ),
             BadgeVariant::Primary => (
                 Theme::ACCENT_PRIMARY().opacity(0.18),
                 Theme::ACCENT_PRIMARY(),

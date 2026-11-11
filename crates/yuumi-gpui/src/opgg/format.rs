@@ -104,7 +104,9 @@ mod tests {
             .items
             .insert(6655, "/preloaded/items/6655.png".into());
         assets.spells.insert(4, "/preloaded/spells/4.png".into());
-        assets.runes.insert(8214, "/preloaded/runes/8214.png".into());
+        assets
+            .runes
+            .insert(8214, "/preloaded/runes/8214.png".into());
         assert_eq!(item_icon(Some(&assets), 6655), "/preloaded/items/6655.png");
         assert_eq!(spell_icon(Some(&assets), 4), "/preloaded/spells/4.png");
         assert_eq!(

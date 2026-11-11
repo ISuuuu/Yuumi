@@ -65,21 +65,33 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn BG_APP() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.5833, 0.4293, 0.1137, 1.0) } else { Self::BG_APP_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5833, 0.4293, 0.1137, 1.0)
+        } else {
+            Self::BG_APP_DEFAULT
+        };
         runtime_or("BG_APP", fallback)
     }
     pub const SIDEBAR_BG_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 0.75); // --sidebar-bg → rgba(255,255,255,0.75)
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn SIDEBAR_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.5833, 0.2500, 0.2043, 0.75) } else { Self::SIDEBAR_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5833, 0.2500, 0.2043, 0.75)
+        } else {
+            Self::SIDEBAR_BG_DEFAULT
+        };
         runtime_or("SIDEBAR_BG", fallback)
     }
     pub const SIDEBAR_HOVER_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 0.0000, 0.03); // --hover-bg
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn SIDEBAR_HOVER() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.06) } else { Self::SIDEBAR_HOVER_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.0000, 0.0000, 1.0000, 0.06)
+        } else {
+            Self::SIDEBAR_HOVER_DEFAULT
+        };
         runtime_or("SIDEBAR_HOVER", fallback)
     }
     pub const SIDEBAR_ACTIVE_DEFAULT: Hsla = const_hsla(0.5108, 1.0000, 0.3333, 0.15); // --primary-color-alpha-15
@@ -100,28 +112,44 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn TITLEBAR_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.5833, 0.2500, 0.2043, 0.85) } else { Self::TITLEBAR_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5833, 0.2500, 0.2043, 0.85)
+        } else {
+            Self::TITLEBAR_BG_DEFAULT
+        };
         runtime_or("TITLEBAR_BG", fallback)
     }
     pub const CARD_BG_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 0.75); // --card-bg
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn CARD_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.5833, 0.2500, 0.2043, 0.75) } else { Self::CARD_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5833, 0.2500, 0.2043, 0.75)
+        } else {
+            Self::CARD_BG_DEFAULT
+        };
         runtime_or("CARD_BG", fallback)
     }
     pub const CARD_BG_HOVER_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 0.95); // --card-bg-hover
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn CARD_BG_HOVER() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.5833, 0.2262, 0.3176, 0.95) } else { Self::CARD_BG_HOVER_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5833, 0.2262, 0.3176, 0.95)
+        } else {
+            Self::CARD_BG_HOVER_DEFAULT
+        };
         runtime_or("CARD_BG_HOVER", fallback)
     }
     pub const CARD_BORDER_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 0.0000, 0.06); // --border-color
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn CARD_BORDER() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.10) } else { Self::CARD_BORDER_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.0000, 0.0000, 1.0000, 0.10)
+        } else {
+            Self::CARD_BORDER_DEFAULT
+        };
         runtime_or("CARD_BORDER", fallback)
     }
     pub const BORDER_HOVER_DEFAULT: Hsla = const_hsla(0.5108, 1.0000, 0.3333, 0.35); // --border-color-hover
@@ -265,7 +293,11 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn REMAKE_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.5972, 0.2022, 0.3600, 0.20) } else { Self::REMAKE_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5972, 0.2022, 0.3600, 0.20)
+        } else {
+            Self::REMAKE_BG_DEFAULT
+        };
         runtime_or("REMAKE_BG", fallback)
     }
     pub const REMAKE_BORDER_DEFAULT: Hsla = const_hsla(0.5972, 0.2022, 0.6510, 0.30); // --remake-border
@@ -295,21 +327,33 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn TEXT_PRIMARY() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.5833, 0.4000, 0.9412, 1.0) } else { Self::TEXT_PRIMARY_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5833, 0.4000, 0.9412, 1.0)
+        } else {
+            Self::TEXT_PRIMARY_DEFAULT
+        };
         runtime_or("TEXT_PRIMARY", fallback)
     }
     pub const TEXT_SECONDARY_DEFAULT: Hsla = const_hsla(0.5980, 0.1932, 0.3451, 1.0); // #475569
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn TEXT_SECONDARY() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.5833, 0.2444, 0.8392, 1.0) } else { Self::TEXT_SECONDARY_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5833, 0.2444, 0.8392, 1.0)
+        } else {
+            Self::TEXT_SECONDARY_DEFAULT
+        };
         runtime_or("TEXT_SECONDARY", fallback)
     }
     pub const TEXT_MUTED_DEFAULT: Hsla = const_hsla(0.5983, 0.1632, 0.4686, 1.0); // #64748b
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn TEXT_MUTED() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.5833, 0.1544, 0.6549, 1.0) } else { Self::TEXT_MUTED_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5833, 0.1544, 0.6549, 1.0)
+        } else {
+            Self::TEXT_MUTED_DEFAULT
+        };
         runtime_or("TEXT_MUTED", fallback)
     }
     pub const TEXT_ACCENT_DEFAULT: Hsla = const_hsla(0.5108, 1.0000, 0.3333, 1.0);
@@ -339,14 +383,22 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn SKELETON_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.06) } else { Self::SKELETON_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.0000, 0.0000, 1.0000, 0.06)
+        } else {
+            Self::SKELETON_BG_DEFAULT
+        };
         runtime_or("SKELETON_BG", fallback)
     }
     pub const SKELETON_BORDER_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 0.0000, 0.06);
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn SKELETON_BORDER() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.10) } else { Self::SKELETON_BORDER_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.0000, 0.0000, 1.0000, 0.10)
+        } else {
+            Self::SKELETON_BORDER_DEFAULT
+        };
         runtime_or("SKELETON_BORDER", fallback)
     }
 
@@ -355,21 +407,33 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn BADGE_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.08) } else { Self::BADGE_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.0000, 0.0000, 1.0000, 0.08)
+        } else {
+            Self::BADGE_BG_DEFAULT
+        };
         runtime_or("BADGE_BG", fallback)
     }
     pub const ITEM_SLOT_BG_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 0.0000, 0.05);
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn ITEM_SLOT_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.08) } else { Self::ITEM_SLOT_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.0000, 0.0000, 1.0000, 0.08)
+        } else {
+            Self::ITEM_SLOT_BG_DEFAULT
+        };
         runtime_or("ITEM_SLOT_BG", fallback)
     }
     pub const ITEM_SLOT_BORDER_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 0.0000, 0.08);
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn ITEM_SLOT_BORDER() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.12) } else { Self::ITEM_SLOT_BORDER_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.0000, 0.0000, 1.0000, 0.12)
+        } else {
+            Self::ITEM_SLOT_BORDER_DEFAULT
+        };
         runtime_or("ITEM_SLOT_BORDER", fallback)
     }
 
@@ -385,7 +449,11 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn BLUE_SIDE_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.5694, 0.6420, 0.3098, 0.90) } else { Self::BLUE_SIDE_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5694, 0.6420, 0.3098, 0.90)
+        } else {
+            Self::BLUE_SIDE_BG_DEFAULT
+        };
         runtime_or("BLUE_SIDE_BG", fallback)
     }
     pub const BLUE_SIDE_BORDER_DEFAULT: Hsla = const_hsla(205.0 / 360.0, 0.60, 0.85, 0.85);
@@ -407,7 +475,11 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn RED_SIDE_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.9722, 0.5800, 0.3100, 0.90) } else { Self::RED_SIDE_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.9722, 0.5800, 0.3100, 0.90)
+        } else {
+            Self::RED_SIDE_BG_DEFAULT
+        };
         runtime_or("RED_SIDE_BG", fallback)
     }
     pub const RED_SIDE_BORDER_DEFAULT: Hsla = const_hsla(350.0 / 360.0, 0.50, 0.86, 0.85);
@@ -458,42 +530,66 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn HOVER_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.06) } else { Self::HOVER_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.0000, 0.0000, 1.0000, 0.06)
+        } else {
+            Self::HOVER_BG_DEFAULT
+        };
         runtime_or("HOVER_BG", fallback)
     }
     pub const HOVER_BG_STRONG_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 0.0000, 0.06); // --hover-bg-strong
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn HOVER_BG_STRONG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.10) } else { Self::HOVER_BG_STRONG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.0000, 0.0000, 1.0000, 0.10)
+        } else {
+            Self::HOVER_BG_STRONG_DEFAULT
+        };
         runtime_or("HOVER_BG_STRONG", fallback)
     }
     pub const SETTINGS_CARD_BG_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 0.80); // --settings-card-bg
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn SETTINGS_CARD_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.6061, 0.3882, 0.1667, 0.75) } else { Self::SETTINGS_CARD_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.6061, 0.3882, 0.1667, 0.75)
+        } else {
+            Self::SETTINGS_CARD_BG_DEFAULT
+        };
         runtime_or("SETTINGS_CARD_BG", fallback)
     }
     pub const SETTINGS_CARD_BG_HOVER_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 0.95); // --settings-card-bg-hover
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn SETTINGS_CARD_BG_HOVER() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.6047, 0.3874, 0.2176, 0.90) } else { Self::SETTINGS_CARD_BG_HOVER_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.6047, 0.3874, 0.2176, 0.90)
+        } else {
+            Self::SETTINGS_CARD_BG_HOVER_DEFAULT
+        };
         runtime_or("SETTINGS_CARD_BG_HOVER", fallback)
     }
     pub const SETTINGS_ROW_BG_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 0.45); // --settings-row-bg
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn SETTINGS_ROW_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.04) } else { Self::SETTINGS_ROW_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.0000, 0.0000, 1.0000, 0.04)
+        } else {
+            Self::SETTINGS_ROW_BG_DEFAULT
+        };
         runtime_or("SETTINGS_ROW_BG", fallback)
     }
     pub const SETTINGS_COLLAPSE_BG_DEFAULT: Hsla = const_hsla(0.6111, 0.1429, 0.9588, 0.80); // --settings-collapse-bg → rgba(243,244,246,0.8)
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn SETTINGS_COLLAPSE_BG() -> Hsla {
-        let fallback = if is_dark_mode_active() { const_hsla(0.6136, 0.3929, 0.1098, 0.85) } else { Self::SETTINGS_COLLAPSE_BG_DEFAULT };
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.6136, 0.3929, 0.1098, 0.85)
+        } else {
+            Self::SETTINGS_COLLAPSE_BG_DEFAULT
+        };
         runtime_or("SETTINGS_COLLAPSE_BG", fallback)
     }
 
@@ -594,7 +690,13 @@ impl Theme {
         // 主题色派生：强调色系共享用户配置的品牌色（默认极光青 #009faa）
         let accent = Hsla::from(parse_hex_color(&personalization.theme_color));
         map.insert("ACCENT_PRIMARY", accent);
-        map.insert("ACCENT_HOVER", Hsla { l: (accent.l + 0.02).min(1.0), ..accent });
+        map.insert(
+            "ACCENT_HOVER",
+            Hsla {
+                l: (accent.l + 0.02).min(1.0),
+                ..accent
+            },
+        );
         map.insert("ACCENT_LIGHT", Hsla { a: 0.15, ..accent });
         map.insert("ACCENT_ALPHA_10", Hsla { a: 0.10, ..accent });
         map.insert("ACCENT_ALPHA_20", Hsla { a: 0.20, ..accent });
@@ -606,17 +708,47 @@ impl Theme {
         // 胜负 / 重开卡片底色（#AARRGGBB 自带透明度，未配置时 parse 回落默认极光色）
         let win = Hsla::from(parse_hex_color(&personalization.win_card_color));
         map.insert("WIN_BG", win);
-        map.insert("WIN_BG_HOVER", Hsla { a: (win.a * 1.6).min(1.0), ..win });
-        map.insert("WIN_BORDER", Hsla { a: (win.a * 2.0).min(1.0), ..win });
+        map.insert(
+            "WIN_BG_HOVER",
+            Hsla {
+                a: (win.a * 1.6).min(1.0),
+                ..win
+            },
+        );
+        map.insert(
+            "WIN_BORDER",
+            Hsla {
+                a: (win.a * 2.0).min(1.0),
+                ..win
+            },
+        );
 
         let lose = Hsla::from(parse_hex_color(&personalization.lose_card_color));
         map.insert("LOSS_BG", lose);
-        map.insert("LOSS_BG_HOVER", Hsla { a: (lose.a * 1.6).min(1.0), ..lose });
-        map.insert("LOSS_BORDER", Hsla { a: (lose.a * 2.0).min(1.0), ..lose });
+        map.insert(
+            "LOSS_BG_HOVER",
+            Hsla {
+                a: (lose.a * 1.6).min(1.0),
+                ..lose
+            },
+        );
+        map.insert(
+            "LOSS_BORDER",
+            Hsla {
+                a: (lose.a * 2.0).min(1.0),
+                ..lose
+            },
+        );
 
         let remake = Hsla::from(parse_hex_color(&personalization.remake_card_color));
         map.insert("REMAKE_BG", remake);
-        map.insert("REMAKE_BORDER", Hsla { a: (remake.a * 2.0).min(1.0), ..remake });
+        map.insert(
+            "REMAKE_BORDER",
+            Hsla {
+                a: (remake.a * 2.0).min(1.0),
+                ..remake
+            },
+        );
 
         // 死亡数字颜色按当前主题取对应配置
         let death = if is_dark {
@@ -650,35 +782,65 @@ pub fn parse_hex_color(hex: &str) -> Rgba {
 
 // 兼容别名与全局快捷常量（历史遗留死代码，随主题层改造成函数形态保留）
 #[allow(dead_code)]
-pub fn BG_MAIN() -> Hsla { Theme::BG_APP() }
+pub fn BG_MAIN() -> Hsla {
+    Theme::BG_APP()
+}
 #[allow(dead_code)]
-pub fn BG_CARD() -> Hsla { Theme::CARD_BG() }
+pub fn BG_CARD() -> Hsla {
+    Theme::CARD_BG()
+}
 #[allow(dead_code)]
-pub fn BG_CARD_HOVER() -> Hsla { Theme::CARD_BG_HOVER() }
+pub fn BG_CARD_HOVER() -> Hsla {
+    Theme::CARD_BG_HOVER()
+}
 #[allow(dead_code)]
-pub fn BG_ELEVATED() -> Hsla { Theme::CARD_BG_HOVER() }
+pub fn BG_ELEVATED() -> Hsla {
+    Theme::CARD_BG_HOVER()
+}
 #[allow(dead_code)]
-pub fn PRIMARY() -> Hsla { Theme::ACCENT_PRIMARY() }
+pub fn PRIMARY() -> Hsla {
+    Theme::ACCENT_PRIMARY()
+}
 #[allow(dead_code)]
-pub fn TEXT_PRIMARY() -> Hsla { Theme::TEXT_PRIMARY() }
+pub fn TEXT_PRIMARY() -> Hsla {
+    Theme::TEXT_PRIMARY()
+}
 #[allow(dead_code)]
-pub fn TEXT_SECONDARY() -> Hsla { Theme::TEXT_SECONDARY() }
+pub fn TEXT_SECONDARY() -> Hsla {
+    Theme::TEXT_SECONDARY()
+}
 #[allow(dead_code)]
-pub fn TEXT_MUTED() -> Hsla { Theme::TEXT_MUTED() }
+pub fn TEXT_MUTED() -> Hsla {
+    Theme::TEXT_MUTED()
+}
 #[allow(dead_code)]
-pub fn BORDER_SECONDARY() -> Hsla { Theme::CARD_BORDER() }
+pub fn BORDER_SECONDARY() -> Hsla {
+    Theme::CARD_BORDER()
+}
 #[allow(dead_code)]
-pub fn WIN_PRIMARY() -> Hsla { Theme::WIN_BAR() }
+pub fn WIN_PRIMARY() -> Hsla {
+    Theme::WIN_BAR()
+}
 #[allow(dead_code)]
-pub fn WIN_MUTED() -> Hsla { Theme::WIN_BG() }
+pub fn WIN_MUTED() -> Hsla {
+    Theme::WIN_BG()
+}
 #[allow(dead_code)]
-pub fn WIN_BORDER() -> Hsla { Theme::WIN_BORDER() }
+pub fn WIN_BORDER() -> Hsla {
+    Theme::WIN_BORDER()
+}
 #[allow(dead_code)]
-pub fn LOSS_PRIMARY() -> Hsla { Theme::LOSS_BAR() }
+pub fn LOSS_PRIMARY() -> Hsla {
+    Theme::LOSS_BAR()
+}
 #[allow(dead_code)]
-pub fn LOSS_MUTED() -> Hsla { Theme::LOSS_BG() }
+pub fn LOSS_MUTED() -> Hsla {
+    Theme::LOSS_BG()
+}
 #[allow(dead_code)]
-pub fn PRIMARY_MUTED() -> Hsla { Theme::ACCENT_LIGHT() }
+pub fn PRIMARY_MUTED() -> Hsla {
+    Theme::ACCENT_LIGHT()
+}
 
 #[cfg(test)]
 mod tests {

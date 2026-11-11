@@ -61,7 +61,9 @@ where
         yuumi_core::runtime::spawn_background(async move {
             if let Some(client) = live_service.get_client().await {
                 log::info!("[ReplayStore] 启动播放对局回放: game_id={}", game_id);
-                if let Err(e) = yuumi_core::parsers::replay::watch_game_replay(&client, game_id).await {
+                if let Err(e) =
+                    yuumi_core::parsers::replay::watch_game_replay(&client, game_id).await
+                {
                     log::error!("[ReplayStore] 启动回放失败: {}", e);
                     set_replay_state(game_id, ReplayState::Error);
                     n();
@@ -108,7 +110,9 @@ where
                     // 需要触发下载
                     set_replay_state(game_id, ReplayState::Downloading);
                     n();
-                    if let Err(e) = yuumi_core::parsers::replay::download_game_replay(&client, game_id).await {
+                    if let Err(e) =
+                        yuumi_core::parsers::replay::download_game_replay(&client, game_id).await
+                    {
                         log::error!("[ReplayStore] 触发下载回放失败: {}", e);
                         set_replay_state(game_id, ReplayState::Error);
                         n();
@@ -142,7 +146,10 @@ async fn start_polling_replay(
             Ok(raw_status) => {
                 let s = raw_status.to_ascii_lowercase();
                 if s == "watch" || s == "found" {
-                    log::info!("[ReplayStore] 回放下载完成，转入 Watch: game_id={}", game_id);
+                    log::info!(
+                        "[ReplayStore] 回放下载完成，转入 Watch: game_id={}",
+                        game_id
+                    );
                     set_replay_state(game_id, ReplayState::Watch);
                     notify();
                     return;
@@ -151,7 +158,11 @@ async fn start_polling_replay(
                     || s == "missingorexpired"
                     || s == "lost"
                 {
-                    log::warn!("[ReplayStore] 回放不可用: game_id={}, status={}", game_id, s);
+                    log::warn!(
+                        "[ReplayStore] 回放不可用: game_id={}, status={}",
+                        game_id,
+                        s
+                    );
                     set_replay_state(game_id, ReplayState::Unsupported);
                     notify();
                     return;

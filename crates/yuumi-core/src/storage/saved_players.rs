@@ -78,7 +78,10 @@ pub fn init_db(path: &Path) -> Result<Connection, String> {
     if !existing_saved_player_cols.iter().any(|c| c == "tag_line") {
         let _ = conn.execute_batch("ALTER TABLE saved_players ADD COLUMN tag_line TEXT;");
     }
-    if !existing_saved_player_cols.iter().any(|c| c == "champion_id") {
+    if !existing_saved_player_cols
+        .iter()
+        .any(|c| c == "champion_id")
+    {
         let _ = conn.execute_batch(
             "ALTER TABLE saved_players ADD COLUMN champion_id INTEGER NOT NULL DEFAULT 0;",
         );
@@ -89,9 +92,8 @@ pub fn init_db(path: &Path) -> Result<Connection, String> {
         );
     }
     if !existing_saved_player_cols.iter().any(|c| c == "notes") {
-        let _ = conn.execute_batch(
-            "ALTER TABLE saved_players ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
-        );
+        let _ = conn
+            .execute_batch("ALTER TABLE saved_players ADD COLUMN notes TEXT NOT NULL DEFAULT '';");
     }
 
     let existing_game_cols: Vec<String> = {
@@ -210,7 +212,14 @@ impl SavedPlayersStorage {
 
         let rows = stmt
             .query_map(
-                params![self_puuid, filter, search_kw, search_pattern, limit as i64, offset as i64],
+                params![
+                    self_puuid,
+                    filter,
+                    search_kw,
+                    search_pattern,
+                    limit as i64,
+                    offset as i64
+                ],
                 |r| {
                     let enc_count_i64: i64 = r.get(6)?;
                     let is_pinned_int: i32 = r.get(8)?;
@@ -299,16 +308,19 @@ impl SavedPlayersStorage {
             .map_err(|e| format!("准备对局历史查询失败: {}", e))?;
 
         let rows = stmt
-            .query_map(params![puuid, self_puuid, limit as i64, offset as i64], |r| {
-                let game_id_i64: i64 = r.get(0)?;
-                Ok(EncounteredGameRecord {
-                    game_id: game_id_i64 as u64,
-                    queue_type: r.get(1)?,
-                    champion_id: r.get(2)?,
-                    timestamp: r.get(3)?,
-                    result: None,
-                })
-            })
+            .query_map(
+                params![puuid, self_puuid, limit as i64, offset as i64],
+                |r| {
+                    let game_id_i64: i64 = r.get(0)?;
+                    Ok(EncounteredGameRecord {
+                        game_id: game_id_i64 as u64,
+                        queue_type: r.get(1)?,
+                        champion_id: r.get(2)?,
+                        timestamp: r.get(3)?,
+                        result: None,
+                    })
+                },
+            )
             .map_err(|e| format!("执行对局历史查询失败: {}", e))?;
 
         let mut list = Vec::new();
@@ -374,7 +386,9 @@ impl SavedPlayersStorage {
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
-        let tx = conn.transaction().map_err(|e| format!("开启事务失败: {}", e))?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("开启事务失败: {}", e))?;
         let mut count = 0u32;
 
         {
@@ -390,7 +404,9 @@ impl SavedPlayersStorage {
                          update_at = excluded.update_at,
                          last_met_at = COALESCE(excluded.last_met_at, saved_players.last_met_at)";
 
-            let mut stmt = tx.prepare(sql).map_err(|e| format!("准备导入语句失败: {}", e))?;
+            let mut stmt = tx
+                .prepare(sql)
+                .map_err(|e| format!("准备导入语句失败: {}", e))?;
 
             for r in records {
                 let res = stmt.execute(params![
@@ -434,7 +450,10 @@ impl SavedPlayersStorage {
         .map_err(|e| format!("更新置顶失败: {}", e))?;
 
         if rows == 0 {
-            return Err(format!("未找到目标玩家记录进行置顶更新 (puuid={}, self_puuid={})", puuid, self_puuid));
+            return Err(format!(
+                "未找到目标玩家记录进行置顶更新 (puuid={}, self_puuid={})",
+                puuid, self_puuid
+            ));
         }
 
         Ok(())
@@ -462,7 +481,10 @@ impl SavedPlayersStorage {
         .map_err(|e| format!("更新玩家标签与备注失败: {}", e))?;
 
         if rows == 0 {
-            return Err(format!("未找到目标玩家记录进行标签更新 (puuid={}, self_puuid={})", puuid, self_puuid));
+            return Err(format!(
+                "未找到目标玩家记录进行标签更新 (puuid={}, self_puuid={})",
+                puuid, self_puuid
+            ));
         }
 
         Ok(())
@@ -477,11 +499,12 @@ impl SavedPlayersStorage {
 
         let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-        let rows = tx.execute(
-            "DELETE FROM saved_players WHERE puuid = ?1 AND self_puuid = ?2",
-            params![puuid, self_puuid],
-        )
-        .map_err(|e| e.to_string())?;
+        let rows = tx
+            .execute(
+                "DELETE FROM saved_players WHERE puuid = ?1 AND self_puuid = ?2",
+                params![puuid, self_puuid],
+            )
+            .map_err(|e| e.to_string())?;
 
         tx.execute(
             "DELETE FROM encountered_games WHERE puuid = ?1 AND self_puuid = ?2",
@@ -490,7 +513,10 @@ impl SavedPlayersStorage {
         .map_err(|e| e.to_string())?;
 
         if rows == 0 {
-            return Err(format!("未找到目标玩家记录进行删除 (puuid={}, self_puuid={})", puuid, self_puuid));
+            return Err(format!(
+                "未找到目标玩家记录进行删除 (puuid={}, self_puuid={})",
+                puuid, self_puuid
+            ));
         }
 
         tx.commit().map_err(|e| e.to_string())?;
@@ -718,7 +744,11 @@ mod tests {
     struct TempDb(PathBuf);
     impl TempDb {
         fn new(name: &str) -> Self {
-            let path = std::env::temp_dir().join(format!("yuumi_test_{}_{}.db", name, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+            let path = std::env::temp_dir().join(format!(
+                "yuumi_test_{}_{}.db",
+                name,
+                chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            ));
             let _ = std::fs::remove_file(&path);
             Self(path)
         }

@@ -168,7 +168,9 @@ pub fn select_dropdown(
                 .justify_between()
                 .cursor_pointer()
                 .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
-                .on_mouse_down(MouseButton::Left, move |ev, win, app| on_click(ev, win, app))
+                .on_mouse_down(MouseButton::Left, move |ev, win, app| {
+                    on_click(ev, win, app)
+                })
                 .child(
                     div()
                         .text_size(px(12.5))

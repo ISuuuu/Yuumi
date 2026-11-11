@@ -231,10 +231,7 @@ pub fn clean_description(text: &str) -> String {
 ///
 /// 两份资料独立于统计请求加载：任一失败只降级为「无符文图标/无提示」，不阻塞正文。
 pub async fn load_rune_catalog(client: &LcuClient) -> RuneCatalog {
-    let styles = match client
-        .get("/lol-game-data/assets/v1/perkstyles.json")
-        .await
-    {
+    let styles = match client.get("/lol-game-data/assets/v1/perkstyles.json").await {
         Ok(value) => match serde_json::from_value::<RawPerkStyles>(value) {
             Ok(RawPerkStyles::List(list)) => list,
             Ok(RawPerkStyles::Wrapped { styles }) => styles,
@@ -312,10 +309,9 @@ mod tests {
             r#"{"styles":[{"id":8000,"name":"精密","iconPath":"/a.png","slots":[{"perks":[8005,8009]}]}]}"#,
         )
         .expect("对象载荷应可解析");
-        let list: RawPerkStyles = serde_json::from_str(
-            r#"[{"id":8100,"name":"主宰","iconPath":"/b.png","slots":[]}]"#,
-        )
-        .expect("数组载荷应可解析");
+        let list: RawPerkStyles =
+            serde_json::from_str(r#"[{"id":8100,"name":"主宰","iconPath":"/b.png","slots":[]}]"#)
+                .expect("数组载荷应可解析");
         match wrapped {
             RawPerkStyles::Wrapped { styles } => assert_eq!(styles.len(), 1),
             RawPerkStyles::List(_) => panic!("对象载荷不应解析为数组"),

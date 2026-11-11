@@ -64,7 +64,11 @@ impl HomeView {
     /// 根据传入的客户端路径与 WeGame 路径更新，并确保优先默认选中 WeGame
     pub fn reload_paths_from(&mut self, paths: Vec<String>, wegame: String) {
         let selected = if paths.iter().any(|p| is_wegame(p))
-            && !self.selected_path.as_deref().map(is_wegame).unwrap_or(false)
+            && !self
+                .selected_path
+                .as_deref()
+                .map(is_wegame)
+                .unwrap_or(false)
         {
             paths.iter().find(|p| is_wegame(p)).cloned()
         } else if let Some(ref cur) = self.selected_path {
@@ -130,7 +134,10 @@ impl HomeView {
         } else {
             render_lcu_offline_state_with_tip(
                 "请先启动英雄联盟客户端，或者通过下方按钮直接启动游戏",
-                Some(self.render_offline_actions(on_select_path, on_launch).into_any_element()),
+                Some(
+                    self.render_offline_actions(on_select_path, on_launch)
+                        .into_any_element(),
+                ),
             )
         }
     }
@@ -474,7 +481,10 @@ mod tests {
             r"E:\Riot Games\League of Legends".to_string(),
         ];
         let selected_fallback = HomeView::pick_default_selected(&paths_without_wegame);
-        assert_eq!(selected_fallback.as_deref(), Some(r"D:\WeGameApps\英雄联盟\TCLS"));
+        assert_eq!(
+            selected_fallback.as_deref(),
+            Some(r"D:\WeGameApps\英雄联盟\TCLS")
+        );
     }
 
     #[test]
