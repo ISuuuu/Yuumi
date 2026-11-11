@@ -1,8 +1,8 @@
 # Yuumi
 
-Yuumi 是一款轻量的英雄联盟客户端辅助工具，通过 LCU API 实现战绩查询、对局分析、自动化操作等功能。
+Yuumi 是一款基于 **GPUI** 纯原生 Rust 构建的轻量级高性能英雄联盟客户端辅助工具，通过 LCU API 实现战绩查询、对局分析、自动化操作等功能。
 
-> **Tags / 关键词**: `rustyuumi` `rust-yuumi` `yuumi` `lol` `league-of-legends` `lcu` `tauri` `vue3`
+> **Tags / 关键词**: `rustyuumi` `rust-yuumi` `yuumi` `lol` `league-of-legends` `lcu` `gpui` `rust`
 
 ## 功能
 
@@ -21,37 +21,46 @@ Yuumi 是一款轻量的英雄联盟客户端辅助工具，通过 LCU API 实�
 
 ## 技术栈
 
-| 层级 | 技术                                         |
-| ---- | -------------------------------------------- |
-| 前端 | Vue 3 + TypeScript + Vite + Pinia + Naive UI |
-| 后端 | Tauri v2 (Rust)                              |
-| 通信 | LCU HTTPS + WebSocket (tokio-tungstenite)    |
-| 打包 | Tauri bundler                                |
+| 层级 | 技术 | 说明 |
+| ---- | ---- | ---- |
+| UI 渲染 | GPUI (`crates/yuumi-gpui`) | 基于 Direct3D 11 / DirectWrite 硬件加速渲染，亚像素抗锯齿与低延迟交互 |
+| 核心业务 | Rust (`crates/yuumi-core`) | 独立纯逻辑库，涵盖 LCU 通信、数据解析、自动化 Agent、本地存储等 |
+| 异步运行时 | Tokio (multi-thread) | 多线程异步网络、WebSocket 事件流与后台任务调度 |
+| 图像管线 | `image` + 异步并发预热 | 后台线程池 BGRA `RenderImage` 解码与多级内存缓存，UI 零卡顿 |
+| 本地存储 | SQLite (`rusqlite bundled`) | 路人集同场相遇历史与标签数据本地持久化 |
+| 安装与分发 | NSIS + 便携绿色版 | 标准安装包 (`Yuumi_<version>_x64-setup.exe`) 与绿色便携包 (`Yuumi_v<version>_portable.zip`) |
 
 ## 开发
 
 ### 环境要求
 
-- [Node.js](https://nodejs.org/) >= 18
-- [pnpm](https://pnpm.io/)
-- [Rust](https://www.rust-lang.org/tools/install) >= 1.77
-- Tauri v2 系统依赖（见 [Tauri 官方文档](https://v2.tauri.app/start/prerequisites/)）
+- [Rust](https://www.rust-lang.org/tools/install) >= 1.77（推荐最新 stable 工具链，包含 `cargo`、`rustfmt` 与 `clippy`）
+- Windows 10 / 11（支持 Direct3D 11 硬件加速渲染）
+- C++ 生成工具（MSVC 工具链）
+- 可选：[Node.js](https://nodejs.org/)（仅用于运行 `scripts/capture-lcu-fixtures.mjs` 采集真实 LCU 响应测试快照）
 
 ### 启动与代码规范自测
 
 ```bash
-pnpm install        # 安装依赖
-pnpm tauri dev      # 开发模式（Vite + Tauri 窗口）
-pnpm tauri build    # 构建生产包
+# 开发模式运行（依赖项自动以 opt-level=2 编译，确保开发调试下 GPUI 流畅帧率）
+cargo run -p yuumi-gpui
+# 或
+cargo run --bin yuumi
+
+# 构建生产发布版本（生成产物位于 target/release/yuumi.exe）
+cargo build --release -p yuumi-gpui
 
 # 代码格式化与规范自测（提交前建议自测）
-pnpm run format     # 自动修复并对齐 Rust 后端代码格式
-pnpm type-check     # Vue / TS 类型检查
-pnpm test:rust      # Rust 单元测试 (cargo test)
-pnpm run check-all  # 执行完整自测（格式校验、类型检查及 clippy 静态分析，集成于 git pre-commit 钩子）
+cargo fmt --all                        # 自动修复并对齐所有 Rust 代码格式
+cargo fmt --all -- --check             # 检查代码格式是否合规
+cargo clippy --workspace --all-targets # Clippy 静态代码检查
+cargo test --workspace                 # 运行全工作区单元测试（含 140+ 真实/合成 fixture 解析测试）
 
-# CI 质量门禁：GitHub Actions 会执行前端类型检查/构建、cargo clippy -D warnings 与 cargo test
+# 抓取真实 LCU 测试快照（可选，需客户端处于运行状态）
+node scripts/capture-lcu-fixtures.mjs
 ```
+
+> **Git 钩子提示**: 仓库集成了 `.githooks/pre-commit`，在 `git commit` 时会自动对暂存的 `.rs` 文件执行 `rustfmt` 并运行 `cargo clippy --workspace --all-targets` 质量门禁。
 
 ## 项目结构
 
@@ -60,74 +69,65 @@ pnpm run check-all  # 执行完整自测（格式校验、类型检查及 clippy
 
 ```
 Yuumi/
-├── src/                  # Vue 前端
-│   ├── views/            # 页面组件（Home/Career/Search/GameInfo/SavedPlayers/TFT/Tools/Settings/BenchOverlay）
-│   ├── components/       # 通用与功能子组件
-│   │   ├── tft/          # 云顶之弈模块（段位卡片/战绩卡片/详情弹窗/OP.GG阵容推荐/海克斯百科）
-│   │   ├── gameinfo/     # 对局信息模块（玩家卡片/战绩列/对局阶段）
-│   │   ├── career/       # 生涯战绩模块（召唤师信息/战绩页签/英雄熟练度与挑战/战利品入口）
-│   │   ├── search/       # 战绩查询模块（战绩列表项/迷你列表/对局详情面板）
-│   │   ├── settings/     # 设置页功能区块（个性化/云端服务/更新/关于等，含共享样式与自动保存 hook）
-│   │   ├── opgg/         # OP.GG 弹窗子组件（筛选栏/梯度榜/出装攻略面板 + 共享格式化工具）
-│   │   ├── tools/        # 工具箱模块（好友清理/自定义房间/符文出装/自动流程/观战，quickactions/ 为快捷操作卡片）
-│   │   ├── layout/       # 布局与自定义标题栏
-│   │   ├── ReplayButton.vue # 对局回放下载与启动观看按钮
-│   │   ├── NoticePopup.vue  # 更新日志弹窗
-│   │   ├── UpdateDialog.vue # 自动更新弹窗（下载/安装新版本）
-│   │   └── LcuOfflineState.vue # 统一 LCU 离线未连接状态
-│   ├── types/            # 共享类型定义（LCU 原始响应/战绩查询/OP.GG/对局信息视图模型）
-│   ├── composables/      # 组合式 hooks（useLcuAsset/useToast/usePlayerSearch/useTftData/useLoot/useFateBadge/useGamePlayerData 等）
-│   ├── api/              # LCU API 封装 + Tauri IPC 调用
-│   ├── store/            # Pinia 全局状态
-│   ├── utils/            # 工具函数与对局数据层（阵营映射/玩家缓存/身份判定/战绩统计/会话缓存等）
-│   ├── i18n.ts           # 多语言配置
-│   ├── main.ts           # 主窗口入口
-│   └── opgg.ts           # OP.GG 独立窗口入口
-├── src-tauri/            # Rust 后端
-│   ├── src/
-│   │   ├── main.rs       # 程序入口：日志初始化、便携升级判定、rustls CryptoProvider 配置
-│   │   ├── lib.rs        # 入口：AppState、命令注册、系统托盘
-│   │   ├── logging.rs    # 日志初始化
-│   │   ├── config.rs     # 配置读写与 Schema 无缝迁移
-│   │   ├── saved_players.rs # 路人集 (曾同局玩家 SQLite 持久化与标记)
-│   │   ├── runtime.rs    # 运行时模式检测 (便携版/安装版)
-│   │   ├── portable_updater.rs # 便携版专用更新与热替换助手
-│   │   ├── lcu/          # LCU 连接（进程监控、HTTPS 代理、WebSocket、OP.GG Client、SGP并发限流、游戏数据资源映射）
-│   │   ├── parsers/      # 数据清洗（召唤师/战绩/对局信息/TFT云顶之弈）
-│   │   ├── agents/       # 自动化任务（BP/自动接受/自动重连/自动荣誉/接受邀请/多杀截图）
-│   │   ├── commands/     # Tauri 命令实现（配置、LCU、工具等）
-│   │   ├── loot.rs       # 战利品系统（智能批量开箱、分解、重铸、解锁）
-│   │   ├── upload.rs     # 对局上传队列（包含失败暂存与对局触发式重试）
-│   │   ├── updater.rs    # 自动更新与更新日志缓存模块
-│   │   ├── tools.rs      # 杂项工具（回放管理/好友清理/装备页导入/符文/OP.GG数据抓取/观战）
-│   │   └── signalr.rs    # SignalR Hub 远程反代
-│   └── tauri.conf.json   # Tauri 配置
-└── File/                 # 重构参考文档（不入库）
+├── Cargo.toml                    # 顶层 Workspace 配置（yuumi-core + yuumi-gpui）
+├── crates/
+│   ├── yuumi-core/               # 核心业务逻辑与 LCU 客户端库
+│   │   ├── src/
+│   │   │   ├── agents/           # 自动化 Agent（Auto BP、Auto Match、生命周期管控与 Supervisor）
+│   │   │   ├── config.rs         # 配置读写与 Schema 兼容迁移（%APPDATA%/Yuumi/config.json）
+│   │   │   ├── gameflow/         # 对局数据流（阵营判定、身份匹配、战绩聚合）
+│   │   │   ├── lcu/              # LCU 交互层（进程探测、HTTPS 客户端、WebSocket、事件投影、资产缓存）
+│   │   │   ├── parsers/          # 核心解析器（战绩、召唤师、对局信息、TFT、战利品、队友分析等）
+│   │   │   ├── runtime.rs        # 运行时模式检测（便携版/安装版、全局 Tokio 句柄注册）
+│   │   │   ├── storage/          # 本地存储（路人集 SQLite 持久化）
+│   │   │   ├── update.rs         # 自动更新校验与便携版更新助手
+│   │   │   ├── upload.rs         # 对局战绩上传队列
+│   │   │   └── signalr.rs        # SignalR Hub 远程反代
+│   │   └── testdata/             # 真实与合成的 LCU 响应测试快照（fixture）
+│   └── yuumi-gpui/               # GPUI 原生桌面 UI 应用（主二进制产物：yuumi.exe）
+│       ├── src/
+│       │   ├── main.rs           # 应用入口：单实例互斥、Tokio 初始化、GPUI Window 启动
+│       │   ├── app_window/       # 主窗口各路由与生命周期管理（shell、career、game_info 等）
+│       │   ├── views/            # 各业务视图组件（Home、Career、Search、GameInfo、SavedPlayers、TFT、Tools、Settings）
+│       │   ├── components/       # 基础 UI 组件（按钮、卡片、输入框、下拉菜单、开关、弹窗、Toast 等）
+│       │   ├── services/         # 界面后端集成服务（LiveLcuService 实时数据源、多杀截图、日志系统等）
+│       │   ├── opgg/             # OP.GG 独立弹窗与出装/符文/英雄梯度面板
+│       │   ├── bench_overlay.rs  # 大乱斗板凳席独立置顶悬浮窗
+│       │   ├── asset_loader.rs   # 图片资源异步加载引擎与 BGRA RenderImage 解码
+│       │   ├── assets.rs         # 内嵌矢量图标 (SVG) 与静态资产定义
+│       │   ├── theme.rs          # 颜色与主题系统（亮暗模式适配）
+│       │   ├── tray.rs           # 系统托盘集成（主页/生涯/战绩/对局/TFT/工具/设置/退出）
+│       │   └── platform/         # Windows 原生平台特性（Win32 窗口属性、无边框阴影、Mica 效果）
+│       └── assets/               # 静态图标 (SVG) 与内置图片资产
+├── .githooks/                    # 纯 Git 钩子（pre-commit 自动触发 rustfmt 与 clippy）
+├── scripts/                      # 辅助工具脚本（LCU 真实 fixture 抓取等）
+└── File/                         # 参考文档
 ```
 
 </details>
 
 ## 配置
 
-配置文件位于 `%APPDATA%/Yuumi/config.json`，支持：
+配置文件位于 `%APPDATA%/Yuumi/config.json`（便携版位于 `data/config.json`），支持：
 
 | 分类            | 内容                                                                                |
 | --------------- | ----------------------------------------------------------------------------------- |
-| General         | 客户端路径（含 WeGame）、启动选项、HTTP 代理、日志、截图保存目录、上传 API、SignalR |
-| Personalization | 主题色、语言、胜/败/重赛卡片颜色、侧边栏菜单显示/隐藏                               |
-| Functions       | 自动化流程开关（BP/匹配/重连/荣誉/邀请/上传/多杀截图等）+ 候选列表                  |
+| General         | 客户端路径（含 WeGame）、启动选项、HTTP 代理、日志级别、上传 API、SignalR Hub       |
+| Personalization | 主题模式（浅色/深色/跟随系统）、主题色、DPI 缩放、胜/负/重赛卡片颜色、Mica 效果     |
+| Functions       | 自动化流程开关（BP/匹配/重连/荣誉/邀请/上传/多杀截图等）+ 候选列表与延迟设置        |
 | Other           | 公告记录、搜索历史                                                                  |
 
 ## 便携版
 
 每次发版同时发布 `*_portable.zip`（绿色版，解压即用）：
 
-- 配置文件/数据库/缓存/WebView 数据均隔离到 `data/` 目录，可整体拷贝迁移，与安装版互不干扰
+- 配置文件/数据库/缓存数据均隔离到 `data/` 目录，可整体拷贝迁移，与安装版互不干扰
 - **支持自动更新**；也可到 [GitHub Releases](https://github.com/ISuuuu/Yuumi/releases/latest) 手动下载最新版
 
 ## 致谢
 
 - [Seraphine](https://github.com/Zzaphkiel/Seraphine) — 原版 Python 实现
+- [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) — 高性能 GPU 加速 UI 框架
 - [LCU API](https://www.hextechdocs.dev/lol/lcuapi) — 英雄联盟客户端 API 文档
 
 ## 许可

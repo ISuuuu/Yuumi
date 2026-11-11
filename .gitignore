@@ -1,15 +1,6 @@
 # Logs
 logs
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
 *.local
 
 # Editor directories and files
@@ -23,11 +14,13 @@ dist-ssr
 *.sln
 *.sw?
 
-# Tauri
-src-tauri/target/
+# Tauri & Rust
+target/
+**/target/
+crates/**/target/
 
 # LCU 抓包暂存区（fixtures:capture 产出，挑选后迁入 real/）
-src-tauri/testdata/match/_capture/
+crates/yuumi-core/testdata/match/_capture/
 
 # 参考文档（不入库）
 File/

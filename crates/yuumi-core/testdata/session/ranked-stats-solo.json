@@ -1,0 +1,24 @@
+{
+  "queueMap": {
+    "RANKED_SOLO_5x5": {
+      "queueType": "RANKED_SOLO_5x5",
+      "tier": "DIAMOND",
+      "division": "I",
+      "leaguePoints": 45,
+      "wins": 120,
+      "losses": 98,
+      "hotStreak": false,
+      "veteran": true,
+      "inactive": false,
+      "freshBlood": false
+    },
+    "RANKED_FLEX_SR": {
+      "queueType": "RANKED_FLEX_SR",
+      "tier": "PLATINUM",
+      "division": "II",
+      "leaguePoints": 12,
+      "wins": 30,
+      "losses": 21
+    }
+  }
+}

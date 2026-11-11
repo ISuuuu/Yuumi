@@ -1,0 +1,37 @@
+[package]
+name = "yuumi-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core business logic and LCU client for Yuumi"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "gzip", "stream"] }
+sysinfo = "0.33"
+regex-lite = "0.1"
+base64 = "0.22"
+dirs = "6"
+log = { version = "0.4", features = ["std"] }
+chrono = "0.4"
+url = "2.5"
+percent-encoding = "2"
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+tokio-util = "0.7"
+futures-util = "0.3"
+rustls = { version = "0.23", features = ["ring"] }
+minisign-verify = "0.2.5"
+semver = "1"
+uuid = { version = "1", features = ["v4"] }
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# MSVC 链接 cdylib/staticlib 时必然生成 .dll.lib/.exp 导入库，
+# 新版 rustc 默认 warn(linker_messages) 刷屏，无害，此处全局允许。
+[lints.rust]
+linker_messages = "allow"
+

@@ -1,0 +1,46 @@
+[package]
+name = "yuumi-gpui"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[[bin]]
+name = "yuumi"
+path = "src/main.rs"
+
+[build-dependencies]
+embed-resource = "3"
+
+[dependencies]
+yuumi-core = { path = "../yuumi-core" }
+gpui = "0.2.2"
+rustls = { version = "0.23", features = ["ring"] }
+log = { version = "0.4", features = ["std"] }
+reqwest = "0.12"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+tray-icon = "0.19"
+rfd = "0.15"
+dirs = "6"
+sysinfo = "0.33"
+image = "0.25"
+smallvec = "1"
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+xcap = "=0.0.14"
+windows = { version = "0.58", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_System_Threading",
+    "Win32_Security",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Registry",
+    "Win32_Globalization",
+] }

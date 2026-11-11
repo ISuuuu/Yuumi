@@ -1,0 +1,27 @@
+{
+  "queues": [
+    {
+      "queueType": "RANKED_TFT",
+      "tier": "DIAMOND",
+      "division": "II",
+      "leaguePoints": 45,
+      "wins": 62,
+      "losses": 48
+    },
+    {
+      "queueType": "RANKED_TFT_TURBO",
+      "ratedTier": "ORANGE",
+      "ratedRating": 1234,
+      "wins": 9
+    },
+    {
+      "queueType": "RANKED_TFT_DOUBLE_UP",
+      "tier": "PLATINUM",
+      "division": "IV",
+      "leaguePoints": 10,
+      "wins": 7,
+      "losses": 5
+    }
+  ],
+  "highestTier": "DIAMOND"
+}

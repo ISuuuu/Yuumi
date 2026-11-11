@@ -1,0 +1,67 @@
+{
+  "metadata": { "gameStatCounts": 1284093, "gameStatDateTime": "2026-11-09T12:30:00Z" },
+  "data": [
+    {
+      "id": "deck-dark-star",
+      "name": { "zh_CN": "暗星金克丝", "en_US": "Dark Star Jinx" },
+      "cost": 4,
+      "teamCode": "0102030405060708090a",
+      "badge": [
+        { "key": "reroll", "value": 6 },
+        { "key": "difficulty", "value": 2 },
+        { "key": "honey", "value": true }
+      ],
+      "stat": {
+        "win_rate": 0.153,
+        "pick_rate": 0.083,
+        "avg_placement": 4.12,
+        "top4_rate": 0.62
+      },
+      "traits": [{ "key": "TFT17_DarkStar_Trait", "numUnits": 5, "style": 2 }],
+      "units": [
+        {
+          "cell": { "x": 4, "y": 3 },
+          "key": "TFT17_Aatrox",
+          "items": ["TFT_Item_InfinityEdge", "TFT_Item_GiantSlayer", null],
+          "tier": 2,
+          "isCore": true,
+          "priority": 1
+        },
+        {
+          "cell": null,
+          "key": "TFT17_Jinx",
+          "items": [],
+          "tier": 3,
+          "isCore": false,
+          "priority": null
+        }
+      ],
+      "early": { "level": "4", "units": [{ "key": "TFT17_Jinx" }] },
+      "middle": { "level": "6", "units": [{ "key": "TFT17_Aatrox" }] }
+    },
+    {
+      "id": "deck-sniper",
+      "name": { "zh_CN": "狙击手过渡" },
+      "cost": 2,
+      "teamCode": "0b0c0d0e0f",
+      "badge": [],
+      "stat": {
+        "win_rate": 0.081,
+        "pick_rate": 0.031,
+        "avg_placement": 4.66,
+        "top4_rate": 0.48
+      },
+      "traits": [{ "key": "TFT17_Sniper_Trait", "numUnits": 2, "style": 1 }],
+      "units": [
+        {
+          "cell": { "x": 2, "y": 1 },
+          "key": "TFT17_Jinx",
+          "items": ["TFT_Item_GuinsoosRageblade"],
+          "tier": 2,
+          "isCore": true,
+          "priority": 2
+        }
+      ]
+    }
+  ]
+}

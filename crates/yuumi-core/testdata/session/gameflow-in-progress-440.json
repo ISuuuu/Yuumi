@@ -1,0 +1,145 @@
+{
+  "gameData": {
+    "gameId": 7012345678,
+    "queue": {
+      "id": 440,
+      "gameMode": "CLASSIC",
+      "isCustom": false,
+      "type": "RANKED_FLEX_SR"
+    },
+    "teamOne": [
+      {
+        "summonerId": 2001,
+        "puuid": "puuid-enemy-top",
+        "summonerName": "诺克萨斯之手",
+        "gameName": "诺克萨斯之手",
+        "tagLine": "KR1",
+        "displayName": "诺克萨斯之手#KR1",
+        "championId": 122,
+        "cellId": 0,
+        "assignedPosition": "top",
+        "teamParticipantId": "tpid-trio-3",
+        "partyId": "tpid-trio-3"
+      },
+      {
+        "summonerId": 2002,
+        "puuid": "puuid-enemy-jug",
+        "summonerName": "盲僧小王",
+        "gameName": "盲僧小王",
+        "tagLine": "JUG",
+        "displayName": "盲僧小王#JUG",
+        "championId": 64,
+        "cellId": 1,
+        "assignedPosition": "jungle",
+        "teamParticipantId": "tpid-trio-3",
+        "partyId": "tpid-trio-3"
+      },
+      {
+        "summonerId": 2003,
+        "puuid": "puuid-enemy-mid",
+        "summonerName": "九尾妖狐",
+        "gameName": "九尾妖狐",
+        "tagLine": "KR2",
+        "displayName": "九尾妖狐#KR2",
+        "championId": 103,
+        "cellId": 2,
+        "assignedPosition": "middle",
+        "teamParticipantId": "tpid-trio-3",
+        "partyId": "tpid-trio-3"
+      },
+      {
+        "summonerId": 2004,
+        "puuid": "puuid-enemy-adc",
+        "summonerName": "狂暴圣枪",
+        "gameName": "狂暴圣枪",
+        "tagLine": "BOT",
+        "displayName": "狂暴圣枪#BOT",
+        "championId": 236,
+        "cellId": 3,
+        "assignedPosition": "bottom",
+        "teamParticipantId": "0",
+        "partyId": "0"
+      },
+      {
+        "summonerId": 2005,
+        "puuid": "puuid-enemy-sup",
+        "summonerName": "幻翎洛洛",
+        "gameName": "幻翎洛洛",
+        "tagLine": "RAK",
+        "displayName": "幻翎洛洛#RAK",
+        "championId": 497,
+        "cellId": 4,
+        "assignedPosition": "utility",
+        "teamParticipantId": "0",
+        "partyId": "0"
+      }
+    ],
+    "teamTwo": [
+      {
+        "summonerId": 1001,
+        "puuid": "puuid-self-top",
+        "summonerName": "悠米本米",
+        "gameName": "悠米本米",
+        "tagLine": "GPUI",
+        "displayName": "悠米本米#GPUI",
+        "championId": 266,
+        "cellId": 5,
+        "assignedPosition": "top",
+        "teamParticipantId": "tpid-duo-7",
+        "partyId": "tpid-duo-7"
+      },
+      {
+        "summonerId": 1002,
+        "puuid": "puuid-ally-jug",
+        "summonerName": "暗影猎犬",
+        "gameName": "暗影猎犬",
+        "tagLine": "CN1",
+        "displayName": "暗影猎犬#CN1",
+        "championId": 121,
+        "cellId": 6,
+        "assignedPosition": "jungle",
+        "teamParticipantId": "tpid-duo-7",
+        "partyId": "tpid-duo-7"
+      },
+      {
+        "summonerId": 1003,
+        "puuid": "puuid-ally-mid",
+        "summonerName": "九尾妖狐",
+        "gameName": "九尾妖狐",
+        "tagLine": "MID",
+        "displayName": "九尾妖狐#MID",
+        "championId": 350,
+        "cellId": 7,
+        "assignedPosition": "middle",
+        "teamParticipantId": "0",
+        "partyId": "0"
+      },
+      {
+        "summonerId": 1004,
+        "puuid": "puuid-ally-adc",
+        "summonerName": "金克丝超闪",
+        "gameName": "金克丝超闪",
+        "tagLine": "ADC",
+        "displayName": "金克丝超闪#ADC",
+        "championId": 222,
+        "cellId": 8,
+        "assignedPosition": "bottom",
+        "teamParticipantId": "0",
+        "partyId": "0"
+      },
+      {
+        "summonerId": 1005,
+        "puuid": "puuid-ally-sup",
+        "summonerName": "时光守护者",
+        "gameName": "时光守护者",
+        "tagLine": "SUP",
+        "displayName": "时光守护者#SUP",
+        "championId": 26,
+        "cellId": 9,
+        "assignedPosition": "utility",
+        "teamParticipantId": "0",
+        "partyId": "0"
+      }
+    ]
+  }
+}
