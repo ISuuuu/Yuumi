@@ -45,7 +45,7 @@ fn main() {
     let _runtime_guard = runtime.enter();
 
     // 1. Windows 单实例互斥量检测（Named Mutex）
-    let mutex_name = "Global\\Yuumi_GPUI_SingleInstance_Mutex";
+    let mutex_name = "Global\\Yuumi_SingleInstance_Mutex";
     let _instance_guard = match platform::acquire_single_instance(mutex_name) {
         Ok(guard) => Some(guard),
         Err(platform::SingleInstanceError::AlreadyRunning) => {
@@ -68,7 +68,7 @@ fn main() {
     {
         eprintln!("日志初始化失败: {error}");
     }
-    log::info!("Yuumi GPUI 原生 Direct3D 11/DirectWrite 渲染宿主正在启动...");
+    log::info!("Yuumi 原生 Direct3D 11/DirectWrite 渲染宿主正在启动...");
 
     // 3. 创建 GPUI 原生应用程序宿主（挂载内嵌图标与 Logo 资源）
     let app = Application::new().with_assets(assets::Assets);
@@ -103,7 +103,7 @@ fn main() {
                 view
             })
         })
-        .expect("创建 Yuumi GPUI 主窗口失败");
+        .expect("创建 Yuumi 主窗口失败");
 
         // 应用全局 API 并发限制。
         yuumi_core::lcu::client::set_api_concurrency(

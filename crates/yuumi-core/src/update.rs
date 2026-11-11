@@ -1,5 +1,5 @@
-//! GPUI release checks and cached release notes. GPUI targets are deliberately
-//! distinct from the legacy Tauri targets, even on the shared release channel.
+//! Release checks and cached release notes. Supports standard Windows targets
+//! (`windows-x86_64`, `windows-x86_64-portable`).
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -14,14 +14,21 @@ const DEFAULT_UPDATE_PUBLIC_KEY: &str =
     "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzQjk5RURCMTE1MTM5MEIKUldRTE9WRVIyNTY1Z3pVZWRIQzh1bythRWZ3bWJsdTdoeS9uUTEvL0ZBa3I1bXZEd1o3cWpRbTYK";
 
 /// Use the default release manifest and signing key unless overridden at build time.
-pub fn gpui_update_channel() -> Result<(String, String), String> {
-    let endpoint = option_env!("YUUMI_GPUI_UPDATE_ENDPOINT")
+pub fn update_channel() -> Result<(String, String), String> {
+    let endpoint = option_env!("YUUMI_UPDATE_ENDPOINT")
+        .or(option_env!("YUUMI_GPUI_UPDATE_ENDPOINT"))
         .filter(|value| !value.is_empty())
         .unwrap_or(DEFAULT_UPDATE_ENDPOINT);
-    let key = option_env!("YUUMI_GPUI_UPDATE_PUBLIC_KEY")
+    let key = option_env!("YUUMI_UPDATE_PUBLIC_KEY")
+        .or(option_env!("YUUMI_GPUI_UPDATE_PUBLIC_KEY"))
         .filter(|value| !value.is_empty())
         .unwrap_or(DEFAULT_UPDATE_PUBLIC_KEY);
     Ok((endpoint.into(), key.into()))
+}
+
+/// Backward compatible alias for `update_channel`.
+pub fn gpui_update_channel() -> Result<(String, String), String> {
+    update_channel()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -74,6 +81,16 @@ fn trusted_transport(address: &str) -> bool {
         && url.password().is_none()
 }
 
+fn is_supported_target(target: &str) -> bool {
+    matches!(
+        target,
+        "windows-x86_64"
+            | "windows-x86_64-portable"
+            | "windows-aarch64"
+            | "windows-aarch64-portable"
+    )
+}
+
 pub struct UpdateService {
     client: reqwest::Client,
     endpoint: String,
@@ -98,17 +115,11 @@ impl UpdateService {
         }
     }
     pub async fn check(&self) -> Result<Option<UpdateInfo>, String> {
-        if !matches!(
-            self.target.as_str(),
-            "windows-x86_64-gpui"
-                | "windows-aarch64-gpui"
-                | "windows-x86_64-gpui-portable"
-                | "windows-aarch64-gpui-portable"
-        ) {
-            return Err("更新目标不是受支持的 GPUI 构建".into());
+        if !is_supported_target(&self.target) {
+            return Err("更新目标不是受支持的构建".into());
         }
         if self.endpoint.is_empty() || self.public_key.is_empty() {
-            return Err("尚未配置可信的 GPUI 更新渠道和公钥".into());
+            return Err("尚未配置可信的更新渠道和公钥".into());
         }
         if !trusted_transport(&self.endpoint) {
             return Err("更新清单地址必须使用 HTTPS".into());
@@ -134,7 +145,7 @@ impl UpdateService {
         let artifact = manifest
             .platforms
             .get(&self.target)
-            .ok_or("更新清单没有匹配的 GPUI 构建")?;
+            .ok_or("更新清单没有匹配的构建")?;
         if !trusted_transport(&artifact.url) || artifact.signature.is_empty() {
             return Err("更新包地址或签名为空".into());
         }
@@ -154,7 +165,7 @@ impl UpdateService {
         mut progress: F,
     ) -> Result<VerifiedUpdate, String> {
         if info.target != self.target
-            || !self.target.contains("-gpui")
+            || !is_supported_target(&self.target)
             || self.public_key.is_empty()
         {
             return Err("更新目标或可信公钥无效".into());
@@ -251,7 +262,7 @@ pub async fn release_changelog(
     }
     let releases: Vec<GithubRelease> = client
         .get(url)
-        .header(reqwest::header::USER_AGENT, "Yuumi-GPUI")
+        .header(reqwest::header::USER_AGENT, "Yuumi")
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -283,19 +294,18 @@ pub async fn release_changelog(
 
 impl VerifiedUpdate {
     /// Stage only the signed installer in an isolated directory chosen by the caller.
-    /// Portable archives need a separate extraction and replacement helper and are refused.
     pub fn stage_installer(&self, directory: &Path) -> Result<StagedInstaller, String> {
         if self.info.target.ends_with("-portable") {
             return Err("便携版更新尚不支持安装".into());
         }
         if !matches!(
             self.info.target.as_str(),
-            "windows-x86_64-gpui" | "windows-aarch64-gpui"
+            "windows-x86_64" | "windows-aarch64"
         ) {
             return Err("不支持的安装版更新目标".into());
         }
         std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
-        let path = directory.join("yuumi-gpui-installer.exe");
+        let path = directory.join("yuumi-installer.exe");
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -341,6 +351,7 @@ impl StagedInstaller {
                 return Err("暂存的更新文件已被修改".into());
             }
             std::process::Command::new(&self.path)
+                .args(["/P", "/R"])
                 .spawn()
                 .map_err(|e| format!("启动安装程序失败: {e}"))?;
         }
@@ -362,28 +373,46 @@ mod tests {
         assert!(verify(&key, "invalid", b"test").is_err());
     }
     #[tokio::test]
-    async fn refuses_legacy_target_and_missing_trust_configuration() {
+    async fn refuses_unknown_target_and_missing_trust_configuration() {
         let client = reqwest::Client::new();
-        let legacy = UpdateService::new(
+        let unknown = UpdateService::new(
             client.clone(),
+            "".into(),
+            "0.1.0".into(),
+            "windows-unknown".into(),
+            "".into(),
+        );
+        assert!(unknown.check().await.is_err());
+        let valid = UpdateService::new(
+            client,
             "".into(),
             "0.1.0".into(),
             "windows-x86_64".into(),
             "".into(),
         );
-        assert!(legacy.check().await.is_err());
-        let gpui = UpdateService::new(
-            client,
-            "".into(),
-            "0.1.0".into(),
-            "windows-x86_64-gpui".into(),
-            "".into(),
-        );
-        assert!(gpui.check().await.is_err());
+        assert!(valid.check().await.is_err());
+    }
+
+    #[test]
+    fn extracts_yuumi_exe_from_portable_zip() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+        let cursor = std::io::Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(cursor);
+        writer
+            .start_file("Yuumi-portable/yuumi.exe", SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"MZfakeexecutable").unwrap();
+        writer
+            .start_file("Yuumi-portable/portable.flag", SimpleFileOptions::default())
+            .unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+        let extracted = extract_exe_from_portable_zip(&bytes).unwrap();
+        assert_eq!(extracted, b"MZfakeexecutable");
     }
 }
 
-/// Verified raw GPUI portable executable staged beside a helper copy.
+/// Verified portable update package (raw exe or zip) staged beside a helper copy.
 pub struct StagedPortable {
     payload: std::path::PathBuf,
     helper: std::path::PathBuf,
@@ -394,17 +423,21 @@ impl VerifiedUpdate {
     pub fn stage_portable(&self, directory: &Path) -> Result<StagedPortable, String> {
         if !matches!(
             self.info.target.as_str(),
-            "windows-x86_64-gpui-portable" | "windows-aarch64-gpui-portable"
+            "windows-x86_64-portable" | "windows-aarch64-portable"
         ) {
-            return Err("更新目标不是 GPUI 便携版".into());
+            return Err("更新目标不是便携版".into());
         }
-        // GPUI portable channel signs the raw executable, never a legacy Tauri zip.
-        if !self.bytes.starts_with(b"MZ") {
-            return Err("便携版更新不是 Windows 可执行文件".into());
+        if self.bytes.starts_with(b"MZ") {
+            // Raw signed executable
+        } else if self.bytes.starts_with(b"PK\x03\x04") {
+            // Validate portable zip contains yuumi.exe
+            let _ = extract_exe_from_portable_zip(&self.bytes)?;
+        } else {
+            return Err("便携版更新包格式无效".into());
         }
         std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
-        let payload = directory.join("yuumi-gpui-payload.exe");
-        let helper = directory.join("yuumi-gpui-helper.exe");
+        let payload = directory.join("yuumi-payload.bin");
+        let helper = directory.join("yuumi-helper.exe");
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -442,7 +475,7 @@ impl StagedPortable {
             return Err("缺少便携版标记".into());
         }
         std::process::Command::new(&self.helper)
-            .arg("--yuumi-gpui-update-helper")
+            .arg("--yuumi-update-helper")
             .arg(std::process::id().to_string())
             .arg(&self.payload)
             .arg(&target)
@@ -454,10 +487,46 @@ impl StagedPortable {
     }
 }
 
+fn extract_exe_from_portable_zip(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    use std::io::{Cursor, Read};
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("解析便携 zip 失败: {e}"))?;
+    if archive.len() > 128 {
+        return Err("便携版更新包内文件数量超出上限".into());
+    }
+    for i in 0..archive.len() {
+        let entry = archive
+            .by_index(i)
+            .map_err(|e| format!("读取便携 zip 条目失败: {e}"))?;
+        let Some(enclosed) = entry.enclosed_name() else {
+            return Err("便携版更新包含不安全路径".into());
+        };
+        if entry.is_dir() || entry.is_symlink() {
+            continue;
+        }
+        let file_name = enclosed
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.to_ascii_lowercase());
+        if matches!(file_name.as_deref(), Some("yuumi.exe")) {
+            let mut extracted = Vec::new();
+            entry
+                .take((MAX_PACKAGE + 1) as u64)
+                .read_to_end(&mut extracted)
+                .map_err(|e| e.to_string())?;
+            if extracted.len() > MAX_PACKAGE || !extracted.starts_with(b"MZ") {
+                return Err("便携 zip 中的可执行文件无效".into());
+            }
+            return Ok(extracted);
+        }
+    }
+    Err("便携 zip 中未找到 yuumi.exe".into())
+}
+
 /// Called before application runtime initialization in main; no live install in tests.
 pub fn run_portable_helper_if_requested() -> bool {
     let args: Vec<_> = std::env::args_os().collect();
-    if args.get(1).and_then(|v| v.to_str()) != Some("--yuumi-gpui-update-helper") {
+    if args.get(1).and_then(|v| v.to_str()) != Some("--yuumi-update-helper") {
         return false;
     }
     if let Err(e) = run_portable_helper(&args) {
@@ -500,13 +569,12 @@ fn run_portable_helper(args: &[std::ffi::OsString]) -> Result<(), String> {
     if gpui_update_channel()?.1 != key {
         return Err("便携更新公钥不属于此构建".into());
     }
-    if target
+    let target_name = target
         .file_name()
         .and_then(|name| name.to_str())
-        .map(|name| name.to_ascii_lowercase())
-        != Some("yuumi-gpui.exe".into())
-    {
-        return Err("便携更新目标不是 GPUI 程序".into());
+        .map(|name| name.to_ascii_lowercase());
+    if target_name.as_deref() != Some("yuumi.exe") {
+        return Err("便携更新目标不是 Yuumi 程序".into());
     }
     if !target
         .parent()
@@ -524,14 +592,21 @@ fn run_portable_helper(args: &[std::ffi::OsString]) -> Result<(), String> {
         .take((MAX_PACKAGE + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
-    if bytes.len() > MAX_PACKAGE || !bytes.starts_with(b"MZ") {
-        return Err("便携更新文件无效".into());
+    if bytes.len() > MAX_PACKAGE {
+        return Err("便携更新文件超出大小限制".into());
     }
     verify(key, signature, &bytes)?;
+    let exe_bytes = if bytes.starts_with(b"MZ") {
+        bytes
+    } else if bytes.starts_with(b"PK\x03\x04") {
+        extract_exe_from_portable_zip(&bytes)?
+    } else {
+        return Err("便携更新文件无效".into());
+    };
     wait_for_parent(pid)?;
     let dir = target.parent().ok_or("目标目录无效")?;
-    let new = dir.join(".yuumi-gpui-update-new.exe");
-    let backup = dir.join(".yuumi-gpui-update-backup.exe");
+    let new = dir.join(".yuumi-update-new.exe");
+    let backup = dir.join(".yuumi-update-backup.exe");
     // Do not overwrite pre-existing files belonging to another update.
     let mut out = std::fs::OpenOptions::new()
         .write(true)
@@ -539,7 +614,7 @@ fn run_portable_helper(args: &[std::ffi::OsString]) -> Result<(), String> {
         .open(&new)
         .map_err(|e| e.to_string())?;
     use std::io::Write;
-    out.write_all(&bytes)
+    out.write_all(&exe_bytes)
         .and_then(|_| out.sync_all())
         .map_err(|e| e.to_string())?;
     drop(out);
@@ -611,32 +686,32 @@ mod integration_tests {
     }
     #[tokio::test]
     async fn manifest_checks_target_and_version() {
-        let (url, task) = server(r#"{"version":"0.2.0","platforms":{"windows-x86_64":{"url":"http://invalid","signature":"old"}}}"#).await;
+        let (url, task) = server(r#"{"version":"0.2.0","platforms":{"other-target":{"url":"https://example.test/update","signature":"sig"}}}"#).await;
         let service = UpdateService::new(
             reqwest::Client::new(),
             url,
             "0.1.0".into(),
-            "windows-x86_64-gpui".into(),
+            "windows-x86_64".into(),
             "key".into(),
         );
-        assert!(service.check().await.unwrap_err().contains("GPUI"));
+        assert!(service.check().await.unwrap_err().contains("匹配"));
         task.await.unwrap();
         let (url, task) = server(r#"{"version":"0.1.0","platforms":{}}"#).await;
         let service = UpdateService::new(
             reqwest::Client::new(),
             url,
             "0.1.0".into(),
-            "windows-x86_64-gpui".into(),
+            "windows-x86_64".into(),
             "key".into(),
         );
         assert!(service.check().await.unwrap().is_none());
         task.await.unwrap();
-        let (url, task) = server(r#"{"version":"0.2.0","platforms":{"windows-x86_64-gpui":{"url":"https://example.test/update","signature":"signature"}}}"#).await;
+        let (url, task) = server(r#"{"version":"0.2.0","platforms":{"windows-x86_64":{"url":"https://example.test/update","signature":"signature"}}}"#).await;
         let service = UpdateService::new(
             reqwest::Client::new(),
             url,
             "0.1.0".into(),
-            "windows-x86_64-gpui".into(),
+            "windows-x86_64".into(),
             "key".into(),
         );
         assert_eq!(service.check().await.unwrap().unwrap().version, "0.2.0");
@@ -677,7 +752,7 @@ mod integration_tests {
             reqwest::Client::new(),
             url.clone(),
             "0.1.0".into(),
-            "windows-x86_64-gpui".into(),
+            "windows-x86_64".into(),
             key,
         );
         let info = UpdateInfo {
@@ -687,7 +762,7 @@ mod integration_tests {
             pub_date: None,
             url,
             signature,
-            target: "windows-x86_64-gpui".into(),
+            target: "windows-x86_64".into(),
         };
         let mut received = 0;
         let update = service

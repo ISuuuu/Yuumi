@@ -25,6 +25,7 @@ rustls = { version = "0.23", features = ["ring"] }
 minisign-verify = "0.2.5"
 semver = "1"
 uuid = { version = "1", features = ["v4"] }
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

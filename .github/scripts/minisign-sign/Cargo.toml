@@ -1,0 +1,13 @@
+[package]
+name = "minisign-sign"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+base64 = "0.22"
+minisign = "0.7"
+
+[dev-dependencies]
+minisign-verify = "0.2.5"

@@ -57,8 +57,7 @@ impl MainWindow {
         };
         self.f_update.checking = true;
         if manual {
-            self.settings_view
-                .set_feedback("正在检查 GPUI 更新…", false);
+            self.settings_view.set_feedback("正在检查更新…", false);
         }
         cx.notify();
         let task = runtime.spawn(async move { service.check().await });
@@ -85,9 +84,7 @@ impl MainWindow {
                         }
                     }
                     // 对照 Vue C02：手动检查已是最新版以 Toast 呈现
-                    Ok(None) if manual => {
-                        this.toast(ToastKind::Success, "当前已是最新 GPUI 版本", cx)
-                    }
+                    Ok(None) if manual => this.toast(ToastKind::Success, "当前已是最新版本", cx),
                     // 对照 Vue C05：手动检查失败以 Toast 呈现
                     Err(error) if manual => this.toast(ToastKind::Error, error, cx),
                     Err(_) => log::warn!("[Update] 启动检查失败"),
@@ -146,7 +143,7 @@ impl MainWindow {
                 return Err("下载已取消".into());
             }
             let directory = yuumi_core::runtime::app_data_dir()
-                .join("gpui-update")
+                .join("yuumi-update")
                 .join(format!(
                     "{}-{}",
                     std::process::id(),
@@ -264,7 +261,7 @@ impl MainWindow {
         let task = runtime.spawn(async move {
             let cache = yuumi_core::runtime::app_data_dir()
                 .join("cache")
-                .join("gpui-releases.json");
+                .join("yuumi-releases.json");
             update::release_changelog(&client, update::RELEASES_URL, &cache, None, force).await
         });
         cx.spawn(async move |entity, cx| {
@@ -303,7 +300,7 @@ impl MainWindow {
                     if self.f_update.progress.is_some() {
                         "查看更新进度"
                     } else {
-                        "查看 GPUI 更新"
+                        "查看更新"
                     },
                     move |_, app| {
                         entity.update(app, |view, cx| {
@@ -326,7 +323,7 @@ impl MainWindow {
         let entity_install = entity.clone();
         let entity_release = entity.clone();
         div()
-            .id("gpui-update-prompt")
+            .id("update-prompt")
             .absolute()
             .right(px(20.0))
             .bottom(px(66.0))
@@ -342,7 +339,7 @@ impl MainWindow {
             .flex_col()
             .gap(px(10.0))
             .child(format!(
-                "GPUI 新版本 {}（当前 {}）",
+                "发现新版本 {}（当前 {}）",
                 info.version, info.current_version
             ))
             .when_some(
@@ -350,7 +347,7 @@ impl MainWindow {
                 |el, notes| {
                     el.child(
                         div()
-                            .id("gpui-update-notes")
+                            .id("update-notes")
                             .max_h(px(160.0))
                             .overflow_y_scroll()
                             .text_sm()
@@ -457,7 +454,7 @@ fn release_client(config: &AppConfig) -> Result<reqwest::Client, String> {
                 attempt.follow()
             }
         }))
-        .user_agent(concat!("Yuumi-GPUI/", env!("CARGO_PKG_VERSION")));
+        .user_agent(concat!("Yuumi/", env!("CARGO_PKG_VERSION")));
     let addr = config.general.http_proxy_addr.trim();
     if config.general.enable_http_proxy && !addr.is_empty() {
         let url = if addr.contains("://") {
@@ -472,9 +469,9 @@ fn release_client(config: &AppConfig) -> Result<reqwest::Client, String> {
 }
 
 fn update_service(config: &AppConfig) -> Result<UpdateService, String> {
-    let (endpoint, key) = update::gpui_update_channel()?;
+    let (endpoint, key) = update::update_channel()?;
     let target = format!(
-        "windows-{}-gpui{}",
+        "windows-{}{}",
         std::env::consts::ARCH,
         if yuumi_core::runtime::is_portable() {
             "-portable"
