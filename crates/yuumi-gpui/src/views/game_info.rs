@@ -1753,6 +1753,7 @@ impl GameInfoView {
             // 主体行：英雄头像（带等级角标，支持双位数完整展示）+ KDA (G08, G10)
             .child(
                 div()
+                    .flex_1()
                     .flex()
                     .items_center()
                     .gap(if compact { px(4.0) } else { px(6.0) })
