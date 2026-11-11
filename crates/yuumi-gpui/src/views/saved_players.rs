@@ -1014,7 +1014,9 @@ impl SavedPlayersView {
         div()
             .p(px(14.0))
             .rounded_lg()
-            .bg(Theme::CARD_BG())
+            // Vue .player-card 的 --card-bg 预合成到页面底色，Mica 开关前后保持一致；
+            // 展开后的相遇记录浅灰底继续叠在这层之上
+            .bg(Theme::over_page(Theme::CARD_BG()))
             .border_1()
             .border_color(Theme::CARD_BORDER())
             .hover(|s| s.border_color(Theme::AURORA_CYAN().opacity(0.35)))

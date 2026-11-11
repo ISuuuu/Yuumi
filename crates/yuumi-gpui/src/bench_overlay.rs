@@ -377,16 +377,17 @@ impl BenchOverlayView {
                         div()
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0xffffff))
+                            .text_color(Theme::TEXT_PRIMARY())
                             .child("大乱斗板凳席"),
                     )
                     .child(
                         div()
                             .px(px(4.0))
                             .rounded(px(3.0))
-                            .bg(rgba(0x00f5d430))
+                            // 浅色卡面上改用品牌色浅底 + 主色字，避免亮青字看不清
+                            .bg(Theme::ACCENT_LIGHT())
                             .text_size(px(9.0))
-                            .text_color(Theme::AURORA_CYAN())
+                            .text_color(Theme::ACCENT_PRIMARY())
                             .child(queue_label),
                     ),
             )
@@ -412,11 +413,11 @@ impl BenchOverlayView {
                             .cursor_pointer()
                             .px_2()
                             .rounded_sm()
-                            .bg(rgba(0xffffff20))
+                            .bg(Theme::HOVER_BG())
                             .hover(|s| s.bg(rgba(0x00f5d440)))
                             .text_size(px(10.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0xffffff))
+                            .text_color(Theme::TEXT_PRIMARY())
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _ev, _window, cx| {
@@ -432,11 +433,11 @@ impl BenchOverlayView {
                             .cursor_pointer()
                             .px_2()
                             .rounded_sm()
-                            .bg(rgba(0x00f5d433))
-                            .hover(|s| s.bg(rgba(0x00f5d466)))
+                            .bg(Theme::ACCENT_LIGHT())
+                            .hover(|s| s.bg(Theme::ACCENT_ALPHA_20()))
                             .text_size(px(10.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::AURORA_CYAN())
+                            .text_color(Theme::ACCENT_PRIMARY())
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _ev, _window, cx| {
@@ -511,7 +512,9 @@ impl Render for BenchOverlayView {
             .flex()
             .flex_row()
             .items_center()
-            .bg(rgba(0x0f172af2)) // 深色半透水晶极光底色
+            // 对齐 Vue .bench-overlay-wrapper 的 --card-bg：浅色近白、深色深蓝，随主题切换；
+            // 卡面按页面底色预合成成实色（GPUI 无 backdrop-filter，半透明会直接透出游戏画面）
+            .bg(Theme::over_page(Theme::CARD_BG()))
             .border_1()
             .border_color(Theme::CARD_BORDER())
             .rounded(px(12.0))
@@ -537,7 +540,7 @@ impl Render for BenchOverlayView {
                     .justify_center()
                     .cursor_move()
                     .opacity(0.55)
-                    .hover(|s| s.opacity(1.0).text_color(rgb(0xffffff)))
+                    .hover(|s| s.opacity(1.0).text_color(Theme::TEXT_PRIMARY()))
                     .child(icon("icons/drag.svg", 16.0, Theme::TEXT_MUTED()))
                     .on_mouse_down(
                         MouseButton::Left,
@@ -585,12 +588,12 @@ impl Render for BenchOverlayView {
                             .h(px(24.0))
                             .px(px(6.0))
                             .rounded(px(4.0))
-                            .bg(rgba(0xffffff18))
+                            .bg(Theme::HOVER_BG())
                             .hover(|s| s.bg(rgba(0x00f5d433)))
                             .cursor_pointer()
                             .text_size(px(10.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0xffffff))
+                            .text_color(Theme::TEXT_PRIMARY())
                             .when(is_pending, |s| s.opacity(0.5))
                             .on_mouse_down(
                                 MouseButton::Left,

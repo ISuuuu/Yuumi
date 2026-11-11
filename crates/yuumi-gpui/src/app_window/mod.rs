@@ -10,7 +10,8 @@ use gpui::{
     div, px, App, Bounds, ClipboardItem, Context, Div, Entity, FocusHandle, FontWeight,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
     ScrollHandle, SharedString, Size, Stateful, StatefulInteractiveElement, Styled,
-    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
+    TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind,
+    WindowOptions,
 };
 use std::sync::Arc;
 use std::time::Duration;

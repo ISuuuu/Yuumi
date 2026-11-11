@@ -12,7 +12,8 @@ impl Card {
     pub fn new() -> Self {
         Self {
             element: div()
-                .bg(Theme::CARD_BG())
+                // 带 shadow_sm() 的卡片需先合成到页面底色，否则阴影会透进卡片内部
+                .bg(Theme::over_page(Theme::CARD_BG()))
                 .border_1()
                 .border_color(Theme::CARD_BORDER())
                 .rounded(px(8.0))
