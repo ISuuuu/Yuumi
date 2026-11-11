@@ -40,36 +40,52 @@ impl SearchInput {
         let is_focused = self.is_focused;
 
         div()
-            .h(px(32.0))
+            .h(px(28.0))
             .w(px(240.0))
-            .rounded_lg()
+            .rounded(px(10.0))
             .bg(Theme::CARD_BG())
             .border_1()
             .border_color(if is_focused {
-                Theme::AURORA_CYAN()
+                Theme::ACCENT_PRIMARY()
             } else {
                 Theme::CARD_BORDER()
+            })
+            .map(|mut el| {
+                if is_focused {
+                    el.style().box_shadow = Some(vec![BoxShadow {
+                        color: Theme::ACCENT_LIGHT(),
+                        offset: point(px(0.0), px(0.0)),
+                        blur_radius: px(0.0),
+                        spread_radius: px(3.0),
+                    }]);
+                }
+                el
+            })
+            .hover(|s| {
+                if !is_focused {
+                    s.border_color(Theme::ACCENT_PRIMARY())
+                } else {
+                    s
+                }
             })
             .px_3()
             .flex()
             .items_center()
             .justify_between()
+            .cursor_text()
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().text_xs().text_color(Theme::TEXT_MUTED()).child("🔍"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(if has_text {
-                                Theme::TEXT_PRIMARY()
-                            } else {
-                                Theme::TEXT_MUTED()
-                            })
-                            .child(if has_text { text } else { placeholder }),
-                    ),
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_xs()
+                    .text_color(if has_text {
+                        Theme::TEXT_PRIMARY()
+                    } else {
+                        Theme::TEXT_MUTED()
+                    })
+                    .child(if has_text { text } else { placeholder }),
             )
             .when(has_text, |this| {
                 this.child(

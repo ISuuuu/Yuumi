@@ -349,6 +349,7 @@ impl SettingsView {
         index: usize,
         key: &'static str,
         placeholder: &'static str,
+        window: &Window,
         on_action: F,
     ) -> Div
     where
@@ -357,6 +358,7 @@ impl SettingsView {
         let Some(focus) = self.f_focus.as_ref().map(|f| &f[index]) else {
             return div();
         };
+        let is_focused = focus.is_focused(window);
         let edit = on_action.clone();
         let clear = on_action.clone();
         let submit = on_action.clone();
@@ -371,7 +373,7 @@ impl SettingsView {
                 placeholder,
                 px(260.0),
                 focus,
-                false,
+                is_focused,
                 TextFieldOptions::default(),
                 move |value, win, app| edit(SettingsAction::EditFInput(key, value), win, app),
                 move |win, app| {
@@ -415,7 +417,7 @@ impl SettingsView {
     pub fn render_panel<F>(
         &self,
         config: &AppConfig,
-        _window: &mut Window,
+        window: &mut Window,
         on_action: F,
     ) -> impl IntoElement
     where
@@ -453,7 +455,7 @@ impl SettingsView {
                     .child(self.render_opgg_group(config, on_action.clone()))
                     // ─── 3. 通用设置 ───
                     .child(self.render_group_header(crate::i18n::t("settings.generalGroup")))
-                    .child(self.render_general_group(config, on_action.clone()))
+                    .child(self.render_general_group(config, window, on_action.clone()))
                     // ─── 4. 日志 ───
                     .child(self.render_group_header(crate::i18n::t("settings.logGroup")))
                     .child(self.render_log_group(config, on_action.clone()))
@@ -464,7 +466,7 @@ impl SettingsView {
                     .child(self.render_group_header(crate::i18n::t("settings.softwareUpdateGroup")))
                     .child(self.render_update_group(config, on_action.clone()))
                     // ─── 7. 网络代理 ───
-                    .child(self.render_proxy_group(config, on_action.clone()))
+                    .child(self.render_proxy_group(config, window, on_action.clone()))
                     // ─── 8. 关于 ───
                     .child(self.render_group_header(crate::i18n::t("settings.aboutGroup")))
                     .child(self.render_about_group(config, on_action.clone()))
@@ -639,7 +641,7 @@ impl SettingsView {
     }
 
     // ─── 3. 通用设置组 (F-V01 ~ F-V04) ───
-    fn render_general_group<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
+    fn render_general_group<F>(&self, config: &AppConfig, window: &Window, on_action: F) -> impl IntoElement
     where
         F: Fn(SettingsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -889,7 +891,7 @@ impl SettingsView {
                     .child(setting_row(
                         crate::i18n::t("settings.apiServerAddrLabel"),
                         None,
-                        self.f_input(0, "f-upload", "http://example.com", on_action.clone()),
+                        self.f_input(0, "f-upload", "http://example.com", window, on_action.clone()),
                     ))
                     // 2. LCU 实时服务开关
                     .child(setting_row(
@@ -906,7 +908,7 @@ impl SettingsView {
                     .child(setting_row(
                         "userid:",
                         None,
-                        self.f_input(1, "f-user", crate::i18n::t("settings.useridPlaceholder"), on_action.clone()),
+                        self.f_input(1, "f-user", crate::i18n::t("settings.useridPlaceholder"), window, on_action.clone()),
                     )),
             ))
             // 隐藏菜单折叠卡片 (F-V04)
@@ -1046,6 +1048,7 @@ impl SettingsView {
                                     3,
                                     "f-screenshot",
                                     crate::i18n::t("settings.screenshotSavePathPlaceholder"),
+                                    window,
                                     on_action.clone(),
                                 ))
                                 .child(action_button(
@@ -1692,7 +1695,7 @@ impl SettingsView {
     }
 
     // ─── 7. 网络代理 (F-V08) ───
-    fn render_proxy_group<F>(&self, config: &AppConfig, on_action: F) -> impl IntoElement
+    fn render_proxy_group<F>(&self, config: &AppConfig, window: &Window, on_action: F) -> impl IntoElement
     where
         F: Fn(SettingsAction, &mut Window, &mut App) + 'static + Clone,
     {
@@ -1722,7 +1725,7 @@ impl SettingsView {
                 .items_center()
                 .justify_between()
                 .gap(px(16.0))
-                .child(self.f_input(2, "f-proxy", "127.0.0.1:7897", on_action.clone()))
+                .child(self.f_input(2, "f-proxy", "127.0.0.1:7897", window, on_action.clone()))
                 .child(
                     div()
                         .cursor_pointer()

@@ -9,6 +9,7 @@
 //! - P05: 初始空态、搜索无结果空态（带清空按钮）、底部触底加载与全部加载完毕提示
 
 use crate::asset_loader::global_asset_loader;
+use crate::components::text_field::{text_field, TextFieldOptions};
 use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -738,10 +739,9 @@ impl SavedPlayersView {
         F: Fn(SavedPlayersAction, &mut Window, &mut App) + 'static + Clone,
     {
         let is_search_focused = self.search_focus_handle.is_focused(window);
-        let current_search = self.search_query.clone();
-        let search_focus_handle = self.search_focus_handle.clone();
         let on_action_search = on_action.clone();
         let on_action_clear = on_action.clone();
+        let on_action_submit = on_action.clone();
 
         div()
             .flex()
@@ -749,102 +749,19 @@ impl SavedPlayersView {
             .justify_between()
             .gap_3()
             .mb_4()
-            // 左侧搜索输入框：带放大镜图标，占位文案，清空按钮，回车即刻触发
-            .child(
-                div()
-                    .id("saved-players-search-box")
-                    .track_focus(&search_focus_handle)
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .w(px(320.0))
-                    .h(px(32.0))
-                    .bg(Theme::CARD_BG())
-                    .border_1()
-                    .border_color(if is_search_focused {
-                        Theme::AURORA_CYAN()
-                    } else {
-                        Theme::CARD_BORDER()
-                    })
-                    .rounded_md()
-                    .px_2p5()
-                    .cursor_text()
-                    .on_mouse_down(MouseButton::Left, move |_ev, win, _app| {
-                        win.focus(&search_focus_handle);
-                    })
-                    .on_key_down(move |ev: &KeyDownEvent, win, app| {
-                        let key_str = &ev.keystroke.key;
-                        if key_str == "enter" {
-                            on_action_search(SavedPlayersAction::SearchSubmit, win, app);
-                        } else if key_str == "backspace" {
-                            let mut s = current_search.clone();
-                            s.pop();
-                            on_action_search(SavedPlayersAction::SearchInput(s), win, app);
-                        } else if let Some(ref c) = ev.keystroke.key_char {
-                            let mut s = current_search.clone();
-                            s.push_str(c);
-                            on_action_search(SavedPlayersAction::SearchInput(s), win, app);
-                        } else if key_str.chars().count() == 1
-                            && !ev.keystroke.modifiers.control
-                            && !ev.keystroke.modifiers.alt
-                        {
-                            let mut s = current_search.clone();
-                            s.push_str(key_str);
-                            on_action_search(SavedPlayersAction::SearchInput(s), win, app);
-                        }
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .overflow_hidden()
-                            .child(div().text_xs().text_color(Theme::TEXT_MUTED()).child("🔍"))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(if self.search_query.is_empty() {
-                                        Theme::TEXT_MUTED()
-                                    } else {
-                                        Theme::TEXT_PRIMARY()
-                                    })
-                                    .child(if self.search_query.is_empty() {
-                                        if is_search_focused {
-                                            "|".to_string()
-                                        } else {
-                                            "搜索召唤师名称、Tag 或标记...".to_string()
-                                        }
-                                    } else {
-                                        if is_search_focused {
-                                            format!("{}|", self.search_query)
-                                        } else {
-                                            self.search_query.clone()
-                                        }
-                                    }),
-                            ),
-                    )
-                    .when(!self.search_query.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .size(px(16.0))
-                                .rounded_full()
-                                .bg(Theme::CARD_BORDER())
-                                .hover(|s| {
-                                    s.bg(Theme::AURORA_CYAN()).text_color(Theme::TEXT_ON_PRIMARY())
-                                })
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_xs()
-                                .text_color(Theme::TEXT_MUTED())
-                                .cursor_pointer()
-                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                    on_action_clear(SavedPlayersAction::SearchClear, win, app);
-                                })
-                                .child("✕"),
-                        )
-                    }),
-            )
+            // 左侧搜索输入框：无放大镜，支持快捷键与清空按钮，回车即刻触发
+            .child(text_field(
+                "saved-players-search-box",
+                &self.search_query,
+                "搜索召唤师名称、Tag 或标记...",
+                px(320.0),
+                &self.search_focus_handle,
+                is_search_focused,
+                TextFieldOptions::default(),
+                move |s, win, app| on_action_search(SavedPlayersAction::SearchInput(s), win, app),
+                move |win, app| on_action_clear(SavedPlayersAction::SearchClear, win, app),
+                move |_, win, app| on_action_submit(SavedPlayersAction::SearchSubmit, win, app),
+            ))
             // 右侧三段分段器：「全部」「标记玩家」「多次相遇」
             .child(
                 div()
@@ -1305,8 +1222,8 @@ impl SavedPlayersView {
                     .child(div().flex().justify_end().child(if is_editing {
                         let is_tag_focused = self.edit_tag_focus_handle.is_focused(window);
                         let edit_tag_h = self.edit_tag_focus_handle.clone();
-                        let current_tag = self.editing_tag_buffer.clone();
                         let on_action_tag_key = on_action.clone();
+                        let on_action_tag_clear = on_action.clone();
                         let p_puuid_save_clone = p_puuid_save.clone();
                         let on_save = on_action_save.clone();
                         let on_cancel = on_action_cancel.clone();
@@ -1316,87 +1233,18 @@ impl SavedPlayersView {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(
-                                div()
-                                    .id("saved-player-tag-input")
-                                    .track_focus(&edit_tag_h)
-                                    .w(px(220.0))
-                                    .h(px(28.0))
-                                    .rounded_sm()
-                                    .border_1()
-                                    .border_color(if is_tag_focused {
-                                        Theme::AURORA_CYAN()
-                                    } else {
-                                        Theme::CARD_BORDER()
-                                    })
-                                    .bg(Theme::CARD_BG())
-                                    .px_2()
-                                    .cursor_text()
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, _app| {
-                                        win.focus(&edit_tag_h);
-                                    })
-                                    .on_key_down(move |ev: &KeyDownEvent, win, app| {
-                                        let key_str = &ev.keystroke.key;
-                                        if key_str == "enter" {
-                                            on_save(
-                                                SavedPlayersAction::SaveEdit(
-                                                    p_puuid_save_clone.clone(),
-                                                ),
-                                                win,
-                                                app,
-                                            );
-                                        } else if key_str == "backspace" {
-                                            let mut s = current_tag.clone();
-                                            s.pop();
-                                            on_action_tag_key(
-                                                SavedPlayersAction::EditTagInput(s),
-                                                win,
-                                                app,
-                                            );
-                                        } else if let Some(ref c) = ev.keystroke.key_char {
-                                            let mut s = current_tag.clone();
-                                            s.push_str(c);
-                                            on_action_tag_key(
-                                                SavedPlayersAction::EditTagInput(s),
-                                                win,
-                                                app,
-                                            );
-                                        } else if key_str.chars().count() == 1
-                                            && !ev.keystroke.modifiers.control
-                                            && !ev.keystroke.modifiers.alt
-                                        {
-                                            let mut s = current_tag.clone();
-                                            s.push_str(key_str);
-                                            on_action_tag_key(
-                                                SavedPlayersAction::EditTagInput(s),
-                                                win,
-                                                app,
-                                            );
-                                        }
-                                    })
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(if self.editing_tag_buffer.is_empty() {
-                                                Theme::TEXT_MUTED()
-                                            } else {
-                                                Theme::TEXT_PRIMARY()
-                                            })
-                                            .child(if self.editing_tag_buffer.is_empty() {
-                                                if is_tag_focused {
-                                                    "|".to_string()
-                                                } else {
-                                                    "添加个性化标记...".to_string()
-                                                }
-                                            } else {
-                                                if is_tag_focused {
-                                                    format!("{}|", self.editing_tag_buffer)
-                                                } else {
-                                                    self.editing_tag_buffer.clone()
-                                                }
-                                            }),
-                                    ),
-                            )
+                            .child(text_field(
+                                "saved-player-tag-input",
+                                &self.editing_tag_buffer,
+                                "添加个性化标记...",
+                                px(220.0),
+                                &edit_tag_h,
+                                is_tag_focused,
+                                TextFieldOptions::default(),
+                                move |s, win, app| on_action_tag_key(SavedPlayersAction::EditTagInput(s), win, app),
+                                move |win, app| on_action_tag_clear(SavedPlayersAction::EditTagInput(String::new()), win, app),
+                                move |_, win, app| on_save(SavedPlayersAction::SaveEdit(p_puuid_save_clone.clone()), win, app),
+                            ))
                             .child(
                                 div()
                                     .px_3()

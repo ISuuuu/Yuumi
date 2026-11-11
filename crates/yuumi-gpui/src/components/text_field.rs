@@ -69,8 +69,6 @@ pub struct TextFieldOptions {
     pub disabled: bool,
     /// 显示加载指示
     pub loading: bool,
-    /// 前置图标（文本形式）
-    pub leading_icon: Option<&'static str>,
     /// 最大字符数；None 表示不限制
     pub max_chars: Option<usize>,
 }
@@ -189,35 +187,44 @@ pub fn text_field(
     div()
         .id(id)
         .track_focus(focus)
-        .h(px(30.0))
+        .h(px(28.0))
         .w(width)
-        .rounded_lg()
+        .rounded(px(10.0))
         .bg(Theme::CARD_BG())
         .border_1()
-        .border_color(if disabled || is_focused {
+        .border_color(if is_focused {
             Theme::ACCENT_PRIMARY()
         } else {
             Theme::CARD_BORDER()
+        })
+        .map(|mut el| {
+            if is_focused {
+                el.style().box_shadow = Some(vec![BoxShadow {
+                    color: Theme::ACCENT_LIGHT(),
+                    offset: point(px(0.0), px(0.0)),
+                    blur_radius: px(0.0),
+                    spread_radius: px(3.0),
+                }]);
+            }
+            el
+        })
+        .hover(|s| {
+            if !disabled && !is_focused {
+                s.border_color(Theme::ACCENT_PRIMARY())
+            } else {
+                s
+            }
         })
         .px(px(10.0))
         .flex()
         .items_center()
         .justify_between()
-        .gap_2()
-        .cursor_pointer()
+        .gap(px(6.0))
+        .cursor_text()
         .on_mouse_down(MouseButton::Left, move |_ev, window, _cx| {
             window.focus(&focus_for_click);
         })
         .on_key_down(on_key)
-        .when_some(options.leading_icon, |this, glyph| {
-            this.child(
-                div()
-                    .flex_none()
-                    .text_size(px(12.0))
-                    .text_color(Theme::TEXT_MUTED())
-                    .child(glyph),
-            )
-        })
         .child(
             div()
                 .flex_1()
@@ -245,18 +252,24 @@ pub fn text_field(
                     .child("⏳"),
             )
         })
-        .when(has_text && !disabled, |this| {
+        .when(has_text && !disabled && !options.loading, |this| {
+            let clear_cb = clear_cb.clone();
             this.child(
                 div()
                     .flex_none()
-                    .text_size(px(12.0))
-                    .text_color(Theme::TEXT_MUTED())
+                    .size(px(18.0))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .cursor_pointer()
-                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY()))
+                    .text_color(Theme::TEXT_MUTED())
+                    .hover(|s| s.text_color(Theme::TEXT_PRIMARY()).bg(Theme::HOVER_BG()))
                     .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
+                        app.stop_propagation();
                         clear_cb(window, app);
                     })
-                    .child("✕"),
+                    .child(svg().path("icons/close.svg").flex_none().size(px(12.0))),
             )
         })
 }

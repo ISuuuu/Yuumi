@@ -2275,7 +2275,6 @@ impl CareerView {
                                     search_focused,
                                     TextFieldOptions {
                                         max_chars: Some(24),
-                                        leading_icon: Some("icons/search.svg"),
                                         ..Default::default()
                                     },
                                     move |text, win, app| cb(text, win, app),
