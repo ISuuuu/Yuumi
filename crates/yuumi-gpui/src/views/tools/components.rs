@@ -50,7 +50,8 @@ pub fn direct_card_row(
     div()
         .id(id)
         .w_full()
-        .bg(Theme::CARD_BG())
+        // Vue .card-item 用 --settings-card-bg（0.8 白），预合成到页面底色后 Mica 开关前后一致
+        .bg(Theme::over_page(Theme::SETTINGS_CARD_BG()))
         .border_1()
         .border_color(Theme::CARD_BORDER())
         .when(border_b_zero, |s| s.border_t_0())
@@ -63,7 +64,8 @@ pub fn direct_card_row(
         .items_center()
         .justify_between()
         .gap(px(14.0))
-        .hover(|s| s.bg(Theme::HOVER_BG()))
+        // Vue .card-item:hover 用 --settings-card-bg-hover
+        .hover(|s| s.bg(Theme::over_page(Theme::SETTINGS_CARD_BG_HOVER())))
         .child(
             div()
                 .flex()
@@ -593,7 +595,8 @@ where
                     .rounded_md()
                     .border_1()
                     .border_color(Theme::SIDEBAR_ACTIVE_BORDER())
-                    .bg(Theme::CARD_BG())
+                    // 展开面板带 shadow_sm()，底色预合成到页面底色避免阴影透进面板
+                    .bg(Theme::over_page(Theme::CARD_BG()))
                     .shadow_sm()
                     .flex()
                     .flex_col()

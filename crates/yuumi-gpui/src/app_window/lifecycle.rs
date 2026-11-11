@@ -486,6 +486,9 @@ impl MainWindow {
             focus: false,
             is_movable: true,
             is_resizable: false,
+            // Vue 浮窗用透明窗口 + 圆角卡面（.bench-overlay-wrapper 的 border-radius）；
+            // Opaque 时四角会被清成黑色，改为 Transparent 后由 DWM 透出桌面
+            window_background: WindowBackgroundAppearance::Transparent,
             ..Default::default()
         };
 

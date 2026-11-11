@@ -1097,7 +1097,12 @@ impl SearchView {
                                 .px_2p5()
                                 .py_2()
                                 .cursor_pointer()
-                                .bg(if win { Theme::WIN_BG() } else { Theme::LOSS_BG() })
+                                // 选中态带 shadow_sm()，胜负底色需预合成到页面底色，避免阴影透进卡片
+                                .bg(if win {
+                                    Theme::over_page(Theme::WIN_BG())
+                                } else {
+                                    Theme::over_page(Theme::LOSS_BG())
+                                })
                                 .border_1()
                                 .border_color(if is_selected {
                                     if win {
@@ -1113,9 +1118,9 @@ impl SearchView {
                                 .when(is_selected, |s| s.border_2().shadow_sm())
                                 .hover(|s| {
                                     s.bg(if win {
-                                        Theme::WIN_BG_HOVER()
+                                        Theme::over_page(Theme::WIN_BG_HOVER())
                                     } else {
-                                        Theme::LOSS_BG_HOVER()
+                                        Theme::over_page(Theme::LOSS_BG_HOVER())
                                     })
                                 })
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {

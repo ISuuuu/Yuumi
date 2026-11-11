@@ -468,6 +468,55 @@ impl Theme {
         let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.10) } else { Self::HOVER_BG_STRONG_DEFAULT };
         runtime_or("HOVER_BG_STRONG", fallback)
     }
+    pub const SETTINGS_CARD_BG_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 0.80); // --settings-card-bg
+    /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
+    #[allow(dead_code)]
+    pub fn SETTINGS_CARD_BG() -> Hsla {
+        let fallback = if is_dark_mode_active() { const_hsla(0.6061, 0.3882, 0.1667, 0.75) } else { Self::SETTINGS_CARD_BG_DEFAULT };
+        runtime_or("SETTINGS_CARD_BG", fallback)
+    }
+    pub const SETTINGS_CARD_BG_HOVER_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 0.95); // --settings-card-bg-hover
+    /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
+    #[allow(dead_code)]
+    pub fn SETTINGS_CARD_BG_HOVER() -> Hsla {
+        let fallback = if is_dark_mode_active() { const_hsla(0.6047, 0.3874, 0.2176, 0.90) } else { Self::SETTINGS_CARD_BG_HOVER_DEFAULT };
+        runtime_or("SETTINGS_CARD_BG_HOVER", fallback)
+    }
+    pub const SETTINGS_ROW_BG_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 0.45); // --settings-row-bg
+    /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
+    #[allow(dead_code)]
+    pub fn SETTINGS_ROW_BG() -> Hsla {
+        let fallback = if is_dark_mode_active() { const_hsla(0.0000, 0.0000, 1.0000, 0.04) } else { Self::SETTINGS_ROW_BG_DEFAULT };
+        runtime_or("SETTINGS_ROW_BG", fallback)
+    }
+    pub const SETTINGS_COLLAPSE_BG_DEFAULT: Hsla = const_hsla(0.6111, 0.1429, 0.9588, 0.80); // --settings-collapse-bg → rgba(243,244,246,0.8)
+    /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
+    #[allow(dead_code)]
+    pub fn SETTINGS_COLLAPSE_BG() -> Hsla {
+        let fallback = if is_dark_mode_active() { const_hsla(0.6136, 0.3929, 0.1098, 0.85) } else { Self::SETTINGS_COLLAPSE_BG_DEFAULT };
+        runtime_or("SETTINGS_COLLAPSE_BG", fallback)
+    }
+
+    /// 把半透明色按自身 alpha 预合成到页面底色上，得到实色。
+    ///
+    /// GPUI 的 `Style::paint` 先绘制 box-shadow 再绘制背景（vendor/gpui/src/style.rs），
+    /// 卡片若用半透明底色，`shadow_sm()` 两层 10% 阴影会透进卡片内部，
+    /// 实测生涯页卡片比 Vue 暗约 19%。带阴影的卡片改用本函数合成后的实色，
+    /// 阴影只留在卡片外缘。
+    pub fn over_page(fg: Hsla) -> Hsla {
+        Self::BG_APP().blend(fg)
+    }
+
+    /// 135° 两端线性渐变（对齐 Vue 的 linear-gradient(135deg, from, to)）。
+    ///
+    /// 两端先按各自 alpha 预合成到页面底色，渐变结果不透明，卡片阴影不会透进卡面。
+    pub fn gradient_over_page(from: Hsla, to: Hsla) -> Background {
+        linear_gradient(
+            135.0,
+            linear_color_stop(Self::over_page(from), 0.0),
+            linear_color_stop(Self::over_page(to), 1.0),
+        )
+    }
 
     pub fn premade_color(idx: usize) -> Hsla {
         match idx % 4 {
@@ -687,6 +736,31 @@ mod tests {
         p.win_card_color = "#6639B01B".into();
         Theme::apply(&p, false);
         assert!(Theme::WIN_BG().a > 0.35);
+
+        restore_default_palette();
+    }
+
+    /// over_page 把半透明卡片底色合成成实色，GPUI 的阴影不再透进卡片内部
+    #[test]
+    fn over_page_flattens_translucent_card_backgrounds() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default_palette();
+
+        let to_u8 = |v: f32| (v * 255.0).round() as i32;
+
+        // 0.75 白底合成到 #f8fafc 页面底色 → 与 Vue 实测 #fdfdfd 相差 1~2 个色阶
+        let card = Theme::over_page(Theme::CARD_BG());
+        assert_eq!(card.a, 1.0);
+        let card = card.to_rgb();
+        assert!((to_u8(card.r) - 253).abs() <= 2, "r = {}", to_u8(card.r));
+        assert!((to_u8(card.g) - 253).abs() <= 2, "g = {}", to_u8(card.g));
+        assert!((to_u8(card.b) - 254).abs() <= 2, "b = {}", to_u8(card.b));
+
+        // 20% 绿底合成到页面底色 → 与 Vue 实测 #d1eacd 相差 3 个色阶以内
+        let win = Theme::over_page(Theme::WIN_BG()).to_rgb();
+        assert!((to_u8(win.r) - 209).abs() <= 3, "r = {}", to_u8(win.r));
+        assert!((to_u8(win.g) - 235).abs() <= 3, "g = {}", to_u8(win.g));
+        assert!((to_u8(win.b) - 207).abs() <= 3, "b = {}", to_u8(win.b));
 
         restore_default_palette();
     }

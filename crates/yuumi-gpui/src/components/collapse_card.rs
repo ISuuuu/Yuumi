@@ -28,7 +28,8 @@ pub fn collapse_card(
     div()
         .id(id)
         .w_full()
-        .bg(Theme::CARD_BG())
+        // Vue .collapse-card 用 --settings-card-bg；卡片带 shadow_sm()，底色需先合成到页面底色
+        .bg(Theme::over_page(Theme::SETTINGS_CARD_BG()))
         .border_1()
         .border_color(if open {
             Theme::SIDEBAR_ACTIVE_BORDER()
@@ -48,7 +49,8 @@ pub fn collapse_card(
                 .items_center()
                 .justify_between()
                 .cursor_pointer()
-                .hover(|s| s.bg(Theme::HOVER_BG()))
+                // Vue .collapse-card 头部悬停用 --settings-card-bg-hover
+                .hover(|s| s.bg(Theme::SETTINGS_CARD_BG_HOVER()))
                 .on_mouse_down(MouseButton::Left, on_toggle)
                 .child(
                     div()
@@ -120,6 +122,8 @@ pub fn collapse_card(
             this.child(
                 div()
                     .w_full()
+                    // 对齐 Vue .n-collapse-item__content 的 --hover-bg 浅灰层（父级卡片已是实色）
+                    .bg(Theme::HOVER_BG())
                     .border_t_1()
                     .border_color(Theme::CARD_BORDER().opacity(0.6))
                     .px(px(24.0))
@@ -180,7 +184,8 @@ pub fn settings_card_item(
         .w_full()
         .px(px(24.0))
         .py(px(16.0))
-        .bg(Theme::CARD_BG())
+        // Vue .setting-row 的 --settings-row-bg 叠在折叠卡展开区之上
+        .bg(Theme::SETTINGS_ROW_BG())
         .when(border_bottom, |s| {
             s.border_b_1().border_color(Theme::CARD_BORDER().opacity(0.5))
         })

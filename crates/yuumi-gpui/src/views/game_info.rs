@@ -1669,12 +1669,36 @@ impl GameInfoView {
         let is_win = m.win;
         let is_remake = m.remake;
 
+        // 对齐 Vue .col-match 的 135° 浅色渐变：首端约为状态色的 70%、末端 20%
+        // （默认胜负色即 14% → 4%）。色相仍取自运行时胜负/重开色，保留自定义配色；
+        // 两端预合成到页面底色，卡片阴影不再透进卡面。
         let (bg, border, text_color) = if is_remake {
-            (Theme::REMAKE_BG(), Theme::REMAKE_BORDER(), Theme::REMAKE_TEXT())
+            (
+                Theme::gradient_over_page(
+                    Theme::REMAKE_BG().opacity(0.7),
+                    Theme::REMAKE_BG().opacity(0.2),
+                ),
+                Theme::REMAKE_BORDER(),
+                Theme::REMAKE_TEXT(),
+            )
         } else if is_win {
-            (Theme::WIN_BG(), Theme::WIN_BORDER(), Theme::WIN_TEXT())
+            (
+                Theme::gradient_over_page(
+                    Theme::WIN_BG().opacity(0.7),
+                    Theme::WIN_BG().opacity(0.2),
+                ),
+                Theme::WIN_BORDER(),
+                Theme::WIN_TEXT(),
+            )
         } else {
-            (Theme::LOSS_BG(), Theme::LOSS_BORDER(), Theme::LOSS_TEXT())
+            (
+                Theme::gradient_over_page(
+                    Theme::LOSS_BG().opacity(0.7),
+                    Theme::LOSS_BG().opacity(0.2),
+                ),
+                Theme::LOSS_BORDER(),
+                Theme::LOSS_TEXT(),
+            )
         };
 
         let time_text = format_month_day(m.time_stamp);

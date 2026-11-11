@@ -898,7 +898,7 @@ impl CareerView {
 
         div()
             .w(px(1000.0))
-            .bg(Theme::CARD_BG())
+            .bg(Theme::over_page(Theme::CARD_BG()))
             .border_1()
             .border_color(Theme::CARD_BORDER())
             .rounded_xl()
@@ -1142,8 +1142,9 @@ impl CareerView {
                             .cursor_pointer()
                             .text_size(px(14.1))
                             .font_weight(FontWeight::BOLD)
+                            // 选中底色预合成到页面底色，Mica 开启时与关闭时保持同一像素
                             .bg(if is_active {
-                                Theme::ACCENT_ALPHA_10()
+                                Theme::over_page(Theme::ACCENT_ALPHA_10())
                             } else {
                                 transparent_black()
                             })
@@ -1282,7 +1283,8 @@ impl CareerView {
         div()
             .w(px(1000.0))
             .flex_none()
-            .bg(Theme::CARD_BG())
+            // 表体近白底预合成到页面底色；表头的 HOVER_BG 继续叠在这层之上
+            .bg(Theme::over_page(Theme::CARD_BG()))
             .border_1()
             .border_color(Theme::CARD_BORDER())
             .rounded_xl()
@@ -1356,7 +1358,8 @@ impl CareerView {
             .w(px(1000.0))
             .flex_none()
             .relative()
-            .bg(Theme::CARD_BG())
+            // Vue .recent-summary-bar 用 --settings-collapse-bg（浅灰蓝），并预合成到页面底色
+            .bg(Theme::over_page(Theme::SETTINGS_COLLAPSE_BG()))
             .border_1()
             .border_color(Theme::CARD_BORDER())
             .rounded(px(8.0))
@@ -1724,6 +1727,8 @@ impl CareerView {
         } else {
             (Theme::LOSS_BG(), Theme::LOSS_BORDER(), Theme::LOSS_TEXT(), "失败")
         };
+        // 半透明胜负底色先合成到页面底色，避免 GPUI 在背景之下绘制的阴影透进卡片内部
+        let bg_color = Theme::over_page(bg_color);
 
         let champion_name = m.display.name.clone();
         let champion_icon_url = m.display.champion_icon_url.clone();
