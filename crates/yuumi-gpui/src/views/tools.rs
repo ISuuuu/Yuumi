@@ -225,9 +225,7 @@ impl Default for ToolsView {
 
 impl ToolsView {
     pub fn new() -> Self {
-        let mut open_cards = HashSet::new();
-        // 默认展开高频卡片：自动接受对局
-        open_cards.insert("autoaccept".to_string());
+        let open_cards = HashSet::new();
 
         Self {
             open_cards,
@@ -363,7 +361,7 @@ impl ToolsView {
                                     )
                                     .when(!connected, |this| {
                                         this.child(
-                                            Badge::new("LCU 未连接 · 部分功能受限")
+                                            Badge::new("LCU 未连接 · 所有功能已禁用")
                                                 .variant(BadgeVariant::Loss),
                                         )
                                     }),

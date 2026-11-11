@@ -4,6 +4,16 @@ use super::*;
 impl MainWindow {
     /// 处理工具箱交互动作
     pub(super) fn handle_tools_action(&mut self, action: ToolsAction, cx: &mut Context<Self>) {
+        if !matches!(self.connection_status, ConnectionStatus::Connected { .. }) {
+            // 未连接状态下所有卡片均不能点击展开，所有功能均不能点击设置
+            self.toast(
+                ToastKind::Warning,
+                crate::i18n::t("common.lcuNotConnected"),
+                cx,
+            );
+            return;
+        }
+
         match action {
             ToolsAction::ToggleCollapse(name) => {
                 self.tools_view.toggle_card(name);
@@ -1054,11 +1064,7 @@ impl MainWindow {
                                 this.tools_view.badges_snapshot_title = saved_title;
                                 this.tools_view.badges_snapshot_badges = saved_ids;
                                 this.tools_view.show_badges_modal = false;
-                                this.toast(
-                                    ToastKind::Success,
-                                    "称号与挑战勋章装配成功！",
-                                    cx,
-                                );
+                                this.toast(ToastKind::Success, "称号与挑战勋章装配成功！", cx);
                             }
                             Err(e) => {
                                 crate::views::tools::personalization::update_badges_view_state(
@@ -1145,7 +1151,8 @@ impl MainWindow {
                             s.error = None;
                         });
                         // 回读的真实当前佩戴覆盖临时选择（不重置打开时的取消快照）
-                        let clean_title = if data.current_title == "-1" || data.current_title == "0" {
+                        let clean_title = if data.current_title == "-1" || data.current_title == "0"
+                        {
                             String::new()
                         } else {
                             data.current_title
