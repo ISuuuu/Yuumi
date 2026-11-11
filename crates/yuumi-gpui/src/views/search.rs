@@ -12,6 +12,7 @@
 use crate::components::card::Card;
 use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
+use crate::components::offline_state::render_lcu_offline_state;
 use crate::components::text_field::search_input_field;
 use crate::match_model::{GameDetail, GameDetailPlayer, GameDetailTeam, MatchItem};
 use crate::theme::Theme;
@@ -437,29 +438,7 @@ impl SearchView {
     ) -> impl IntoElement {
         // S01: 离线时复用离线状态组件
         if !is_connected {
-            return div()
-                .flex()
-                .flex_col()
-                .size_full()
-                .bg(Theme::BG_APP())
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap_3()
-                        .child(div().text_size(px(48.0)).child("🐱"))
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(Theme::TEXT_MUTED())
-                                .child("英雄联盟客户端未连接，请先启动游戏客户端"),
-                        ),
-                )
-                .into_any_element();
+            return render_lcu_offline_state(None);
         }
 
         let (paged_matches, total_count, has_more) = self.paged_filtered_matches();

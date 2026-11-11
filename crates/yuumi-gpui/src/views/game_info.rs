@@ -14,6 +14,7 @@
 
 use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
+use crate::components::offline_state::render_lcu_offline_state;
 use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -1845,51 +1846,28 @@ impl GameInfoView {
     where
         F: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
     {
-        div()
-            .size_full()
+        let demo_btn = div()
+            .mt(px(20.0))
+            .px(px(20.0))
+            .py(px(9.0))
+            .rounded_lg()
+            .bg(Theme::ACCENT_PRIMARY())
+            .hover(|this| this.opacity(0.85))
+            .cursor_pointer()
+            .on_mouse_down(MouseButton::Left, on_load_demo)
             .flex()
-            .flex_col()
             .items_center()
-            .justify_center()
-            .py_24()
-            .px_8()
-            .gap(px(12.0))
-            .child(div().text_size(px(48.0)).child("⚡"))
+            .gap(px(6.0))
             .child(
                 div()
-                    .text_size(px(16.0))
+                    .text_size(px(13.5))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(Theme::TEXT_PRIMARY())
-                    .child("尚未连接到英雄联盟客户端"),
+                    .text_color(gpui::white())
+                    .child("预览对局信息"),
             )
-            .child(
-                div()
-                    .text_size(px(13.0))
-                    .text_color(Theme::TEXT_MUTED())
-                    .child("启动客户端并登录后会自动检测 LCU 进程，无需手动操作。"),
-            )
-            .child(
-                div()
-                    .mt(px(8.0))
-                    .px(px(18.0))
-                    .py(px(7.0))
-                    .rounded_lg()
-                    .bg(Theme::ACCENT_PRIMARY())
-                    .hover(|this| this.opacity(0.85))
-                    .cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, on_load_demo)
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(
-                        div()
-                            .text_size(px(13.0))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(gpui::white())
-                            .child("预览对局信息"),
-                    ),
-            )
-            .into_any_element()
+            .into_any_element();
+
+        render_lcu_offline_state(Some(demo_btn))
     }
 
     /// 统一提示框 (G01)

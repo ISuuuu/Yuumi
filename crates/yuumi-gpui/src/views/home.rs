@@ -2,12 +2,13 @@
 //!
 //! 1:1 核心复刻要点 (H01~H04)：
 //! - H01: 已连接状态大标题「已连接至英雄联盟客户端」，详情卡片展示 PID / --app-port，未读到显示「正在获取客户端连接详情...」，右下角绝对定位猫咪 Logo (120x120px) 带 hover / active 效果。
-//! - H02: 未连接离线状态居中纵向排布：Logo 图 (96x96)、标题「未检测到英雄联盟客户端」、说明、带播放三角图标的「启动英雄联盟客户端」按钮、客户端路径列表（有路径才显示）、底部等待环与「等待英雄联盟客户端启动中...」。
+//! - H02: 未连接离线状态居中纵向排布：Logo 图 (96x96)、说明、带播放三角图标的「启动英雄联盟客户端」按钮、客户端路径列表（有路径才显示）、底部等待环与「等待英雄联盟客户端启动中...」。
 //! - H03: 路径列表上方显示「客户端启动路径:」，单选 radio 与高亮边框；WeGame 标记（WEGAME_MARKER / "WEGAME"）默认选中，展示彩色 WeGame 徽章，次文案显示配置路径或斜体「未设置 WeGame 路径」；点击切换选中路径，点击启动调用 launch_lol_client。
 //! - H04: 连接状态切换时立即响应，断开切为离线未连接状态，就绪立即展示真实 PID / port。
 
 use crate::assets::logo_image;
 use crate::components::icon::icon;
+use crate::components::offline_state::render_lcu_offline_state_with_tip;
 use crate::services::system_tools::{load_client_paths, WEGAME_MARKER};
 use crate::services::ConnectionStatus;
 use crate::theme::Theme;
@@ -83,16 +84,17 @@ impl HomeView {
         F1: Fn(String, &mut Window, &mut App) + 'static + Clone,
         F2: Fn(&mut Window, &mut App) + 'static + Clone,
     {
-        div()
-            .relative()
-            .size_full()
-            .px(px(24.0))
-            .py(px(40.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .when(matches!(status, ConnectionStatus::Connected { .. }), |el| {
-                el.child(self.render_connected(status)).child(
+        if matches!(status, ConnectionStatus::Connected { .. }) {
+            div()
+                .relative()
+                .size_full()
+                .px(px(24.0))
+                .py(px(40.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(self.render_connected(status))
+                .child(
                     // 连接成功后猫咪移到窗体右下角（bottom: 40px, right: 40px, 120x120px，保持比例，悬停/激活效果）
                     div()
                         .absolute()
@@ -110,11 +112,13 @@ impl HomeView {
                             )
                         }),
                 )
-            })
-            .when(
-                !matches!(status, ConnectionStatus::Connected { .. }),
-                |el| el.child(self.render_offline(on_select_path, on_launch)),
+                .into_any_element()
+        } else {
+            render_lcu_offline_state_with_tip(
+                "请先启动英雄联盟客户端，或者通过下方按钮直接启动游戏",
+                Some(self.render_offline_actions(on_select_path, on_launch).into_any_element()),
             )
+        }
     }
 
     /// H01 已连接状态
@@ -204,8 +208,8 @@ impl HomeView {
             )
     }
 
-    /// H02 未连接离线状态 & H03 路径列表与 WeGame 识别
-    fn render_offline<F1, F2>(&self, on_select_path: F1, on_launch: F2) -> impl IntoElement
+    /// H02 未连接离线操作区（启动按钮、路径列表与等待环）
+    fn render_offline_actions<F1, F2>(&self, on_select_path: F1, on_launch: F2) -> impl IntoElement
     where
         F1: Fn(String, &mut Window, &mut App) + 'static + Clone,
         F2: Fn(&mut Window, &mut App) + 'static + Clone,
@@ -216,46 +220,10 @@ impl HomeView {
             .items_center()
             .text_center()
             .max_w(px(520.0))
-            .w_full();
+            .w_full()
+            .pt(px(24.0));
 
-        // 1) 猫咪 logo 图（96x96，带阴影与浮动动画，object_fit(ObjectFit::Contain)）
-        if let Some(logo) = logo_image() {
-            offline_container = offline_container.child(
-                div()
-                    .mb(px(24.0))
-                    .cursor_default()
-                    .hover(|s| s.opacity(0.92))
-                    .child(
-                        img(logo)
-                            .w(px(96.0))
-                            .h(px(96.0))
-                            .object_fit(ObjectFit::Contain)
-                            .shadow_lg(),
-                    ),
-            );
-        }
-
-        // 2) 未连接标题「未检测到英雄联盟客户端」
-        offline_container = offline_container.child(
-            div()
-                .text_size(px(28.8))
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(Theme::TEXT_PRIMARY())
-                .mb(px(14.0))
-                .child("未检测到英雄联盟客户端"),
-        );
-
-        // 3) 说明文案「请先启动英雄联盟客户端，或者通过下方按钮直接启动游戏」
-        offline_container = offline_container.child(
-            div()
-                .text_size(px(14.1))
-                .line_height(px(22.0))
-                .text_color(Theme::TEXT_SECONDARY())
-                .mb(px(24.0))
-                .child("请先启动英雄联盟客户端，或者通过下方按钮直接启动游戏"),
-        );
-
-        // 4) 带播放三角图标的「启动英雄联盟客户端」按钮（launch-btn）
+        // 1) 带播放三角图标的「启动英雄联盟客户端」按钮（launch-btn）
         offline_container = offline_container.child(
             div()
                 .id("launch-btn")

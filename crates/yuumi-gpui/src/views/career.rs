@@ -1,6 +1,7 @@
 use crate::components::dropdown::{dropdown_item, dropdown_menu, dropdown_trigger};
 use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
+use crate::components::offline_state::render_lcu_offline_state;
 use crate::components::text_field::{text_field, TextFieldOptions};
 use crate::match_model::{
     compute_match_stats, position_to_zh, top_champions, top_positions, MatchItem,
@@ -705,27 +706,7 @@ impl CareerView {
     }
 
     pub fn render_offline_state() -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .py(px(96.0))
-            .px(px(32.0))
-            .child(
-                div()
-                    .text_size(px(48.0))
-                    .line_height(px(48.0))
-                    .mb(px(16.0))
-                    .child("🎮"),
-            )
-            .child(
-                div()
-                    .text_size(px(15.0))
-                    .line_height(px(24.0))
-                    .text_color(Theme::TEXT_MUTED())
-                    .child("请先启动英雄联盟客户端"),
-            )
+        render_lcu_offline_state(None)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -752,13 +733,7 @@ impl CareerView {
         on_replay: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         if !is_connected {
-            return div()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(Self::render_offline_state())
-                .into_any_element();
+            return Self::render_offline_state().into_any_element();
         }
 
         if self.summoner.is_none() {
