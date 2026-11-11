@@ -667,6 +667,7 @@ impl SearchView {
                                 let del_cb = on_delete_history.clone();
                                 let choose_cb = on_search.clone();
                                 let close_cb = on_close_history.clone();
+                                let dismiss_cb = on_close_history.clone();
                                 this.child(
                                     deferred(
                                         div()
@@ -688,6 +689,10 @@ impl SearchView {
                                             .flex()
                                             .flex_col()
                                             .gap(px(10.0))
+                                            .on_mouse_down_out(move |_ev, win, app| {
+                                                app.stop_propagation();
+                                                dismiss_cb(win, app);
+                                            })
                                             .child(
                                                 div()
                                                     .flex()
@@ -966,6 +971,7 @@ impl SearchView {
                     ),
             )
             .when(is_open, |this| {
+                let dismiss_cb = on_close_select.clone();
                 this.child(
                     deferred(
                         div()
@@ -983,6 +989,10 @@ impl SearchView {
                             .border_color(Theme::CARD_BORDER())
                             .rounded(px(8.0))
                             .shadow_md()
+                            .on_mouse_down_out(move |_ev, win, app| {
+                                app.stop_propagation();
+                                dismiss_cb(false, win, app);
+                            })
                             .children(SEARCH_QUEUE_OPTIONS.into_iter().map(|option| {
                                 let is_selected = current_filter == option.id;
                                 let select = on_select_cb.clone();

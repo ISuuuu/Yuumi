@@ -62,6 +62,7 @@ pub fn dropdown_trigger(
                 )),
         )
         .when(open, |this| {
+            let on_dismiss = on_toggle.clone();
             this.child(
                 deferred(
                     div()
@@ -77,6 +78,10 @@ pub fn dropdown_trigger(
                         .border_color(Theme::CARD_BORDER())
                         .rounded_lg()
                         .shadow_md()
+                        .on_mouse_down_out(move |_ev, win, app| {
+                            app.stop_propagation();
+                            on_dismiss(win, app);
+                        })
                         .child(menu),
                 )
                 .with_priority(2),
@@ -135,6 +140,8 @@ pub fn select_dropdown(
     on_toggle: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
     let current_label = current_label.into();
+    let on_toggle = std::rc::Rc::new(on_toggle);
+    let on_click = on_toggle.clone();
 
     div()
         .id(id)
@@ -161,7 +168,7 @@ pub fn select_dropdown(
                 .justify_between()
                 .cursor_pointer()
                 .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
-                .on_mouse_down(MouseButton::Left, on_toggle)
+                .on_mouse_down(MouseButton::Left, move |ev, win, app| on_click(ev, win, app))
                 .child(
                     div()
                         .text_size(px(12.5))
@@ -179,6 +186,7 @@ pub fn select_dropdown(
                 )),
         )
         .when(open, |this| {
+            let on_dismiss = on_toggle.clone();
             this.child(
                 deferred(
                     div()
@@ -195,6 +203,10 @@ pub fn select_dropdown(
                         .shadow_md()
                         .overflow_hidden()
                         .py(px(4.0))
+                        .on_mouse_down_out(move |ev, win, app| {
+                            app.stop_propagation();
+                            on_dismiss(ev, win, app);
+                        })
                         .child(menu),
                 )
                 .with_priority(20),

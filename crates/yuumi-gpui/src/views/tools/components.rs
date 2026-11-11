@@ -196,6 +196,7 @@ where
                 )),
         )
         .when(open && !disabled, |this| {
+            let dismiss_cb = on_toggle.clone();
             this.child(
                 deferred(
                     div()
@@ -217,6 +218,10 @@ where
                         .flex()
                         .flex_col()
                         .gap(px(2.0))
+                        .on_mouse_down_out(move |_ev, win, app| {
+                            app.stop_propagation();
+                            dismiss_cb(win, app);
+                        })
                         .children(options.into_iter().map(|(val, label)| {
                             let select_cb = on_select.clone();
                             div()

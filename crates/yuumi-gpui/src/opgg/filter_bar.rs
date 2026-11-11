@@ -106,8 +106,9 @@ fn trigger(
     on_select: impl Fn(FilterKind, &'static str, &mut Window, &mut App) + 'static + Clone,
 ) -> impl IntoElement {
     let is_open = open == Some(kind);
-    let toggle = on_toggle;
+    let toggle = std::rc::Rc::new(on_toggle);
     let select = on_select;
+    let toggle_click = toggle.clone();
 
     div()
         .id(id)
@@ -137,7 +138,7 @@ fn trigger(
                 .hover(|style| style.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                     app.stop_propagation();
-                    toggle(kind, window, app);
+                    toggle_click(kind, window, app);
                 })
                 .child(label_of(options, current))
                 .child(icon(
@@ -151,6 +152,7 @@ fn trigger(
                 )),
         )
         .when(is_open, |el| {
+            let toggle_dismiss = toggle.clone();
             el.child(
                 // 浮层菜单：`deferred` 让菜单盖住后续兄弟节点（沿用项目 dropdown 的做法）
                 deferred(
@@ -171,6 +173,10 @@ fn trigger(
                         .border_color(Theme::CARD_BORDER())
                         .rounded(px(8.0))
                         .shadow_lg()
+                        .on_mouse_down_out(move |_ev, window, app| {
+                            app.stop_propagation();
+                            toggle_dismiss(kind, window, app);
+                        })
                         .on_mouse_down(MouseButton::Left, |_ev, _window, app| {
                             app.stop_propagation();
                         })

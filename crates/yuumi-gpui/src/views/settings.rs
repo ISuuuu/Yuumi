@@ -448,6 +448,7 @@ fn render_color_picker(
             // 当前实际纯 RGB 色
             let cur_rgb = hsv_to_rgb(h, s, v);
 
+            let dismiss_cb = on_close.clone();
             this.child(
                 deferred(
                     div()
@@ -466,6 +467,10 @@ fn render_color_picker(
                         .flex_col()
                         .gap(px(10.0))
                         .w(px(280.0))
+                        .on_mouse_down_out(move |_ev, win, app| {
+                            app.stop_propagation();
+                            dismiss_cb(win, app);
+                        })
                         // 1. 顶部取样状态预览与关闭
                         .child(
                             div()
