@@ -50,7 +50,7 @@ impl MainWindow {
                 self.persist_config(cx);
             }
             SettingsAction::SetCareerGames(val) => {
-                let clamped = val.clamp(1, 100);
+                let clamped = val.clamp(5, 50);
                 self.app_config.functions.career_games_number = clamped;
                 self.persist_config(cx);
             }
@@ -95,7 +95,7 @@ impl MainWindow {
                         self.toast(ToastKind::Info, crate::i18n::t("settings.pathExists"), cx);
                     } else {
                         self.app_config.general.lol_path.push(path.clone());
-                        self.home_view.reload_paths();
+                        self.sync_home_paths();
                         self.persist_config_silent(cx);
                         self.toast(
                             ToastKind::Success,
@@ -115,7 +115,7 @@ impl MainWindow {
                         self.toast(ToastKind::Info, crate::i18n::t("settings.pathExists"), cx);
                     } else {
                         self.app_config.general.lol_path.push(path.clone());
-                        self.home_view.reload_paths();
+                        self.sync_home_paths();
                         self.persist_config_silent(cx);
                         self.toast(
                             ToastKind::Success,
@@ -133,7 +133,7 @@ impl MainWindow {
                     self.toast(ToastKind::Info, crate::i18n::t("settings.wegameExists"), cx);
                 } else {
                     self.app_config.general.lol_path.push(wegame_marker);
-                    self.home_view.reload_paths();
+                    self.sync_home_paths();
                     self.persist_config_silent(cx);
                     self.toast(ToastKind::Success, crate::i18n::t("settings.wegameAdded"), cx);
                 }
@@ -142,7 +142,7 @@ impl MainWindow {
             SettingsAction::RemoveLolPath(idx) => {
                 if idx < self.app_config.general.lol_path.len() {
                     self.app_config.general.lol_path.remove(idx);
-                    self.home_view.reload_paths();
+                    self.sync_home_paths();
                     self.persist_config(cx);
                 }
             }

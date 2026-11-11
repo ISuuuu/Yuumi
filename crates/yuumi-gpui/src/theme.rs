@@ -497,6 +497,18 @@ impl Theme {
         runtime_or("SETTINGS_COLLAPSE_BG", fallback)
     }
 
+    pub const POPUP_BG_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 1.0); // 实色纯白
+    /// 浮层/下拉菜单专用不透明背景（实色，避免遮挡下方文字透光，深浅色自适应）
+    #[allow(dead_code)]
+    pub fn POPUP_BG() -> Hsla {
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5833, 0.2800, 0.1700, 1.0)
+        } else {
+            Self::POPUP_BG_DEFAULT
+        };
+        runtime_or("POPUP_BG", fallback)
+    }
+
     /// 把半透明色按自身 alpha 预合成到页面底色上，得到实色。
     ///
     /// GPUI 的 `Style::paint` 先绘制 box-shadow 再绘制背景（vendor/gpui/src/style.rs），
@@ -703,6 +715,12 @@ mod tests {
         Theme::apply(&p, false);
         assert_ne!(Theme::BG_APP(), Theme::BG_APP_DEFAULT);
         assert!(is_dark_mode_active());
+        assert!(Theme::POPUP_BG().l < 0.25, "深色模式下 POPUP_BG 应为深色底");
+
+        // Light 模式恢复纯白底
+        p.theme_mode = "Light".into();
+        Theme::apply(&p, false);
+        assert_eq!(Theme::POPUP_BG().l, 1.0, "浅色模式下 POPUP_BG 应为纯白底");
 
         // Auto：跟随系统深色偏好
         p.theme_mode = "Auto".into();

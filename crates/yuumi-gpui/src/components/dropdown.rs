@@ -72,7 +72,7 @@ pub fn dropdown_trigger(
                         .id(SharedString::from(format!("{}-menu", id)))
                         .occlude()
                         // 不透明背景，避免下方战绩卡片文字透上来
-                        .bg(rgb(0xffffff))
+                        .bg(Theme::POPUP_BG())
                         .border_1()
                         .border_color(Theme::CARD_BORDER())
                         .rounded_lg()
@@ -188,7 +188,7 @@ pub fn select_dropdown(
                         .mt(px(4.0))
                         .w(px(width_px))
                         .occlude()
-                        .bg(rgb(0xffffff))
+                        .bg(Theme::POPUP_BG())
                         .border_1()
                         .border_color(Theme::CARD_BORDER())
                         .rounded_lg()

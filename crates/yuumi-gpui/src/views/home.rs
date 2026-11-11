@@ -16,7 +16,9 @@ use gpui::prelude::*;
 use gpui::*;
 
 pub fn is_wegame(path: &str) -> bool {
-    path == WEGAME_MARKER || path.eq_ignore_ascii_case("wegame")
+    path == WEGAME_MARKER
+        || path.eq_ignore_ascii_case("wegame")
+        || path.to_ascii_lowercase().ends_with("wegame.exe")
 }
 
 #[derive(Clone)]
@@ -38,13 +40,18 @@ impl Default for HomeView {
 }
 
 impl HomeView {
-    pub fn new() -> Self {
-        let (paths, wegame) = load_client_paths();
-        let selected = if paths.iter().any(|p| is_wegame(p)) {
-            paths.iter().find(|p| is_wegame(p)).cloned()
+    /// 辅助方法：计算默认选中路径（若有 WeGame 优先选中 WeGame，否则选中首项）
+    fn pick_default_selected(paths: &[String]) -> Option<String> {
+        if let Some(wegame) = paths.iter().find(|p| is_wegame(p)) {
+            Some(wegame.clone())
         } else {
             paths.first().cloned()
-        };
+        }
+    }
+
+    pub fn new() -> Self {
+        let (paths, wegame) = load_client_paths();
+        let selected = Self::pick_default_selected(&paths);
 
         Self {
             lol_paths: paths,
@@ -54,24 +61,31 @@ impl HomeView {
         }
     }
 
-    /// 重新载入客户端路径（当从设置页修改或重新检测后调用）
-    pub fn reload_paths(&mut self) {
-        let (paths, wegame) = load_client_paths();
-        if self.selected_path.is_none()
-            || !self
-                .selected_path
-                .as_ref()
-                .map(|s| paths.contains(s))
-                .unwrap_or(false)
+    /// 根据传入的客户端路径与 WeGame 路径更新，并确保优先默认选中 WeGame
+    pub fn reload_paths_from(&mut self, paths: Vec<String>, wegame: String) {
+        let selected = if paths.iter().any(|p| is_wegame(p))
+            && !self.selected_path.as_deref().map(is_wegame).unwrap_or(false)
         {
-            self.selected_path = if paths.iter().any(|p| is_wegame(p)) {
-                paths.iter().find(|p| is_wegame(p)).cloned()
+            paths.iter().find(|p| is_wegame(p)).cloned()
+        } else if let Some(ref cur) = self.selected_path {
+            if paths.contains(cur) {
+                Some(cur.clone())
             } else {
-                paths.first().cloned()
-            };
-        }
+                Self::pick_default_selected(&paths)
+            }
+        } else {
+            Self::pick_default_selected(&paths)
+        };
+
+        self.selected_path = selected;
         self.lol_paths = paths;
         self.wegame_path = wegame;
+    }
+
+    /// 重新载入客户端路径（从磁盘兜底重读）
+    pub fn reload_paths(&mut self) {
+        let (paths, wegame) = load_client_paths();
+        self.reload_paths_from(paths, wegame);
     }
 
     pub fn render<F1, F2>(
@@ -438,4 +452,52 @@ impl HomeView {
 /// 详情卡使用等宽字体
 fn mono_font_family() -> SharedString {
     "Consolas".into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_wegame, HomeView};
+
+    #[test]
+    fn test_is_wegame_matches_marker_and_exe() {
+        assert!(is_wegame("WeGame"));
+        assert!(is_wegame("wegame"));
+        assert!(is_wegame("WEGAME"));
+        assert!(is_wegame(r"D:\Program Files\Tencent\WeGame\wegame.exe"));
+        assert!(!is_wegame(r"D:\WeGameApps\League of Legends\TCLS"));
+    }
+
+    #[test]
+    fn test_pick_default_selected_prefers_wegame() {
+        let paths = vec![
+            r"D:\WeGameApps\英雄联盟（含经典模式）\TCLS".to_string(),
+            "WeGame".to_string(),
+        ];
+        let selected = HomeView::pick_default_selected(&paths);
+        assert_eq!(selected.as_deref(), Some("WeGame"));
+
+        let paths_without_wegame = vec![
+            r"D:\WeGameApps\英雄联盟\TCLS".to_string(),
+            r"E:\Riot Games\League of Legends".to_string(),
+        ];
+        let selected_fallback = HomeView::pick_default_selected(&paths_without_wegame);
+        assert_eq!(selected_fallback.as_deref(), Some(r"D:\WeGameApps\英雄联盟\TCLS"));
+    }
+
+    #[test]
+    fn test_reload_paths_from_prefers_wegame() {
+        let mut home = HomeView {
+            lol_paths: vec![r"D:\Games\LOL".to_string()],
+            wegame_path: "".to_string(),
+            selected_path: Some(r"D:\Games\LOL".to_string()),
+            launch_message: None,
+        };
+
+        // 当新增了 WeGame 时，应自动优先选中 WeGame
+        home.reload_paths_from(
+            vec![r"D:\Games\LOL".to_string(), "WeGame".to_string()],
+            r"D:\WeGame".to_string(),
+        );
+        assert_eq!(home.selected_path.as_deref(), Some("WeGame"));
+    }
 }

@@ -2,14 +2,12 @@
 //!
 //! 包含直显卡片行、英雄选择器、技能选择器、带后缀按钮输入框、危险按钮、装配弹窗等。
 
+use super::data::{get_champion_name, get_spell_name, ChampionEntry, CHAMPIONS, SUMMONER_SPELLS};
 use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
 use crate::components::text_field::{text_field, TextFieldOptions};
 use crate::services::champion_alias::{champion_keywords, spell_icon_path};
 use crate::theme::Theme;
-use super::data::{
-    get_champion_name, get_spell_name, ChampionEntry, CHAMPIONS, SUMMONER_SPELLS,
-};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::cell::OnceCell;
@@ -146,7 +144,9 @@ where
         .id(id)
         .relative()
         .w(px(width_px))
-        .when(disabled, |s| s.opacity(0.5).cursor(CursorStyle::OperationNotAllowed))
+        .when(disabled, |s| {
+            s.opacity(0.5).cursor(CursorStyle::OperationNotAllowed)
+        })
         .child(
             div()
                 .w_full()
@@ -208,7 +208,7 @@ where
                         .max_h(px(200.0))
                         .overflow_y_scroll()
                         .occlude()
-                        .bg(rgb(0xffffff))
+                        .bg(Theme::POPUP_BG())
                         .border_1()
                         .border_color(Theme::CARD_BORDER())
                         .rounded_lg()
@@ -516,10 +516,9 @@ where
                                         .text_color(Theme::TEXT_MUTED())
                                         .cursor_pointer()
                                         .hover(|s| s.text_color(Theme::LOSS_TEXT()))
-                                        .on_mouse_down(
-                                            MouseButton::Left,
-                                            move |_ev, win, app| remove_cb(cid, win, app),
-                                        )
+                                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                            remove_cb(cid, win, app)
+                                        })
                                         .child("✕"),
                                 )
                         })),
@@ -580,7 +579,11 @@ where
                                         open_click(ev, win, app);
                                     }
                                 })
-                                .child(if is_open { "收起选择" } else { "选择英雄" }),
+                                .child(if is_open {
+                                    "收起选择"
+                                } else {
+                                    "选择英雄"
+                                }),
                         ),
                 ),
         )
@@ -669,10 +672,9 @@ where
                                     .gap(px(6.0))
                                     .cursor_pointer()
                                     .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        move |_ev, win, app| select_cb(cid, win, app),
-                                    )
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        select_cb(cid, win, app)
+                                    })
                                     // 英雄头像（对照 Vue champ-icon，网格紧凑布局用 28px）
                                     .child(
                                         LcuImage::new(format!(
@@ -909,69 +911,64 @@ where
                                     .child("✕"),
                             ),
                     )
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_wrap()
-                            .gap(px(8.0))
-                            .children(SUMMONER_SPELLS.iter().map(|(sid, sname)| {
-                                let id_val = *sid;
-                                let is_cur = match active_slot {
-                                    Some("D") => d_spell_id == Some(id_val),
-                                    Some("F") => f_spell_id == Some(id_val),
-                                    _ => false,
-                                };
-                                let select_cb = on_select.clone();
+                    .child(div().w_full().flex().flex_wrap().gap(px(8.0)).children(
+                        SUMMONER_SPELLS.iter().map(|(sid, sname)| {
+                            let id_val = *sid;
+                            let is_cur = match active_slot {
+                                Some("D") => d_spell_id == Some(id_val),
+                                Some("F") => f_spell_id == Some(id_val),
+                                _ => false,
+                            };
+                            let select_cb = on_select.clone();
 
-                                div()
-                                    .px(px(8.0))
-                                    .py(px(4.0))
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(if is_cur {
-                                        Theme::ACCENT_PRIMARY()
-                                    } else {
-                                        Theme::CARD_BORDER()
-                                    })
-                                    .bg(if is_cur {
-                                        Theme::ACCENT_LIGHT()
-                                    } else {
-                                        Theme::HOVER_BG()
-                                    })
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .cursor_pointer()
-                                    .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        select_cb(id_val, win, app)
-                                    })
-                                    // 技能图标（GameData 预加载的 iconPath；离线时降级为纯文字）
-                                    .when_some(spell_icon_path(id_val), |this, icon| {
-                                        this.child(
-                                            LcuImage::new(icon)
-                                                .size(px(20.0))
-                                                .shape(LcuImageShape::Rounded),
-                                        )
-                                    })
-                                    .child(
-                                        div()
-                                            .text_size(px(12.0))
-                                            .font_weight(if is_cur {
-                                                FontWeight::BOLD
-                                            } else {
-                                                FontWeight::NORMAL
-                                            })
-                                            .text_color(if is_cur {
-                                                Theme::ACCENT_PRIMARY()
-                                            } else {
-                                                Theme::TEXT_PRIMARY()
-                                            })
-                                            .child(*sname),
+                            div()
+                                .px(px(8.0))
+                                .py(px(4.0))
+                                .rounded_md()
+                                .border_1()
+                                .border_color(if is_cur {
+                                    Theme::ACCENT_PRIMARY()
+                                } else {
+                                    Theme::CARD_BORDER()
+                                })
+                                .bg(if is_cur {
+                                    Theme::ACCENT_LIGHT()
+                                } else {
+                                    Theme::HOVER_BG()
+                                })
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .cursor_pointer()
+                                .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
+                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                    select_cb(id_val, win, app)
+                                })
+                                // 技能图标（GameData 预加载的 iconPath；离线时降级为纯文字）
+                                .when_some(spell_icon_path(id_val), |this, icon| {
+                                    this.child(
+                                        LcuImage::new(icon)
+                                            .size(px(20.0))
+                                            .shape(LcuImageShape::Rounded),
                                     )
-                            })),
-                    ),
+                                })
+                                .child(
+                                    div()
+                                        .text_size(px(12.0))
+                                        .font_weight(if is_cur {
+                                            FontWeight::BOLD
+                                        } else {
+                                            FontWeight::NORMAL
+                                        })
+                                        .text_color(if is_cur {
+                                            Theme::ACCENT_PRIMARY()
+                                        } else {
+                                            Theme::TEXT_PRIMARY()
+                                        })
+                                        .child(*sname),
+                                )
+                        }),
+                    )),
             )
         })
 }
@@ -1038,16 +1035,13 @@ where
                         .items_center()
                         .gap(px(6.0))
                         // 已选技能图标（GameData 预加载；离线时降级为纯文字）
-                        .when_some(
-                            spell_id.and_then(spell_icon_path),
-                            |this, icon| {
-                                this.child(
-                                    LcuImage::new(icon)
-                                        .size(px(24.0))
-                                        .shape(LcuImageShape::Rounded),
-                                )
-                            },
-                        )
+                        .when_some(spell_id.and_then(spell_icon_path), |this, icon| {
+                            this.child(
+                                LcuImage::new(icon)
+                                    .size(px(24.0))
+                                    .shape(LcuImageShape::Rounded),
+                            )
+                        })
                         .child(
                             div()
                                 .flex()
@@ -1187,7 +1181,7 @@ where
                               placeholder: &'static str,
                               cmd: &'static str,
                               focus_cell: Rc<OnceCell<FocusHandle>>|
-     -> AnyElement {
+          -> AnyElement {
         let send_change = on_cmd.clone();
         let send_clear = on_cmd.clone();
         if let Some(handle) = focus_cell.get().cloned() {
@@ -1276,7 +1270,7 @@ where
                 div()
                     .w(px(640.0))
                     .max_h(px(600.0))
-                    .bg(rgb(0xffffff))
+                    .bg(Theme::POPUP_BG())
                     .rounded_xl()
                     .shadow_lg()
                     .border_1()
@@ -1421,9 +1415,12 @@ where
                                                 .text_size(px(11.5))
                                                 .text_color(Theme::TEXT_PRIMARY())
                                                 .cursor_pointer()
-                                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                    act("title:".to_string(), win, app)
-                                                })
+                                                .on_mouse_down(
+                                                    MouseButton::Left,
+                                                    move |_ev, win, app| {
+                                                        act("title:".to_string(), win, app)
+                                                    },
+                                                )
                                                 .child("（无称号）")
                                         })
                                         .children(filtered_titles.into_iter().map(|t| {
@@ -1448,9 +1445,12 @@ where
                                                 .text_size(px(11.5))
                                                 .text_color(Theme::TEXT_PRIMARY())
                                                 .cursor_pointer()
-                                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                    act(format!("title:{}", id), win, app)
-                                                })
+                                                .on_mouse_down(
+                                                    MouseButton::Left,
+                                                    move |_ev, win, app| {
+                                                        act(format!("title:{}", id), win, app)
+                                                    },
+                                                )
                                                 .child(t.name.clone())
                                         })),
                                 ),
@@ -1468,72 +1468,78 @@ where
                                         .text_size(px(12.5))
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(Theme::TEXT_PRIMARY())
-                                        .child(format!("已选挑战勋章 ({}/3)", selected_badges.len())),
+                                        .child(format!(
+                                            "已选挑战勋章 ({}/3)",
+                                            selected_badges.len()
+                                        )),
                                 )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(10.0))
-                                        .children((0..3).map(|idx| {
-                                            let bid_opt = selected_badges.get(idx);
-                                            let detail_name = bid_opt.and_then(|id| {
-                                                state
-                                                    .owned_badges
-                                                    .iter()
-                                                    .find(|b| b.id == *id)
-                                                    .map(|b| b.name.clone())
-                                            });
-                                            let act = remove_cb.clone();
-                                            let has = detail_name.is_some();
-                                            div()
-                                                .flex_1()
-                                                .h(px(50.0))
-                                                .p(px(8.0))
-                                                .rounded_lg()
-                                                .border_1()
-                                                .border_color(if has {
-                                                    Theme::SIDEBAR_ACTIVE_BORDER()
-                                                } else {
-                                                    Theme::CARD_BORDER()
-                                                })
-                                                .bg(if has {
-                                                    Theme::ACCENT_LIGHT()
-                                                } else {
-                                                    Theme::HOVER_BG()
-                                                })
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .gap(px(6.0))
-                                                .child(
+                                .child(div().flex().items_center().gap(px(10.0)).children(
+                                    (0..3).map(|idx| {
+                                        let bid_opt = selected_badges.get(idx);
+                                        let detail_name = bid_opt.and_then(|id| {
+                                            state
+                                                .owned_badges
+                                                .iter()
+                                                .find(|b| b.id == *id)
+                                                .map(|b| b.name.clone())
+                                        });
+                                        let act = remove_cb.clone();
+                                        let has = detail_name.is_some();
+                                        div()
+                                            .flex_1()
+                                            .h(px(50.0))
+                                            .p(px(8.0))
+                                            .rounded_lg()
+                                            .border_1()
+                                            .border_color(if has {
+                                                Theme::SIDEBAR_ACTIVE_BORDER()
+                                            } else {
+                                                Theme::CARD_BORDER()
+                                            })
+                                            .bg(if has {
+                                                Theme::ACCENT_LIGHT()
+                                            } else {
+                                                Theme::HOVER_BG()
+                                            })
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .gap(px(6.0))
+                                            .child(
+                                                div()
+                                                    .text_size(px(11.5))
+                                                    .text_color(if has {
+                                                        Theme::ACCENT_PRIMARY()
+                                                    } else {
+                                                        Theme::TEXT_MUTED()
+                                                    })
+                                                    .child(match &detail_name {
+                                                        Some(n) => n.clone(),
+                                                        None => format!("槽位 {} (空)", idx + 1),
+                                                    }),
+                                            )
+                                            .when(has, |s| {
+                                                s.child(
                                                     div()
-                                                        .text_size(px(11.5))
-                                                        .text_color(if has {
-                                                            Theme::ACCENT_PRIMARY()
-                                                        } else {
-                                                            Theme::TEXT_MUTED()
-                                                        })
-                                                        .child(match &detail_name {
-                                                            Some(n) => n.clone(),
-                                                            None => format!("槽位 {} (空)", idx + 1),
-                                                        }),
+                                                        .text_size(px(11.0))
+                                                        .text_color(Theme::TEXT_MUTED())
+                                                        .cursor_pointer()
+                                                        .hover(|s| s.text_color(Theme::LOSS_TEXT()))
+                                                        .on_mouse_down(
+                                                            MouseButton::Left,
+                                                            move |_ev, win, app| {
+                                                                act(
+                                                                    format!("remove:{}", idx),
+                                                                    win,
+                                                                    app,
+                                                                )
+                                                            },
+                                                        )
+                                                        .child("✕"),
                                                 )
-                                                .when(has, |s| {
-                                                    s.child(
-                                                        div()
-                                                            .text_size(px(11.0))
-                                                            .text_color(Theme::TEXT_MUTED())
-                                                            .cursor_pointer()
-                                                            .hover(|s| s.text_color(Theme::LOSS_TEXT()))
-                                                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                                act(format!("remove:{}", idx), win, app)
-                                                            })
-                                                            .child("✕"),
-                                                    )
-                                                })
-                                        })),
-                                ),
+                                            })
+                                    }),
+                                )),
                         )
                     })
                     // 候选勋章库：搜索 + 段位筛选 + 真实列表
@@ -1547,7 +1553,10 @@ where
                                     div()
                                         .text_size(px(12.0))
                                         .text_color(Theme::TEXT_MUTED())
-                                        .child(format!("候选勋章库（已获 {} 枚）", state.owned_badges.len())),
+                                        .child(format!(
+                                            "候选勋章库（已获 {} 枚）",
+                                            state.owned_badges.len()
+                                        )),
                                 )
                                 .child(
                                     div()
@@ -1555,38 +1564,37 @@ where
                                         .items_center()
                                         .gap(px(8.0))
                                         .child(badge_search_box)
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_wrap()
-                                                .gap(px(4.0))
-                                                .children(tier_filters.into_iter().map(|(val, label)| {
-                                                    let act = filter_cb.clone();
-                                                    let active = tier_filter == val;
-                                                    div()
-                                                        .px(px(8.0))
-                                                        .py(px(3.0))
-                                                        .rounded_md()
-                                                        .border_1()
-                                                        .border_color(if active {
-                                                            Theme::ACCENT_PRIMARY()
-                                                        } else {
-                                                            Theme::CARD_BORDER()
-                                                        })
-                                                        .bg(if active {
-                                                            Theme::ACCENT_LIGHT()
-                                                        } else {
-                                                            Theme::CARD_BG()
-                                                        })
-                                                        .text_size(px(11.0))
-                                                        .text_color(Theme::TEXT_SECONDARY())
-                                                        .cursor_pointer()
-                                                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        .child(div().flex().flex_wrap().gap(px(4.0)).children(
+                                            tier_filters.into_iter().map(|(val, label)| {
+                                                let act = filter_cb.clone();
+                                                let active = tier_filter == val;
+                                                div()
+                                                    .px(px(8.0))
+                                                    .py(px(3.0))
+                                                    .rounded_md()
+                                                    .border_1()
+                                                    .border_color(if active {
+                                                        Theme::ACCENT_PRIMARY()
+                                                    } else {
+                                                        Theme::CARD_BORDER()
+                                                    })
+                                                    .bg(if active {
+                                                        Theme::ACCENT_LIGHT()
+                                                    } else {
+                                                        Theme::CARD_BG()
+                                                    })
+                                                    .text_size(px(11.0))
+                                                    .text_color(Theme::TEXT_SECONDARY())
+                                                    .cursor_pointer()
+                                                    .on_mouse_down(
+                                                        MouseButton::Left,
+                                                        move |_ev, win, app| {
                                                             act(format!("filter:{}", val), win, app)
-                                                        })
-                                                        .child(label)
-                                                })),
-                                        ),
+                                                        },
+                                                    )
+                                                    .child(label)
+                                            }),
+                                        )),
                                 )
                                 .child(
                                     div()
@@ -1598,7 +1606,8 @@ where
                                         .flex_col()
                                         .gap(px(6.0))
                                         .children(filtered_badges.into_iter().map(|b| {
-                                            let is_equipped = selected_badges.iter().any(|id| id == &b.id);
+                                            let is_equipped =
+                                                selected_badges.iter().any(|id| id == &b.id);
                                             let bid = b.id.clone();
                                             let act = toggle_cb.clone();
                                             let level = level_label(&b.level);
@@ -1624,9 +1633,10 @@ where
                                                 .justify_between()
                                                 .cursor_pointer()
                                                 .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
-                                                .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                                    act(bid.clone(), win, app)
-                                                })
+                                                .on_mouse_down(
+                                                    MouseButton::Left,
+                                                    move |_ev, win, app| act(bid.clone(), win, app),
+                                                )
                                                 .child(
                                                     div()
                                                         .flex()
@@ -1643,11 +1653,13 @@ where
                                                             div()
                                                                 .text_size(px(11.0))
                                                                 .text_color(Theme::TEXT_MUTED())
-                                                                .child(if b.description.is_empty() {
-                                                                    "暂无描述".to_string()
-                                                                } else {
-                                                                    b.description.clone()
-                                                                }),
+                                                                .child(
+                                                                    if b.description.is_empty() {
+                                                                        "暂无描述".to_string()
+                                                                    } else {
+                                                                        b.description.clone()
+                                                                    },
+                                                                ),
                                                         ),
                                                 )
                                                 .child(
@@ -1676,7 +1688,11 @@ where
                                                                 } else {
                                                                     Theme::TEXT_MUTED()
                                                                 })
-                                                                .child(if is_equipped { "已装备" } else { "装备" }),
+                                                                .child(if is_equipped {
+                                                                    "已装备"
+                                                                } else {
+                                                                    "装备"
+                                                                }),
                                                         ),
                                                 )
                                         })),

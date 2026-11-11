@@ -387,7 +387,7 @@ impl MainWindow {
             if self.current_route == Route::SavedPlayers {
                 self.reload_saved_players(cx);
             } else if self.current_route == Route::Home {
-                self.home_view.reload_paths();
+                self.sync_home_paths();
             } else if self.current_route == Route::Tft {
                 self.ensure_tft_data(cx);
             }

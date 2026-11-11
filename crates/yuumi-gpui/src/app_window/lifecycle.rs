@@ -51,7 +51,7 @@ impl MainWindow {
                         if let Some(detected) = services::detect_lol_path() {
                             if !self.app_config.general.lol_path.contains(&detected) {
                                 self.app_config.general.lol_path.insert(0, detected);
-                                self.home_view.reload_paths();
+                                self.sync_home_paths();
                                 let _ = self.app_config.save();
                             }
                         }
@@ -67,6 +67,8 @@ impl MainWindow {
                     self.cloud_match_played = false;
                     self.game_info_loading = false;
                     self.close_bench_overlay(cx);
+                    // 客户端断开：收起工具箱所有卡片
+                    self.tools_view.open_cards.clear();
                     // 客户端断开连接时自动返回首页（对照 Vue 行为）
                     if was_connected {
                         self.switch_route(Route::Home, cx);

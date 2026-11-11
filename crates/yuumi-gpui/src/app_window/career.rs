@@ -24,7 +24,7 @@ impl MainWindow {
         }
 
         let live = self.live_service.clone();
-        let limit = self.app_config.functions.career_games_number as usize;
+        let limit = (self.app_config.functions.career_games_number as usize).clamp(1, 50);
         yuumi_core::runtime::spawn_background(async move {
             live.refresh_career_data_with_limit(limit).await;
         });
@@ -344,7 +344,7 @@ impl MainWindow {
 
         let live = self.live_service.clone();
         let target_name = name.clone();
-        let limit = (self.app_config.functions.career_games_number as usize).clamp(1, 100);
+        let limit = (self.app_config.functions.career_games_number as usize).clamp(1, 50);
         cx.spawn(async move |entity, cx| {
             if let Some(client) = live.get_client().await {
                 let assets_opt = live.get_game_data_assets().await;

@@ -459,7 +459,7 @@ fn render_color_picker(
                         .rounded_xl()
                         .border_1()
                         .border_color(Theme::CARD_BORDER())
-                        .bg(rgb(0xffffff))
+                        .bg(Theme::POPUP_BG())
                         .shadow_xl()
                         .occlude()
                         .flex()
@@ -1123,7 +1123,7 @@ impl SettingsView {
     {
         let f = &config.functions;
         let cur_concurr = f.api_concurrency_number;
-        let cur_games = f.career_games_number;
+        let cur_games = f.career_games_number.min(50);
         let act_concurr_dec = on_action.clone();
         let act_concurr_inc = on_action.clone();
         let act_games_dec = on_action.clone();
@@ -1173,7 +1173,7 @@ impl SettingsView {
                         "stepper-career-games".into(),
                         cur_games.to_string(),
                         cur_games > 5,
-                        cur_games < 100,
+                        cur_games < 50,
                         move |_ev, win, app| {
                             act_games_dec(
                                 SettingsAction::SetCareerGames(cur_games.saturating_sub(5).max(5)),
@@ -1183,7 +1183,7 @@ impl SettingsView {
                         },
                         move |_ev, win, app| {
                             act_games_inc(
-                                SettingsAction::SetCareerGames((cur_games + 5).min(100)),
+                                SettingsAction::SetCareerGames((cur_games + 5).min(50)),
                                 win,
                                 app,
                             )
@@ -2443,7 +2443,7 @@ impl SettingsView {
                         .w(px(640.0))
                         .max_w(px(760.0))
                         .max_h(px(520.0))
-                        .bg(rgb(0xffffff))
+                        .bg(Theme::POPUP_BG())
                         .rounded_xl()
                         .shadow_xl()
                         .border_1()

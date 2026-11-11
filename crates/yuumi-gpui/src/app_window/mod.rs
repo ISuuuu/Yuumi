@@ -210,7 +210,11 @@ impl MainWindow {
         let mut settings_view = SettingsView::new();
         settings_view.bind_f_inputs(&app_config, cx);
         let tft_view = TftView::new();
-        let home_view = HomeView::new();
+        let mut home_view = HomeView::new();
+        home_view.reload_paths_from(
+            app_config.general.lol_path.clone(),
+            app_config.general.wegame_path.clone().unwrap_or_default(),
+        );
 
         // 窗口级 Toast 队列：内容变更时通知主窗重绘浮层
         let toast_stack = cx.new(|_| ToastStack::new());
@@ -398,6 +402,14 @@ impl MainWindow {
         self.toast_stack.update(cx, |stack, cx| {
             stack.push(kind, message, cx);
         });
+    }
+
+    /// 同步最新的客户端路径与 WeGame 路径到首页视图
+    pub(super) fn sync_home_paths(&mut self) {
+        self.home_view.reload_paths_from(
+            self.app_config.general.lol_path.clone(),
+            self.app_config.general.wegame_path.clone().unwrap_or_default(),
+        );
     }
 }
 
