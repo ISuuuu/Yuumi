@@ -101,6 +101,7 @@ impl WindowsWindowInner {
             WM_DEADCHAR => self.handle_dead_char_msg(wparam),
             WM_IME_STARTCOMPOSITION => self.handle_ime_position(handle),
             WM_IME_COMPOSITION => self.handle_ime_composition(handle, lparam),
+            WM_IME_ENDCOMPOSITION => self.handle_ime_end_composition(),
             WM_SETCURSOR => self.handle_set_cursor(handle, lparam),
             WM_SETTINGCHANGE => self.handle_system_settings_changed(handle, wparam, lparam),
             WM_INPUTLANGCHANGE => self.handle_input_language_changed(),
@@ -371,6 +372,12 @@ impl WindowsWindowInner {
     // It's a known bug that you can't trigger `ctrl-shift-0`. See:
     // https://superuser.com/questions/1455762/ctrl-shift-number-key-combination-has-stopped-working-for-a-few-numbers
     fn handle_keydown_msg(&self, handle: HWND, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
+        // VK_PROCESSKEY 表示该按键正在由 IME 处理，必须经由 TranslateMessage 和 DefWindowProcW 交还给系统输入法
+        if VIRTUAL_KEY(wparam.loword()) == VK_PROCESSKEY {
+            translate_message(handle, wparam, lparam);
+            return None;
+        }
+
         let mut lock = self.state.borrow_mut();
         let Some(input) = handle_key_event(handle, wparam, lparam, &mut lock, |keystroke| {
             PlatformInput::KeyDown(KeyDownEvent {
@@ -388,7 +395,7 @@ impl WindowsWindowInner {
             .is_some();
         if is_composing {
             translate_message(handle, wparam, lparam);
-            return Some(0);
+            return None;
         }
 
         let Some(mut func) = self.state.borrow_mut().callbacks.input.take() else {
@@ -630,8 +637,12 @@ impl WindowsWindowInner {
     fn handle_ime_position(&self, handle: HWND) -> Option<isize> {
         unsafe {
             let ctx = ImmGetContext(handle);
+            if ctx.is_invalid() {
+                return None;
+            }
 
             let Some(caret_position) = self.retrieve_caret_position() else {
+                ImmReleaseContext(handle, ctx).ok().log_err();
                 return Some(0);
             };
             {
@@ -657,9 +668,19 @@ impl WindowsWindowInner {
 
     fn handle_ime_composition(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
         let ctx = unsafe { ImmGetContext(handle) };
+        if ctx.is_invalid() {
+            return None;
+        }
         let result = self.handle_ime_composition_inner(ctx, lparam);
         unsafe { ImmReleaseContext(handle, ctx).ok().log_err() };
         result
+    }
+
+    fn handle_ime_end_composition(&self) -> Option<isize> {
+        self.with_input_handler(|input_handler| {
+            input_handler.unmark_text();
+        });
+        None
     }
 
     fn handle_ime_composition_inner(&self, ctx: HIMC, lparam: LPARAM) -> Option<isize> {
@@ -672,22 +693,25 @@ impl WindowsWindowInner {
             })?;
             Some(0)
         } else {
+            if lparam & GCS_RESULTSTR.0 > 0 {
+                let comp_result = parse_ime_composition_string(ctx, GCS_RESULTSTR)?;
+                self.with_input_handler(|input_handler| {
+                    input_handler.replace_text_in_range(None, &comp_result);
+                })?;
+            }
             if lparam & GCS_COMPSTR.0 > 0 {
                 let comp_string = parse_ime_composition_string(ctx, GCS_COMPSTR)?;
                 let caret_pos =
                     (!comp_string.is_empty() && lparam & GCS_CURSORPOS.0 > 0).then(|| {
-                        let pos = retrieve_composition_cursor_position(ctx);
+                        let pos = retrieve_composition_cursor_position(ctx)
+                            .unwrap_or_else(|| comp_string.encode_utf16().count());
                         pos..pos
                     });
                 self.with_input_handler(|input_handler| {
                     input_handler.replace_and_mark_text_in_range(None, &comp_string, caret_pos);
                 })?;
             }
-            if lparam & GCS_RESULTSTR.0 > 0 {
-                let comp_result = parse_ime_composition_string(ctx, GCS_RESULTSTR)?;
-                self.with_input_handler(|input_handler| {
-                    input_handler.replace_text_in_range(None, &comp_result);
-                })?;
+            if lparam & (GCS_RESULTSTR.0 | GCS_COMPSTR.0) > 0 {
                 return Some(0);
             }
 
@@ -1345,12 +1369,8 @@ where
                 capslock,
             }))
         }
+        VK_PROCESSKEY => None,
         vkey => {
-            let vkey = if vkey == VK_PROCESSKEY {
-                VIRTUAL_KEY(unsafe { ImmGetVirtualKey(handle) } as u16)
-            } else {
-                vkey
-            };
             let keystroke = parse_normal_key(vkey, lparam, modifiers)?;
             Some(f(keystroke))
         }
@@ -1455,8 +1475,9 @@ fn parse_ime_composition_string(ctx: HIMC, comp_type: IME_COMPOSITION_STRING) ->
 }
 
 #[inline]
-fn retrieve_composition_cursor_position(ctx: HIMC) -> usize {
-    unsafe { ImmGetCompositionStringW(ctx, GCS_CURSORPOS, None, 0) as usize }
+fn retrieve_composition_cursor_position(ctx: HIMC) -> Option<usize> {
+    let pos = unsafe { ImmGetCompositionStringW(ctx, GCS_CURSORPOS, None, 0) };
+    (pos >= 0).then_some(pos as usize)
 }
 
 #[inline]

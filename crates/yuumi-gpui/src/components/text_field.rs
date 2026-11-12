@@ -40,9 +40,10 @@ impl ImeState {
 
     fn set_composing(&mut self, new_text: &str, new_selected_range: Option<Range<usize>>) {
         self.composing_text = new_text.to_string();
+        let comp_u16_len = new_text.encode_utf16().count();
         self.composing_cursor_utf16 = new_selected_range
-            .map(|r| r.end)
-            .unwrap_or_else(|| new_text.encode_utf16().count());
+            .map(|r| r.end.min(comp_u16_len))
+            .unwrap_or(comp_u16_len);
     }
 
     fn clear_composing(&mut self) {
@@ -165,13 +166,21 @@ impl InputHandler for TextFieldInputHandler {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let next_text = ACTIVE_IME.with(|cell| {
-            let mut borrow = cell.borrow_mut();
-            let (_, ref mut state) = borrow.as_mut().filter(|(f, _)| f == &self.focus)?;
-            Some(state.apply_committed_text(text, self.max_chars))
-        });
-        if let Some(next) = next_text {
-            (self.on_change)(next, window, cx);
+        let (next_text, changed) = ACTIVE_IME
+            .with(|cell| {
+                let mut borrow = cell.borrow_mut();
+                let (_, ref mut state) = borrow.as_mut().filter(|(f, _)| f == &self.focus)?;
+                let prev_base = state.base_text.clone();
+                let next = state.apply_committed_text(text, self.max_chars);
+                let changed = next != prev_base;
+                Some((next, changed))
+            })
+            .unwrap_or_default();
+
+        if changed {
+            (self.on_change)(next_text, window, cx);
+        } else {
+            window.refresh();
         }
     }
 
@@ -275,8 +284,18 @@ pub fn text_field(
 
     let keyed_text = current.clone();
     let on_change_key = on_change.clone();
+    let focus_for_key = focus.clone();
     let on_key = move |ev: &KeyDownEvent, window: &mut Window, app: &mut App| {
         if disabled {
+            return;
+        }
+        let is_composing_now = ACTIVE_IME.with(|cell| {
+            cell.borrow()
+                .as_ref()
+                .filter(|(f, _)| f == &focus_for_key)
+                .is_some_and(|(_, s)| !s.composing_text.is_empty())
+        });
+        if is_composing_now {
             return;
         }
         let keystroke = &ev.keystroke;
@@ -546,8 +565,18 @@ pub fn search_input_field(
     let keyed_text = current.clone();
     let submit_for_key = on_submit.clone();
     let on_change_key = on_change.clone();
+    let focus_for_key = focus.clone();
     let on_key = move |ev: &KeyDownEvent, window: &mut Window, app: &mut App| {
         if disabled || loading {
+            return;
+        }
+        let is_composing_now = ACTIVE_IME.with(|cell| {
+            cell.borrow()
+                .as_ref()
+                .filter(|(f, _)| f == &focus_for_key)
+                .is_some_and(|(_, s)| !s.composing_text.is_empty())
+        });
+        if is_composing_now {
             return;
         }
         let keystroke = &ev.keystroke;
@@ -859,5 +888,22 @@ mod tests {
         state.set_composing("abc", None);
         state.clear_composing();
         assert_eq!(state.marked_utf16_range(), None);
+    }
+
+    #[::core::prelude::v1::test]
+    fn ime_state_set_composing_clamps_out_of_bounds_cursor_position() {
+        let mut state = ImeState::default();
+        state.sync_base("亚索");
+
+        // 模拟 Windows IME 错误码 (-1 转为 usize::MAX) 传入时的边界保护
+        state.set_composing("liulang", Some(usize::MAX..usize::MAX));
+        assert_eq!(state.composing_cursor_utf16, 7);
+        assert_eq!(state.selected_utf16_range(), 9..9);
+
+        // 退格到空串
+        state.set_composing("", Some(0..0));
+        assert_eq!(state.composing_cursor_utf16, 0);
+        assert_eq!(state.marked_utf16_range(), None);
+        assert_eq!(state.selected_utf16_range(), 2..2);
     }
 }
