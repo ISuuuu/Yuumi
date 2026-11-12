@@ -111,6 +111,8 @@ pub struct LiveLcuService {
     current_phase: Arc<RwLock<String>>,
     /// 对局信息拉取任务（防抖用）
     game_info_task: Arc<RwLock<Option<JoinHandle<()>>>>,
+    /// 对局结算后的生涯战绩刷新任务（同一局只调度一次）
+    career_refresh_task: Arc<RwLock<Option<JoinHandle<()>>>>,
     /// 最近一次拉取的会话指纹，避免同内容重复拉取
     last_game_info_key: Arc<RwLock<String>>,
     /// 对局信息拉取串行化
@@ -145,6 +147,7 @@ impl LiveLcuService {
             game_info: Arc::new(RwLock::new(None)),
             current_phase: Arc::new(RwLock::new("None".to_string())),
             game_info_task: Arc::new(RwLock::new(None)),
+            career_refresh_task: Arc::new(RwLock::new(None)),
             last_game_info_key: Arc::new(RwLock::new(String::new())),
             refresh_lock: Arc::new(RwLock::new(())),
         }
@@ -592,12 +595,17 @@ impl LiveLcuService {
                             self.schedule_game_info_refresh(phase_str, Duration::ZERO)
                                 .await;
                         }
-                        // 对局结束：延迟刷新生涯战绩，10 人快照保留
-                        let this = self.clone();
-                        tokio::spawn(async move {
-                            sleep(POST_GAME_HISTORY_DELAY).await;
-                            this.refresh_career_data().await;
-                        });
+                        // 对局结束：延迟刷新生涯战绩，10 人快照保留。
+                        // 同一局会依次推送 WaitingForStats → PreEndOfGame → EndOfGame，
+                        // 只在首次进入结算阶段时刷新一次；EndOfGame 时若本局战绩尚未落库再补刷一次。
+                        let entering_post_game = !is_post_game_phase(&previous_phase);
+                        if entering_post_game
+                            || (phase == GamePhase::EndOfGame
+                                && self.finished_match_missing_from_recent().await)
+                        {
+                            self.schedule_post_game_career_refresh(POST_GAME_HISTORY_DELAY)
+                                .await;
+                        }
                     }
                     _ => {}
                 }
@@ -694,6 +702,12 @@ impl LiveLcuService {
                                 s.puuid
                             );
                             let current_status = this.status.borrow().clone();
+                            // 同一账号重复推送（例如对局结束后客户端再推一次）无需重刷全部生涯数据
+                            let same_summoner = matches!(
+                                &current_status,
+                                ConnectionStatus::Connected { summoner, .. }
+                                    if matches!(&**summoner, Some(prev) if prev.puuid == s.puuid)
+                            );
                             if let ConnectionStatus::Connected { info, .. } = current_status {
                                 let new_status = ConnectionStatus::Connected {
                                     info,
@@ -710,7 +724,9 @@ impl LiveLcuService {
                             {
                                 this.sync_game_data_from_lcu(&client).await;
                             }
-                            this.refresh_career_data().await;
+                            if !same_summoner {
+                                this.refresh_career_data().await;
+                            }
                         }
                     }
                 });
@@ -946,6 +962,41 @@ impl LiveLcuService {
         request_bench_swap(&client, champion_id).await
     }
 
+    /// 防抖调度对局结束后的生涯战绩刷新：若上一次结算刷新仍在进行则忽略重复请求
+    async fn schedule_post_game_career_refresh(&self, delay: Duration) {
+        let mut slot = self.career_refresh_task.write().await;
+        if slot.as_ref().is_some_and(|handle| !handle.is_finished()) {
+            return;
+        }
+        let this = self.clone();
+        *slot = Some(tokio::spawn(async move {
+            if !delay.is_zero() {
+                sleep(delay).await;
+            }
+            this.refresh_career_data().await;
+        }));
+    }
+
+    /// 结算阶段判断本局是否尚未出现在最近战绩中（用于决定是否需要补刷一次）
+    async fn finished_match_missing_from_recent(&self) -> bool {
+        let game_id = self
+            .game_info
+            .read()
+            .await
+            .as_ref()
+            .and_then(|g| g.game_id)
+            .unwrap_or(0);
+        if game_id == 0 {
+            return false;
+        }
+        !self
+            .recent_matches
+            .read()
+            .await
+            .iter()
+            .any(|m| m.game_id == game_id)
+    }
+
     /// 防抖调度对局信息刷新：取消上一次未完成的任务，延迟后重新拉取
     async fn schedule_game_info_refresh(&self, phase: String, delay: Duration) {
         let mut slot = self.game_info_task.write().await;
@@ -969,6 +1020,16 @@ impl LiveLcuService {
             log::debug!("[LiveLcu] LCU 未连接，跳过对局信息拉取");
             return;
         };
+
+        // 局内事件排队的拉取可能到对局结束后才执行（如结算瞬间的 Reconnect 刷新），
+        // 阶段已切换时直接放弃，避免把过期快照重新刷回对局信息页
+        if self.is_stale_game_info_fetch(phase).await {
+            log::debug!(
+                "[LiveLcu] 跳过已过期阶段的对局信息拉取: requested={}",
+                phase
+            );
+            return;
+        }
 
         let mut source = match phase {
             "ChampSelect" => {
@@ -1172,6 +1233,11 @@ impl LiveLcuService {
             &assets,
         )
         .await;
+        // 拉取期间阶段已切换（对局结束）时丢弃本次快照，避免覆盖结算页面
+        if self.is_stale_game_info_fetch(phase).await {
+            log::debug!("[LiveLcu] 丢弃过期阶段的对局信息快照: requested={}", phase);
+            return;
+        }
         {
             let quick = Arc::new(quick);
             *self.game_info.write().await = Some(quick.clone());
@@ -1213,11 +1279,32 @@ impl LiveLcuService {
             info.user_side
         );
 
+        // 拉取耗时较长，提交前再校验一次阶段，避免结算后被过期快照覆盖
+        if self.is_stale_game_info_fetch(phase).await {
+            log::debug!("[LiveLcu] 丢弃过期阶段的对局信息快照: requested={}", phase);
+            return;
+        }
+
         let info = Arc::new(info);
         *self.last_game_info_key.write().await = key;
         *self.game_info.write().await = Some(info.clone());
         let _ = self.event_tx.send(LiveLcuEvent::GameInfoUpdated(info));
     }
+
+    /// 局内阶段的拉取请求在当前阶段已离开局内时视为过期（对局结束后不再提交旧快照）
+    async fn is_stale_game_info_fetch(&self, requested_phase: &str) -> bool {
+        is_in_game_phase(requested_phase) && !is_in_game_phase(&self.get_current_phase().await)
+    }
+}
+
+/// 是否处于对局结算阶段（同一局会依次推送 WaitingForStats → PreEndOfGame → EndOfGame）
+fn is_post_game_phase(phase: &str) -> bool {
+    matches!(phase, "PreEndOfGame" | "WaitingForStats" | "EndOfGame")
+}
+
+/// 是否处于局内加载 / 进行中阶段
+fn is_in_game_phase(phase: &str) -> bool {
+    matches!(phase, "GameStart" | "InProgress" | "Reconnect")
 }
 
 /// 从选人 pin-drop-notification 读取实时红蓝阵营
@@ -1290,6 +1377,30 @@ fn load_tagged_players_map(self_puuid: &str) -> HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_phase_classification_helpers() {
+        // 结算阶段：同一局只应触发一次生涯战绩刷新
+        for phase in ["WaitingForStats", "PreEndOfGame", "EndOfGame"] {
+            assert!(is_post_game_phase(phase), "{phase} 应属于结算阶段");
+        }
+        for phase in ["None", "Lobby", "ChampSelect", "InProgress", "Reconnect"] {
+            assert!(!is_post_game_phase(phase), "{phase} 不应属于结算阶段");
+        }
+        // 局内阶段：对局结束后才执行的排队拉取判为过期
+        for phase in ["GameStart", "InProgress", "Reconnect"] {
+            assert!(is_in_game_phase(phase), "{phase} 应属于局内阶段");
+        }
+        for phase in [
+            "None",
+            "Lobby",
+            "WaitingForStats",
+            "PreEndOfGame",
+            "EndOfGame",
+        ] {
+            assert!(!is_in_game_phase(phase), "{phase} 不应属于局内阶段");
+        }
+    }
 
     #[tokio::test]
     async fn test_agent_config_sync_startup_runtime_and_reconnect() {
