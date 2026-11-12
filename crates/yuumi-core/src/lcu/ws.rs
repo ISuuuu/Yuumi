@@ -22,19 +22,24 @@ pub const SUBSCRIBE_MSG: &str = r#"[5, "OnJsonApiEvent"]"#;
 
 /// 默认 session 事件节流间隔（毫秒）
 const SESSION_THROTTLE_MS: u64 = 50;
+const SESSION_THROTTLE_UNSET: u64 = u64::MAX;
 static SESSION_EPOCH: OnceLock<std::time::Instant> = OnceLock::new();
-static LAST_SESSION_TS: AtomicU64 = AtomicU64::new(0);
+static LAST_SESSION_TS: AtomicU64 = AtomicU64::new(SESSION_THROTTLE_UNSET);
+
+fn check_throttle_at(last_ts: &AtomicU64, now_us: u64, window_us: u64) -> bool {
+    let last = last_ts.load(Ordering::Relaxed);
+    if last != SESSION_THROTTLE_UNSET && now_us.saturating_sub(last) < window_us {
+        return false;
+    }
+    last_ts
+        .compare_exchange(last, now_us, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+}
 
 fn session_throttle_allowed() -> bool {
     let epoch = SESSION_EPOCH.get_or_init(std::time::Instant::now);
     let now = epoch.elapsed().as_micros() as u64;
-    let last = LAST_SESSION_TS.load(Ordering::Relaxed);
-    if now.saturating_sub(last) < SESSION_THROTTLE_MS * 1000 {
-        return false;
-    }
-    LAST_SESSION_TS
-        .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
-        .is_ok()
+    check_throttle_at(&LAST_SESSION_TS, now, SESSION_THROTTLE_MS * 1000)
 }
 
 /// 默认关心并分发的事件 URI 前缀
@@ -369,5 +374,17 @@ mod tests {
         let mut dedup = EventDedup::default();
         let payload = r#"[5, "Subscribed"]"#;
         assert!(parse_and_project_event(payload, &mut dedup).is_none());
+    }
+
+    #[test]
+    fn test_first_session_event_not_throttled() {
+        let last_ts = AtomicU64::new(SESSION_THROTTLE_UNSET);
+        let window_us = SESSION_THROTTLE_MS * 1000;
+        // 首次调用即使 now=0 也必须放行（此前因初值为 0 导致 0 < 50ms 被吞）
+        assert!(check_throttle_at(&last_ts, 0, window_us));
+        // 50ms 窗口内重复事件被节流
+        assert!(!check_throttle_at(&last_ts, 10_000, window_us));
+        // 超过 50ms 后再次放行
+        assert!(check_throttle_at(&last_ts, 60_000, window_us));
     }
 }

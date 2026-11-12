@@ -430,6 +430,43 @@ impl LiveLcuService {
 
                 match phase {
                     GamePhase::ChampSelect => {
+                        // 进入选人阶段时主动拉取一次最新会话作为保底，避免极速/自定义房间首帧事件缺失导致 Auto BP 漏触发
+                        let this = self.clone();
+                        tokio::spawn(async move {
+                            sleep(Duration::from_millis(150)).await;
+                            if this.get_current_phase().await == "ChampSelect" {
+                                if let Some(client) = this.get_client().await {
+                                    if let Ok(val) =
+                                        client.get("/lol-champ-select/v1/session").await
+                                    {
+                                        if let Ok(session) =
+                                            serde_json::from_value::<ChampSelectSession>(val)
+                                        {
+                                            let guard = this.agent_runtime.read().await;
+                                            if let Some(runtime) = guard.as_ref() {
+                                                runtime.dispatcher().dispatch_bp(
+                                                    BpAgentEvent::ChampSelect(Box::new(
+                                                        session.clone(),
+                                                    )),
+                                                );
+                                            }
+                                            let ui_session = if bench_user_hidden() {
+                                                let mut hidden = session.clone();
+                                                hidden.queue_id = 0;
+                                                hidden.is_custom_game = false;
+                                                hidden.bench_enabled = false;
+                                                hidden
+                                            } else {
+                                                session
+                                            };
+                                            let _ = this
+                                                .event_tx
+                                                .send(LiveLcuEvent::ChampSelectUpdated(ui_session));
+                                        }
+                                    }
+                                }
+                            }
+                        });
                         self.schedule_game_info_refresh(phase_str, CHAMP_SELECT_DEBOUNCE)
                             .await;
                     }

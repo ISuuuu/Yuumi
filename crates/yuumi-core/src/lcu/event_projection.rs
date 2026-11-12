@@ -14,6 +14,8 @@ const CHAMP_SELECT_PLAYER_KEYS: &[&str] = &[
     "championId",
     "championPickIntent",
     "assignedPosition",
+    "spell1Id",
+    "spell2Id",
     "summonerId",
     "puuid",
     "displayName",
