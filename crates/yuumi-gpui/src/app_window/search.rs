@@ -283,13 +283,14 @@ impl MainWindow {
             {
                 Ok(summoner) => {
                     let full_name = summoner.full_name();
-                    // 2. 查询近期战绩 (0..=career_games_number.max(20)-1)
-                    match yuumi_core::parsers::match_parser::fetch_match_history(
+                    // 2. 查询近期战绩 (0..=career_games_number.max(20)-1)，首批并发合并 LCU + SGP
+                    match yuumi_core::parsers::match_parser::fetch_match_history_smart(
                         &client,
                         &summoner.puuid,
-                        Some(0),
-                        Some(fetch_end),
+                        0,
+                        fetch_end,
                         &assets,
+                        false,
                     )
                     .await
                     {
@@ -312,6 +313,8 @@ impl MainWindow {
                                     summoner.summoner_id.unwrap_or(0),
                                     items,
                                 );
+                                this.search_view.loaded_game_index =
+                                    (fetch_end as usize + 1).max(this.search_view.matches.len());
                                 // 列表图标异步预热（与渲染同源路径），避免右栏只显示占位文字
                                 let list_paths = match_list_asset_paths(&this.search_view.matches);
                                 prewarm_assets(list_paths, cx);
@@ -319,6 +322,8 @@ impl MainWindow {
                                 if let Some(gid) = selected_game_id {
                                     this.search_view.selected_game_id = Some(gid);
                                 }
+                                // 若跳转后直接处于第 2 页及以上，触发预载下一批
+                                this.check_and_trigger_prefetch(cx);
                                 cx.notify();
                             });
 
@@ -649,6 +654,12 @@ impl MainWindow {
 
     /// 战绩查询翻到上一页并自动定位当页首局详情
     pub(super) fn handle_search_prev_page(&mut self, cx: &mut Context<Self>) {
+        if self.search_view.is_searching
+            || self.search_view.is_page_switching
+            || self.search_view.is_background_refreshing
+        {
+            return;
+        }
         if self.search_view.current_page > 1 {
             self.search_view.current_page -= 1;
             let (paged, _, _) = self.search_view.paged_filtered_matches();
@@ -656,21 +667,339 @@ impl MainWindow {
                 let gid = first.display.game_id;
                 self.load_match_detail(gid, cx);
             }
+            self.upload_current_search_page();
             cx.notify();
         }
     }
 
-    /// 战绩查询翻到下一页并自动定位当页首局详情
+    /// 检查并按需触发后台预载后续对局（对齐旧版 Vue：翻到第 2 页起剩余不足 1 页时预拉取）
+    pub(super) fn check_and_trigger_prefetch(&mut self, cx: &mut Context<Self>) {
+        if self.search_view.is_searching
+            || self.search_view.is_page_switching
+            || self.search_view.is_loading_more
+            || self.search_view.has_reached_end
+            || self.search_view.matches.len() >= views::search::MAX_SEARCH_MATCHES
+        {
+            return;
+        }
+
+        let page_size = self.search_view.matches_per_page;
+        let end = self.search_view.current_page * page_size;
+        let filtered_len = self.search_view.filtered_matches().len();
+
+        if self.search_view.current_page >= 2
+            && end + page_size * views::search::PREFETCH_PAGES >= filtered_len
+        {
+            self.load_more_matches(false, None, cx);
+        }
+    }
+
+    /// 增量拉取更多对局：先试 LCU，全重复或为空则降级 SGP（腾讯国服）
+    /// - `is_page_switch = true`: 用户主动翻页等待数据，显示 `⏳` 并支持多批循环直到满足目标页或触底
+    /// - `is_page_switch = false`: 后台静默预载，不阻塞当前界面操作
+    pub(super) fn load_more_matches(
+        &mut self,
+        is_page_switch: bool,
+        target_page: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.search_view.has_reached_end
+            || self.search_view.matches.len() >= views::search::MAX_SEARCH_MATCHES
+        {
+            if is_page_switch {
+                self.search_view.is_page_switching = false;
+                cx.notify();
+            }
+            return;
+        }
+
+        // 若后台预载正在进行而用户主动点击翻页，标记待跳转页并进入等待态，待当前请求结束后直接推进
+        if self.search_view.is_loading_more {
+            if is_page_switch {
+                log::info!(
+                    "[Search] 后台预载进行中，用户触发翻页等待: target_page={:?}",
+                    target_page
+                );
+                self.search_view.is_page_switching = true;
+                if target_page.is_some() {
+                    self.search_view.pending_next_page = target_page;
+                }
+                cx.notify();
+            }
+            return;
+        }
+
+        let puuid = self
+            .search_view
+            .current_summoner_puuid
+            .clone()
+            .or_else(|| self.own_summoner.as_ref().map(|s| s.puuid.clone()));
+        let Some(puuid) = puuid else {
+            log::warn!("[Search] load_more_matches 跳过：无法获取当前召唤师 puuid");
+            if is_page_switch {
+                self.search_view.is_page_switching = false;
+                cx.notify();
+            }
+            return;
+        };
+
+        if self.search_view.current_summoner_puuid.is_none() {
+            self.search_view.current_summoner_puuid = Some(puuid.clone());
+        }
+        if self.search_view.loaded_game_index == 0 && !self.search_view.matches.is_empty() {
+            self.search_view.loaded_game_index = self
+                .search_view
+                .matches
+                .len()
+                .max(views::search::INITIAL_BATCH);
+        }
+
+        self.search_view.is_loading_more = true;
+        if is_page_switch {
+            self.search_view.is_page_switching = true;
+            if target_page.is_some() {
+                self.search_view.pending_next_page = target_page;
+            }
+        }
+        cx.notify();
+
+        let gen = self.search_view.search_generation;
+        let live_service = self.live_service.clone();
+
+        log::info!(
+            "[Search] 开始增量拉取更多对局: puuid={}, loaded_index={}, is_page_switch={}, target_page={:?}",
+            puuid,
+            self.search_view.loaded_game_index,
+            is_page_switch,
+            target_page
+        );
+
+        cx.spawn(async move |entity, cx| {
+            let client_opt = live_service.get_client().await;
+            let assets_opt = live_service.get_game_data_assets().await;
+
+            let (client, assets) = match (client_opt, assets_opt) {
+                (Some(c), Some(a)) => (c, a),
+                _ => {
+                    let _ = entity.update(cx, |this, cx| {
+                        if this.search_view.search_generation == gen {
+                            this.search_view.is_loading_more = false;
+                            this.search_view.is_page_switching = false;
+                            this.search_view.pending_next_page = None;
+                            cx.notify();
+                        }
+                    });
+                    return;
+                }
+            };
+
+            loop {
+                let mut should_stop = false;
+                let mut fetch_beg = 0u32;
+                let mut existing_ids = std::collections::HashSet::new();
+                let mut required_count = 0usize;
+
+                let _ = entity.update(cx, |this, _cx| {
+                    if this.search_view.search_generation != gen
+                        || this.search_view.has_reached_end
+                        || this.search_view.matches.len() >= views::search::MAX_SEARCH_MATCHES
+                    {
+                        should_stop = true;
+                        return;
+                    }
+                    fetch_beg = this.search_view.loaded_game_index as u32;
+                    existing_ids = this
+                        .search_view
+                        .matches
+                        .iter()
+                        .map(|m| m.display.game_id)
+                        .collect();
+                    let active_target = target_page.or(this.search_view.pending_next_page);
+                    required_count = active_target
+                        .map(|t| t * this.search_view.matches_per_page)
+                        .unwrap_or(0);
+                });
+
+                if should_stop {
+                    break;
+                }
+
+                let fetch_end = fetch_beg + views::search::LOAD_MORE_COUNT as u32 - 1;
+
+                // 1. 先试 LCU
+                let lcu_raw = yuumi_core::parsers::match_parser::fetch_match_history(
+                    &client,
+                    &puuid,
+                    Some(fetch_beg),
+                    Some(fetch_end),
+                    &assets,
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    log::debug!("[Search] loadMoreMatches(LCU) 失败: {}", e);
+                    Vec::new()
+                });
+
+                let mut new_games: Vec<yuumi_core::parsers::match_parser::MatchDisplay> = lcu_raw
+                    .into_iter()
+                    .filter(|m| !existing_ids.contains(&m.game_id))
+                    .collect();
+
+                // 2. LCU 全重复或为空 → 降级 SGP（腾讯国服）
+                if new_games.is_empty() {
+                    log::info!(
+                        "[Search] LCU 返回全重复或空，降级 SGP: beg={}, end={}",
+                        fetch_beg,
+                        fetch_end
+                    );
+                    match yuumi_core::parsers::match_parser::fetch_match_history_sgp(
+                        &client, &puuid, fetch_beg, fetch_end, &assets,
+                    )
+                    .await
+                    {
+                        Ok(sgp_raw) => {
+                            new_games = sgp_raw
+                                .into_iter()
+                                .filter(|m| !existing_ids.contains(&m.game_id))
+                                .collect();
+                        }
+                        Err(e) => {
+                            log::warn!("[Search] SGP 战绩降级拉取失败: {}", e);
+                        }
+                    }
+                }
+
+                let mut continue_loop = false;
+                let _ = entity.update(cx, |this, cx| {
+                    if this.search_view.search_generation != gen {
+                        return;
+                    }
+
+                    this.search_view.loaded_game_index = (fetch_end + 1) as usize;
+
+                    if !new_games.is_empty() {
+                        let new_items: Vec<MatchItem> =
+                            new_games.into_iter().map(MatchItem::new).collect();
+                        let paths = match_list_asset_paths(&new_items);
+                        prewarm_assets(paths, cx);
+
+                        // 再次基于当前列表去重追加
+                        let cur_ids: std::collections::HashSet<u64> = this
+                            .search_view
+                            .matches
+                            .iter()
+                            .map(|m| m.display.game_id)
+                            .collect();
+                        for item in new_items {
+                            if !cur_ids.contains(&item.display.game_id) {
+                                this.search_view.matches.push(item);
+                            }
+                        }
+                        if this.search_view.matches.len() > views::search::MAX_SEARCH_MATCHES {
+                            this.search_view
+                                .matches
+                                .truncate(views::search::MAX_SEARCH_MATCHES);
+                            this.search_view.has_reached_end = true;
+                        }
+                        log::info!(
+                            "[Search] 增量拉取完成: 总计 {} 场对局",
+                            this.search_view.matches.len()
+                        );
+                    } else {
+                        log::info!("[Search] LCU 与 SGP 均无新增对局，已触达历史尽头");
+                        this.search_view.has_reached_end = true;
+                    }
+
+                    // 翻页等待模式且按队列筛选后条数仍不够目标页，继续循环拉取下一批
+                    if required_count > 0
+                        && !this.search_view.has_reached_end
+                        && this.search_view.filtered_matches().len() < required_count
+                    {
+                        continue_loop = true;
+                    }
+                    cx.notify();
+                });
+
+                if !continue_loop {
+                    break;
+                }
+            }
+
+            let _ = entity.update(cx, |this, cx| {
+                if this.search_view.search_generation != gen {
+                    return;
+                }
+                this.search_view.is_loading_more = false;
+                let active_target =
+                    target_page.or_else(|| this.search_view.pending_next_page.take());
+
+                if is_page_switch || active_target.is_some() {
+                    this.search_view.is_page_switching = false;
+                    if let Some(target) = active_target {
+                        let required_start = (target - 1) * this.search_view.matches_per_page;
+                        let filtered_len = this.search_view.filtered_matches().len();
+                        if filtered_len > required_start {
+                            this.search_view.current_page = target;
+                            let (paged, _, _) = this.search_view.paged_filtered_matches();
+                            if let Some(first) = paged.first() {
+                                let gid = first.display.game_id;
+                                this.load_match_detail(gid, cx);
+                            }
+                            this.upload_current_search_page();
+                            this.check_and_trigger_prefetch(cx);
+                        } else {
+                            this.search_view.has_reached_end = true;
+                        }
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// 战绩查询翻到下一页并自动定位当页首局详情（支持后台预载与 SGP 降级）
     pub(super) fn handle_search_next_page(&mut self, cx: &mut Context<Self>) {
-        let (_, _, has_more) = self.search_view.paged_filtered_matches();
-        if has_more {
-            self.search_view.current_page += 1;
+        if self.search_view.is_searching
+            || self.search_view.is_page_switching
+            || self.search_view.is_background_refreshing
+        {
+            return;
+        }
+
+        let target_page = self.search_view.current_page + 1;
+        let page_size = self.search_view.matches_per_page;
+        let required_count = target_page * page_size;
+        let required_start = (target_page - 1) * page_size;
+        let current_filtered = self.search_view.filtered_matches().len();
+
+        log::info!(
+            "[Search] 点击下一页: current_page={}, target_page={}, matches={}, filtered={}, has_reached_end={}, is_loading_more={}",
+            self.search_view.current_page,
+            target_page,
+            self.search_view.matches.len(),
+            current_filtered,
+            self.search_view.has_reached_end,
+            self.search_view.is_loading_more
+        );
+
+        if current_filtered >= required_count
+            || (self.search_view.has_reached_end && current_filtered > required_start)
+        {
+            // 内存中已有足够对局，直接翻页
+            self.search_view.current_page = target_page;
             let (paged, _, _) = self.search_view.paged_filtered_matches();
             if let Some(first) = paged.first() {
                 let gid = first.display.game_id;
                 self.load_match_detail(gid, cx);
             }
+            self.upload_current_search_page();
+            // 点到第 2 页及之后，按需预载下一批
+            self.check_and_trigger_prefetch(cx);
             cx.notify();
+        } else if !self.search_view.has_reached_end {
+            // 数据不足但尚未触达尽头，等待增量拉取完成后再翻页
+            self.load_more_matches(true, Some(target_page), cx);
         }
     }
 

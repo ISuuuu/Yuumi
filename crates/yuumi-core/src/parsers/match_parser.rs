@@ -507,6 +507,444 @@ pub async fn fetch_match_history(
     Ok(parse_match_history_games(&history.games.games, assets))
 }
 
+/// 通过 SGP 接口获取战绩列表（支持分页，仅腾讯国服可用）
+pub async fn fetch_match_history_sgp(
+    client: &LcuClient,
+    puuid: &str,
+    beg_index: u32,
+    end_index: u32,
+    assets: &GameDataAssets,
+) -> Result<Vec<MatchDisplay>, String> {
+    let Some(server) = &client.server else {
+        log::info!("[SGP] 无法获取服务器信息，跳过 SGP 战绩获取");
+        return Ok(Vec::new());
+    };
+    let server_lower = server.to_lowercase();
+    if !crate::lcu::sgp::is_tencent_server(&server_lower) {
+        log::info!("[SGP] 非腾讯国服 ({})，跳过 SGP 战绩获取", server);
+        return Ok(Vec::new());
+    }
+
+    let auth = build_auth_header(&client.token);
+
+    // 1. 获取 SGP accessToken（30 分钟缓存复用）与共享客户端
+    let sgp_token = crate::lcu::sgp::get_sgp_token(client.port, &auth).await?;
+
+    // 2. 构建 SGP base URL 与客户端
+    let sgp_base = crate::lcu::sgp::sgp_base_url(&server_lower);
+    let sgp_client = crate::lcu::sgp::get_sgp_client();
+
+    if end_index < beg_index {
+        return Err("参数错误: end_index 不能小于 beg_index".to_string());
+    }
+    let count = end_index - beg_index + 1;
+    let sgp_url = format!(
+        "{}/match-history-query/v1/products/lol/player/{}/SUMMARY",
+        sgp_base, puuid
+    );
+
+    let mut current_token = sgp_token;
+    let mut sgp_resp = sgp_client
+        .get(&sgp_url)
+        .header("Authorization", format!("Bearer {}", current_token))
+        .query(&[
+            ("startIndex", &beg_index.to_string()),
+            ("count", &count.to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("SGP 战绩请求失败: {}", e))?;
+
+    // 遇到 401 时强制刷新 token 并重试一次
+    if sgp_resp.status().as_u16() == 401 {
+        log::warn!("[SGP] SGP 战绩返回 401 未授权，尝试强制刷新 accessToken 重试");
+        if let Ok(refreshed_token) =
+            crate::lcu::sgp::get_sgp_token_force_refresh(client.port, &auth).await
+        {
+            current_token = refreshed_token;
+            sgp_resp = sgp_client
+                .get(&sgp_url)
+                .header("Authorization", format!("Bearer {}", current_token))
+                .query(&[
+                    ("startIndex", &beg_index.to_string()),
+                    ("count", &count.to_string()),
+                ])
+                .send()
+                .await
+                .map_err(|e| format!("SGP 战绩重试请求失败: {}", e))?;
+        }
+    }
+
+    if !sgp_resp.status().is_success() {
+        return Err(format!(
+            "SGP 战绩返回错误: HTTP {}",
+            sgp_resp.status().as_u16()
+        ));
+    }
+
+    let sgp_data: serde_json::Value = sgp_resp
+        .json()
+        .await
+        .map_err(|e| format!("解析 SGP 响应失败: {}", e))?;
+
+    Ok(parse_sgp_match_history_response(&sgp_data, puuid, assets))
+}
+
+/// 解析 SGP 战绩响应 JSON 为 `Vec<MatchDisplay>`
+pub fn parse_sgp_match_history_response(
+    sgp_data: &serde_json::Value,
+    puuid: &str,
+    assets: &GameDataAssets,
+) -> Vec<MatchDisplay> {
+    let games = sgp_data
+        .get("games")
+        .and_then(|g| {
+            if let Some(arr) = g.as_array() {
+                Some(arr.clone())
+            } else if let Some(inner) = g.get("games") {
+                inner.as_array().cloned()
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    if games.is_empty() {
+        return Vec::new();
+    }
+
+    let mut displays = Vec::new();
+    for game_val in &games {
+        let g = game_val.get("json").unwrap_or(game_val);
+
+        let game_id = g.get("gameId").and_then(|v| v.as_u64()).unwrap_or(0);
+        let game_creation = g.get("gameCreation").and_then(|v| v.as_u64()).unwrap_or(0);
+        let game_duration = g
+            .get("gameDuration")
+            .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+            .unwrap_or(0);
+        let queue_id = g.get("queueId").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+        let participants = g
+            .get("participants")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let participant = participants.iter().find(|p| {
+            p.get("puuid")
+                .and_then(|v| v.as_str())
+                .map(|p_str| p_str.eq_ignore_ascii_case(puuid))
+                .unwrap_or(false)
+        });
+
+        let Some(participant) = participant else {
+            continue;
+        };
+
+        let stats = participant.get("stats").unwrap_or(participant);
+
+        let win = stats.get("win").and_then(|v| v.as_bool()).unwrap_or(false);
+        let kills = stats.get("kills").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let deaths = stats.get("deaths").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let assists = stats.get("assists").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let champ_level = stats
+            .get("champLevel")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let champion_id = participant
+            .get("championId")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let spell1_id = participant
+            .get("spell1Id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let spell2_id = participant
+            .get("spell2Id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let perk0 = stats
+            .get("perk0")
+            .and_then(|v| v.as_i64())
+            .or_else(|| {
+                participant
+                    .get("perks")
+                    .and_then(|p| p.get("styles"))
+                    .and_then(|s| s.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|s0| s0.get("selections"))
+                    .and_then(|sel| sel.as_array())
+                    .and_then(|sel_arr| sel_arr.first())
+                    .and_then(|sel0| sel0.get("perk"))
+                    .and_then(|v| v.as_i64())
+            })
+            .unwrap_or(0) as i32;
+        let total_minions = stats
+            .get("totalMinionsKilled")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0)
+            + stats
+                .get("neutralMinionsKilled")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+        let gold = stats
+            .get("goldEarned")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let total_damage = stats
+            .get("totalDamageDealtToChampions")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let total_heal = stats.get("totalHeal").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let remake = stats
+            .get("gameEndedInEarlySurrender")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let subteam_placement = stats
+            .get("subteamPlacement")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+
+        let item0 = stats.get("item0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item1 = stats.get("item1").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item2 = stats.get("item2").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item3 = stats.get("item3").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item4 = stats.get("item4").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item5 = stats.get("item5").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let item6 = stats.get("item6").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+        let item_ids = vec![item0, item1, item2, item3, item4, item5, item6];
+        let queue_info = get_queue_info(queue_id);
+
+        let time = timestamp_to_str(game_creation);
+        let short_time = timestamp_to_short_str(game_creation);
+        let duration = secs_to_str(game_duration);
+
+        let augment_ids = dedupe_augment_ids(
+            stats
+                .get("augments")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_i64().map(|id| id as i32))
+                .chain(
+                    [
+                        "playerAugment1",
+                        "playerAugment2",
+                        "playerAugment3",
+                        "playerAugment4",
+                        "playerAugment5",
+                    ]
+                    .into_iter()
+                    .filter_map(|key| stats.get(key).and_then(|v| v.as_i64()).map(|id| id as i32)),
+                ),
+        );
+        let (augment_icon_urls, augment_names) = resolve_augment_details(&augment_ids, assets);
+
+        let kda = if deaths == 0 {
+            "Perfect".to_string()
+        } else {
+            format!("{:.2}", (kills as f64 + assists as f64) / deaths as f64)
+        };
+
+        let champion_icon_url = format!(
+            "/lol-game-data/assets/v1/champion-icons/{}.png",
+            champion_id
+        );
+        let spell1_icon_url = assets.spells.get(&spell1_id).cloned().unwrap_or_default();
+        let spell2_icon_url = assets.spells.get(&spell2_id).cloned().unwrap_or_default();
+        let rune_icon_url = assets.runes.get(&perk0).cloned().unwrap_or_default();
+        let item_icon_urls: Vec<String> = item_ids
+            .iter()
+            .filter(|&&id| id > 0)
+            .filter_map(|id| assets.items.get(id).cloned())
+            .collect();
+
+        let role_bound_item = stats
+            .get("roleBoundItem")
+            .or_else(|| participant.get("roleBoundItem"))
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32);
+
+        let position = if !is_laned_mode(queue_id) {
+            None
+        } else {
+            role_bound_item
+                .and_then(resolve_role_bound_item_position)
+                .map(|pos| pos.to_string())
+                .or_else(|| {
+                    item_ids
+                        .iter()
+                        .find_map(|&id| resolve_role_bound_item_position(id))
+                        .map(|pos| pos.to_string())
+                })
+                .or_else(|| {
+                    if spell1_id == 11 || spell2_id == 11 {
+                        Some("JUNGLE".to_string())
+                    } else if item_ids.iter().any(|&id| is_support_item(id)) {
+                        Some("UTILITY".to_string())
+                    } else if item_ids.iter().any(|&id| is_jungle_item(id)) {
+                        Some("JUNGLE".to_string())
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    normalize_sgp_position(participant.get("teamPosition").and_then(|v| v.as_str()))
+                })
+                .or_else(|| {
+                    normalize_sgp_position(
+                        participant.get("selectedPosition").and_then(|v| v.as_str()),
+                    )
+                })
+                .or_else(|| {
+                    let lane = participant
+                        .get("timeline")
+                        .and_then(|t| t.get("lane"))
+                        .and_then(|v| v.as_str());
+                    let role = participant
+                        .get("timeline")
+                        .and_then(|t| t.get("role"))
+                        .and_then(|v| v.as_str());
+                    resolve_position(lane, role)
+                })
+        };
+
+        displays.push(MatchDisplay {
+            queue_id,
+            game_id,
+            time,
+            short_time,
+            name: queue_info.name.to_string(),
+            map: queue_info.map.to_string(),
+            duration,
+            remake,
+            win,
+            placement: subteam_placement,
+            champion_id,
+            spell1_id,
+            spell2_id,
+            champ_level,
+            kills,
+            deaths,
+            assists,
+            kda,
+            item_ids,
+            rune_id: perk0,
+            cs: total_minions as i32,
+            gold,
+            time_stamp: game_creation,
+            total_damage,
+            total_heal,
+            champion_icon_url,
+            spell1_icon_url,
+            spell2_icon_url,
+            rune_icon_url,
+            item_icon_urls,
+            augment_ids,
+            augment_icon_urls,
+            augment_names,
+            position,
+            role_bound_item,
+        });
+    }
+
+    displays
+}
+
+/// 合并去重 LCU 与 SGP 战绩列表（SGP 数据优先覆盖同 game_id 条目）
+pub fn merge_lcu_and_sgp_matches(
+    lcu_matches: Vec<MatchDisplay>,
+    sgp_matches: Vec<MatchDisplay>,
+    max_len: usize,
+) -> Vec<MatchDisplay> {
+    let mut map: std::collections::HashMap<u64, MatchDisplay> = std::collections::HashMap::new();
+    for m in lcu_matches {
+        map.insert(m.game_id, m);
+    }
+    for m in sgp_matches {
+        map.insert(m.game_id, m);
+    }
+
+    let mut merged: Vec<MatchDisplay> = map.into_values().collect();
+    merged.sort_by_key(|m| std::cmp::Reverse(m.time_stamp));
+
+    if merged.len() > max_len {
+        merged.truncate(max_len);
+    }
+    merged
+}
+
+/// 智能获取战绩列表：
+/// 优先请求 LCU 本地接口，并在首批 (beg_index == 0) 或显式指定 force_sgp 时并发请求 SGP（腾讯国服），
+/// 按 game_id 去重合并并按 time_stamp 降序排列。
+pub async fn fetch_match_history_smart(
+    client: &LcuClient,
+    puuid: &str,
+    beg_index: u32,
+    end_index: u32,
+    assets: &GameDataAssets,
+    force_sgp: bool,
+) -> Result<Vec<MatchDisplay>, String> {
+    if end_index < beg_index {
+        return Err("参数错误: end_index 不能小于 beg_index".to_string());
+    }
+    let is_home = beg_index == 0;
+    let is_tencent = client
+        .server
+        .as_deref()
+        .map(|s| crate::lcu::sgp::is_tencent_server(&s.to_lowercase()))
+        .unwrap_or(false);
+
+    if (!is_home && !force_sgp) || !is_tencent {
+        return fetch_match_history(client, puuid, Some(beg_index), Some(end_index), assets).await;
+    }
+
+    // 并发请求 LCU 与 SGP
+    let lcu_fut = fetch_match_history(client, puuid, Some(beg_index), Some(end_index), assets);
+    let sgp_fut = fetch_match_history_sgp(client, puuid, beg_index, end_index, assets);
+
+    let (lcu_res, sgp_res) = tokio::join!(lcu_fut, sgp_fut);
+
+    let (lcu_matches, lcu_err) = match lcu_res {
+        Ok(list) => (list, None),
+        Err(e) => {
+            log::debug!("[fetch_match_history_smart] LCU 拉取战绩失败: {}", e);
+            (Vec::new(), Some(e))
+        }
+    };
+    let sgp_matches = match sgp_res {
+        Ok(list) => list,
+        Err(e) => {
+            log::debug!("[fetch_match_history_smart] SGP 拉取跳过或失败: {}", e);
+            if lcu_matches.is_empty() {
+                if let Some(le) = lcu_err {
+                    return Err(le);
+                }
+            }
+            Vec::new()
+        }
+    };
+
+    if sgp_matches.is_empty() {
+        return if lcu_matches.is_empty() {
+            if let Some(le) = lcu_err {
+                Err(le)
+            } else {
+                Ok(Vec::new())
+            }
+        } else {
+            Ok(lcu_matches)
+        };
+    }
+    if lcu_matches.is_empty() {
+        return Ok(sgp_matches);
+    }
+
+    let max_len = (end_index - beg_index + 1) as usize;
+    Ok(merge_lcu_and_sgp_matches(lcu_matches, sgp_matches, max_len))
+}
+
 // ─── 队列 ID 映射 ───
 
 pub fn queue_id_to_opgg_mode(queue_id: i32) -> &'static str {
@@ -1352,5 +1790,89 @@ mod tests {
         assert!(!display.spell1_icon_url.is_empty());
         assert!(!display.spell2_icon_url.is_empty());
         assert!(!display.item_icon_urls.is_empty());
+    }
+
+    #[test]
+    fn parse_sgp_response_extracts_nested_json_and_perks_and_position() {
+        let sgp_json = json!({
+            "games": [
+                {
+                    "json": {
+                        "gameId": 999888777_u64,
+                        "gameCreation": 1_705_329_000_000_u64,
+                        "gameDuration": 1800_u64,
+                        "queueId": 420,
+                        "participants": [
+                            {
+                                "puuid": "other-puuid",
+                                "championId": 1,
+                                "spell1Id": 4,
+                                "spell2Id": 12,
+                                "teamPosition": "TOP",
+                                "win": false
+                            },
+                            {
+                                "puuid": "TARGET-PUUID",
+                                "championId": 157,
+                                "spell1Id": 4,
+                                "spell2Id": 14,
+                                "teamPosition": "MIDDLE",
+                                "win": true,
+                                "kills": 12,
+                                "deaths": 3,
+                                "assists": 6,
+                                "champLevel": 18,
+                                "totalMinionsKilled": 200,
+                                "neutralMinionsKilled": 15,
+                                "goldEarned": 15000,
+                                "totalDamageDealtToChampions": 32000,
+                                "totalHeal": 4500,
+                                "item0": 3153,
+                                "perks": {
+                                    "styles": [
+                                        { "selections": [{ "perk": 8010 }] }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let parsed =
+            parse_sgp_match_history_response(&sgp_json, "target-puuid", &GameDataAssets::default());
+        assert_eq!(parsed.len(), 1);
+        let m = &parsed[0];
+        assert_eq!(m.game_id, 999888777);
+        assert_eq!(m.champion_id, 157);
+        assert_eq!(m.rune_id, 8010);
+        assert_eq!(m.position.as_deref(), Some("MIDDLE"));
+        assert_eq!(m.cs, 215);
+        assert_eq!(m.kda, "6.00");
+        assert!(m.win);
+    }
+
+    #[test]
+    fn merge_lcu_and_sgp_prefers_sgp_and_sorts_descending() {
+        let mut lcu_1 = sample_game(420)
+            .to_display(&GameDataAssets::default())
+            .unwrap();
+        lcu_1.game_id = 100;
+        lcu_1.time_stamp = 1000;
+        lcu_1.position = None;
+
+        let mut sgp_1 = lcu_1.clone();
+        sgp_1.position = Some("TOP".to_string());
+
+        let mut sgp_2 = lcu_1.clone();
+        sgp_2.game_id = 200;
+        sgp_2.time_stamp = 2000;
+
+        let merged = merge_lcu_and_sgp_matches(vec![lcu_1], vec![sgp_1, sgp_2], 20);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].game_id, 200);
+        assert_eq!(merged[1].game_id, 100);
+        assert_eq!(merged[1].position.as_deref(), Some("TOP"));
     }
 }

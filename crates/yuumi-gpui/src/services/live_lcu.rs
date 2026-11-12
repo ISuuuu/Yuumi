@@ -20,16 +20,16 @@ use yuumi_core::lcu::{
     ws::{start_ws, LcuWsEvent, LcuWsHandle},
 };
 use yuumi_core::parsers::game_info::{
-    fetch_live_game_info, fetch_liveclient_snapshot, fetch_ranked_stats, liveclient_map_side,
-    liveclient_teams, merge_liveclient_teams, ChampSelectSnapshot, GameInfoSource,
-    GameflowSessionSnapshot, LiveGameInfo, RankedStats,
+    clear_player_data_cache, fetch_live_game_info, fetch_liveclient_snapshot, fetch_ranked_stats,
+    liveclient_map_side, liveclient_teams, merge_liveclient_teams, ChampSelectSnapshot,
+    GameInfoSource, GameflowSessionSnapshot, LiveGameInfo, RankedStats,
 };
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
 use yuumi_core::parsers::loot_actions::{
     self, LootActionItem, LootActionKind, LootActionProgress, MAX_LOOP_COUNT,
 };
 use yuumi_core::parsers::mastery::ChampionMasteryItem;
-use yuumi_core::parsers::match_parser::{fetch_match_history, MatchDisplay};
+use yuumi_core::parsers::match_parser::{fetch_match_history_smart, MatchDisplay};
 use yuumi_core::parsers::summoner::{fetch_current_summoner, SummonerInfo};
 use yuumi_core::parsers::teammates::{fetch_recent_teammates, RecentTeammate};
 
@@ -335,7 +335,7 @@ impl LiveLcuService {
                         info.pid,
                         info.port,
                         info.token.clone(),
-                        None,
+                        info.server.clone(),
                     ) {
                         // 优先从本地缓存秒级水合 GameDataAssets，再在后台同步 LCU 最新字典（不阻塞 WS 与 Agent 启动）
                         self.hydrate_game_data_from_disk().await;
@@ -465,6 +465,7 @@ impl LiveLcuService {
                         ws.cancel();
                     }
                     active_info = None;
+                    yuumi_core::lcu::sgp::clear_sgp_token_cache();
                     self.asset_cache.set_lcu_client(None);
                     *self.client.write().await = None;
                     self.game_data_synced_from_lcu
@@ -521,6 +522,8 @@ impl LiveLcuService {
                 let previous_phase = self.get_current_phase().await;
                 if phase_str.as_str() == "ChampSelect" && previous_phase != "ChampSelect" {
                     reset_bench_user_hidden();
+                    // 新一轮对局：清空玩家数据缓存，避免复用上一局拉到的战绩与段位
+                    clear_player_data_cache();
                 }
                 let phase = GamePhase::from(phase_str.as_str());
                 *self.current_phase.write().await = phase_str.clone();
@@ -756,12 +759,13 @@ impl LiveLcuService {
         let assets_clone = assets.clone();
         let this_matches = self.clone();
         let matches_task = tokio::spawn(async move {
-            match fetch_match_history(
+            match fetch_match_history_smart(
                 &c_matches,
                 &puuid_clone,
-                Some(0),
-                Some(end_idx),
+                0,
+                end_idx,
                 &assets_clone,
+                false,
             )
             .await
             {
@@ -967,19 +971,26 @@ impl LiveLcuService {
 
         let mut source = match phase {
             "ChampSelect" => {
-                let mut pin_side = fetch_pin_drop_side(&client).await;
-                if pin_side.is_none() {
-                    let prev_in_champ_select = self
-                        .game_info
-                        .read()
-                        .await
-                        .as_ref()
-                        .is_some_and(|g| g.phase == "ChampSelect");
-                    if !prev_in_champ_select {
-                        sleep(Duration::from_millis(400)).await;
-                        pin_side = fetch_pin_drop_side(&client).await;
+                // 同一轮选人的阵营不会变，判定出来后直接沿用，避免每次刷新都查 pin-drop
+                let known_side = self
+                    .game_info
+                    .read()
+                    .await
+                    .as_ref()
+                    .filter(|g| g.phase == "ChampSelect")
+                    .and_then(|g| g.user_side);
+                let pin_side = match known_side {
+                    Some(side) => Some(side),
+                    None => {
+                        let side = fetch_pin_drop_side(&client).await;
+                        if side.is_some() {
+                            side
+                        } else {
+                            sleep(Duration::from_millis(400)).await;
+                            fetch_pin_drop_side(&client).await
+                        }
                     }
-                }
+                };
                 match client.get("/lol-champ-select/v1/session").await {
                     Ok(value) => match serde_json::from_value::<ChampSelectSnapshot>(value) {
                         Ok(snapshot) => GameInfoSource::from_champ_select(&snapshot, pin_side),
@@ -1069,12 +1080,14 @@ impl LiveLcuService {
             .get_game_data_assets()
             .await
             .unwrap_or_else(|| Arc::new(GameDataAssets::default()));
-        let summoner = match fetch_current_summoner(&client).await {
-            Ok(s) => Some(s),
-            Err(_) => match &*self.status.borrow() {
-                ConnectionStatus::Connected { summoner, .. } => (**summoner).clone(),
-                _ => None,
-            },
+        // 连接期已持有召唤师信息，直接复用；仅在状态缺失时才请求 LCU
+        let cached_summoner = match &*self.status.borrow() {
+            ConnectionStatus::Connected { summoner, .. } => (**summoner).clone(),
+            _ => None,
+        };
+        let summoner = match cached_summoner {
+            Some(summoner) => Some(summoner),
+            None => fetch_current_summoner(&client).await.ok(),
         };
         let Some(summoner) = summoner else {
             log::debug!("[LiveLcu] 召唤师信息未就绪，跳过对局信息拉取");

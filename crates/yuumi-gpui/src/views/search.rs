@@ -132,6 +132,12 @@ pub fn queue_id_to_name(queue_id: i32, fallback_map: &str) -> String {
     }
 }
 
+/// 战绩翻页增量拉取与预载常量（对齐旧版 Vue Search.vue）
+pub const INITIAL_BATCH: usize = 20;
+pub const LOAD_MORE_COUNT: usize = 30;
+pub const PREFETCH_PAGES: usize = 1;
+pub const MAX_SEARCH_MATCHES: usize = 500;
+
 /// 战绩查询主视图模型
 pub struct SearchView {
     /// 搜索输入框文本
@@ -192,6 +198,14 @@ pub struct SearchView {
     pub participant_ranks: HashMap<String, ParticipantRankInfo>,
     /// 段位请求序号：防止旧详情的段位结果回写当前选中详情
     pub rank_request_id: usize,
+    /// 已从接口拉取的对局游标（用于增量翻页与预载）
+    pub loaded_game_index: usize,
+    /// 是否正在后台增量拉取更多对局
+    pub is_loading_more: bool,
+    /// 是否已触达服务器历史记录尽头（无更多可拉取）
+    pub has_reached_end: bool,
+    /// 后台预载进行中时用户点击下一页的目标页码
+    pub pending_next_page: Option<usize>,
     /// 键盘焦点句柄
     pub focus_handle: FocusHandle,
 }
@@ -265,6 +279,10 @@ impl SearchView {
             copied_feedback: None,
             participant_ranks: HashMap::new(),
             rank_request_id: 0,
+            loaded_game_index: 0,
+            is_loading_more: false,
+            has_reached_end: false,
+            pending_next_page: None,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -332,6 +350,10 @@ impl SearchView {
         self.search_error = None;
 
         self.matches = matches;
+        self.loaded_game_index = self.matches.len().max(INITIAL_BATCH);
+        self.is_loading_more = false;
+        self.has_reached_end = self.matches.is_empty();
+        self.pending_next_page = None;
 
         if let Some(target) = self.target_select_game_id.take() {
             // [P1-3] 命中跳转目标时按列表下标自动翻页，避免目标对局不在第 1 页切片内丢失选中态
@@ -384,7 +406,10 @@ impl SearchView {
         } else {
             Vec::new()
         };
-        let has_more = total > end;
+        let has_more = total > end
+            || (!self.has_reached_end
+                && !self.matches.is_empty()
+                && self.matches.len() < MAX_SEARCH_MATCHES);
         (items, total, has_more)
     }
 

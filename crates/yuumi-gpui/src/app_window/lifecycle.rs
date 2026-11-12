@@ -28,6 +28,20 @@ impl MainWindow {
                         if !self.career_view.is_viewing_other {
                             self.career_view.summoner = Some(s.clone());
                         }
+                        if is_new_account {
+                            self.search_view.current_summoner_puuid = Some(s.puuid.clone());
+                            self.search_view.current_summoner_name = None;
+                            self.search_view.current_summoner_id = s.summoner_id.unwrap_or(0);
+                            self.search_view.matches.clear();
+                            self.search_view.current_page = 1;
+                            self.search_view.loaded_game_index = 0;
+                            self.search_view.has_reached_end = false;
+                            self.search_view.is_loading_more = false;
+                            self.search_view.pending_next_page = None;
+                        } else if self.search_view.current_summoner_puuid.is_none() {
+                            self.search_view.current_summoner_puuid = Some(s.puuid.clone());
+                            self.search_view.current_summoner_id = s.summoner_id.unwrap_or(0);
+                        }
                         // [P2-1] 记录本人 PUUID 后走异步重载（不再同步查库阻塞 UI）
                         self.saved_players_view.self_puuid = Some(s.puuid.clone());
                         self.reload_saved_players(cx);
@@ -97,7 +111,40 @@ impl MainWindow {
                     };
 
                 if !viewing_other_in_search {
-                    self.search_view.matches = items.clone();
+                    if let Some(own) = &self.own_summoner {
+                        if self.search_view.current_summoner_puuid.is_none() {
+                            self.search_view.current_summoner_puuid = Some(own.puuid.clone());
+                            self.search_view.current_summoner_name = Some(own.full_name());
+                            self.search_view.current_summoner_id = own.summoner_id.unwrap_or(0);
+                        }
+                    }
+
+                    if self.search_view.matches.len() <= items.len() {
+                        self.search_view.matches = items.clone();
+                        self.search_view.loaded_game_index =
+                            items.len().max(views::search::INITIAL_BATCH);
+                        self.search_view.has_reached_end = items.is_empty();
+                        self.search_view.is_loading_more = false;
+                        self.search_view.pending_next_page = None;
+                    } else {
+                        // 保留用户已预载的后页对局，仅将最新对局合入头部
+                        let existing_ids: std::collections::HashSet<u64> = self
+                            .search_view
+                            .matches
+                            .iter()
+                            .map(|m| m.display.game_id)
+                            .collect();
+                        let mut prepended: Vec<MatchItem> = items
+                            .iter()
+                            .filter(|m| !existing_ids.contains(&m.display.game_id))
+                            .cloned()
+                            .collect();
+                        if !prepended.is_empty() {
+                            self.search_view.loaded_game_index += prepended.len();
+                            prepended.append(&mut self.search_view.matches);
+                            self.search_view.matches = prepended;
+                        }
+                    }
 
                     // 未搜索场景下（进入战绩查询页自动带出的战绩）也要选中并载入首局详情，
                     // 否则右栏会一直停在「等待详情载入」的空态
