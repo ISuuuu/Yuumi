@@ -400,6 +400,8 @@ impl MainWindow {
             self.main_scroll_handle.set_offset(Point::default());
             if self.current_route == Route::SavedPlayers {
                 self.reload_saved_players(cx);
+                // 对照 Vue 版 refreshRoster：每次进入路人集都补齐缺失的召唤师身份
+                self.backfill_saved_players_identity(cx);
             } else if self.current_route == Route::Home {
                 self.sync_home_paths();
             } else if self.current_route == Route::Tft {

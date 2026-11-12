@@ -264,10 +264,16 @@ impl MainWindow {
                 ) {
                     self.game_info_loading = false;
                 }
+                // 进入对局：预缓存本局 10 人身份，结算阶段一次性消费后写入路人集
+                // （对齐 Vue 版 spawn_cache_current_game；对局中才有的 gameData 在这里最完整）
+                if phase == GamePhase::InProgress {
+                    self.cache_current_game(cx);
+                }
                 // 进入选人阶段按配置自动弹出 OP.GG（已有窗口则聚焦），并重置对局看板
                 if phase == GamePhase::ChampSelect {
                     self.game_info = None;
-                    self.last_recorded_encounter_game_id = None;
+                    // 新一局开始：丢弃上一局未消费的预缓存，避免结算时错记
+                    self.current_game_cache = None;
                     // 只在「进入」选人阶段时开窗：LCU 会重复推送同一阶段，
                     // 否则用户手动关闭的窗口会被下一次重复通知再次拉起。
                     if entering_champ_select && self.app_config.functions.auto_show_opgg {
@@ -796,7 +802,48 @@ impl MainWindow {
         cx.notify();
     }
 
-    /// 对局结束（结算阶段）：若存在 10 人快照且未记录过本局，自动持久化记录同局相遇玩家。
+    /// 进入对局后预缓存本局 10 人身份（对齐 Vue 版 `spawn_cache_current_game`）。
+    ///
+    /// 结算阶段的 LCU 载荷里玩家名常为空，这里在对局中就逐人解析真实 Riot ID 缓存起来；
+    /// 等待 1.5 秒让 `gameData` 就绪（与 Vue 版一致）。
+    fn cache_current_game(&mut self, cx: &mut Context<Self>) {
+        let live_service = self.live_service.clone();
+        let handle = yuumi_core::runtime::tokio_handle();
+        cx.spawn(async move |entity, cx| {
+            let Some(handle) = handle else {
+                return;
+            };
+            let cache = handle
+                .spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                    let client = live_service.get_client().await?;
+                    yuumi_core::parsers::game_info::fetch_current_game_cache(&client).await
+                })
+                .await
+                .unwrap_or(None);
+
+            let Some(cache) = cache else {
+                log::debug!("[MainWindow] 本局信息缓存失败，跳过预缓存");
+                return;
+            };
+            log::info!(
+                "[MainWindow] 已缓存本局信息: game_id={}, queue_id={}, 玩家数={}",
+                cache.game_id,
+                cache.queue_id,
+                cache.players.len()
+            );
+            let _ = entity.update(cx, |this, _cx| {
+                this.current_game_cache = Some(cache);
+            });
+        })
+        .detach();
+    }
+
+    /// 对局结束（结算阶段）：消费对局中预缓存的本局玩家并写入路人集。
+    ///
+    /// 对齐 Vue 版：先取本人 puuid，再一次性取走缓存（`take`）。
+    /// 没有缓存说明本进程没见过这局的对局阶段（例如在结算页才启动应用），直接跳过，
+    /// 避免把历史对局补记成刚发生的相遇。
     ///
     /// [P2-1] SQLite 写入完全剥离到 Tokio 阻塞池，完成后异步刷新路人集列表。
     pub(super) fn try_record_encounters(&mut self, cx: &mut Context<Self>) {
@@ -804,14 +851,6 @@ impl MainWindow {
             self.current_phase.as_str(),
             "PreEndOfGame" | "EndOfGame" | "WaitingForStats"
         ) {
-            return;
-        }
-
-        let Some(ref info) = self.game_info else {
-            return;
-        };
-
-        if info.is_demo || (1090..=1200).contains(&info.queue_id) {
             return;
         }
 
@@ -833,79 +872,72 @@ impl MainWindow {
             })
             .unwrap_or_default();
 
-        let game_id = info.game_id.unwrap_or(0);
-        let queue_type = info.queue_id.to_string();
+        if self_puuid.is_empty() {
+            log::warn!("[MainWindow] 对局结束：无法获取自己的 puuid，跳过相遇记录");
+            return;
+        }
 
-        let is_already_recorded = self
-            .last_recorded_encounter_game_id
-            .map(|id| id == game_id)
-            .unwrap_or(false);
+        // 一次性消费：取走即失效，结算阶段连发多个事件也不会重复写入
+        let Some(cache) = self.current_game_cache.take() else {
+            log::debug!("[MainWindow] 对局结束：无本局信息缓存，跳过相遇记录");
+            return;
+        };
 
-        if !is_already_recorded && !self_puuid.is_empty() && game_id > 0 {
-            let players_to_record: Vec<yuumi_core::storage::GamePlayerRecord> = info
-                .players()
-                .filter(|p| !p.is_local_player && !p.puuid.is_empty())
-                .map(|p| yuumi_core::storage::GamePlayerRecord {
-                    puuid: p.puuid.clone(),
-                    summoner_name: p.summoner_name.clone(),
-                    tag_line: if p.tag_line.is_empty() {
-                        None
-                    } else {
-                        Some(p.tag_line.clone())
-                    },
-                    profile_icon_id: p.profile_icon_id,
-                    champion_id: p.champion_id,
-                })
-                .collect();
+        let game_id = cache.game_id;
+        let queue_type = cache.queue_id.to_string();
+        let players_to_record: Vec<yuumi_core::storage::GamePlayerRecord> = cache
+            .players
+            .into_iter()
+            .map(|p| yuumi_core::storage::GamePlayerRecord {
+                puuid: p.puuid,
+                summoner_name: p.summoner_name,
+                tag_line: p.tag_line,
+                profile_icon_id: p.profile_icon_id,
+                champion_id: p.champion_id,
+            })
+            .collect();
 
-            if !players_to_record.is_empty() {
-                // 先占位防重：结算阶段可能连发多个事件，避免并发重复写入
-                self.last_recorded_encounter_game_id = Some(game_id);
-                let handle = yuumi_core::runtime::tokio_handle();
-                cx.spawn(async move |entity, cx| {
-                    let Some(handle) = handle else {
-                        return;
-                    };
-                    let res = handle
-                        .spawn(async move {
-                            tokio::task::spawn_blocking(move || {
-                                storage.record_encounters(
-                                    &players_to_record,
-                                    &self_puuid,
-                                    game_id,
-                                    &queue_type,
-                                )
-                            })
-                            .await
-                            .unwrap_or_else(|e| Err(e.to_string()))
+        if !players_to_record.is_empty() {
+            let handle = yuumi_core::runtime::tokio_handle();
+            cx.spawn(async move |entity, cx| {
+                let Some(handle) = handle else {
+                    return;
+                };
+                let res = handle
+                    .spawn(async move {
+                        tokio::task::spawn_blocking(move || {
+                            storage.record_encounters(
+                                &players_to_record,
+                                &self_puuid,
+                                game_id,
+                                &queue_type,
+                            )
                         })
                         .await
-                        .unwrap_or_else(|e| Err(e.to_string()));
+                        .unwrap_or_else(|e| Err(e.to_string()))
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()));
 
-                    let _ = entity.update(cx, |this, cx| {
-                        match res {
-                            Ok(rec) => {
-                                log::info!(
-                                    "[MainWindow] 对局结束自动记录相遇玩家: 共 {} 人 (game_id={})",
-                                    rec,
-                                    game_id
-                                );
-                            }
-                            Err(e) => {
-                                // 写入失败清除占位标记，后续结算事件可重试（对齐旧行为）
-                                log::warn!("[MainWindow] 自动记录相遇玩家失败: {}", e);
-                                if this.last_recorded_encounter_game_id == Some(game_id) {
-                                    this.last_recorded_encounter_game_id = None;
-                                }
-                            }
+                let _ = entity.update(cx, |this, cx| {
+                    match res {
+                        Ok(rec) => {
+                            log::info!(
+                                "[MainWindow] 对局结束自动记录相遇玩家: 共 {} 人 (game_id={})",
+                                rec,
+                                game_id
+                            );
                         }
-                        // 写入完成后异步刷新路人集列表（storage 就绪时生效）
-                        this.reload_saved_players(cx);
-                        cx.notify();
-                    });
-                })
-                .detach();
-            }
+                        Err(e) => {
+                            log::warn!("[MainWindow] 自动记录相遇玩家失败: {}", e);
+                        }
+                    }
+                    // 写入完成后异步刷新路人集列表（storage 就绪时生效）
+                    this.reload_saved_players(cx);
+                    cx.notify();
+                });
+            })
+            .detach();
         }
     }
 }

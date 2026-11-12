@@ -2145,6 +2145,144 @@ pub async fn fetch_live_game_info(
     )
 }
 
+// ─── 对局中预缓存（对局结束记录相遇玩家） ───
+
+/// 对局中缓存的本局玩家（对齐 Vue 版 `CurrentGameCache`）。
+///
+/// 结算阶段 LCU 载荷里的 `summonerName` 常为空，若等到结算才现拉数据，
+/// 名字只能写成占位符；因此在 InProgress 阶段就把 10 人身份解析成真实 Riot ID 缓存，
+/// 结算时只消费一次这份缓存（取走即失效），避免把历史对局补记进来。
+#[derive(Debug, Clone)]
+pub struct CurrentGameCache {
+    pub game_id: u64,
+    pub queue_id: i32,
+    pub players: Vec<CachedGamePlayer>,
+}
+
+/// 预缓存中的单名玩家
+#[derive(Debug, Clone)]
+pub struct CachedGamePlayer {
+    pub puuid: String,
+    pub summoner_name: String,
+    pub tag_line: Option<String>,
+    pub profile_icon_id: i32,
+    pub champion_id: i32,
+}
+
+/// 拉取当前对局 10 人并解析真实召唤师名。
+///
+/// 返回 `None` 表示会话不可用、无对局号，或属于不录入路人集的云顶队列。
+pub async fn fetch_current_game_cache(client: &LcuClient) -> Option<CurrentGameCache> {
+    let value = client.get("/lol-gameflow/v1/session").await.ok()?;
+    let snapshot = serde_json::from_value::<GameflowSessionSnapshot>(value).ok()?;
+    let game_data = snapshot.game_data.as_ref()?;
+    let game_id = game_data.game_id?;
+    let queue_id = game_data.queue.as_ref().and_then(|q| q.id).unwrap_or(0);
+    // 云顶对局不录入路人集（与 Vue 版一致）
+    if matches!(queue_id, 1090 | 1100 | 1130 | 1160) {
+        return None;
+    }
+
+    // (summonerId, puuid, 会话内名称兜底, 英雄 ID)
+    let mut targets: Vec<(i64, String, String, i32)> = Vec::new();
+    for player in game_data.team_one.iter().chain(game_data.team_two.iter()) {
+        let Some(summoner_id) = player.resolved_summoner_id() else {
+            continue;
+        };
+        targets.push((
+            summoner_id,
+            player.resolved_puuid().unwrap_or_default().to_string(),
+            player.summoner_name.clone().unwrap_or_default(),
+            player.resolved_champion_id(),
+        ));
+    }
+
+    let players: Vec<CachedGamePlayer> = stream::iter(targets)
+        .map(|(summoner_id, session_puuid, fallback_name, champion_id)| {
+            let client = client.clone();
+            async move {
+                let info = fetch_cache_summoner(&client, summoner_id, &session_puuid).await;
+                let field = |key: &str| {
+                    info.as_ref()
+                        .and_then(|v| v.get(key))
+                        .and_then(|v| v.as_str())
+                };
+                let puuid = field("puuid")
+                    .filter(|s| !s.trim().is_empty())
+                    .map(str::to_string)
+                    .unwrap_or(session_puuid);
+                CachedGamePlayer {
+                    puuid,
+                    // 国服 Riot ID 体系下 displayName 常为空串，先过滤再取 gameName
+                    summoner_name: preferred_summoner_name(
+                        field("displayName"),
+                        field("gameName"),
+                        &fallback_name,
+                    ),
+                    tag_line: field("tagLine")
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string),
+                    profile_icon_id: info
+                        .as_ref()
+                        .and_then(|v| v.get("profileIconId"))
+                        .and_then(|v| v.as_i64())
+                        .filter(|n| *n > 0)
+                        .unwrap_or(0) as i32,
+                    champion_id,
+                }
+            }
+        })
+        .buffer_unordered(10)
+        .collect()
+        .await;
+
+    if players.is_empty() {
+        return None;
+    }
+    Some(CurrentGameCache {
+        game_id,
+        queue_id,
+        players,
+    })
+}
+
+/// 按 displayName → gameName → 会话内名称 的顺序取第一个非空名字
+fn preferred_summoner_name(display: Option<&str>, game: Option<&str>, fallback: &str) -> String {
+    for name in [display, game].into_iter().flatten() {
+        let name = name.trim();
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+    fallback.trim().to_string()
+}
+
+/// 优先按 summonerId 查询完整召唤师信息，失败再按 puuid 兜底
+async fn fetch_cache_summoner(
+    client: &LcuClient,
+    summoner_id: i64,
+    puuid: &str,
+) -> Option<serde_json::Value> {
+    if summoner_id > 0 {
+        let path = format!("/lol-summoner/v1/summoners/{}", summoner_id);
+        if let Ok(value) = client.get(&path).await {
+            if value.is_object() {
+                return Some(value);
+            }
+        }
+    }
+    if !puuid.is_empty() {
+        let path = format!("/lol-summoner/v2/summoners/puuid/{}", puuid);
+        if let Ok(value) = client.get(&path).await {
+            if value.is_object() {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
 // ─── 2999 端口 LiveClientData 兜底 ───
 
 /// 2999 `liveclientdata/playerlist` 中的单个玩家（宽容反序列化，逐条跳过异常条目）
@@ -3217,5 +3355,18 @@ mod tests {
         );
         assert!(!is_real_summoner_name("未知", &assets));
         assert!(!is_real_summoner_name("", &assets));
+    }
+
+    #[test]
+    fn preferred_summoner_name_priority() {
+        assert_eq!(
+            preferred_summoner_name(Some("显示名"), Some("游戏名"), "兜底"),
+            "显示名"
+        );
+        assert_eq!(
+            preferred_summoner_name(Some("  "), Some("游戏名"), "兜底"),
+            "游戏名"
+        );
+        assert_eq!(preferred_summoner_name(None, None, " 兜底 "), "兜底");
     }
 }

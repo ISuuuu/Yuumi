@@ -181,8 +181,8 @@ pub struct MainWindow {
     mica_active: bool,
     /// 窗口级 Toast 队列（对照 Vue NMessageProvider，全部业务反馈的统一出口）
     toast_stack: Entity<ToastStack>,
-    /// 最近一次已成功记录相遇的对局 ID（防止结算多事件重复写入）
-    last_recorded_encounter_game_id: Option<u64>,
+    /// 对局中预缓存的本局 10 人身份（结算阶段一次性消费后写入路人集）
+    current_game_cache: Option<yuumi_core::parsers::game_info::CurrentGameCache>,
     /// 主窗最近一次渲染时的窗口区域（OP.GG 独立窗据此跟随主窗所在屏幕）
     main_window_bounds: Option<Bounds<Pixels>>,
 }
@@ -418,7 +418,7 @@ impl MainWindow {
             opgg_window: None,
             mica_active: false,
             toast_stack,
-            last_recorded_encounter_game_id: None,
+            current_game_cache: None,
             main_window_bounds: None,
         }
     }
