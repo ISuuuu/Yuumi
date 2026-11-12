@@ -50,13 +50,13 @@ impl HomeView {
     }
 
     pub fn new() -> Self {
-        let (paths, wegame) = load_client_paths();
-        let selected = Self::pick_default_selected(&paths);
-
+        // [P0-6] 构造期不做路径探测：主窗构造后紧接 reload_paths_from(配置) 会整体覆盖，
+        // 首次启动（配置尚无 LolPath）时这里的探测结果必被丢弃，却要在 UI 线程付出数秒
+        // （find_wegame_exe 会枚举注册表卸载项并逐个扫盘）。
         Self {
-            lol_paths: paths,
-            wegame_path: wegame,
-            selected_path: selected,
+            lol_paths: Vec::new(),
+            wegame_path: String::new(),
+            selected_path: None,
             launch_message: None,
         }
     }

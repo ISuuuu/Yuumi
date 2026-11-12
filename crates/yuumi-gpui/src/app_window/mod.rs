@@ -232,6 +232,12 @@ impl MainWindow {
             app_config.general.wegame_path.clone().unwrap_or_default(),
         );
 
+        // [P0-6] 细分打点：区分「子视图构造」与「托盘创建」两段耗时
+        log::info!(
+            "[Startup] 子视图构造完成（生涯/工具/查询/路人集/设置/TFT/首页）: {:?}",
+            new_start.elapsed()
+        );
+
         // 窗口级 Toast 队列：内容变更时通知主窗重绘浮层
         let toast_stack = cx.new(|_| ToastStack::new());
         cx.observe(&toast_stack, |_, _, cx| cx.notify()).detach();
@@ -250,6 +256,7 @@ impl MainWindow {
                 );
             });
         }
+        let tray_start = std::time::Instant::now();
         let tray = match TrayManager::new(app_config.functions.hide_tft) {
             Ok(tray) => Some(tray),
             Err(e) => {
@@ -257,7 +264,11 @@ impl MainWindow {
                 None
             }
         };
-        log::info!("[Startup] 托盘创建完成: {:?}", new_start.elapsed());
+        log::info!(
+            "[Startup] 托盘创建完成: {:?}（TrayManager::new 自身耗时 {:?}）",
+            new_start.elapsed(),
+            tray_start.elapsed()
+        );
 
         // 检查「启动时自动运行 LOL」配置
         if app_config.general.enable_start_lol_with_app {
