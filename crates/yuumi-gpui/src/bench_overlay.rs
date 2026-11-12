@@ -1,8 +1,7 @@
 //! 大乱斗板凳席置顶透明悬浮小窗
 //!
 //! 数据源：`LiveLcuService` 广播的 `ChampSelectSession`（由主窗口转发）。
-//! 交互：点击板凳席英雄图标 → 调用 LCU `bench/swap` 一键换人；「摇号」→ 重随当前英雄；
-//!       「摇号换回」→ reroll 后瞬时从板凳席换回原英雄；空白区域按下可拖拽移动并记忆坐标。
+//! 交互：点击板凳席英雄图标 → 调用 LCU `bench/swap` 一键换人；空白区域按下可拖拽移动并记忆坐标。
 //! 生命周期：仅在极地大乱斗（及同族板凳席队列）选人期间由主窗口显示，选人结束自动隐藏。
 
 use crate::asset_loader::global_asset_loader;
@@ -110,12 +109,8 @@ pub struct BenchOverlayView {
     /// 当前登录玩家已选英雄
     my_champion_id: i32,
     queue_id: i32,
-    /// 剩余摇号次数
-    rerolls_remaining: i32,
     /// 正在提交换人请求的英雄 ID（用于禁用重复点击）
     pending_champion: Option<i32>,
-    /// 摇号 / 摇号换回请求进行中，用于连点去重
-    pending_reroll: bool,
     /// 最近一次操作反馈
     status: Option<SharedString>,
     /// 窗口边界变化监听句柄
@@ -132,9 +127,7 @@ impl BenchOverlayView {
             team: Vec::new(),
             my_champion_id: 0,
             queue_id: 0,
-            rerolls_remaining: 0,
             pending_champion: None,
-            pending_reroll: false,
             status: None,
             _bounds_subscription: None,
             _save_task: None,
@@ -171,7 +164,6 @@ impl BenchOverlayView {
 
         self.queue_id = session.queue_id;
         self.my_champion_id = session.local_champion_id();
-        self.rerolls_remaining = session.rerolls_remaining;
         self.bench = session
             .bench_champions
             .iter()
@@ -210,9 +202,7 @@ impl BenchOverlayView {
         self.team.clear();
         self.my_champion_id = 0;
         self.queue_id = 0;
-        self.rerolls_remaining = 0;
         self.pending_champion = None;
-        self.pending_reroll = false;
         self.status = None;
         cx.notify();
     }
@@ -283,62 +273,6 @@ impl BenchOverlayView {
         .detach();
     }
 
-    /// 摇号（重随）当前英雄
-    fn reroll(&mut self, cx: &mut Context<Self>) {
-        if self.pending_champion.is_some() || self.pending_reroll {
-            return;
-        }
-        self.pending_reroll = true;
-        self.status = Some("摇号中…".into());
-        cx.notify();
-
-        let service = self.live_service.clone();
-        cx.spawn(async move |this, cx| {
-            let result = service.reroll_aram_champion().await;
-            let message: SharedString = match &result {
-                Ok(()) => "已提交摇号".into(),
-                Err(e) => format!("摇号失败: {}", e).into(),
-            };
-            if let Err(e) = &result {
-                log::warn!("[BenchOverlay] {}", e);
-            }
-            let _ = this.update(cx, |view, cx| {
-                view.pending_reroll = false;
-                view.status = Some(message);
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    /// 摇号并瞬时换回原英雄
-    fn reroll_and_restore(&mut self, cx: &mut Context<Self>) {
-        if self.pending_champion.is_some() || self.pending_reroll {
-            return;
-        }
-        self.pending_reroll = true;
-        self.status = Some("摇号换回中…".into());
-        cx.notify();
-
-        let service = self.live_service.clone();
-        cx.spawn(async move |this, cx| {
-            let result = service.reroll_and_restore_aram_champion().await;
-            let message: SharedString = match &result {
-                Ok(champion_id) => format!("已摇号并换回英雄 {}", champion_id).into(),
-                Err(e) => format!("摇号换回失败: {}", e).into(),
-            };
-            if let Err(e) = &result {
-                log::warn!("[BenchOverlay] {}", e);
-            }
-            let _ = this.update(cx, |view, cx| {
-                view.pending_reroll = false;
-                view.status = Some(message);
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
     /// 空白区域按下：交给 Win32 异步启动原生拖拽（坐标由 bind_window 注册的 bounds observer 防抖持久化）
     fn begin_drag(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(hwnd) = platform::find_window_by_title(BENCH_WINDOW_TITLE) else {
@@ -351,7 +285,7 @@ impl BenchOverlayView {
     }
 
     #[allow(dead_code)]
-    fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_header(&self, _cx: &mut Context<Self>) -> impl IntoElement {
         let queue_label: SharedString = match self.queue_id {
             450 => "极地大乱斗".into(),
             2400 => "海克斯大乱斗".into(),
@@ -390,61 +324,16 @@ impl BenchOverlayView {
                     ),
             )
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_size(px(9.0))
-                            .text_color(Theme::TEXT_MUTED())
-                            .child(format!(
-                                "板凳 {} · 本方 {} · 剩余摇号 {}",
-                                self.bench.len(),
-                                self.team.len(),
-                                self.rerolls_remaining
-                            )),
-                    )
-                    .child(
-                        div()
-                            .id("bench-reroll")
-                            .cursor_pointer()
-                            .px_2()
-                            .rounded_sm()
-                            .bg(Theme::HOVER_BG())
-                            .hover(|s| s.bg(rgba(0x00f5d440)))
-                            .text_size(px(10.0))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_PRIMARY())
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _ev, _window, cx| {
-                                    cx.stop_propagation();
-                                    this.reroll(cx);
-                                }),
-                            )
-                            .child("摇号"),
-                    )
-                    .child(
-                        div()
-                            .id("bench-reroll-restore")
-                            .cursor_pointer()
-                            .px_2()
-                            .rounded_sm()
-                            .bg(Theme::ACCENT_LIGHT())
-                            .hover(|s| s.bg(Theme::ACCENT_ALPHA_20()))
-                            .text_size(px(10.0))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::ACCENT_PRIMARY())
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _ev, _window, cx| {
-                                    cx.stop_propagation();
-                                    this.reroll_and_restore(cx);
-                                }),
-                            )
-                            .child("摇号换回"),
-                    ),
+                div().flex().items_center().gap_2().child(
+                    div()
+                        .text_size(px(9.0))
+                        .text_color(Theme::TEXT_MUTED())
+                        .child(format!(
+                            "板凳 {} · 本方 {}",
+                            self.bench.len(),
+                            self.team.len(),
+                        )),
+                ),
             )
     }
 
@@ -500,8 +389,6 @@ impl Render for BenchOverlayView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let bench = self.bench.clone();
         let status = self.status.clone();
-        let rerolls = self.rerolls_remaining;
-        let is_pending = self.pending_champion.is_some();
 
         div()
             .id("bench-overlay-root")
@@ -571,84 +458,27 @@ impl Render for BenchOverlayView {
                     })
                     .children(bench.iter().map(|slot| self.render_slot(slot, cx))),
             )
-            // 3. 右侧操作区 (紧凑摇号/换回 + 关闭)
+            // 3. 右侧关闭按钮
             .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(
-                        div()
-                            .id("bench-reroll")
-                            .flex()
-                            .items_center()
-                            .h(px(24.0))
-                            .px(px(6.0))
-                            .rounded(px(4.0))
-                            .bg(Theme::HOVER_BG())
-                            .hover(|s| s.bg(rgba(0x00f5d433)))
-                            .cursor_pointer()
-                            .text_size(px(10.0))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_PRIMARY())
-                            .when(is_pending, |s| s.opacity(0.5))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _ev, _window, cx| {
-                                    cx.stop_propagation();
-                                    this.reroll(cx);
-                                }),
-                            )
-                            .child(if rerolls > 0 {
-                                format!("摇号 {}", rerolls)
-                            } else {
-                                "摇号".to_string()
-                            }),
-                    )
-                    .child(
-                        div()
-                            .id("bench-reroll-restore")
-                            .flex()
-                            .items_center()
-                            .h(px(24.0))
-                            .px(px(6.0))
-                            .rounded(px(4.0))
-                            .bg(rgba(0x00f5d426))
-                            .hover(|s| s.bg(rgba(0x00f5d44d)))
-                            .cursor_pointer()
-                            .text_size(px(10.0))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::AURORA_CYAN())
-                            .when(is_pending, |s| s.opacity(0.5))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _ev, _window, cx| {
-                                    cx.stop_propagation();
-                                    this.reroll_and_restore(cx);
-                                }),
-                            )
-                            .child("换回"),
-                    )
-                    .child(
-                        div()
-                            .id("bench-close-btn")
-                            .size(px(24.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(4.0))
-                            .cursor_pointer()
-                            .opacity(0.55)
-                            .hover(|s| s.opacity(1.0).text_color(Theme::LOSS_BAR()))
-                            .text_color(Theme::TEXT_MUTED())
-                            .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED()))
-                            .on_mouse_down(MouseButton::Left, |_ev, window, _app| {
-                                // [D07-a] 用户主动隐藏：置位后本轮选人不再被重复事件自动打开
-                                mark_bench_user_hidden();
-                                window.remove_window();
-                            }),
-                    ),
+                div().flex().flex_row().items_center().child(
+                    div()
+                        .id("bench-close-btn")
+                        .size(px(24.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(4.0))
+                        .cursor_pointer()
+                        .opacity(0.55)
+                        .hover(|s| s.opacity(1.0).text_color(Theme::LOSS_BAR()))
+                        .text_color(Theme::TEXT_MUTED())
+                        .child(icon("icons/close.svg", 14.0, Theme::TEXT_MUTED()))
+                        .on_mouse_down(MouseButton::Left, |_ev, window, _app| {
+                            // [D07-a] 用户主动隐藏：置位后本轮选人不再被重复事件自动打开
+                            mark_bench_user_hidden();
+                            window.remove_window();
+                        }),
+                ),
             )
             // 4. 底部迷你悬浮提示小药丸
             .when_some(status, |this, text| {
