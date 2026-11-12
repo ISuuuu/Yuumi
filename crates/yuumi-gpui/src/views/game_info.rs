@@ -357,6 +357,9 @@ impl GameInfoView {
                     }),
             );
 
+        let team_slots = current_team.len().max(5);
+        let empty_team_slots = team_slots.saturating_sub(current_team.len());
+
         // 右侧面板：包含顶部工具条和五等宽战绩列在同一面板内 (G03)
         let right_panel = div()
             .flex_1()
@@ -382,22 +385,27 @@ impl GameInfoView {
                 on_change_tab,
                 on_exit_demo,
             ))
-            // 五等宽战绩列：各自独立滚动 (G03, G10)
-            .child(div().flex_1().min_h_0().flex().flex_row().children(
-                current_team.iter().enumerate().map(|(idx, p)| {
-                    Self::render_player_match_column(
-                        p,
-                        side_accent,
-                        is_ally_tab,
-                        false,
-                        false,
-                        game_info_filter,
-                        info.queue_id,
-                        on_player_search.clone(),
-                        idx,
-                    )
-                }),
-            ));
+            // 五等宽战绩列：各自独立滚动 (G03, G10)；不足 5 人时按 5 人分配每列宽度
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_row()
+                    .children(current_team.iter().enumerate().map(|(idx, p)| {
+                        Self::render_player_match_column(
+                            p,
+                            side_accent,
+                            is_ally_tab,
+                            false,
+                            game_info_filter,
+                            info.queue_id,
+                            on_player_search.clone(),
+                            idx,
+                        )
+                    }))
+                    .children((0..empty_team_slots).map(|_| div().flex_1().min_w_0().h_full())),
+            );
 
         // <= 1100px 自动改为上下布局 (G03)
         if window_width <= px(1100.0) {
@@ -452,6 +460,11 @@ impl GameInfoView {
             Theme::RED_SIDE_ACCENT()
         };
 
+        let ally_slots = ally_team.len().max(5);
+        let empty_ally_slots = ally_slots.saturating_sub(ally_team.len());
+        let enemy_slots = enemy_team.len().max(5);
+        let empty_enemy_slots = enemy_slots.saturating_sub(enemy_team.len());
+
         div()
             .size_full()
             .rounded_xl()
@@ -474,42 +487,65 @@ impl GameInfoView {
                 on_change_tab,
                 on_exit_demo,
             ))
-            // 战绩列横排：十列紧凑模式走 compact 分支 (G04, G07, G10)
+            // 战绩列横排：十列紧凑模式走 compact 分支 (G04, G07, G10)；每队默认按 5 人分配列宽
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
                     .flex()
                     .flex_row()
-                    // 友方 5 列
-                    .children(ally_team.iter().enumerate().map(|(idx, p)| {
-                        Self::render_player_match_column(
-                            p,
-                            ally_accent,
-                            true,
-                            true,
-                            false,
-                            game_info_filter,
-                            info.queue_id,
-                            on_player_search.clone(),
-                            idx,
-                        )
-                    }))
-                    // 敌方 5 列（若未公开则完全隐藏右侧列，G04）
+                    // 友方半区 (默认 5 列)
+                    .child(
+                        div()
+                            .w_1_2()
+                            .min_w_0()
+                            .h_full()
+                            .flex()
+                            .flex_row()
+                            .children(ally_team.iter().enumerate().map(|(idx, p)| {
+                                Self::render_player_match_column(
+                                    p,
+                                    ally_accent,
+                                    true,
+                                    true,
+                                    game_info_filter,
+                                    info.queue_id,
+                                    on_player_search.clone(),
+                                    idx,
+                                )
+                            }))
+                            .children(
+                                (0..empty_ally_slots).map(|_| div().flex_1().min_w_0().h_full()),
+                            ),
+                    )
+                    // 敌方半区 (默认 5 列；若未公开则完全隐藏右侧列，G04)
                     .when(is_revealed, |el| {
-                        el.children(enemy_team.iter().enumerate().map(|(idx, p)| {
-                            Self::render_player_match_column(
-                                p,
-                                enemy_accent,
-                                false,
-                                true,
-                                idx == 0,
-                                game_info_filter,
-                                info.queue_id,
-                                on_player_search.clone(),
-                                ally_team.len() + idx,
-                            )
-                        }))
+                        el.child(
+                            div()
+                                .w_1_2()
+                                .min_w_0()
+                                .h_full()
+                                .border_l_2()
+                                .border_color(Theme::CARD_BORDER())
+                                .flex()
+                                .flex_row()
+                                .children(enemy_team.iter().enumerate().map(|(idx, p)| {
+                                    Self::render_player_match_column(
+                                        p,
+                                        enemy_accent,
+                                        false,
+                                        true,
+                                        game_info_filter,
+                                        info.queue_id,
+                                        on_player_search.clone(),
+                                        ally_team.len() + idx,
+                                    )
+                                }))
+                                .children(
+                                    (0..empty_enemy_slots)
+                                        .map(|_| div().flex_1().min_w_0().h_full()),
+                                ),
+                        )
                     }),
             )
             .into_any_element()
@@ -1155,7 +1191,6 @@ impl GameInfoView {
         side_accent: Hsla,
         _is_ally: bool,
         compact: bool,
-        is_first_enemy: bool,
         game_info_filter: bool,
         queue_id: i32,
         on_player_search: F,
@@ -1694,7 +1729,7 @@ impl GameInfoView {
             matches_list.into_any_element()
         };
 
-        let mut column = div()
+        div()
             .flex_1()
             .min_w(if compact { px(68.0) } else { px(96.0) })
             .h_full()
@@ -1705,14 +1740,8 @@ impl GameInfoView {
             .border_color(Theme::CARD_BORDER())
             .child(div().h(px(3.0)).w_full().bg(side_accent))
             .child(col_header)
-            .child(matches_pane);
-
-        // 十列视图下两队之间的队伍分割线 (G10)
-        if is_first_enemy {
-            column = column.border_l_2();
-        }
-
-        column.into_any_element()
+            .child(matches_pane)
+            .into_any_element()
     }
 
     /// 渲染单场战绩卡片 (MatchCard) (G08, G10)
