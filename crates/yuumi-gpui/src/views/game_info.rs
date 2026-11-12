@@ -10,18 +10,22 @@
 //! - G08: 历史战绩列每人前 10 场：模式、日期、位置、头像与等级、K/D/A；五列显示 KDA 倍率，十列隐藏；胜/负/重开状态色；空态
 //! - G09: 组队色按 PremadeGroupChips，芯片仅在 >=2 人成组时渲染，列头与概览卡使用对应组队色
 //! - G10: 战绩卡高与独立列滚动：五列内边距 6px、间距 6px、卡高最小 44px、头像 32x32；十列内边距 4px 2px、间距 4px、卡高最小 38px、头像 29x29，双位数等级角标完整显示；每列独立纵向滚动
-//! - G11: 正式界面移除预览按钮、退出预览等调试按钮；内部保留 load_snapshot_or_demo 方法供测试调用
+//! - G11: 保留「预览对局信息」入口（空态一键加载本地快照），预览态顶部显示退出按钮
 
 use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
 use crate::components::offline_state::render_lcu_offline_state;
+use crate::components::tooltip::{with_tooltip, with_tooltip_below, TooltipLine};
 use crate::theme::Theme;
 use crate::views::saved_players::tag_badge_colors;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::collections::HashMap;
+use yuumi_core::gameflow::match_stats::{AggregatedPositions, PositionKey};
 use yuumi_core::gameflow::team_builder::MapSide;
-use yuumi_core::parsers::game_info::{GameInfoPlayer, LiveGameInfo};
+use yuumi_core::parsers::game_info::{
+    FateInfo, GameInfoPlayer, LiveGameInfo, MasteryBadge, TopChampion,
+};
 use yuumi_core::parsers::match_parser::MatchDisplay;
 
 /// 视图模式：按队伍(5列) 或 全部战绩(10列)
@@ -100,7 +104,7 @@ impl GameInfoView {
         F5: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
         F6: Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static + Clone,
     {
-        // 若当前无对局数据：未连接 / 读取中 / 等待中（均支持一键进入离线/演示预览）
+        // 若当前无对局数据：未连接 / 读取中 / 等待中（均可一键预览快照数据）
         if data.is_none() {
             if !connected {
                 return Self::render_offline_state(on_load_demo);
@@ -844,11 +848,7 @@ impl GameInfoView {
         F: Fn(Option<(String, String)>, &mut Window, &mut App) + 'static + Clone,
     {
         let is_local = player.is_local_player;
-        let is_top = player
-            .top_champions
-            .first()
-            .map(|t| t.champion_id == player.champion_id && player.champion_id > 0)
-            .unwrap_or(false);
+        let is_top = is_signature_champion(player);
 
         let premade_style = player.premade_group_id.map(|idx| {
             let color = Theme::premade_color(idx);
@@ -938,6 +938,8 @@ impl GameInfoView {
                                             .into_any_element()
                                     }),
                             )
+                            // 熟练度角标：招牌 ★ / 练英雄 练
+                            .children(mastery_corner_badge(player, 13.0))
                             // 等级徽标
                             .when(player.summoner_level > 0, |el| {
                                 el.child(
@@ -1015,7 +1017,8 @@ impl GameInfoView {
                                     })
                                     // 宿命徽标
                                     .when_some(player.fate.as_ref(), |el, fate| {
-                                        el.child(
+                                        el.child(with_tooltip(
+                                            format!("gi-fate-{}", player.puuid),
                                             div()
                                                 .px(px(4.0))
                                                 .py(px(1.0))
@@ -1033,12 +1036,14 @@ impl GameInfoView {
                                                     Theme::LOSS_TEXT()
                                                 })
                                                 .child(fate.badge_text()),
-                                        )
+                                            fate_tooltip(fate),
+                                        ))
                                     })
                                     // 路人集标记徽标（大腿 / 避坑 / 绝活等）
                                     .when_some(player.saved_tag.clone(), |el, tag| {
                                         let (tag_bg, tag_text, tag_border) = tag_badge_colors(&tag);
-                                        el.child(
+                                        el.child(with_tooltip(
+                                            format!("gi-saved-{}", player.puuid),
                                             div()
                                                 .px(px(4.0))
                                                 .py(px(1.0))
@@ -1049,15 +1054,17 @@ impl GameInfoView {
                                                 .text_size(px(9.0))
                                                 .font_weight(FontWeight::BOLD)
                                                 .text_color(tag_text)
-                                                .child(tag),
-                                        )
+                                                .child(tag.clone()),
+                                            saved_tag_tooltip(&tag, player.saved_encounter_count),
+                                        ))
                                     })
                                     // 相遇次数徽标（无自定义 tag 且同局相遇 >= 2 次）
                                     .when(
                                         player.saved_tag.is_none()
                                             && player.saved_encounter_count >= 2,
                                         |el| {
-                                            el.child(
+                                            el.child(with_tooltip(
+                                                format!("gi-met-{}", player.puuid),
                                                 div()
                                                     .px(px(4.0))
                                                     .py(px(1.0))
@@ -1070,7 +1077,11 @@ impl GameInfoView {
                                                         "相遇{}次",
                                                         player.saved_encounter_count
                                                     )),
-                                            )
+                                                saved_tag_tooltip(
+                                                    "未标记",
+                                                    player.saved_encounter_count,
+                                                ),
+                                            ))
                                         },
                                     )
                                     // 连胜 / 连败微徽标 (>=2 场显示, G06)
@@ -1109,15 +1120,15 @@ impl GameInfoView {
                                             .text_color(tier_color(&player.rank_tier))
                                             .child(player.rank_display.clone()),
                                     )
-                                    .when(player.ranked_wins > 0, |el| {
+                                    .when(player.recent_wins > 0, |el| {
                                         el.child(
                                             div()
                                                 .text_color(Theme::TEXT_MUTED())
-                                                .child(format!("· {}胜", player.ranked_wins)),
+                                                .child(format!("· {}胜", player.recent_wins)),
                                         )
                                     }),
                             )
-                            // 第 3 行：近 10 场胜率与 KDA
+                            // 第 3 行：KDA（胜率不在此展示，看板列头用近 50 场峡谷胜负）
                             .child(
                                 div()
                                     .flex()
@@ -1127,57 +1138,60 @@ impl GameInfoView {
                                     .child(
                                         div()
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(if player.win_rate >= 50 {
-                                                Theme::WIN_TEXT()
-                                            } else {
-                                                Theme::LOSS_TEXT()
-                                            })
-                                            .child(format!("{}%", player.win_rate)),
-                                    )
-                                    .child(div().text_color(Theme::TEXT_MUTED()).child("·"))
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::BOLD)
                                             .text_color(kda_color(player.avg_kda))
                                             .child(format!("KDA {:.2}", player.avg_kda)),
                                     ),
                             ),
                     ),
             )
-            // 第二层：底部画像（常玩位置 + 常用英雄） (G06)
+            // 第二层：底部画像（熟练度/招牌 + 常见位置分布 + 常用英雄） (G06)
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
+                    .gap(px(4.0))
                     .pt(px(4.0))
                     .border_t_1()
                     .border_color(Theme::CARD_BORDER().opacity(0.5))
-                    // 左侧：位置/角色
+                    // 左侧：所选英雄熟练度（Lv/点数 + 招牌·练英雄）+ 近期位置分布
                     .child(
                         div()
-                            .text_size(px(10.0))
-                            .text_color(Theme::TEXT_MUTED())
-                            .child(position_display(&player.position)),
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .flex_1()
+                            .min_w_0()
+                            .children(
+                                player
+                                    .mastery
+                                    .as_ref()
+                                    .map(|mastery| render_mastery_pill(&player.puuid, mastery)),
+                            )
+                            .child(render_position_stats(player)),
                     )
                     // 右侧：近期常用英雄小头像
                     .child(div().flex().items_center().gap(px(4.0)).children(
                         player.top_champions.iter().take(3).map(|c| {
-                            div()
-                                .size(px(18.0))
-                                .rounded_full()
-                                .border_1()
-                                .border_color(Theme::CARD_BORDER())
-                                .overflow_hidden()
-                                .child(
-                                    LcuImage::new(format!(
-                                        "/lol-game-data/assets/v1/champion-icons/{}.png",
-                                        c.champion_id
-                                    ))
+                            with_tooltip(
+                                format!("gi-champ-{}-{}", player.puuid, c.champion_id),
+                                div()
                                     .size(px(18.0))
-                                    .shape(LcuImageShape::Circle)
-                                    .placeholder("?".to_string()),
-                                )
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER())
+                                    .overflow_hidden()
+                                    .child(
+                                        LcuImage::new(format!(
+                                            "/lol-game-data/assets/v1/champion-icons/{}.png",
+                                            c.champion_id
+                                        ))
+                                        .size(px(18.0))
+                                        .shape(LcuImageShape::Circle)
+                                        .placeholder("?".to_string()),
+                                    ),
+                                champion_tooltip(c, player.recent_match_count),
+                            )
                         }),
                     )),
             )
@@ -1200,11 +1214,7 @@ impl GameInfoView {
         F: Fn(String, Option<String>, &mut Window, &mut App) + 'static + Clone,
     {
         let premade_bg = player.premade_group_id.map(Theme::premade_color);
-        let is_top = player
-            .top_champions
-            .first()
-            .map(|t| t.champion_id == player.champion_id && player.champion_id > 0)
-            .unwrap_or(false);
+        let is_top = is_signature_champion(player);
 
         let player_name = player.summoner_name.clone();
         let player_tag = player.tag_line.clone();
@@ -1315,27 +1325,11 @@ impl GameInfoView {
                                                         .child("?")
                                                         .into_any_element()
                                                 })
-                                                // 招牌星标角标 (G07)
-                                                .when(is_top, |el| {
-                                                    el.child(
-                                                        div()
-                                                            .absolute()
-                                                            .top(px(-1.0))
-                                                            .right(px(-1.0))
-                                                            .size(px(9.0))
-                                                            .rounded_full()
-                                                            .bg(Theme::GOLD())
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_center()
-                                                            .text_size(px(6.0))
-                                                            .text_color(gpui::white())
-                                                            .child("★"),
-                                                    )
-                                                }),
+                                                // 熟练度角标：招牌 ★ / 练英雄 练 (G07)
+                                                .children(mastery_corner_badge(player, 10.0)),
                                         ),
                                 )
-                                // 头像下方胜负统计 (G07)
+                                // 头像下方胜负统计 (G07)；腾讯客户端不返回排位负场，0 负时只显示胜场
                                 .child(
                                     div()
                                         .flex()
@@ -1343,16 +1337,20 @@ impl GameInfoView {
                                         .gap(px(1.5))
                                         .text_size(px(8.5))
                                         .font_weight(FontWeight::BOLD)
-                                        .child(
-                                            div()
-                                                .text_color(Theme::WIN_TEXT())
-                                                .child(format!("{}胜", player.ranked_wins)),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_color(Theme::LOSS_TEXT())
-                                                .child(format!("{}负", player.ranked_losses)),
-                                        ),
+                                        .when(player.recent_wins > 0, |el| {
+                                            el.child(
+                                                div()
+                                                    .text_color(Theme::WIN_TEXT())
+                                                    .child(format!("{}胜", player.recent_wins)),
+                                            )
+                                        })
+                                        .when(player.recent_losses > 0, |el| {
+                                            el.child(
+                                                div()
+                                                    .text_color(Theme::LOSS_TEXT())
+                                                    .child(format!("{}负", player.recent_losses)),
+                                            )
+                                        }),
                                 ),
                         )
                         // 右侧信息：第一行昵称(点击查战绩)，第二行短段位
@@ -1403,16 +1401,25 @@ impl GameInfoView {
                                             ))
                                         }),
                                 )
+                                // 段位行：左侧挂英雄熟练度，右侧段位
                                 .child(
                                     div()
-                                        .text_size(px(9.5))
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(tier_color(&player.rank_tier))
-                                        .truncate()
-                                        .child(tier_short_name(
-                                            &player.rank_tier,
-                                            &player.rank_division,
-                                        )),
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(3.0))
+                                        .min_w_0()
+                                        .children(mastery_inline(player, true))
+                                        .child(
+                                            div()
+                                                .text_size(px(9.5))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(tier_color(&player.rank_tier))
+                                                .truncate()
+                                                .child(tier_short_name(
+                                                    &player.rank_tier,
+                                                    &player.rank_division,
+                                                )),
+                                        ),
                                 ),
                         ),
                 )
@@ -1427,7 +1434,12 @@ impl GameInfoView {
                         .child(
                             div()
                                 .font_weight(FontWeight::MEDIUM)
-                                .child(format!("{}{} %", short_position(&player.position), player.win_rate)),
+                                .truncate()
+                                // 无分路数据（大乱斗/战绩隐藏）时不显示，避免出现「胜率 45%」这类无关信息
+                                .when_some(
+                                    position_stats_compact(player.positions.as_ref()),
+                                    |el, text| el.child(text),
+                                ),
                         )
                         .child(
                             div()
@@ -1468,7 +1480,7 @@ impl GameInfoView {
                                             .text_size(px(8.0))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(tag_text)
-                                            .child(tag),
+                                            .child(tag.clone()),
                                     )
                                 }),
                         ),
@@ -1609,7 +1621,7 @@ impl GameInfoView {
                                             .text_size(px(8.5))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(tag_text)
-                                            .child(tag),
+                                            .child(tag.clone()),
                                     )
                                 })
                                 .when(
@@ -1643,32 +1655,54 @@ impl GameInfoView {
                                         .flex()
                                         .items_center()
                                         .gap(px(2.0))
-                                        .child(
-                                            div()
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::WIN_TEXT())
-                                                .child(format!("{}胜", player.ranked_wins)),
-                                        )
-                                        .child(
-                                            div()
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::LOSS_TEXT())
-                                                .child(format!("{}负", player.ranked_losses)),
-                                        ),
+                                        // 腾讯客户端不返回排位负场，0 负时只显示胜场
+                                        .when(player.recent_wins > 0, |el| {
+                                            el.child(
+                                                div()
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(Theme::WIN_TEXT())
+                                                    .child(format!("{}胜", player.recent_wins)),
+                                            )
+                                        })
+                                        .when(player.recent_losses > 0, |el| {
+                                            el.child(
+                                                div()
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(Theme::LOSS_TEXT())
+                                                    .child(format!("{}负", player.recent_losses)),
+                                            )
+                                        }),
                                 )
+                                // 段位行：左侧挂英雄熟练度，右侧段位
                                 .child(
                                     div()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(tier_color(&player.rank_tier))
-                                        .truncate()
-                                        .child(tier_short_name(
-                                            &player.rank_tier,
-                                            &player.rank_division,
-                                        )),
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(3.0))
+                                        .min_w_0()
+                                        .children(mastery_inline(player, false))
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(tier_color(&player.rank_tier))
+                                                .truncate()
+                                                .child(tier_short_name(
+                                                    &player.rank_tier,
+                                                    &player.rank_division,
+                                                )),
+                                        ),
                                 ),
                         ),
                 )
         };
+
+        // 整个列头（英雄头像 / 昵称 / 段位 / 位置任意一处）悬浮 → 展示该玩家完整画像。
+        // 列头贴顶，气泡朝下展开，避免跑到窗口外
+        let col_header = with_tooltip_below(
+            format!("gi-sum-{}", player.puuid),
+            col_header,
+            player_summary_tooltip(player),
+        );
 
         // 垂直战绩列表：独立纵向滚动，每人严格前 10 局 (G08, G10)
         let filtered_matches: Vec<&MatchDisplay> = if game_info_filter && queue_id > 0 {
@@ -2221,7 +2255,7 @@ pub fn is_their_team_revealed(their_team: &[GameInfoPlayer], phase: &str) -> boo
 
 /// 段位短名（如 "钻石1" / "大师" / "未定级"）
 fn tier_short_name(tier: &str, division: &str) -> String {
-    let t_short = match tier.trim().to_ascii_uppercase().as_str() {
+    let t_short = match tier_code(tier).trim().to_ascii_uppercase().as_str() {
         "IRON" => "黑铁",
         "BRONZE" => "青铜",
         "SILVER" => "白银",
@@ -2245,9 +2279,27 @@ fn tier_short_name(tier: &str, division: &str) -> String {
     }
 }
 
+/// 段位名归一化：`GameInfoPlayer.rank_tier` 存的是中文名（如「钻石」），
+/// 而配色/简称表按英文 tier 匹配，不转换会全部落到「未定级」
+fn tier_code(tier: &str) -> &str {
+    match tier.trim() {
+        "黑铁" => "IRON",
+        "青铜" => "BRONZE",
+        "白银" => "SILVER",
+        "黄金" => "GOLD",
+        "铂金" => "PLATINUM",
+        "翡翠" => "EMERALD",
+        "钻石" => "DIAMOND",
+        "大师" => "MASTER",
+        "宗师" => "GRANDMASTER",
+        "王者" => "CHALLENGER",
+        other => other,
+    }
+}
+
 /// 段位主题色
 fn tier_color(tier: &str) -> Hsla {
-    match tier.trim().to_ascii_uppercase().as_str() {
+    match tier_code(tier).trim().to_ascii_uppercase().as_str() {
         "IRON" => hsla(215.0 / 360.0, 0.08, 0.55, 1.0),
         "BRONZE" => hsla(30.0 / 360.0, 0.90, 0.38, 1.0),
         "SILVER" => hsla(212.0 / 360.0, 0.18, 0.58, 1.0),
@@ -2306,28 +2358,438 @@ fn format_kda_ratio(kills: i32, deaths: i32, assists: i32) -> (String, Hsla, Hsl
     }
 }
 
-/// 常用位置简称（如 "中" / "上"）
-fn short_position(pos: &str) -> &'static str {
-    match pos.trim().to_ascii_uppercase().as_str() {
-        "TOP" | "上路" => "上",
-        "JUNGLE" | "打野" => "野",
-        "MIDDLE" | "MID" | "中路" => "中",
-        "BOTTOM" | "BOT" | "ADC" | "下路" => "下",
-        "UTILITY" | "SUPPORT" | "SUP" | "辅助" => "辅",
-        _ => "位",
+/// 宿命徽标提示：最近交手的英雄、交手统计与时间
+fn fate_tooltip(fate: &FateInfo) -> Vec<TooltipLine> {
+    let mut lines = vec![TooltipLine::title(fate.badge_text())];
+    if !fate.champion_name.is_empty() {
+        lines.push(TooltipLine::body(format!(
+            "最近交手英雄：{}",
+            fate.champion_name
+        )));
+    }
+    lines.push(TooltipLine::body(format!(
+        "同队 {} 次 · 对阵 {} 次",
+        fate.ally_count, fate.enemy_count
+    )));
+    let time = format_timestamp(fate.game_creation);
+    if !time.is_empty() {
+        lines.push(TooltipLine::muted(format!("最近交手：{}", time)));
+    }
+    lines
+}
+
+/// 路人集标记提示
+fn saved_tag_tooltip(tag: &str, encounter_count: u32) -> Vec<TooltipLine> {
+    let title = if tag == "未标记" {
+        "路人集玩家".to_string()
+    } else {
+        format!("路人集标记：{}", tag)
+    };
+    vec![
+        TooltipLine::title(title),
+        TooltipLine::body(format!("历史相遇 {} 次", encounter_count)),
+    ]
+}
+
+/// 熟练度提示
+fn mastery_tooltip(mastery: &MasteryBadge) -> Vec<TooltipLine> {
+    let mut lines = vec![TooltipLine::title(format!(
+        "Lv.{} · {} 熟练度",
+        mastery.level, mastery.points
+    ))];
+    if mastery.is_top_champion {
+        lines.push(TooltipLine::accent(
+            "招牌英雄（熟练度前三或超 10 万点）",
+            Theme::GOLD(),
+        ));
+    } else if mastery.is_practicing {
+        lines.push(TooltipLine::muted("练英雄（该英雄熟练度较低）"));
+    }
+    lines
+}
+
+/// 位置分布提示：按场次降序列出全部有效分路
+fn position_tooltip(positions: &AggregatedPositions) -> Vec<TooltipLine> {
+    let mut lines = vec![TooltipLine::title(format!(
+        "近期位置分布（{} 场）",
+        positions.total_valid
+    ))];
+    let mut entries: Vec<(PositionKey, u32)> = positions
+        .counts
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(|(position, count)| (*position, *count))
+        .collect();
+    entries.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    for (position, count) in entries {
+        let percentage = positions.percentages.get(&position).copied().unwrap_or(0);
+        lines.push(TooltipLine::body(format!(
+            "{} · {} 场 · {}%",
+            position.display_name(),
+            count,
+            percentage
+        )));
+    }
+    lines
+}
+
+/// 常用英雄提示
+fn champion_tooltip(champion: &TopChampion, recent_match_count: usize) -> Vec<TooltipLine> {
+    vec![
+        TooltipLine::title(champion.champion_name.clone()),
+        TooltipLine::body(format!(
+            "近 {} 场出场 {} 次 · 胜率 {}%",
+            recent_match_count, champion.count, champion.win_rate
+        )),
+    ]
+}
+
+/// 玩家完整画像（列头任意处悬浮）：段位/战绩/熟练度/位置/常用英雄/宿命/路人集标记
+fn player_summary_tooltip(player: &GameInfoPlayer) -> Vec<TooltipLine> {
+    let mut name = if player.summoner_name.is_empty() {
+        "未知玩家".to_string()
+    } else if player.tag_line.is_empty() {
+        player.summoner_name.clone()
+    } else {
+        format!("{}#{}", player.summoner_name, player.tag_line)
+    };
+    if player.champion_id > 0 && !player.champion_name.is_empty() {
+        name.push_str(&format!("（{}）", player.champion_name));
+    }
+    let mut lines = vec![TooltipLine::title(name)];
+
+    let rank = if player.summoner_level > 0 {
+        format!("Lv.{} · {}", player.summoner_level, player.rank_display)
+    } else {
+        player.rank_display.clone()
+    };
+    lines.push(TooltipLine::body(rank));
+
+    // 近期胜负：只统计召唤师峡谷对局（排除重开/娱乐模式），对齐旧版「近 50 局统计胜负」
+    if player.recent_wins + player.recent_losses > 0 {
+        lines.push(TooltipLine::body(format!(
+            "近 {} 场 · 峡谷 {} 胜 {} 负",
+            player.recent_match_count, player.recent_wins, player.recent_losses
+        )));
+    }
+
+    if player.recent_match_count > 0 {
+        lines.push(TooltipLine::body(format!(
+            "近 {} 场 · 胜率 {}% · KDA {:.2}",
+            player.recent_match_count, player.win_rate, player.avg_kda
+        )));
+        lines.push(TooltipLine::body(format!(
+            "场均 {:.1} / {:.1} / {:.1}",
+            player.avg_kills, player.avg_deaths, player.avg_assists
+        )));
+    }
+
+    if let Some(streak) = player.streak_text.as_ref() {
+        let color = if player.streak_is_win {
+            Hsla::from(rgb(0x4ade80))
+        } else {
+            Hsla::from(rgb(0xf87171))
+        };
+        lines.push(TooltipLine::accent(streak.clone(), color));
+    }
+
+    if let Some(mastery) = player.mastery.as_ref() {
+        let suffix = if mastery.is_top_champion {
+            " · ★招牌"
+        } else if mastery.is_practicing {
+            " · 练英雄"
+        } else {
+            ""
+        };
+        lines.push(TooltipLine::body(format!(
+            "熟练度 Lv.{} · {} 点{}",
+            mastery.level, mastery.points, suffix
+        )));
+    }
+
+    if let Some(positions) = player.positions.as_ref() {
+        let mut entries: Vec<(PositionKey, u32)> = positions
+            .counts
+            .iter()
+            .filter(|(_, count)| **count > 0)
+            .map(|(position, count)| (*position, *count))
+            .collect();
+        entries.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        let text = entries
+            .iter()
+            .map(|(position, count)| {
+                let percentage = positions.percentages.get(position).copied().unwrap_or(0);
+                format!("{} {}场 {}%", position.display_name(), count, percentage)
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
+        if !text.is_empty() {
+            lines.push(TooltipLine::body(format!("位置 {}", text)));
+        }
+    }
+
+    for champion in player.top_champions.iter().take(3) {
+        lines.push(TooltipLine::muted(format!(
+            "常用 {} · {} 场 · 胜率 {}%",
+            champion.champion_name, champion.count, champion.win_rate
+        )));
+    }
+
+    if let Some(fate) = player.fate.as_ref() {
+        let mut text = format!(
+            "宿命 {} · 同队 {} / 对阵 {}",
+            fate.badge_text(),
+            fate.ally_count,
+            fate.enemy_count
+        );
+        let time = format_timestamp(fate.game_creation);
+        if !fate.champion_name.is_empty() {
+            text.push_str(&format!(" · 上次 {}", fate.champion_name));
+        }
+        if !time.is_empty() {
+            text.push_str(&format!(" {}", time));
+        }
+        lines.push(TooltipLine::accent(text, Hsla::from(rgb(0xfbbf24))));
+    }
+
+    match player.saved_tag.as_ref() {
+        Some(tag) => lines.push(TooltipLine::accent(
+            format!(
+                "路人集 · {} · 相遇 {} 次",
+                tag, player.saved_encounter_count
+            ),
+            Hsla::from(rgb(0x60a5fa)),
+        )),
+        None if player.saved_encounter_count > 0 => lines.push(TooltipLine::muted(format!(
+            "路人集 · 未标记 · 相遇 {} 次",
+            player.saved_encounter_count
+        ))),
+        None => {}
+    }
+
+    if !player.data_available {
+        lines.push(TooltipLine::muted("战绩已隐藏"));
+    }
+
+    lines
+}
+
+/// 位置分布元素：无分路数据时不渲染（避免用「补位」之类的会话占位糊弄）
+fn render_position_stats(player: &GameInfoPlayer) -> AnyElement {
+    let Some(text) = position_stats_text(player.positions.as_ref()) else {
+        return div().into_any_element();
+    };
+    let element = div()
+        .text_size(px(9.5))
+        .text_color(Theme::TEXT_MUTED())
+        .truncate()
+        .child(text);
+    match player.positions.as_ref() {
+        Some(positions) => with_tooltip(
+            format!("gi-pos-{}", player.puuid),
+            element,
+            position_tooltip(positions),
+        ),
+        None => element.into_any_element(),
     }
 }
 
-/// 常用位置全称展示
-fn position_display(pos: &str) -> &'static str {
-    match pos.trim().to_ascii_uppercase().as_str() {
-        "TOP" | "上路" => "上路",
-        "JUNGLE" | "打野" => "打野",
-        "MIDDLE" | "MID" | "中路" => "中路",
-        "BOTTOM" | "BOT" | "ADC" | "下路" => "下路",
-        "UTILITY" | "SUPPORT" | "SUP" | "辅助" => "辅助",
-        _ => "常玩位置",
+/// 毫秒时间戳 → MM/DD HH:mm
+fn format_timestamp(timestamp: u64) -> String {
+    if timestamp == 0 {
+        return String::new();
     }
+    chrono::DateTime::from_timestamp_millis(timestamp as i64)
+        .map(|dt| {
+            let local: chrono::DateTime<chrono::Local> = dt.into();
+            local.format("%m/%d %H:%M").to_string()
+        })
+        .unwrap_or_default()
+}
+
+/// 是否为招牌英雄：优先用熟练度判定，缺少熟练度数据时退回「近期常用英雄第一位」
+fn is_signature_champion(player: &GameInfoPlayer) -> bool {
+    if player.champion_id <= 0 {
+        return false;
+    }
+    match player.mastery.as_ref() {
+        Some(mastery) => mastery.is_top_champion,
+        None => player
+            .top_champions
+            .first()
+            .map(|t| t.champion_id == player.champion_id)
+            .unwrap_or(false),
+    }
+}
+
+/// 熟练度点数缩写（1.2w / 320k / 1.1M）
+fn format_mastery_points(points: u32) -> String {
+    let value = points as f64;
+    if value >= 1_000_000.0 {
+        format!("{:.1}M", value / 1_000_000.0)
+    } else if value >= 10_000.0 {
+        format!("{:.1}w", value / 10_000.0)
+    } else if value >= 1_000.0 {
+        format!("{:.1}k", value / 1_000.0)
+    } else {
+        points.to_string()
+    }
+}
+
+/// 英雄头像右上角的熟练度角标：招牌=★（金），练英雄=练（蓝）
+fn mastery_corner_badge(player: &GameInfoPlayer, size: f32) -> Option<AnyElement> {
+    let mastery = player.mastery.as_ref()?;
+    let (text, color) = if mastery.is_top_champion {
+        ("★", Theme::GOLD())
+    } else if mastery.is_practicing {
+        ("练", Theme::BLUE_SIDE_ACCENT())
+    } else {
+        return None;
+    };
+    Some(
+        div()
+            .absolute()
+            .top(px(-2.0))
+            .right(px(-2.0))
+            .size(px(size))
+            .rounded_full()
+            .bg(color)
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(size * 0.62))
+            .font_weight(FontWeight::BOLD)
+            .text_color(gpui::white())
+            .child(text)
+            .into_any_element(),
+    )
+}
+
+/// 列头里的熟练度微标（挂在段位左侧）：紧凑模式只显示等级，宽列显示等级+点数
+fn mastery_inline(player: &GameInfoPlayer, compact: bool) -> Option<AnyElement> {
+    let mastery = player.mastery.as_ref()?;
+    let text = if compact {
+        format!("Lv.{}", mastery.level)
+    } else {
+        format!(
+            "Lv.{} {}",
+            mastery.level,
+            format_mastery_points(mastery.points)
+        )
+    };
+    let color = if mastery.is_top_champion {
+        Theme::GOLD()
+    } else if mastery.is_practicing {
+        Theme::BLUE_SIDE_ACCENT()
+    } else {
+        Theme::TEXT_MUTED()
+    };
+    Some(
+        div()
+            .text_size(px(if compact { 8.0 } else { 9.0 }))
+            .font_weight(FontWeight::BOLD)
+            .text_color(color)
+            .flex_shrink_0()
+            .child(text)
+            .into_any_element(),
+    )
+}
+
+/// 熟练度徽标：Lv.等级 + 点数 + 招牌/练英雄
+fn render_mastery_pill(puuid: &str, mastery: &MasteryBadge) -> AnyElement {
+    let is_top = mastery.is_top_champion;
+    let pill = div()
+        .flex()
+        .items_center()
+        .gap(px(3.0))
+        .flex_shrink_0()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(2.0))
+                .px(px(3.0))
+                .py(px(1.0))
+                .rounded(px(3.0))
+                .bg(if is_top {
+                    Theme::GOLD().opacity(0.14)
+                } else {
+                    Theme::BADGE_BG()
+                })
+                .text_size(px(8.5))
+                .font_weight(FontWeight::BOLD)
+                .child(
+                    div()
+                        .text_color(if is_top {
+                            Theme::GOLD()
+                        } else {
+                            Theme::TEXT_SECONDARY()
+                        })
+                        .child(format!("Lv.{}", mastery.level)),
+                )
+                .child(
+                    div()
+                        .text_color(Theme::TEXT_MUTED())
+                        .child(format_mastery_points(mastery.points)),
+                ),
+        )
+        .when(!is_top && mastery.is_practicing, |el| {
+            el.child(
+                div()
+                    .text_size(px(8.5))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(Theme::BLUE_SIDE_ACCENT())
+                    .child("练英雄"),
+            )
+        })
+        .when(is_top, |el| {
+            el.child(
+                div()
+                    .text_size(px(8.5))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(Theme::GOLD())
+                    .child("★招牌"),
+            )
+        });
+    with_tooltip(
+        format!("gi-mastery-{}", puuid),
+        pill,
+        mastery_tooltip(mastery),
+    )
+}
+
+/// 位置分布文案（上路 60% / 野 15%）；无分路数据（大乱斗/战绩隐藏）时返回 None
+fn position_stats_text(positions: Option<&AggregatedPositions>) -> Option<String> {
+    let positions = positions?;
+    let primary = positions.primary_position?;
+    let mut text = format!(
+        "{} {}%",
+        primary.display_name(),
+        positions.primary_percentage
+    );
+    if let Some(secondary) = positions.secondary_position {
+        text.push_str(&format!(
+            " / {} {}%",
+            secondary.short_name(),
+            positions.secondary_percentage
+        ));
+    }
+    Some(text)
+}
+
+/// 紧凑模式位置文案（上60%/野15%，副位置也带简称，避免只剩百分比看不懂）
+fn position_stats_compact(positions: Option<&AggregatedPositions>) -> Option<String> {
+    let positions = positions?;
+    let primary = positions.primary_position?;
+    let mut text = format!("{}{}%", primary.short_name(), positions.primary_percentage);
+    if let Some(secondary) = positions.secondary_position {
+        text.push_str(&format!(
+            "/{}{}%",
+            secondary.short_name(),
+            positions.secondary_percentage
+        ));
+    }
+    Some(text)
 }
 
 /// 格式化对局毫秒时间戳为月/日 (MM/DD)

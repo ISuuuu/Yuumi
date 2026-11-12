@@ -194,6 +194,10 @@ pub fn compute_match_stats<M: MatchLike>(matches: &[M]) -> ComputedMatchStats {
     let mut total_valid_positions = 0u32;
 
     for m in matches {
+        // 重开局不足 3 分钟，分路任务道具不会出现，位置不可靠
+        if m.is_remake() {
+            continue;
+        }
         if let Some(pos) = normalize_position(m.position()) {
             *pos_counts.entry(pos).or_insert(0) += 1;
             total_valid_positions += 1;

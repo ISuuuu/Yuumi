@@ -3,6 +3,8 @@ use super::*;
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 悬浮提示在鼠标事件里需要宿主视图句柄来触发重绘，渲染期记录一次
+        crate::components::tooltip::set_host_view(cx.entity().entity_id());
         let _is_overlay_open = self.overlay_window.is_some();
         // 记录主窗所在区域：OP.GG 独立窗按主窗所在屏幕定位（对照 Vue 跟随主窗口）
         self.main_window_bounds = Some(window.bounds());

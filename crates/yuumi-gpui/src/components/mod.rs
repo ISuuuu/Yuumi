@@ -12,3 +12,4 @@ pub mod switch;
 pub mod text_field;
 pub mod titlebar;
 pub mod toast;
+pub mod tooltip;

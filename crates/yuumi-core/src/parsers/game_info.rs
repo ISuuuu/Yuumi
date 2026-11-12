@@ -12,7 +12,9 @@ use std::collections::{HashMap, HashSet};
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use crate::gameflow::match_stats::{compute_match_stats, StreakInfo, StreakType};
+use crate::gameflow::match_stats::{
+    compute_match_stats, AggregatedPositions, StreakInfo, StreakType,
+};
 use crate::gameflow::player_identity::get_valid_tpid;
 use crate::gameflow::team_builder::{
     resolve_team_side, MapSide, SnapshotParticipant, TeamBuildContext,
@@ -20,10 +22,12 @@ use crate::gameflow::team_builder::{
 use crate::lcu::client::LcuClient;
 use crate::lcu::game_data::GameDataAssets;
 use crate::parsers::match_detail::{fetch_game_detail, GameDetail};
-use crate::parsers::match_parser::{fetch_match_history, get_queue_info, MatchDisplay};
+use crate::parsers::match_parser::{
+    fetch_match_history_smart, get_queue_info, is_laned_mode, MatchDisplay,
+};
 
 /// 每名玩家拉取的近期对局数量
-pub const RECENT_MATCH_LIMIT: u32 = 20;
+pub const RECENT_MATCH_LIMIT: u32 = 50;
 /// 玩家数据并发拉取上限
 const PLAYER_FETCH_CONCURRENCY: usize = 5;
 /// 宿命对局详情回捞上限（只回捞与本人战绩存在交集的对局）
@@ -591,6 +595,9 @@ pub struct FateInfo {
     pub game_creation: u64,
     /// 该玩家在最近一次交手中使用的英雄
     pub champion_id: i32,
+    /// 上面对应的英雄名（展示用，构建时填充）
+    #[serde(default)]
+    pub champion_name: String,
     pub ally_count: u32,
     pub enemy_count: u32,
 }
@@ -623,6 +630,27 @@ pub struct TopChampion {
     pub win_rate: u32,
 }
 
+/// 单条英雄熟练度（仅保留判定所需字段）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MasteryEntry {
+    pub champion_id: i32,
+    pub level: u32,
+    pub points: u32,
+}
+
+/// 当前所选英雄的熟练度摘要（招牌 / 练英雄判定，对齐 Vue getPlayerMasteryDetail）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MasteryBadge {
+    pub level: u32,
+    pub points: u32,
+    /// 招牌：熟练度前 3 且点数 >= 1w，或总点数 >= 10w
+    pub is_top_champion: bool,
+    /// 练英雄：非招牌且等级 <= 1 或点数 < 5000
+    pub is_practicing: bool,
+}
+
 /// 单名玩家的对局信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -644,6 +672,12 @@ pub struct GameInfoPlayer {
     pub ranked_wins: u32,
     pub ranked_losses: u32,
     pub recent_match_count: usize,
+    /// 近期召唤师峡谷对局胜场（不含重开与娱乐模式）
+    #[serde(default)]
+    pub recent_wins: u32,
+    /// 近期召唤师峡谷对局负场
+    #[serde(default)]
+    pub recent_losses: u32,
     pub win_rate: u32,
     pub avg_kda: f64,
     pub avg_kills: f32,
@@ -672,6 +706,12 @@ pub struct GameInfoPlayer {
     /// 历史相遇总次数
     #[serde(default)]
     pub saved_encounter_count: u32,
+    /// 近期对局位置分布（主玩 / 副玩占比）
+    #[serde(default)]
+    pub positions: Option<AggregatedPositions>,
+    /// 当前英雄熟练度摘要（招牌 / 练英雄）
+    #[serde(default)]
+    pub mastery: Option<MasteryBadge>,
     /// 是否成功拉到段位或战绩（否则前端展示占位）
     pub data_available: bool,
 }
@@ -882,6 +922,14 @@ fn make_mock_player(
         ranked_wins,
         ranked_losses,
         recent_match_count: matches.len(),
+        recent_wins: matches
+            .iter()
+            .filter(|m| !m.remake && is_laned_mode(m.queue_id) && m.win)
+            .count() as u32,
+        recent_losses: matches
+            .iter()
+            .filter(|m| !m.remake && is_laned_mode(m.queue_id) && !m.win)
+            .count() as u32,
         win_rate,
         avg_kda,
         avg_kills: kills,
@@ -898,6 +946,8 @@ fn make_mock_player(
         top_champions,
         saved_tag: None,
         saved_encounter_count: 0,
+        positions: None,
+        mastery: None,
         data_available: true,
     }
 }
@@ -996,6 +1046,7 @@ fn make_demo_instance() -> LiveGameInfo {
                     game_id: 9999999001,
                     game_creation: 1794000000000,
                     champion_id: 103,
+                    champion_name: "九尾妖狐".to_string(),
                     ally_count: 2,
                     enemy_count: 0,
                 }),
@@ -1141,6 +1192,7 @@ fn make_demo_instance() -> LiveGameInfo {
                     game_id: 9999999002,
                     game_creation: 1794000000000,
                     champion_id: 238,
+                    champion_name: "影流之镰".to_string(),
                     ally_count: 0,
                     enemy_count: 3,
                 }),
@@ -1536,6 +1588,14 @@ fn parse_snapshot_json(content: &str) -> Result<LiveGameInfo, Box<dyn std::error
                 ranked_wins,
                 ranked_losses,
                 recent_match_count: matches.len(),
+                recent_wins: matches
+                    .iter()
+                    .filter(|m| !m.remake && is_laned_mode(m.queue_id) && m.win)
+                    .count() as u32,
+                recent_losses: matches
+                    .iter()
+                    .filter(|m| !m.remake && is_laned_mode(m.queue_id) && !m.win)
+                    .count() as u32,
                 win_rate,
                 avg_kda,
                 avg_kills: 0.0,
@@ -1552,6 +1612,8 @@ fn parse_snapshot_json(content: &str) -> Result<LiveGameInfo, Box<dyn std::error
                 top_champions,
                 saved_tag: None,
                 saved_encounter_count: 0,
+                positions: None,
+                mastery: None,
                 data_available: true,
             });
         }
@@ -1611,6 +1673,26 @@ pub fn position_display(assigned_position: Option<&str>) -> String {
 pub struct PlayerFetchData {
     pub ranked: Option<RankedQueueEntry>,
     pub recent: Vec<MatchDisplay>,
+    /// 会话内名字为空时的兜底身份（对局阶段 gameflow teamOne/teamTwo 的 summonerName 常为空串）
+    pub identity: Option<SummonerIdentity>,
+    /// 英雄熟练度列表（按点数降序），用于招牌 / 练英雄判定
+    pub masteries: Vec<MasteryEntry>,
+}
+
+/// 玩家真实 Riot ID
+#[derive(Debug, Clone, Default)]
+pub struct SummonerIdentity {
+    pub game_name: String,
+    pub tag_line: String,
+    pub level: u32,
+}
+
+/// 会话内可用于召唤师身份反查的线索
+#[derive(Debug, Clone, Default)]
+pub struct IdentityHint {
+    pub summoner_id: i64,
+    /// 会话里已有的名字（脱敏/占位也算），用于 puuid 与 summonerId 都查不到时按名反查
+    pub fallback_name: Option<String>,
 }
 
 /// 本人近期对局（用于宿命判定，仅回捞存在交集的对局详情）
@@ -1719,6 +1801,7 @@ pub fn detect_fate(
         game_id: game.game_id,
         game_creation: game.game_creation,
         champion_id: game.champions.get(player_puuid).copied().unwrap_or(0),
+        champion_name: String::new(),
         ally_count,
         enemy_count,
     })
@@ -1812,7 +1895,14 @@ fn build_player(
     fetch: Option<&PlayerFetchData>,
     ctx: &PlayerBuildContext<'_>,
 ) -> GameInfoPlayer {
-    let (summoner_name, tag_line) = session.name_parts();
+    let (mut summoner_name, mut tag_line) = session.name_parts();
+    // 名字以召唤师接口返回为准（对齐 Vue 版），会话字段仅在接口不可用时兜底
+    if let Some(identity) = fetch.and_then(|f| f.identity.as_ref()) {
+        summoner_name = identity.game_name.clone();
+        if !identity.tag_line.is_empty() {
+            tag_line = identity.tag_line.clone();
+        }
+    }
     let puuid = session.resolved_puuid().unwrap_or("").to_string();
     let summoner_id = session.resolved_summoner_id().unwrap_or(0);
     let champion_id = session.resolved_champion_id();
@@ -1843,6 +1933,15 @@ fn build_player(
             ctx.my_games,
             ctx.latest_my_game_id,
         )
+        .map(|mut fate| {
+            fate.champion_name = ctx
+                .assets
+                .champions
+                .get(&fate.champion_id)
+                .cloned()
+                .unwrap_or_default();
+            fate
+        })
     };
 
     let is_local_player = !puuid.is_empty()
@@ -1882,6 +1981,18 @@ fn build_player(
             .then_with(|| b.win_rate.cmp(&a.win_rate))
     });
     top_champions.truncate(3);
+
+    // 近期胜负只统计召唤师峡谷对局（排除重开与娱乐模式），对齐旧版「近 50 局统计胜负」
+    let (recent_wins, recent_losses) = recent
+        .iter()
+        .filter(|m| !m.remake && is_laned_mode(m.queue_id))
+        .fold((0u32, 0u32), |(wins, losses), m| {
+            if m.win {
+                (wins + 1, losses)
+            } else {
+                (wins, losses + 1)
+            }
+        });
 
     let (saved_tag, saved_encounter_count) = if !puuid.is_empty() {
         ctx.saved_markers
@@ -1927,6 +2038,8 @@ fn build_player(
         ranked_wins: ranked.map(|r| r.wins).unwrap_or(0),
         ranked_losses: ranked.map(|r| r.losses).unwrap_or(0),
         recent_match_count: recent_count,
+        recent_wins,
+        recent_losses,
         win_rate: stats.win_rate,
         avg_kda: stats.avg_kda,
         avg_kills,
@@ -1940,14 +2053,28 @@ fn build_player(
         fate,
         is_local_player,
         is_bot: session.is_bot(),
-        summoner_level: 0,
+        summoner_level: fetch
+            .and_then(|f| f.identity.as_ref())
+            .map(|identity| identity.level)
+            .unwrap_or(0),
         profile_icon_id: session.profile_icon_id.unwrap_or(0),
         matches: recent.to_vec(),
         top_champions,
         saved_tag,
         saved_encounter_count,
+        positions: (stats.positions.total_valid > 0).then_some(stats.positions),
+        mastery: fetch.and_then(|f| mastery_badge(&f.masteries, champion_id)),
         data_available: ranked.is_some() || recent_count > 0,
     }
+}
+
+/// 复用路人集存储句柄：对局信息每次重建都打开 SQLite 建表开销过大，进程内只打开一次
+fn saved_players_storage() -> Option<&'static crate::storage::SavedPlayersStorage> {
+    static STORAGE: std::sync::OnceLock<Option<crate::storage::SavedPlayersStorage>> =
+        std::sync::OnceLock::new();
+    STORAGE
+        .get_or_init(|| crate::storage::SavedPlayersStorage::open_default().ok())
+        .as_ref()
 }
 
 /// 由会话来源 + 各玩家拉取结果构建 10 人对局信息（纯函数，便于测试）
@@ -1960,7 +2087,7 @@ pub fn build_live_game_info(
     assets: &GameDataAssets,
 ) -> LiveGameInfo {
     let (side, side_matched) = bind_team_side(source, self_puuid, self_summoner_id);
-    let saved_markers = crate::storage::SavedPlayersStorage::open_default()
+    let saved_markers = saved_players_storage()
         .map(|s| s.get_saved_markers(self_puuid))
         .unwrap_or_default();
 
@@ -2050,32 +2177,310 @@ pub fn placed_ranked_entry(stats: &RankedStats) -> Option<RankedQueueEntry> {
     Some(entry.clone())
 }
 
-/// 拉取单个玩家的排位与近期对局（任一失败均降级为空）
+/// 拉取单个玩家的数据分两段执行：
+/// - `full = false`：只取身份与段位（2 个请求），用于首帧快速出骨架；
+/// - `full = true`：再补近期对局与熟练度，已有骨架缓存时直接复用。
 async fn fetch_player_data(
     client: &LcuClient,
     puuid: &str,
     assets: &GameDataAssets,
+    hint: Option<&IdentityHint>,
+    is_self: bool,
+    full: bool,
 ) -> PlayerFetchData {
-    let ranked_path = format!("/lol-ranked/v1/ranked-stats/{}", puuid);
-    let (ranked_resp, history_resp) = tokio::join!(
-        client.get(&ranked_path),
-        fetch_match_history(client, puuid, Some(0), Some(RECENT_MATCH_LIMIT - 1), assets)
-    );
+    if let Some((data, stage)) = cached_player_data(puuid) {
+        if !full || stage == PLAYER_DATA_STAGE_FULL {
+            return data;
+        }
+    }
 
-    let ranked = ranked_resp.ok().and_then(|value| {
-        serde_json::from_value::<RankedStats>(value)
-            .ok()
-            .and_then(|stats| stats.preferred_entry().cloned())
-    });
+    let ranked_path = format!("/lol-ranked/v1/ranked-stats/{}", puuid);
+    let name_resolved = |identity: &Option<SummonerIdentity>| {
+        identity.is_some() || hint.is_some_and(|h| h.fallback_name.is_some())
+    };
+
+    if !full {
+        let (ranked_resp, identity) = tokio::join!(
+            client.get(&ranked_path),
+            fetch_summoner_identity(client, puuid, hint)
+        );
+        let data = PlayerFetchData {
+            ranked: parse_ranked_entry(ranked_resp),
+            recent: Vec::new(),
+            identity,
+            masteries: Vec::new(),
+        };
+        // 名字尚未查到时不写缓存，下次刷新重试
+        if name_resolved(&data.identity) {
+            store_player_data(puuid, &data, PLAYER_DATA_STAGE_QUICK);
+        }
+        return data;
+    }
+
+    // 完整拉取：已有骨架缓存时只补战绩与熟练度
+    if let Some((base, _)) = cached_player_data(puuid) {
+        let (history_resp, masteries) = tokio::join!(
+            fetch_match_history_smart(client, puuid, 0, RECENT_MATCH_LIMIT - 1, assets, false),
+            fetch_player_masteries(client, puuid, hint, is_self)
+        );
+        let mut recent = history_resp.unwrap_or_default();
+        recent.truncate(RECENT_MATCH_LIMIT as usize);
+        let data = PlayerFetchData {
+            recent,
+            masteries,
+            ..base
+        };
+        if name_resolved(&data.identity) {
+            store_player_data(puuid, &data, PLAYER_DATA_STAGE_FULL);
+        }
+        return data;
+    }
+
+    let (ranked_resp, history_resp, identity, masteries) = tokio::join!(
+        client.get(&ranked_path),
+        fetch_match_history_smart(client, puuid, 0, RECENT_MATCH_LIMIT - 1, assets, false),
+        fetch_summoner_identity(client, puuid, hint),
+        fetch_player_masteries(client, puuid, hint, is_self)
+    );
 
     let mut recent = history_resp.unwrap_or_default();
     // LCU 产品接口实际会比 endIndex 多返回一场，统一裁剪为 20 场
     recent.truncate(RECENT_MATCH_LIMIT as usize);
 
-    PlayerFetchData { ranked, recent }
+    let data = PlayerFetchData {
+        ranked: parse_ranked_entry(ranked_resp),
+        recent,
+        identity,
+        masteries,
+    };
+    if name_resolved(&data.identity) {
+        store_player_data(puuid, &data, PLAYER_DATA_STAGE_FULL);
+    }
+    data
 }
 
-/// 实时构建当前对局信息：并发拉取 10 人数据 + 宿命对局回捞
+/// 解析段位统计响应，取最优先队列的段位项
+fn parse_ranked_entry(ranked_resp: Result<serde_json::Value, String>) -> Option<RankedQueueEntry> {
+    ranked_resp.ok().and_then(|value| {
+        serde_json::from_value::<RankedStats>(value)
+            .ok()
+            .and_then(|stats| stats.preferred_entry().cloned())
+    })
+}
+
+/// 缓存中的单名玩家数据（带拉取时刻与完成阶段）
+struct CachedPlayerData {
+    data: PlayerFetchData,
+    /// 1 = 仅身份+段位（骨架），2 = 含战绩与熟练度（完整）
+    stage: u8,
+    fetched_at: std::time::Instant,
+}
+
+/// 骨架阶段：身份与段位
+const PLAYER_DATA_STAGE_QUICK: u8 = 1;
+/// 完整阶段：额外包含近期对局与熟练度
+const PLAYER_DATA_STAGE_FULL: u8 = 2;
+
+/// 玩家数据进程内缓存：选人/对局阶段反复刷新时直接复用已拉到的段位与战绩，
+/// 只对首次出现的 puuid 发请求（对齐 Vue 版 playerData 复用）
+fn cached_player_data_map() -> &'static std::sync::Mutex<HashMap<String, CachedPlayerData>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, CachedPlayerData>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// 缓存有效期：超过后重新拉取，避免长时间运行后数据过旧
+const PLAYER_DATA_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+/// 缓存条目上限，超出后整体清空
+const PLAYER_DATA_CACHE_LIMIT: usize = 64;
+/// 单名玩家保留的熟练度条目上限（按点数降序裁剪）
+const MASTERY_LIST_LIMIT: usize = 200;
+
+/// 清空玩家数据缓存：新一轮对局开始时调用，避免复用上一局拉到的战绩与段位
+pub fn clear_player_data_cache() {
+    if let Ok(mut cache) = cached_player_data_map().lock() {
+        cache.clear();
+    }
+}
+
+/// 读取缓存条目：返回数据与完成阶段
+fn cached_player_data(puuid: &str) -> Option<(PlayerFetchData, u8)> {
+    let mut cache = cached_player_data_map().lock().ok()?;
+    let entry = cache.get(puuid)?;
+    if entry.fetched_at.elapsed() > PLAYER_DATA_TTL {
+        cache.remove(puuid);
+        return None;
+    }
+    Some((entry.data.clone(), entry.stage))
+}
+
+fn store_player_data(puuid: &str, data: &PlayerFetchData, stage: u8) {
+    let Ok(mut cache) = cached_player_data_map().lock() else {
+        return;
+    };
+    cache.retain(|_, entry| entry.fetched_at.elapsed() <= PLAYER_DATA_TTL);
+    if cache.len() >= PLAYER_DATA_CACHE_LIMIT {
+        cache.clear();
+    }
+    cache.insert(
+        puuid.to_string(),
+        CachedPlayerData {
+            data: data.clone(),
+            stage,
+            fetched_at: std::time::Instant::now(),
+        },
+    );
+}
+
+/// 查询真实 Riot ID：puuid → summonerId → 会话名字 三级兜底（对齐 Vue 版 fetchRealPlayerData）。
+/// 对局中 gameflow session 的 summonerName/displayName 全为空串，而 /lol-summoner 接口仍返回 gameName/tagLine
+async fn fetch_summoner_identity(
+    client: &LcuClient,
+    puuid: &str,
+    hint: Option<&IdentityHint>,
+) -> Option<SummonerIdentity> {
+    let by_puuid = format!("/lol-summoner/v2/summoners/puuid/{}", puuid);
+    if let Ok(value) = client.get(&by_puuid).await {
+        if let Some(identity) = summoner_identity_from(&value) {
+            return Some(identity);
+        }
+    }
+
+    let summoner_id = hint.map(|h| h.summoner_id).filter(|&id| id > 0);
+    if let Some(summoner_id) = summoner_id {
+        let by_id = format!("/lol-summoner/v1/summoners/{}", summoner_id);
+        if let Ok(value) = client.get(&by_id).await {
+            if let Some(identity) = summoner_identity_from(&value) {
+                return Some(identity);
+            }
+        }
+    }
+
+    let name = hint.and_then(|h| h.fallback_name.as_deref())?;
+    let encoded = percent_encoding::utf8_percent_encode(name, percent_encoding::NON_ALPHANUMERIC);
+    let by_name = format!("/lol-summoner/v1/summoners?name={}", encoded);
+    let value = client.get(&by_name).await.ok()?;
+    summoner_identity_from(&value)
+}
+
+/// 拉取英雄熟练度：puuid → 自己走 local-player → summonerId 三级兜底（对齐 Vue fetchPlayerMastery），
+/// 结果按点数降序裁剪，供招牌 / 练英雄判定
+async fn fetch_player_masteries(
+    client: &LcuClient,
+    puuid: &str,
+    hint: Option<&IdentityHint>,
+    is_self: bool,
+) -> Vec<MasteryEntry> {
+    let by_puuid = format!("/lol-champion-mastery/v1/{}/champion-mastery", puuid);
+    if let Some(list) = fetch_mastery_list(client, &by_puuid).await {
+        return list;
+    }
+
+    if is_self {
+        if let Some(list) = fetch_mastery_list(
+            client,
+            "/lol-champion-mastery/v1/local-player/champion-mastery",
+        )
+        .await
+        {
+            return list;
+        }
+    }
+
+    let summoner_id = hint.map(|h| h.summoner_id).filter(|&id| id > 0);
+    if let Some(summoner_id) = summoner_id {
+        let by_id = format!(
+            "/lol-champion-mastery/v1/summoners/{}/champion-mastery",
+            summoner_id
+        );
+        if let Some(list) = fetch_mastery_list(client, &by_id).await {
+            return list;
+        }
+    }
+
+    Vec::new()
+}
+
+/// 请求并解析单个熟练度接口；返回 None 表示接口不可用（用于触发下一级兜底）
+async fn fetch_mastery_list(client: &LcuClient, path: &str) -> Option<Vec<MasteryEntry>> {
+    let value = client.get(path).await.ok()?;
+    let items = value.as_array()?;
+    let mut list: Vec<MasteryEntry> = items
+        .iter()
+        .filter_map(|item| {
+            let champion_id = item
+                .get("championId")
+                .or_else(|| item.get("champion_id"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0) as i32;
+            if champion_id <= 0 {
+                return None;
+            }
+            Some(MasteryEntry {
+                champion_id,
+                level: item
+                    .get("championLevel")
+                    .or_else(|| item.get("masteryLevel"))
+                    .or_else(|| item.get("level"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32,
+                points: item
+                    .get("championPoints")
+                    .or_else(|| item.get("points"))
+                    .or_else(|| item.get("score"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32,
+            })
+        })
+        .collect();
+    list.sort_by_key(|entry| std::cmp::Reverse(entry.points));
+    list.truncate(MASTERY_LIST_LIMIT);
+    Some(list)
+}
+
+/// 当前所选英雄的熟练度摘要；未查到熟练度数据时返回 None
+fn mastery_badge(masteries: &[MasteryEntry], champion_id: i32) -> Option<MasteryBadge> {
+    if masteries.is_empty() || champion_id <= 0 {
+        return None;
+    }
+    let current = masteries.iter().find(|m| m.champion_id == champion_id);
+    let level = current.map(|m| m.level).unwrap_or(0);
+    let points = current.map(|m| m.points).unwrap_or(0);
+    let in_top3 = masteries
+        .iter()
+        .take(3)
+        .any(|m| m.champion_id == champion_id);
+    let is_top_champion = (in_top3 && points >= 10_000) || points >= 100_000;
+    Some(MasteryBadge {
+        level,
+        points,
+        is_top_champion,
+        is_practicing: !is_top_champion && (level <= 1 || points < 5_000),
+    })
+}
+
+/// 从召唤师信息载荷取真实 Riot ID（腾讯客户端 displayName 常为空，优先 gameName）
+fn summoner_identity_from(value: &serde_json::Value) -> Option<SummonerIdentity> {
+    let pick = |key: &str| {
+        value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let game_name = pick("gameName").or_else(|| pick("displayName"))?;
+    Some(SummonerIdentity {
+        game_name,
+        tag_line: pick("tagLine").unwrap_or_default(),
+        level: value
+            .get("summonerLevel")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32,
+    })
+}
+
+/// 实时构建当前对局信息：并发拉取 10 人完整数据 + 宿命对局回捞
 pub async fn fetch_live_game_info(
     client: &LcuClient,
     self_puuid: &str,
@@ -2084,11 +2489,83 @@ pub async fn fetch_live_game_info(
     recent_matches: &[MatchDisplay],
     assets: &GameDataAssets,
 ) -> LiveGameInfo {
+    fetch_live_game_info_inner(
+        client,
+        self_puuid,
+        self_summoner_id,
+        source,
+        recent_matches,
+        assets,
+        true,
+    )
+    .await
+}
+
+/// 快速构建：只拉身份与段位，用于首帧骨架（战绩/熟练度/宿命随后由完整拉取补齐）
+pub async fn fetch_live_game_info_quick(
+    client: &LcuClient,
+    self_puuid: &str,
+    self_summoner_id: Option<i64>,
+    source: GameInfoSource,
+    recent_matches: &[MatchDisplay],
+    assets: &GameDataAssets,
+) -> LiveGameInfo {
+    fetch_live_game_info_inner(
+        client,
+        self_puuid,
+        self_summoner_id,
+        source,
+        recent_matches,
+        assets,
+        false,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fetch_live_game_info_inner(
+    client: &LcuClient,
+    self_puuid: &str,
+    self_summoner_id: Option<i64>,
+    source: GameInfoSource,
+    recent_matches: &[MatchDisplay],
+    assets: &GameDataAssets,
+    full: bool,
+) -> LiveGameInfo {
     let puuids = source.puuids();
 
-    let fetched: Vec<(String, PlayerFetchData)> = stream::iter(puuids)
-        .map(|puuid| async move {
-            let data = fetch_player_data(client, &puuid, assets).await;
+    // 会话内的身份线索：对局阶段 gameflow session 的 summonerName/displayName 常为空串，
+    // 名字统一以 /lol-summoner 接口返回为准（对齐 Vue 版 puuid → summonerId → 名字 三级兜底）
+    let hints: HashMap<String, IdentityHint> = source
+        .blue
+        .iter()
+        .chain(source.red.iter())
+        .filter_map(|p| {
+            let puuid = p.resolved_puuid()?;
+            let (name, _) = p.name_parts();
+            Some((
+                puuid.to_string(),
+                IdentityHint {
+                    summoner_id: p.resolved_summoner_id().unwrap_or(0),
+                    fallback_name: (!name.is_empty()).then_some(name),
+                },
+            ))
+        })
+        .collect();
+
+    let targets: Vec<(String, Option<IdentityHint>)> = puuids
+        .into_iter()
+        .map(|puuid| {
+            let hint = hints.get(&puuid).cloned();
+            (puuid, hint)
+        })
+        .collect();
+
+    let fetched: Vec<(String, PlayerFetchData)> = stream::iter(targets)
+        .map(|(puuid, hint)| async move {
+            let is_self = puuid == self_puuid;
+            let data =
+                fetch_player_data(client, &puuid, assets, hint.as_ref(), is_self, full).await;
             (puuid, data)
         })
         .buffer_unordered(PLAYER_FETCH_CONCURRENCY)
@@ -2694,6 +3171,7 @@ pub async fn detect_liveclient_map_side() -> Option<MapSide> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gameflow::match_stats::PositionKey;
 
     const CHAMP_SELECT_FIXTURE: &str =
         include_str!("../../testdata/session/champ-select-ranked-420.json");
@@ -2866,6 +3344,96 @@ mod tests {
     }
 
     #[test]
+    fn empty_session_names_fall_back_to_fetched_identity() {
+        // 对局阶段 gameflow session 的 summonerName/displayName 全为空串（腾讯客户端实测），
+        // 名字必须由 /lol-summoner/v2/summoners/puuid 补查结果兜底
+        let mut source = gameflow_source();
+        for player in source.blue.iter_mut().chain(source.red.iter_mut()) {
+            player.display_name = None;
+            player.summoner_name = None;
+            player.game_name = None;
+            player.tag_line = None;
+        }
+
+        let mut fetch = HashMap::new();
+        for player in source.blue.iter().chain(source.red.iter()) {
+            let Some(puuid) = player.resolved_puuid() else {
+                continue;
+            };
+            fetch.insert(
+                puuid.to_string(),
+                PlayerFetchData {
+                    identity: Some(SummonerIdentity {
+                        game_name: format!("name-{puuid}"),
+                        tag_line: "1234".to_string(),
+                        level: 0,
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+
+        let info = build_live_game_info(
+            &source,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &fetch,
+            &GameDataAssets::default(),
+        );
+
+        for player in info.blue_team.iter().chain(info.red_team.iter()) {
+            if player.puuid.is_empty() {
+                assert_eq!(player.summoner_name, "未知玩家");
+            } else {
+                assert_eq!(player.summoner_name, format!("name-{}", player.puuid));
+                assert_eq!(player.tag_line, "1234");
+            }
+        }
+    }
+
+    #[test]
+    fn fetched_identity_overrides_session_name() {
+        // 会话字段可能被脱敏或只给了旧名，名字统一以召唤师接口返回为准（Vue 版同名逻辑）
+        let source = gameflow_source();
+        let target = source
+            .blue
+            .iter()
+            .chain(source.red.iter())
+            .find_map(|p| p.resolved_puuid().map(str::to_string))
+            .expect("fixture 应至少有一名真实玩家");
+
+        let mut fetch = HashMap::new();
+        fetch.insert(
+            target.clone(),
+            PlayerFetchData {
+                identity: Some(SummonerIdentity {
+                    game_name: "接口名".to_string(),
+                    tag_line: "9999".to_string(),
+                    level: 0,
+                }),
+                ..Default::default()
+            },
+        );
+
+        let info = build_live_game_info(
+            &source,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &fetch,
+            &GameDataAssets::default(),
+        );
+
+        let player = info
+            .players()
+            .find(|p| p.puuid == target)
+            .expect("应能找到目标玩家");
+        assert_eq!(player.summoner_name, "接口名");
+        assert_eq!(player.tag_line, "9999");
+    }
+
+    #[test]
     fn ranked_fixture_prefers_solo_queue() {
         let stats: RankedStats =
             serde_json::from_str(RANKED_FIXTURE).expect("排位数据应能反序列化");
@@ -2909,6 +3477,8 @@ mod tests {
                     ..Default::default()
                 }),
                 recent,
+                identity: None,
+                masteries: Vec::new(),
             },
         );
 
@@ -2942,6 +3512,80 @@ mod tests {
         assert!(!no_data.data_available);
         assert_eq!(no_data.rank_display, "未定级");
         assert_eq!(no_data.win_rate, 0);
+    }
+
+    #[test]
+    fn built_player_exposes_position_distribution() {
+        let source = champ_select_source();
+        let mut fetch = HashMap::new();
+        fetch.insert(
+            "puuid-ally-mid".to_string(),
+            PlayerFetchData {
+                recent: vec![
+                    sample_match(1, true, 5, 2, 6),
+                    sample_match(2, false, 3, 5, 4),
+                    sample_match(3, true, 8, 1, 9),
+                ],
+                ..Default::default()
+            },
+        );
+
+        let info = build_live_game_info(
+            &source,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &fetch,
+            &GameDataAssets::default(),
+        );
+
+        let player = info
+            .blue_team
+            .iter()
+            .find(|p| p.puuid == "puuid-ally-mid")
+            .expect("应命中有数据的中单");
+        let positions = player
+            .positions
+            .as_ref()
+            .expect("三场带分路的对局应产出位置分布");
+        assert_eq!(positions.total_valid, 3);
+        assert_eq!(positions.primary_position, Some(PositionKey::Top));
+        assert_eq!(positions.primary_percentage, 100);
+    }
+
+    #[test]
+    fn mastery_badge_marks_top_and_practicing_champions() {
+        let masteries = vec![
+            MasteryEntry {
+                champion_id: 266,
+                level: 12,
+                points: 320_000,
+            },
+            MasteryEntry {
+                champion_id: 103,
+                level: 7,
+                points: 42_000,
+            },
+            MasteryEntry {
+                champion_id: 22,
+                level: 5,
+                points: 12_000,
+            },
+        ];
+
+        let top = mastery_badge(&masteries, 266).expect("应有熟练度摘要");
+        assert!(top.is_top_champion);
+        assert!(!top.is_practicing);
+        assert_eq!(top.points, 320_000);
+
+        // 未出现在熟练度列表中的英雄 → 0 级 0 点，判定为练英雄
+        let practicing = mastery_badge(&masteries, 5).expect("应有熟练度摘要");
+        assert!(!practicing.is_top_champion);
+        assert!(practicing.is_practicing);
+        assert_eq!(practicing.level, 0);
+
+        assert!(mastery_badge(&[], 266).is_none());
+        assert!(mastery_badge(&masteries, 0).is_none());
     }
 
     #[test]

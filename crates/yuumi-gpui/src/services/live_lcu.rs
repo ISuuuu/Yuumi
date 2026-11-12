@@ -20,9 +20,10 @@ use yuumi_core::lcu::{
     ws::{start_ws, LcuWsEvent, LcuWsHandle},
 };
 use yuumi_core::parsers::game_info::{
-    clear_player_data_cache, fetch_live_game_info, fetch_liveclient_snapshot, fetch_ranked_stats,
-    liveclient_map_side, liveclient_teams, merge_liveclient_teams, ChampSelectSnapshot,
-    GameInfoSource, GameflowSessionSnapshot, LiveGameInfo, RankedStats,
+    clear_player_data_cache, fetch_live_game_info, fetch_live_game_info_quick,
+    fetch_liveclient_snapshot, fetch_ranked_stats, liveclient_map_side, liveclient_teams,
+    merge_liveclient_teams, ChampSelectSnapshot, GameInfoSource, GameflowSessionSnapshot,
+    LiveGameInfo, RankedStats,
 };
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
 use yuumi_core::parsers::loot_actions::{
@@ -1161,6 +1162,23 @@ impl LiveLcuService {
         );
         let _ = self.event_tx.send(LiveLcuEvent::GameInfoLoading);
 
+        // 第一段：身份 + 段位（快），先把 10 人骨架顶上去，避免面板空等 8~9 秒
+        let quick = fetch_live_game_info_quick(
+            &client,
+            &summoner.puuid,
+            self_summoner_id,
+            source.clone(),
+            &recent,
+            &assets,
+        )
+        .await;
+        {
+            let quick = Arc::new(quick);
+            *self.game_info.write().await = Some(quick.clone());
+            let _ = self.event_tx.send(LiveLcuEvent::GameInfoUpdated(quick));
+        }
+
+        // 第二段：战绩 / 熟练度 / 宿命（复用上面的骨架缓存）
         let mut info = fetch_live_game_info(
             &client,
             &summoner.puuid,
