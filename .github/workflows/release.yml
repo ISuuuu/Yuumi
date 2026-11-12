@@ -59,7 +59,9 @@ jobs:
     runs-on: windows-latest
     env:
       CARGO_INCREMENTAL: 0
-      RUSTFLAGS: "-C linker=lld-link"
+      # 静态链接 MSVC CRT：便携版/安装包经常在未安装 VC++ 运行库的干净系统（如 Windows 沙箱）上直接运行，
+      # 动态 CRT 会因缺少 VCRUNTIME140.dll 而无法启动。
+      RUSTFLAGS: "-C linker=lld-link -C target-feature=+crt-static"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

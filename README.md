@@ -48,7 +48,9 @@ cargo run -p yuumi-gpui
 cargo run --bin yuumi
 
 # 构建生产发布版本（生成产物位于 target/release/yuumi.exe）
-cargo build --release -p yuumi-gpui
+# +crt-static 静态链接 MSVC CRT，产物不依赖 VCRUNTIME140.dll（便携版需能在未装 VC++ 运行库的机器/沙箱上运行）
+RUSTFLAGS="-C target-feature=+crt-static" cargo build --release -p yuumi-gpui
+# PowerShell 等价写法：$env:RUSTFLAGS="-C target-feature=+crt-static"; cargo build --release -p yuumi-gpui
 
 # 代码格式化与规范自测（提交前建议自测）
 cargo fmt --all                        # 自动修复并对齐所有 Rust 代码格式
@@ -60,7 +62,7 @@ cargo test --workspace                 # 运行全工作区单元测试（含 14
 node scripts/capture-lcu-fixtures.mjs
 ```
 
-> **Git 钩子提示**: 仓库集成了 `.githooks/pre-commit`，在 `git commit` 时会自动对暂存的 `.rs` 文件执行 `rustfmt` 并运行 `cargo clippy --workspace --all-targets` 质量门禁。
+> **Git 钩子提示**: 仓库集成了 `.githooks/pre-commit`，在 `git commit` 时会自动对暂存的 `.rs` 文件执行 `rustfmt`，并在暂存区包含 `.rs` / `Cargo.toml` / `Cargo.lock` 时运行 `cargo clippy --workspace --all-targets` 质量门禁。钩子不随 clone 自动启用，首次使用需在仓库根目录执行一次 `git config core.hooksPath .githooks`。
 
 ## 项目结构
 

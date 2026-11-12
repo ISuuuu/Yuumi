@@ -11,7 +11,8 @@ on:
 
 env:
   CARGO_INCREMENTAL: 0
-  RUSTFLAGS: "-C linker=lld-link"
+  # 与 release.yml 保持一致（静态链接 MSVC CRT，避免依赖 VCRUNTIME140.dll），否则 rust-cache 无法复用
+  RUSTFLAGS: "-C linker=lld-link -C target-feature=+crt-static"
 
 jobs:
   check-and-cache:
