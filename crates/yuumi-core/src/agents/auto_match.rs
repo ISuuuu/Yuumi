@@ -891,7 +891,7 @@ async fn spawn_aram_team_side(
                     "celebration"
                 };
                 let message = serde_json::json!({
-                    "body": format!("[Yuumi] 本局我方在{}", side_name),
+                    "body": format!("[YuumiN] 本局我方在{}", side_name),
                     "type": message_type,
                 });
                 let path = format!("/lol-chat/v1/conversations/{}/messages", conv_id);

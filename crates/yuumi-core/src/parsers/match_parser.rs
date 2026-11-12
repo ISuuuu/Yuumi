@@ -137,6 +137,48 @@ pub struct MatchDisplay {
     pub role_bound_item: Option<i32>,
 }
 
+impl MatchDisplay {
+    /// 当早期解析时 `GameDataAssets` 尚未完整就绪导致部分图标 URL 缺失，在字典补全后按 ID 重新填充。
+    pub fn rehydrate_icons(&mut self, assets: &GameDataAssets) {
+        if self.spell1_icon_url.is_empty() && self.spell1_id > 0 {
+            if let Some(url) = assets.spells.get(&self.spell1_id) {
+                self.spell1_icon_url = url.clone();
+            }
+        }
+        if self.spell2_icon_url.is_empty() && self.spell2_id > 0 {
+            if let Some(url) = assets.spells.get(&self.spell2_id) {
+                self.spell2_icon_url = url.clone();
+            }
+        }
+        if self.rune_icon_url.is_empty() && self.rune_id > 0 {
+            if let Some(url) = assets.runes.get(&self.rune_id) {
+                self.rune_icon_url = url.clone();
+            }
+        }
+        if self.item_icon_urls.is_empty() && !assets.items.is_empty() {
+            let urls: Vec<String> = self
+                .item_ids
+                .iter()
+                .filter(|&&id| id > 0)
+                .filter_map(|id| assets.items.get(id).cloned())
+                .collect();
+            if !urls.is_empty() {
+                self.item_icon_urls = urls;
+            }
+        }
+        if self.augment_icon_urls.is_empty()
+            && !self.augment_ids.is_empty()
+            && !assets.augments.is_empty()
+        {
+            let (urls, names) = resolve_augment_details(&self.augment_ids, assets);
+            if !urls.is_empty() {
+                self.augment_icon_urls = urls;
+                self.augment_names = names;
+            }
+        }
+    }
+}
+
 // ─── 数据清洗与辅助函数 ───
 
 /// 判断是否为具备分路的召唤师峡谷类 5v5 模式
@@ -1283,5 +1325,32 @@ mod tests {
         assert_eq!(stats.win_count, 1);
         assert_eq!(stats.win_rate, 100);
         assert!((stats.avg_kda - 7.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_match_display_rehydrate_icons() {
+        let mut display = sample_game(420)
+            .to_display(&GameDataAssets::default())
+            .unwrap();
+        assert!(display.item_icon_urls.is_empty());
+        assert!(display.spell1_icon_url.is_empty());
+
+        let mut assets = GameDataAssets::default();
+        assets
+            .spells
+            .insert(display.spell1_id, "/spells/1.png".to_string());
+        assets
+            .spells
+            .insert(display.spell2_id, "/spells/2.png".to_string());
+        for &id in &display.item_ids {
+            if id > 0 {
+                assets.items.insert(id, format!("/items/{id}.png"));
+            }
+        }
+
+        display.rehydrate_icons(&assets);
+        assert!(!display.spell1_icon_url.is_empty());
+        assert!(!display.spell2_icon_url.is_empty());
+        assert!(!display.item_icon_urls.is_empty());
     }
 }

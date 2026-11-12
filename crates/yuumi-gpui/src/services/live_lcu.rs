@@ -96,6 +96,10 @@ pub struct LiveLcuService {
     _auto_bp_rx: Arc<watch::Receiver<AutoBpConfig>>,
     pub client: Arc<tokio::sync::RwLock<Option<yuumi_core::lcu::client::LcuClient>>>,
     pub game_data_assets: Arc<tokio::sync::RwLock<Option<Arc<GameDataAssets>>>>,
+    /// 本次连接是否已成功从 LCU 同步过完整的 GameDataAssets
+    game_data_synced_from_lcu: Arc<std::sync::atomic::AtomicBool>,
+    /// 防止多任务并发拉取 GameDataAssets
+    game_data_fetch_lock: Arc<tokio::sync::Mutex<()>>,
     /// 当前连接生命周期内的 Agent 后台运行时（未连接时为 None）
     agent_runtime: Arc<tokio::sync::RwLock<Option<AgentRuntime>>>,
     /// 本人近期真实战绩（宿命对局判定与生涯页共用）
@@ -133,6 +137,8 @@ impl LiveLcuService {
             _auto_bp_rx: Arc::new(bp_rx),
             client: Arc::new(tokio::sync::RwLock::new(None)),
             game_data_assets: Arc::new(tokio::sync::RwLock::new(None)),
+            game_data_synced_from_lcu: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            game_data_fetch_lock: Arc::new(tokio::sync::Mutex::new(())),
             agent_runtime: Arc::new(tokio::sync::RwLock::new(None)),
             recent_matches: Arc::new(RwLock::new(Vec::new())),
             game_info: Arc::new(RwLock::new(None)),
@@ -183,6 +189,112 @@ impl LiveLcuService {
         self.game_data_assets.read().await.clone()
     }
 
+    /// 优先用本地磁盘缓存零耗时预热内存字典，使早期界面即时可用
+    async fn hydrate_game_data_from_disk(&self) {
+        if self.game_data_assets.read().await.is_some() {
+            return;
+        }
+        if let Some(assets) = yuumi_core::lcu::game_data::load_cached_assets() {
+            let mut guard = self.game_data_assets.write().await;
+            if guard.is_none() {
+                log::info!(
+                    "[LiveLcu] 已从磁盘缓存预热 GameData 字典: items={}, spells={}, champions={}",
+                    assets.items.len(),
+                    assets.spells.len(),
+                    assets.champions.len()
+                );
+                super::champion_alias::store_spell_icons(&assets);
+                let arc_assets = Arc::new(assets);
+                *guard = Some(arc_assets.clone());
+                let _ = self.event_tx.send(LiveLcuEvent::GameDataReady(arc_assets));
+            }
+        }
+    }
+
+    /// 从当前 LCU 同步最新完整的 GameDataAssets（由 Tokio 运行时执行与互斥锁防重入）
+    pub async fn sync_game_data_from_lcu(
+        &self,
+        client: &yuumi_core::lcu::client::LcuClient,
+    ) -> Arc<GameDataAssets> {
+        if let Some(handle) = yuumi_core::runtime::tokio_handle() {
+            let this = self.clone();
+            let client = client.clone();
+            if let Ok(res) = handle
+                .spawn(async move { this.sync_game_data_from_lcu_inner(&client).await })
+                .await
+            {
+                return res;
+            }
+        }
+        self.sync_game_data_from_lcu_inner(client).await
+    }
+
+    async fn sync_game_data_from_lcu_inner(
+        &self,
+        client: &yuumi_core::lcu::client::LcuClient,
+    ) -> Arc<GameDataAssets> {
+        let _guard = self.game_data_fetch_lock.lock().await;
+        if self
+            .game_data_synced_from_lcu
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            if let Some(existing) = self.game_data_assets.read().await.clone() {
+                if existing.is_complete() {
+                    return existing;
+                }
+            }
+        }
+
+        log::info!("[LiveLcu] 正在从 LCU 预加载 GameData 资源字典...");
+        let mut assets = fetch_game_data_assets(client).await;
+        if let Some(existing) = self.game_data_assets.read().await.as_ref() {
+            assets.merge_missing(existing);
+        }
+
+        if assets.is_complete() {
+            self.game_data_synced_from_lcu
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        log::info!(
+            "[LiveLcu] GameData 字典加载完毕: items={}, spells={}, runes={}, champions={}, augments={}",
+            assets.items.len(),
+            assets.spells.len(),
+            assets.runes.len(),
+            assets.champions.len(),
+            assets.augments.len(),
+        );
+
+        super::champion_alias::store_spell_icons(&assets);
+        super::champion_alias::spawn_fetch_tencent_keywords();
+
+        let arc_assets = Arc::new(assets);
+        *self.game_data_assets.write().await = Some(arc_assets.clone());
+        let _ = self
+            .event_tx
+            .send(LiveLcuEvent::GameDataReady(arc_assets.clone()));
+        arc_assets
+    }
+
+    /// 确保 GameDataAssets 可用且核心项（装备/技能/英雄）就绪
+    pub async fn ensure_game_data_assets(
+        &self,
+        client: &yuumi_core::lcu::client::LcuClient,
+    ) -> Arc<GameDataAssets> {
+        if let Some(existing) = self.game_data_assets.read().await.clone() {
+            if existing.is_complete() {
+                return existing;
+            }
+        }
+        self.hydrate_game_data_from_disk().await;
+        if let Some(existing) = self.game_data_assets.read().await.clone() {
+            if existing.is_complete() {
+                return existing;
+            }
+        }
+        self.sync_game_data_from_lcu(client).await
+    }
+
     /// 当前 gameflow 阶段
     pub async fn get_current_phase(&self) -> String {
         self.current_phase.read().await.clone()
@@ -204,7 +316,6 @@ impl LiveLcuService {
     async fn run_loop(&self) {
         let mut active_ws: Option<LcuWsHandle> = None;
         let mut active_info: Option<LcuConnectionInfo> = None;
-        let mut game_data_assets: Option<Arc<GameDataAssets>> = None;
 
         loop {
             // 1. 探测 LCU 进程
@@ -226,27 +337,13 @@ impl LiveLcuService {
                         info.token.clone(),
                         None,
                     ) {
-                        // 预加载 GameData 字典
-                        if game_data_assets.is_none() {
-                            log::info!("[LiveLcu] 正在从 LCU 预加载 GameData 资源字典...");
-                            let assets = fetch_game_data_assets(&client).await;
-                            log::info!(
-                                "[LiveLcu] GameData 字典加载完毕: items={}, spells={}, runes={}, champions={}, augments={}",
-                                assets.items.len(),
-                                assets.spells.len(),
-                                assets.runes.len(),
-                                assets.champions.len(),
-                                assets.augments.len(),
-                            );
-                            // 选择器静态资源：召唤师技能图标 + 后台拉取腾讯英雄别称库
-                            super::champion_alias::store_spell_icons(&assets);
-                            super::champion_alias::spawn_fetch_tencent_keywords();
-
-                            let arc_assets = Arc::new(assets);
-                            game_data_assets = Some(arc_assets.clone());
-                            *self.game_data_assets.write().await = Some(arc_assets.clone());
-                            let _ = self.event_tx.send(LiveLcuEvent::GameDataReady(arc_assets));
-                        }
+                        // 优先从本地缓存秒级水合 GameDataAssets，再在后台同步 LCU 最新字典（不阻塞 WS 与 Agent 启动）
+                        self.hydrate_game_data_from_disk().await;
+                        let this_assets = self.clone();
+                        let client_assets = client.clone();
+                        tokio::spawn(async move {
+                            this_assets.sync_game_data_from_lcu(&client_assets).await;
+                        });
 
                         // 同步活跃 LCU 客户端至 AssetCache，以便图片优先通过活跃客户端拉取
                         self.asset_cache.set_lcu_client(Some(client.clone()));
@@ -370,6 +467,9 @@ impl LiveLcuService {
                     active_info = None;
                     self.asset_cache.set_lcu_client(None);
                     *self.client.write().await = None;
+                    self.game_data_synced_from_lcu
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                    *self.game_data_assets.write().await = None;
                     self.supervisor.cancel_all().await;
 
                     // 取消对局信息拉取任务并重置去重指纹
@@ -600,6 +700,12 @@ impl LiveLcuService {
                                     .event_tx
                                     .send(LiveLcuEvent::ConnectionChanged(new_status));
                             }
+                            if !this
+                                .game_data_synced_from_lcu
+                                .load(std::sync::atomic::Ordering::SeqCst)
+                            {
+                                this.sync_game_data_from_lcu(&client).await;
+                            }
                             this.refresh_career_data().await;
                         }
                     }
@@ -632,12 +738,8 @@ impl LiveLcuService {
             }
         };
 
-        // 2. 获取 GameDataAssets
-        let assets_opt = self.game_data_assets.read().await.clone();
-        let Some(assets) = assets_opt else {
-            log::warn!("[LiveLcu] 无法刷新战绩: GameDataAssets 尚未就绪");
-            return;
-        };
+        // 2. 获取 GameDataAssets（若未就绪或残缺则优先拉取/等待完整字典）
+        let assets = self.ensure_game_data_assets(&client).await;
 
         log::info!(
             "[LiveLcu] 开始并发拉取召唤师 [{}] 的生涯对局历史 (限 {} 场)、熟练度与战利品...",

@@ -5,9 +5,9 @@ use tokio::time::{sleep, Duration};
 
 use super::client::{build_auth_header, LcuClient};
 
-/// 游戏资源加载重试次数和间隔
-const GAME_DATA_RETRIES: u32 = 3;
-const GAME_DATA_RETRY_DELAY: Duration = Duration::from_secs(2);
+/// 游戏资源加载重试次数和间隔（覆盖客户端启动阶段的端点就绪窗口期）
+const GAME_DATA_RETRIES: u32 = 8;
+const GAME_DATA_RETRY_DELAY: Duration = Duration::from_millis(1500);
 
 /// 海克斯强化详情（来自 LCU cherry-augments.json）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -33,6 +33,68 @@ pub struct GameDataAssets {
     pub augments: HashMap<i32, CherryAugmentDetail>,
 }
 
+impl GameDataAssets {
+    /// 检查核心游戏资产是否均已就绪（装备、召唤师技能、英雄均非空）
+    pub fn is_complete(&self) -> bool {
+        !self.items.is_empty() && !self.spells.is_empty() && !self.champions.is_empty()
+    }
+
+    /// 检查是否完全为空
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+            && self.spells.is_empty()
+            && self.runes.is_empty()
+            && self.champions.is_empty()
+            && self.augments.is_empty()
+    }
+
+    /// 用另一个 assets 补充当前缺失的部分
+    pub fn merge_missing(&mut self, fallback: &GameDataAssets) {
+        if self.items.is_empty() {
+            self.items = fallback.items.clone();
+        }
+        if self.spells.is_empty() {
+            self.spells = fallback.spells.clone();
+        }
+        if self.runes.is_empty() {
+            self.runes = fallback.runes.clone();
+        }
+        if self.champions.is_empty() {
+            self.champions = fallback.champions.clone();
+        }
+        if self.augments.is_empty() {
+            self.augments = fallback.augments.clone();
+        }
+    }
+}
+
+/// 从本地磁盘缓存读取已持久化的 GameDataAssets（兜底初次连接）
+pub fn load_cached_assets() -> Option<GameDataAssets> {
+    let path = crate::runtime::app_data_dir()
+        .join("cache")
+        .join("gamedata_assets.json");
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// 将已成功且完整的 GameDataAssets 原子写入本地磁盘缓存
+pub fn save_cached_assets(assets: &GameDataAssets) {
+    if !assets.is_complete() {
+        return;
+    }
+    let dir = crate::runtime::app_data_dir().join("cache");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("gamedata_assets.json");
+    let temp_path = dir.join(format!("gamedata_assets.{}.tmp", std::process::id()));
+    if let Ok(bytes) = serde_json::to_vec(assets) {
+        if std::fs::write(&temp_path, &bytes).is_ok() {
+            let _ = std::fs::rename(temp_path, path);
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[allow(dead_code)]
 struct IdEntry {
@@ -43,113 +105,150 @@ struct IdEntry {
     name: Option<String>,
 }
 
-/// 从 LCU 预加载所有游戏资源路径（带重试）。
+/// 从 LCU 预加载所有游戏资源路径（带重试与本地磁盘缓存兜底）。
 pub async fn fetch_game_data_assets(lcu: &LcuClient) -> GameDataAssets {
-    let mut last_assets = GameDataAssets::default();
+    let mut assets = GameDataAssets::default();
+
+    // 优先尝试读取本地磁盘缓存作为兜底底座
+    let cached_opt = load_cached_assets();
 
     for attempt in 1..=GAME_DATA_RETRIES {
-        last_assets = fetch_game_data_assets_inner(lcu).await;
+        let auth = build_auth_header(&lcu.token);
+        let base = format!("https://127.0.0.1:{}", lcu.port);
 
-        let is_empty = last_assets.items.is_empty()
-            && last_assets.spells.is_empty()
-            && last_assets.runes.is_empty()
-            && last_assets.champions.is_empty();
+        // 增量式并发获取：只请求当前尚未获取成功的项
+        let fetch_items = assets.items.is_empty();
+        let fetch_spells = assets.spells.is_empty();
+        let fetch_runes = assets.runes.is_empty();
+        let fetch_champions = assets.champions.is_empty();
+        let fetch_augments = assets.augments.is_empty();
 
-        if !is_empty {
-            return last_assets;
+        let (new_items, new_spells, new_runes, new_champions, new_augments) = tokio::join!(
+            async {
+                if fetch_items {
+                    fetch_id_map(
+                        &lcu.http_client,
+                        &base,
+                        &auth,
+                        "/lol-game-data/assets/v1/items.json",
+                    )
+                    .await
+                } else {
+                    HashMap::new()
+                }
+            },
+            async {
+                if fetch_spells {
+                    fetch_id_map(
+                        &lcu.http_client,
+                        &base,
+                        &auth,
+                        "/lol-game-data/assets/v1/summoner-spells.json",
+                    )
+                    .await
+                } else {
+                    HashMap::new()
+                }
+            },
+            async {
+                if fetch_runes {
+                    fetch_id_map(
+                        &lcu.http_client,
+                        &base,
+                        &auth,
+                        "/lol-game-data/assets/v1/perks.json",
+                    )
+                    .await
+                } else {
+                    HashMap::new()
+                }
+            },
+            async {
+                if fetch_champions {
+                    fetch_champion_map(&lcu.http_client, &base, &auth).await
+                } else {
+                    HashMap::new()
+                }
+            },
+            async {
+                if fetch_augments {
+                    fetch_cherry_augment_map(
+                        &lcu.http_client,
+                        &base,
+                        &auth,
+                        "/lol-game-data/assets/v1/cherry-augments.json",
+                    )
+                    .await
+                } else {
+                    HashMap::new()
+                }
+            },
+        );
+
+        if !new_items.is_empty() {
+            assets.items = new_items;
+        }
+        if !new_spells.is_empty() {
+            assets.spells = new_spells;
+        }
+        if !new_runes.is_empty() {
+            assets.runes = new_runes;
+        }
+        if !new_champions.is_empty() {
+            assets.champions = new_champions;
+        }
+        if !new_augments.is_empty() {
+            assets.augments = new_augments;
+        }
+
+        if assets.is_complete() {
+            log::info!(
+                "[GameData] 游戏资源字典加载完整 (第 {}/{} 次成功): items={}, spells={}, runes={}, champions={}, augments={}",
+                attempt,
+                GAME_DATA_RETRIES,
+                assets.items.len(),
+                assets.spells.len(),
+                assets.runes.len(),
+                assets.champions.len(),
+                assets.augments.len()
+            );
+            let assets_clone = assets.clone();
+            crate::runtime::spawn_background(async move {
+                save_cached_assets(&assets_clone);
+            });
+            return assets;
         }
 
         if attempt < GAME_DATA_RETRIES {
-            log::warn!(
-                "游戏资源加载为空 ({}/{})，{}秒后重试...",
+            log::debug!(
+                "[GameData] 游戏资源部分未就绪 (尝试 {}/{}): items={}, spells={}, runes={}, champions={}, {}ms 后重试...",
                 attempt,
                 GAME_DATA_RETRIES,
-                GAME_DATA_RETRY_DELAY.as_secs()
+                assets.items.len(),
+                assets.spells.len(),
+                assets.runes.len(),
+                assets.champions.len(),
+                GAME_DATA_RETRY_DELAY.as_millis()
             );
             sleep(GAME_DATA_RETRY_DELAY).await;
         }
     }
 
-    log::warn!("游戏资源在 {} 次尝试后仍为空", GAME_DATA_RETRIES);
-    last_assets
-}
-
-/// 从 LCU 预加载所有游戏资源路径（单次尝试）。
-async fn fetch_game_data_assets_inner(lcu: &LcuClient) -> GameDataAssets {
-    let auth = build_auth_header(&lcu.token);
-    let base = format!("https://127.0.0.1:{}", lcu.port);
-
-    let (items, spells, runes, champions, augments) = tokio::join!(
-        fetch_id_map(
-            &lcu.http_client,
-            &base,
-            &auth,
-            "/lol-game-data/assets/v1/items.json"
-        ),
-        fetch_id_map(
-            &lcu.http_client,
-            &base,
-            &auth,
-            "/lol-game-data/assets/v1/summoner-spells.json"
-        ),
-        fetch_id_map(
-            &lcu.http_client,
-            &base,
-            &auth,
-            "/lol-game-data/assets/v1/perks.json"
-        ),
-        fetch_champion_map(&lcu.http_client, &base, &auth),
-        fetch_cherry_augment_map(
-            &lcu.http_client,
-            &base,
-            &auth,
-            "/lol-game-data/assets/v1/cherry-augments.json",
-        ),
-    );
-
-    let items = if items.is_empty() {
-        fetch_id_map_flexible(
-            &lcu.http_client,
-            &base,
-            &auth,
-            "/lol-game-data/assets/v1/items.json",
-        )
-        .await
+    // 最终尝试用本地磁盘缓存补齐缺失部分
+    if let Some(cached) = cached_opt {
+        log::warn!(
+            "[GameData] LCU 游戏资源在 {} 次尝试后仍未完整，使用本地磁盘缓存补充",
+            GAME_DATA_RETRIES
+        );
+        assets.merge_missing(&cached);
     } else {
-        items
-    };
-
-    let spells = if spells.is_empty() {
-        fetch_id_map_flexible(
-            &lcu.http_client,
-            &base,
-            &auth,
-            "/lol-game-data/assets/v1/summoner-spells.json",
-        )
-        .await
-    } else {
-        spells
-    };
-
-    let runes = if runes.is_empty() {
-        fetch_id_map_flexible(
-            &lcu.http_client,
-            &base,
-            &auth,
-            "/lol-game-data/assets/v1/perks.json",
-        )
-        .await
-    } else {
-        runes
-    };
-
-    GameDataAssets {
-        items,
-        spells,
-        runes,
-        champions,
-        augments,
+        log::warn!(
+            "[GameData] 游戏资源在 {} 次尝试后仍不完整且无本地缓存",
+            GAME_DATA_RETRIES
+        );
     }
+
+    assets
 }
 
 async fn fetch_id_map(
@@ -160,16 +259,60 @@ async fn fetch_id_map(
 ) -> HashMap<i32, String> {
     let url = format!("{}{}", base, path);
 
-    match http.get(&url).header("Authorization", auth).send().await {
-        Ok(resp) if resp.status().is_success() => match resp.json::<Vec<IdEntry>>().await {
-            Ok(entries) => entries
-                .into_iter()
-                .filter_map(|e| Some((e.id?, e.icon_path?)))
-                .collect(),
-            Err(_) => HashMap::new(),
-        },
-        _ => HashMap::new(),
+    let resp = match http.get(&url).header("Authorization", auth).send().await {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => {
+            log::debug!("[GameData] 端点 {} 状态码异常: {}", path, r.status());
+            return HashMap::new();
+        }
+        Err(e) => {
+            log::debug!("[GameData] 请求端点 {} 失败: {}", path, e);
+            return HashMap::new();
+        }
+    };
+
+    let text = match resp.text().await {
+        Ok(t) if !t.is_empty() => t,
+        _ => return HashMap::new(),
+    };
+
+    // Fast path: 直接反序列化 Vec<IdEntry>
+    if let Ok(entries) = serde_json::from_str::<Vec<IdEntry>>(&text) {
+        let map: HashMap<i32, String> = entries
+            .into_iter()
+            .filter_map(|e| Some((e.id?, e.icon_path?)))
+            .collect();
+        if !map.is_empty() {
+            return map;
+        }
     }
+
+    // Flexible path: 支持以字典对象或松散结构组织的载荷
+    if let Ok(val) = serde_json::from_str::<Value>(&text) {
+        let mut map = HashMap::new();
+        if let Some(arr) = val.as_array() {
+            for item in arr {
+                if let (Some(id), Some(icon)) = (
+                    item.get("id").and_then(|v| v.as_i64()),
+                    item.get("iconPath").and_then(|v| v.as_str()),
+                ) {
+                    map.insert(id as i32, icon.to_string());
+                }
+            }
+        } else if let Some(obj) = val.as_object() {
+            for (_k, v) in obj {
+                if let (Some(id), Some(icon)) = (
+                    v.get("id").and_then(|i| i.as_i64()),
+                    v.get("iconPath").and_then(|i| i.as_str()),
+                ) {
+                    map.insert(id as i32, icon.to_string());
+                }
+            }
+        }
+        return map;
+    }
+
+    HashMap::new()
 }
 
 async fn fetch_champion_map(
@@ -260,47 +403,40 @@ async fn fetch_cherry_augment_map(
         .collect()
 }
 
-async fn fetch_id_map_flexible(
-    http: &reqwest::Client,
-    base: &str,
-    auth: &str,
-    path: &str,
-) -> HashMap<i32, String> {
-    let url = format!("{}{}", base, path);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let Ok(resp) = http.get(&url).header("Authorization", auth).send().await else {
-        return HashMap::new();
-    };
+    #[test]
+    fn test_game_data_assets_is_complete_and_empty() {
+        let mut assets = GameDataAssets::default();
+        assert!(assets.is_empty());
+        assert!(!assets.is_complete());
 
-    if !resp.status().is_success() {
-        return HashMap::new();
+        assets.items.insert(1001, "boot.png".to_string());
+        assert!(!assets.is_empty());
+        assert!(!assets.is_complete());
+
+        assets.spells.insert(4, "flash.png".to_string());
+        assert!(!assets.is_complete());
+
+        assets.champions.insert(1, "Annie".to_string());
+        assert!(assets.is_complete());
     }
 
-    let Ok(val) = resp.json::<Value>().await else {
-        return HashMap::new();
-    };
+    #[test]
+    fn test_game_data_assets_merge_missing() {
+        let mut partial = GameDataAssets::default();
+        partial.runes.insert(8000, "precision.png".to_string());
 
-    let mut map = HashMap::new();
+        let mut fallback = GameDataAssets::default();
+        fallback.items.insert(1001, "boot.png".to_string());
+        fallback.spells.insert(4, "flash.png".to_string());
+        fallback.champions.insert(1, "Annie".to_string());
 
-    if let Some(arr) = val.as_array() {
-        for item in arr {
-            if let (Some(id), Some(icon)) = (
-                item.get("id").and_then(|v| v.as_i64()),
-                item.get("iconPath").and_then(|v| v.as_str()),
-            ) {
-                map.insert(id as i32, icon.to_string());
-            }
-        }
-    } else if let Some(obj) = val.as_object() {
-        for (_k, v) in obj {
-            if let (Some(id), Some(icon)) = (
-                v.get("id").and_then(|i| i.as_i64()),
-                v.get("iconPath").and_then(|i| i.as_str()),
-            ) {
-                map.insert(id as i32, icon.to_string());
-            }
-        }
+        partial.merge_missing(&fallback);
+        assert!(partial.is_complete());
+        assert_eq!(partial.items.len(), 1);
+        assert_eq!(partial.runes.len(), 1);
     }
-
-    map
 }

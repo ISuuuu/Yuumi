@@ -227,6 +227,38 @@ impl MainWindow {
                         ));
                     }
                 }
+
+                // 若之前战绩已加载但部分图标缺失，在此用最新字典补齐图标并预热
+                for m in self.matches.iter_mut() {
+                    m.rehydrate_icons(&assets);
+                    asset_paths.extend(m.display.item_icon_urls.iter().cloned());
+                    if !m.display.spell1_icon_url.is_empty() {
+                        asset_paths.push(m.display.spell1_icon_url.clone());
+                    }
+                    if !m.display.spell2_icon_url.is_empty() {
+                        asset_paths.push(m.display.spell2_icon_url.clone());
+                    }
+                    if !m.display.rune_icon_url.is_empty() {
+                        asset_paths.push(m.display.rune_icon_url.clone());
+                    }
+                    asset_paths.extend(m.display.augment_icon_urls.iter().cloned());
+                }
+                for m in self.own_matches.iter_mut() {
+                    m.rehydrate_icons(&assets);
+                }
+                for m in self.search_view.matches.iter_mut() {
+                    m.rehydrate_icons(&assets);
+                }
+
+                // 补齐可能滞后的英雄熟练度中文名
+                for item in self.career_view.mastery_list.iter_mut() {
+                    if item.champion_name.is_empty() {
+                        if let Some(name) = assets.champions.get(&(item.champion_id as i32)) {
+                            item.champion_name = name.clone();
+                        }
+                    }
+                }
+
                 asset_paths.sort();
                 asset_paths.dedup();
                 prewarm_assets(asset_paths, cx);

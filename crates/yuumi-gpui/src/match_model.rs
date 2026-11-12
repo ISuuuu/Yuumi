@@ -4,7 +4,6 @@ pub use yuumi_core::gameflow::match_stats::{compute_match_stats, MatchLike};
 pub use yuumi_core::parsers::match_detail::{GameDetail, GameDetailPlayer, GameDetailTeam};
 pub use yuumi_core::parsers::match_parser::MatchDisplay;
 
-#[cfg(test)]
 use yuumi_core::lcu::game_data::GameDataAssets;
 #[cfg(test)]
 use yuumi_core::parsers::match_parser::{LcuMatchGame, LcuMatchHistoryResponse};
@@ -22,6 +21,10 @@ impl MatchItem {
             display,
             expanded: false,
         }
+    }
+
+    pub fn rehydrate_icons(&mut self, assets: &GameDataAssets) {
+        self.display.rehydrate_icons(assets);
     }
 }
 
