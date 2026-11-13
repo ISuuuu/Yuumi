@@ -1823,7 +1823,16 @@ impl SearchView {
         let pure_name = p.name.split('#').next().unwrap_or(&p.name).to_string();
 
         // 段位徽章（按需拉取后展示；未拉到或未定级时不渲染）
-        let rank_info = self.participant_ranks.get(&p.puuid).cloned();
+        // 未定级玩家不画段位徽章（对齐「开启段位显示时不展示未定级」）
+        let rank_info = self
+            .participant_ranks
+            .get(&p.puuid)
+            .cloned()
+            .filter(|info| {
+                yuumi_core::parsers::game_info::is_ranked_tier(&info.tier)
+                    && info.rank_text != "未定级"
+                    && !info.rank_text.trim().is_empty()
+            });
         let rank_icon_path = rank_info
             .as_ref()
             .and_then(|info| crate::asset_loader::AssetLoader::get_ranked_icon_path(&info.tier));

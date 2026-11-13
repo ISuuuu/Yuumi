@@ -69,7 +69,8 @@ pub struct RankedQueueEntry {
 impl RankedQueueEntry {
     /// 是否已完成定级（定级中 `tier` 为空）
     pub fn is_placed(&self) -> bool {
-        !self.tier.trim().is_empty()
+        // 未定级 / NONE / UNRANKED 不算已定级，界面上不再显示「未定级」
+        is_ranked_tier(&self.tier)
     }
 
     /// 该队列总场次
@@ -125,6 +126,21 @@ pub fn tier_display(tier: &str) -> &'static str {
         "CHALLENGER" => "王者",
         _ => "未定级",
     }
+}
+
+/// 是否已定级（未定级 / NONE / UNRANKED / 空串 / "--" 均返回 false）
+///
+/// 界面按「无段位就不画段位文案」处理，避免到处出现「未定级」。
+/// 同时接受英文 tier（LCU 原始值）与中文 tier（GameInfoPlayer.rank_tier 存的是中文名）。
+pub fn is_ranked_tier(tier: &str) -> bool {
+    let trimmed = tier.trim();
+    let normalized = trimmed.to_ascii_uppercase();
+    !normalized.is_empty()
+        && normalized != "NONE"
+        && normalized != "UNRANKED"
+        && normalized != "NA"
+        && normalized != "--"
+        && trimmed != "未定级"
 }
 
 /// 段位简称，例如 "钻石 I"、"大师"；无段位返回 "未定级"
@@ -775,6 +791,62 @@ impl LiveGameInfo {
     pub fn create_demo() -> Self {
         make_demo_instance()
     }
+
+    /// 落盘快照文件（保留对局信息 / 断线重连后直接复用，对齐旧版 Vue 的 localStorage 快照）
+    pub fn cache_file_path() -> std::path::PathBuf {
+        crate::runtime::app_data_dir().join("game_info_cache.json")
+    }
+
+    /// 保存对局快照：只存真实对局，且同一局内不允许被更瘦的快照覆盖
+    pub fn save_cache(&self) {
+        if self.is_demo || self.game_id.unwrap_or(0) == 0 {
+            return;
+        }
+        if self.blue_team.len() + self.red_team.len() == 0 {
+            return;
+        }
+        if !should_overwrite_cache(Self::load_cache().as_ref(), self) {
+            log::debug!("[GameInfo] 跳过写入更瘦的对局快照");
+            return;
+        }
+        let path = Self::cache_file_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        match serde_json::to_string(self) {
+            Ok(json) => {
+                if let Err(error) = std::fs::write(&path, json) {
+                    log::warn!("[GameInfo] 写入对局快照失败: {error}");
+                }
+            }
+            Err(error) => log::warn!("[GameInfo] 序列化对局快照失败: {error}"),
+        }
+    }
+
+    /// 读取落盘快照（演示数据不入缓存）
+    pub fn load_cache() -> Option<Self> {
+        let content = std::fs::read_to_string(Self::cache_file_path()).ok()?;
+        serde_json::from_str::<Self>(&content)
+            .ok()
+            .filter(|info| !info.is_demo && info.game_id.unwrap_or(0) > 0)
+    }
+
+    /// 新一轮选人开始时清空落盘快照（与玩家数据缓存同步失效）
+    pub fn clear_cache() {
+        let _ = std::fs::remove_file(Self::cache_file_path());
+    }
+}
+
+/// 是否允许用新快照覆盖已落盘快照：
+/// 同一局内队伍人数变少说明是 InProgress 阶段的精简 session，禁止覆盖完整快照。
+fn should_overwrite_cache(prev: Option<&LiveGameInfo>, next: &LiveGameInfo) -> bool {
+    let Some(prev) = prev else {
+        return true;
+    };
+    if prev.game_id != next.game_id {
+        return true;
+    }
+    next.blue_team.len() + next.red_team.len() >= prev.blue_team.len() + prev.red_team.len()
 }
 #[allow(clippy::too_many_arguments)]
 fn make_mock_match(
@@ -1923,8 +1995,13 @@ fn build_player(
     let avg_deaths = average(recent.iter().map(|m| m.deaths.max(0) as f32).collect());
     let avg_assists = average(recent.iter().map(|m| m.assists.max(0) as f32).collect());
 
+    let is_local_player = !puuid.is_empty()
+        && (puuid == ctx.self_puuid
+            || (summoner_id != 0 && Some(summoner_id) == ctx.self_summoner_id));
+
     let player_game_ids: Vec<u64> = recent.iter().map(|m| m.game_id).collect();
-    let fate = if puuid.is_empty() {
+    // 本人不计算宿命：自己的对局列表必然与「本人近期对局」全部命中，会错误地显示「友」标记
+    let fate = if puuid.is_empty() || is_local_player {
         None
     } else {
         detect_fate(
@@ -1943,10 +2020,6 @@ fn build_player(
             fate
         })
     };
-
-    let is_local_player = !puuid.is_empty()
-        && (puuid == ctx.self_puuid
-            || (summoner_id != 0 && Some(summoner_id) == ctx.self_summoner_id));
 
     let mut champ_counts: HashMap<i32, (usize, usize)> = HashMap::new();
     for m in recent {
@@ -2187,8 +2260,9 @@ async fn fetch_player_data(
     hint: Option<&IdentityHint>,
     is_self: bool,
     full: bool,
+    game_id: u64,
 ) -> PlayerFetchData {
-    if let Some((data, stage)) = cached_player_data(puuid) {
+    if let Some((data, stage)) = cached_player_data(puuid, game_id) {
         if !full || stage == PLAYER_DATA_STAGE_FULL {
             return data;
         }
@@ -2212,13 +2286,13 @@ async fn fetch_player_data(
         };
         // 名字尚未查到时不写缓存，下次刷新重试
         if name_resolved(&data.identity) {
-            store_player_data(puuid, &data, PLAYER_DATA_STAGE_QUICK);
+            store_player_data(puuid, &data, PLAYER_DATA_STAGE_QUICK, game_id);
         }
         return data;
     }
 
     // 完整拉取：已有骨架缓存时只补战绩与熟练度
-    if let Some((base, _)) = cached_player_data(puuid) {
+    if let Some((base, _)) = cached_player_data(puuid, game_id) {
         let (history_resp, masteries) = tokio::join!(
             fetch_match_history_smart(client, puuid, 0, RECENT_MATCH_LIMIT - 1, assets, false),
             fetch_player_masteries(client, puuid, hint, is_self)
@@ -2231,7 +2305,7 @@ async fn fetch_player_data(
             ..base
         };
         if name_resolved(&data.identity) {
-            store_player_data(puuid, &data, PLAYER_DATA_STAGE_FULL);
+            store_player_data(puuid, &data, PLAYER_DATA_STAGE_FULL, game_id);
         }
         return data;
     }
@@ -2254,7 +2328,7 @@ async fn fetch_player_data(
         masteries,
     };
     if name_resolved(&data.identity) {
-        store_player_data(puuid, &data, PLAYER_DATA_STAGE_FULL);
+        store_player_data(puuid, &data, PLAYER_DATA_STAGE_FULL, game_id);
     }
     data
 }
@@ -2268,12 +2342,14 @@ fn parse_ranked_entry(ranked_resp: Result<serde_json::Value, String>) -> Option<
     })
 }
 
-/// 缓存中的单名玩家数据（带拉取时刻与完成阶段）
+/// 缓存中的单名玩家数据（带拉取时刻、所属对局与完成阶段）
 struct CachedPlayerData {
     data: PlayerFetchData,
     /// 1 = 仅身份+段位（骨架），2 = 含战绩与熟练度（完整）
     stage: u8,
     fetched_at: std::time::Instant,
+    /// 数据所属的真实对局 id（选人阶段拉取时为 0，进入对局后绑定）
+    game_id: u64,
 }
 
 /// 骨架阶段：身份与段位
@@ -2289,7 +2365,7 @@ fn cached_player_data_map() -> &'static std::sync::Mutex<HashMap<String, CachedP
     CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
-/// 缓存有效期：超过后重新拉取，避免长时间运行后数据过旧
+/// 缓存有效期：仅对「尚未绑定对局」的条目生效；绑定到某一局后一局内一直复用
 const PLAYER_DATA_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 /// 缓存条目上限，超出后整体清空
 const PLAYER_DATA_CACHE_LIMIT: usize = 64;
@@ -2304,21 +2380,39 @@ pub fn clear_player_data_cache() {
 }
 
 /// 读取缓存条目：返回数据与完成阶段
-fn cached_player_data(puuid: &str) -> Option<(PlayerFetchData, u8)> {
+///
+/// 对齐旧版 Vue：同一局（gameId 相同）内的数据全程复用，不按时间过期；
+/// 跨局（gameId 变化）立即失效，避免把上一局的战绩带进新局。
+fn cached_player_data(puuid: &str, game_id: u64) -> Option<(PlayerFetchData, u8)> {
     let mut cache = cached_player_data_map().lock().ok()?;
-    let entry = cache.get(puuid)?;
-    if entry.fetched_at.elapsed() > PLAYER_DATA_TTL {
+    let (same_game, idle_expired, data) = {
+        let entry = cache.get(puuid)?;
+        // 选人阶段（game_id = 0）拉到的条目，进入真实对局后沿用
+        let same_game = entry.game_id == game_id || entry.game_id == 0;
+        let idle_expired = entry.game_id == 0 && entry.fetched_at.elapsed() > PLAYER_DATA_TTL;
+        (same_game, idle_expired, (entry.data.clone(), entry.stage))
+    };
+    if !same_game || idle_expired {
         cache.remove(puuid);
         return None;
     }
-    Some((entry.data.clone(), entry.stage))
+    // 选人阶段拉到的条目在进入真实对局后绑定该局，之后一局内不再受 TTL 影响
+    if game_id != 0 {
+        if let Some(entry) = cache.get_mut(puuid) {
+            entry.game_id = game_id;
+        }
+    }
+    Some(data)
 }
 
-fn store_player_data(puuid: &str, data: &PlayerFetchData, stage: u8) {
+fn store_player_data(puuid: &str, data: &PlayerFetchData, stage: u8, game_id: u64) {
     let Ok(mut cache) = cached_player_data_map().lock() else {
         return;
     };
-    cache.retain(|_, entry| entry.fetched_at.elapsed() <= PLAYER_DATA_TTL);
+    // 同局条目常驻；未绑定对局的条目按 TTL 清理
+    cache.retain(|_, entry| {
+        entry.game_id == game_id || entry.fetched_at.elapsed() <= PLAYER_DATA_TTL
+    });
     if cache.len() >= PLAYER_DATA_CACHE_LIMIT {
         cache.clear();
     }
@@ -2328,6 +2422,7 @@ fn store_player_data(puuid: &str, data: &PlayerFetchData, stage: u8) {
             data: data.clone(),
             stage,
             fetched_at: std::time::Instant::now(),
+            game_id,
         },
     );
 }
@@ -2561,11 +2656,21 @@ async fn fetch_live_game_info_inner(
         })
         .collect();
 
+    // 本局真实 gameId：用于把玩家数据缓存绑定到这一局（同一局内全程复用，跨局失效）
+    let game_id = source.game_id.unwrap_or(0);
     let fetched: Vec<(String, PlayerFetchData)> = stream::iter(targets)
         .map(|(puuid, hint)| async move {
             let is_self = puuid == self_puuid;
-            let data =
-                fetch_player_data(client, &puuid, assets, hint.as_ref(), is_self, full).await;
+            let data = fetch_player_data(
+                client,
+                &puuid,
+                assets,
+                hint.as_ref(),
+                is_self,
+                full,
+                game_id,
+            )
+            .await;
             (puuid, data)
         })
         .buffer_unordered(PLAYER_FETCH_CONCURRENCY)
@@ -3448,11 +3553,45 @@ mod tests {
     }
 
     #[test]
+    fn cache_overwrite_guard_keeps_fuller_snapshot() {
+        let mut full = LiveGameInfo::create_demo();
+        full.is_demo = false;
+        full.game_id = Some(123456);
+
+        // 没有旧快照：允许写入
+        assert!(should_overwrite_cache(None, &full));
+
+        // 同局更瘦的快照（InProgress 精简 session）：禁止覆盖
+        let mut thin = full.clone();
+        thin.blue_team.truncate(1);
+        thin.red_team.clear();
+        assert!(!should_overwrite_cache(Some(&full), &thin));
+
+        // 同局同样完整或更全：允许覆盖
+        assert!(should_overwrite_cache(Some(&full), &full));
+
+        // 换了一局：允许覆盖
+        let mut other = thin.clone();
+        other.game_id = Some(999999);
+        assert!(should_overwrite_cache(Some(&full), &other));
+    }
+
+    #[test]
     fn rank_display_handles_unranked_and_apex_tiers() {
         assert_eq!(rank_display("", "", 0), "未定级");
         assert_eq!(rank_display("UNRANKED", "", 0), "未定级");
         assert_eq!(rank_display("MASTER", "I", 320), "大师 · 320 LP");
         assert_eq!(rank_display("CHALLENGER", "I", 800), "王者 · 800 LP");
+
+        // 界面据 is_ranked_tier 决定是否绘制段位文案：未定级一律不画
+        assert!(!is_ranked_tier(""));
+        assert!(!is_ranked_tier("NONE"));
+        assert!(!is_ranked_tier("UNRANKED"));
+        assert!(!is_ranked_tier("--"));
+        assert!(!is_ranked_tier("未定级"));
+        assert!(is_ranked_tier("DIAMOND"));
+        // GameInfoPlayer.rank_tier 存中文名，必须同样判定为已定级
+        assert!(is_ranked_tier("钻石"));
     }
 
     #[test]
@@ -3586,6 +3725,49 @@ mod tests {
 
         assert!(mastery_badge(&[], 266).is_none());
         assert!(mastery_badge(&masteries, 0).is_none());
+    }
+
+    #[test]
+    fn local_player_has_no_fate_badge() {
+        let source = champ_select_source();
+        let shared_game = 9001u64;
+        let mut fetch = HashMap::new();
+        for puuid in source.puuids() {
+            fetch.insert(
+                puuid,
+                PlayerFetchData {
+                    ranked: None,
+                    recent: vec![sample_match(shared_game, true, 1, 2, 3)],
+                    identity: None,
+                    masteries: Vec::new(),
+                },
+            );
+        }
+        // 本人自身也在那局游戏的队友名单里：修复前会命中「友」宿命
+        let my_games = vec![MyRecentGame {
+            game_id: shared_game,
+            game_creation: 0,
+            ally_puuids: HashSet::from([SELF_PUUID.to_string()]),
+            enemy_puuids: HashSet::new(),
+            champions: HashMap::new(),
+        }];
+        let info = build_live_game_info(
+            &source,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext {
+                latest_game_id: Some(shared_game),
+                games: my_games,
+            },
+            &fetch,
+            &GameDataAssets::default(),
+        );
+
+        let me = info
+            .players()
+            .find(|p| p.is_local_player)
+            .expect("应识别出本人");
+        assert!(me.fate.is_none(), "本人不应带宿命标记（否则会显示「友」）");
     }
 
     #[test]
