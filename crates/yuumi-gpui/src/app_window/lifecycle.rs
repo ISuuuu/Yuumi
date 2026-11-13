@@ -15,8 +15,10 @@ impl MainWindow {
                             .map(|o| o.puuid != s.puuid)
                             .unwrap_or(false);
                         if is_new_account {
-                            // 换号清理上一账号的对局信息与路人集状态
+                            // 换号清理上一账号的对局信息、段位与路人集状态
                             self.game_info = None;
+                            self.own_ranked = None;
+                            self.career_view.ranked = None;
                             self.saved_players_view.players.clear();
                             self.saved_players_view.total_count = 0;
                             self.saved_players_view.expanded_puuid = None;
@@ -50,10 +52,7 @@ impl MainWindow {
                         // 连接新账号后触发路人身份异步补齐
                         self.backfill_saved_players_identity(cx);
                     }
-                    // 首次连接且当前停留在首页时，自动跳转到生涯页（对照 Vue 行为）
-                    if !was_connected && self.current_route == Route::Home {
-                        self.switch_route(Route::Career, cx);
-                    }
+                    // 新首页即数据看板：连接后停留在首页展示召唤师概览，不再自动跳转生涯页
                     // 客户端连接建立后：自动检测 LOL 安装路径（若尚未配置）并回读设置只读锁定开关
                     if self.app_config.general.lol_path.is_empty()
                         || self

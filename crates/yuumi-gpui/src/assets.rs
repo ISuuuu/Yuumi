@@ -33,6 +33,8 @@ impl AssetSource for Assets {
             "icons/copy.svg" => Some(include_bytes!("../assets/icons/copy.svg")),
             "icons/lock.svg" => Some(include_bytes!("../assets/icons/lock.svg")),
             "icons/play.svg" => Some(include_bytes!("../assets/icons/play.svg")),
+            "icons/checkmark.svg" => Some(include_bytes!("../assets/icons/checkmark.svg")),
+            "icons/warning.svg" => Some(include_bytes!("../assets/icons/warning.svg")),
             "icons/refresh.svg" => Some(include_bytes!("../assets/icons/refresh.svg")),
             "icons/bell.svg" => Some(include_bytes!("../assets/icons/bell.svg")),
             "icons/tft.svg" => Some(include_bytes!("../assets/icons/tft.svg")),

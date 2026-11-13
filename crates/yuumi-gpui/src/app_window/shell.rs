@@ -437,8 +437,13 @@ impl MainWindow {
         let view_entity = cx.entity().clone();
         let view_select = view_entity.clone();
         let view_launch = view_entity.clone();
+        let view_nav = view_entity.clone();
+        let view_opgg = view_entity.clone();
         el.child(self.home_view.render(
             &self.connection_status,
+            self.own_summoner.as_ref(),
+            self.own_ranked.as_ref(),
+            self.current_phase.as_str(),
             move |path, _win, app| {
                 view_select.update(app, |this, cx| {
                     this.home_view.selected_path = Some(path);
@@ -471,6 +476,16 @@ impl MainWindow {
                         }
                     }
                     cx.notify();
+                });
+            },
+            move |route, _win, app| {
+                view_nav.update(app, |this, cx| {
+                    this.switch_route(route, cx);
+                });
+            },
+            move |_win, app| {
+                view_opgg.update(app, |this, cx| {
+                    this.open_opgg_window(cx);
                 });
             },
         ))

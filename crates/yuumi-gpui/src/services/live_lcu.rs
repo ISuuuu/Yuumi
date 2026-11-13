@@ -428,6 +428,43 @@ impl LiveLcuService {
                             this_career.refresh_career_data().await;
                         });
 
+                        // 「先开软件后开客户端」登录兜底：连接建立时客户端可能尚未登录完成
+                        // （召唤师为 None），且登录完成不一定触发 WS current-summoner 推送；
+                        // 每 2 秒探测一次，直到登录成功或客户端退出。
+                        if summoner.is_none() {
+                            let this_login = self.clone();
+                            let login_client = client.clone();
+                            tokio::spawn(async move {
+                                loop {
+                                    sleep(Duration::from_secs(2)).await;
+                                    // 客户端退出或已重建连接（端口/PID 变化）时停止，交给新一轮连接流程
+                                    let alive = match this_login.client.read().await.clone() {
+                                        None => false,
+                                        Some(current) => {
+                                            current.pid == login_client.pid
+                                                && current.port == login_client.port
+                                        }
+                                    };
+                                    if !alive {
+                                        log::info!("[LiveLcu] 客户端已断开，停止登录完成探测");
+                                        break;
+                                    }
+                                    let has_summoner = matches!(
+                                        &*this_login.status.borrow(),
+                                        ConnectionStatus::Connected { summoner, .. }
+                                            if summoner.is_some()
+                                    );
+                                    if has_summoner {
+                                        break;
+                                    }
+                                    if this_login.apply_current_summoner(&login_client).await {
+                                        log::info!("[LiveLcu] 登录完成探测成功，已获取当前召唤师");
+                                        break;
+                                    }
+                                }
+                            });
+                        }
+
                         // 启动 Agent 后台 Worker（与本次连接同生命周期）
                         let runtime = AgentRuntime::start(
                             client.clone(),
@@ -738,44 +775,57 @@ impl LiveLcuService {
                 let this = self.clone();
                 tokio::spawn(async move {
                     if let Some(client) = this.get_client().await {
-                        if let Ok(s) = fetch_current_summoner(&client).await {
-                            log::info!(
-                                "[LiveLcu] 收到当前召唤师更新: {} (puuid: {})",
-                                s.full_name(),
-                                s.puuid
-                            );
-                            let current_status = this.status.borrow().clone();
-                            // 同一账号重复推送（例如对局结束后客户端再推一次）无需重刷全部生涯数据
-                            let same_summoner = matches!(
-                                &current_status,
-                                ConnectionStatus::Connected { summoner, .. }
-                                    if matches!(&**summoner, Some(prev) if prev.puuid == s.puuid)
-                            );
-                            if let ConnectionStatus::Connected { info, .. } = current_status {
-                                let new_status = ConnectionStatus::Connected {
-                                    info,
-                                    summoner: Box::new(Some(s)),
-                                };
-                                let _ = this.status.send(new_status.clone());
-                                let _ = this
-                                    .event_tx
-                                    .send(LiveLcuEvent::ConnectionChanged(new_status));
-                            }
-                            if !this
-                                .game_data_synced_from_lcu
-                                .load(std::sync::atomic::Ordering::SeqCst)
-                            {
-                                this.sync_game_data_from_lcu(&client).await;
-                            }
-                            if !same_summoner {
-                                this.refresh_career_data().await;
-                            }
-                        }
+                        this.apply_current_summoner(&client).await;
                     }
                 });
             }
             _ => {}
         }
+    }
+
+    /// 拉取并应用当前登录召唤师：成功时更新连接状态、广播事件并按需刷新生涯数据。
+    ///
+    /// 供 WS 推送（`/lol-summoner/v1/current-summoner`）与登录完成轮询兜底共用。
+    /// 返回 true 表示本次成功取到召唤师资料；同一账号重复推送不会重刷生涯数据。
+    pub async fn apply_current_summoner(
+        &self,
+        client: &yuumi_core::lcu::client::LcuClient,
+    ) -> bool {
+        let Ok(s) = fetch_current_summoner(client).await else {
+            return false;
+        };
+        log::info!(
+            "[LiveLcu] 收到当前召唤师更新: {} (puuid: {})",
+            s.full_name(),
+            s.puuid
+        );
+        let current_status = self.status.borrow().clone();
+        // 同一账号重复推送（例如对局结束后客户端再推一次）无需重刷全部生涯数据
+        let same_summoner = matches!(
+            &current_status,
+            ConnectionStatus::Connected { summoner, .. }
+                if matches!(&**summoner, Some(prev) if prev.puuid == s.puuid)
+        );
+        if let ConnectionStatus::Connected { info, .. } = current_status {
+            let new_status = ConnectionStatus::Connected {
+                info,
+                summoner: Box::new(Some(s)),
+            };
+            let _ = self.status.send(new_status.clone());
+            let _ = self
+                .event_tx
+                .send(LiveLcuEvent::ConnectionChanged(new_status));
+        }
+        if !self
+            .game_data_synced_from_lcu
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            self.sync_game_data_from_lcu(client).await;
+        }
+        if !same_summoner {
+            self.refresh_career_data().await;
+        }
+        true
     }
 
     /// 刷新当前登录召唤师的生涯数据（默认最近 20 场战绩）
