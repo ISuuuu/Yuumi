@@ -103,6 +103,8 @@ static LANG_ZH_CN: &[(&str, &str)] = &[
     ("common.lcuNotConnected", "LCU 未连接，请先启动英雄联盟客户端"),
     ("common.reconnectTriggered", "已触发游戏重连"),
     ("common.reconnectFailed", "重连请求失败"),
+    ("common.lcuReset", "LCU 监听服务已重置"),
+    ("common.inGameNoFix", "对局进行中，无需修复"),
     ("common.save", "保存"),
     ("common.refresh", "刷新"),
     // ─── 设置页 ───
@@ -287,6 +289,8 @@ static LANG_ZH_TW: &[(&str, &str)] = &[
     ("common.lcuNotConnected", "LCU 未連接，請先啟動英雄聯盟客戶端"),
     ("common.reconnectTriggered", "已觸發遊戲重連"),
     ("common.reconnectFailed", "重連請求失敗"),
+    ("common.lcuReset", "LCU 監聽服務已重置"),
+    ("common.inGameNoFix", "對局進行中，無需修復"),
     ("common.save", "保存"),
     ("common.refresh", "刷新"),
     // ─── 设置页 ───
@@ -471,6 +475,8 @@ static LANG_EN_US: &[(&str, &str)] = &[
     ("common.lcuNotConnected", "LCU not connected, please start League Client first"),
     ("common.reconnectTriggered", "Reconnect triggered"),
     ("common.reconnectFailed", "Reconnect failed"),
+    ("common.lcuReset", "LCU listener reset"),
+    ("common.inGameNoFix", "Game in progress, nothing to fix"),
     ("common.save", "Save"),
     ("common.refresh", "Refresh"),
     // ─── 设置页 ───

@@ -119,6 +119,8 @@ pub struct LiveLcuService {
     last_game_info_key: Arc<RwLock<String>>,
     /// 对局信息拉取串行化
     refresh_lock: Arc<RwLock<()>>,
+    /// 当前活跃的 WS 订阅句柄（供手动重置时取消旧连接）
+    ws_handle: Arc<RwLock<Option<LcuWsHandle>>>,
 }
 
 impl LiveLcuService {
@@ -152,6 +154,7 @@ impl LiveLcuService {
             career_refresh_task: Arc::new(RwLock::new(None)),
             last_game_info_key: Arc::new(RwLock::new(String::new())),
             refresh_lock: Arc::new(RwLock::new(())),
+            ws_handle: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -306,6 +309,44 @@ impl LiveLcuService {
         self.current_phase.read().await.clone()
     }
 
+    /// 重建 LCU WebSocket 订阅（「修复无限加载」入口）
+    ///
+    /// WS 循环只在连接报错/断开时重连，半开连接会静默停表；此处主动换一条新连接，
+    /// 并用当前阶段重放一次事件，使界面与 Agent 立即恢复。
+    pub async fn reset_ws_listeners(&self) {
+        let Some(client) = self.get_client().await else {
+            return;
+        };
+        if let Some(old) = self.ws_handle.write().await.take() {
+            old.cancel();
+        }
+
+        let handle = start_ws(client.port, client.token.clone());
+        let mut rx = handle.subscribe_events();
+        let this = self.clone();
+        tokio::spawn(async move {
+            while let Ok(event) = rx.recv().await {
+                this.handle_ws_event(event).await;
+            }
+            log::info!("[LiveLcu] WS 事件读取任务已结束（手动重置）");
+        });
+        *self.ws_handle.write().await = Some(handle);
+        log::info!("[LiveLcu] 已手动重置 LCU WebSocket 订阅");
+
+        // 重放当前阶段，触发选人会话与对局信息的重新拉取
+        let Ok(serde_json::Value::String(phase)) =
+            client.get("/lol-gameflow/v1/gameflow-phase").await
+        else {
+            return;
+        };
+        self.handle_ws_event(LcuWsEvent {
+            uri: "/lol-gameflow/v1/gameflow-phase".to_string(),
+            event_type: "Update".to_string(),
+            data: serde_json::Value::String(phase),
+        })
+        .await;
+    }
+
     /// 获取本人近期真实战绩（宿命判定数据源）
     async fn get_recent_matches(&self) -> Vec<MatchDisplay> {
         self.recent_matches.read().await.clone()
@@ -320,7 +361,6 @@ impl LiveLcuService {
     }
 
     async fn run_loop(&self) {
-        let mut active_ws: Option<LcuWsHandle> = None;
         let mut active_info: Option<LcuConnectionInfo> = None;
 
         loop {
@@ -461,13 +501,13 @@ impl LiveLcuService {
                             log::info!("[LiveLcu] WS 事件读取任务已结束");
                         });
 
-                        active_ws = Some(ws_handle);
+                        *self.ws_handle.write().await = Some(ws_handle);
                         active_info = Some(info);
                     }
                 }
                 (None, Some(_)) => {
                     log::info!("[LiveLcu] LCU 进程已退出，重置连接状态");
-                    if let Some(ws) = active_ws.take() {
+                    if let Some(ws) = self.ws_handle.write().await.take() {
                         ws.cancel();
                     }
                     active_info = None;

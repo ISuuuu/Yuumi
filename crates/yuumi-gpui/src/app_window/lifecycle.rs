@@ -721,8 +721,8 @@ impl MainWindow {
     }
 
     pub(super) fn trigger_reconnect(&mut self, cx: &mut Context<Self>) {
-        log::info!("[MainWindow] 用户触发重新连接/修复流程");
-        // 对照 Vue A03：未连接时手动重连只提示警告，不发起请求
+        log::info!("[MainWindow] 用户触发修复无限加载/重新连接");
+        // 未连接时只提示警告，不发起请求
         if !matches!(self.connection_status, ConnectionStatus::Connected { .. }) {
             self.toast(
                 ToastKind::Warning,
@@ -733,11 +733,9 @@ impl MainWindow {
             return;
         }
         let live = self.live_service.clone();
-        let phase = self.current_phase.clone();
         cx.spawn(async move |entity, cx| {
             let Some(client) = live.get_client().await else {
                 let _ = entity.update(cx, |this, cx| {
-                    // 对照 Vue A03
                     this.toast(
                         ToastKind::Warning,
                         crate::i18n::t("common.lcuNotConnected"),
@@ -746,65 +744,95 @@ impl MainWindow {
                 });
                 return;
             };
-            if matches!(phase.as_str(), "InProgress" | "GameStart" | "Reconnect") {
-                // 游戏中 → 调用 reconnect API（指数退避重试最多 5 次）
-                let mut last_err = None;
-                for i in 0..5 {
-                    match client
-                        .request("POST", "/lol-gameflow/v1/reconnect", None, false)
-                        .await
-                    {
-                        Ok(_) => {
-                            log::info!("[MainWindow] 游戏重连 API 调用成功");
-                            last_err = None;
-                            break;
-                        }
-                        Err(e) => {
-                            last_err = Some(e);
-                            if i < 4 {
-                                tokio::time::sleep(Duration::from_millis(500 * (1 << i))).await;
+
+            // 1. 现查阶段，避免使用 WS 缓存值（WS 失效时缓存恰恰是旧的）
+            //    查询失败说明客户端端口已关或假死，get_client() 可能是过期实例，按未连接处理
+            let phase = match client.get("/lol-gameflow/v1/gameflow-phase").await {
+                Ok(serde_json::Value::String(p)) => p,
+                _ => {
+                    let _ = entity.update(cx, |this, cx| {
+                        this.toast(
+                            ToastKind::Warning,
+                            crate::i18n::t("common.lcuNotConnected"),
+                            cx,
+                        )
+                    });
+                    return;
+                }
+            };
+
+            // 2. 对局进行中：只给提示，不做任何操作（该阶段 reconnect 只会返回 403）
+            if phase == "InProgress" {
+                let _ = entity.update(cx, |this, cx| {
+                    this.toast(ToastKind::Info, crate::i18n::t("common.inGameNoFix"), cx)
+                });
+                return;
+            }
+
+            // 3. 重建自己的 LCU 订阅：WS 半开时循环不会自动重连，页面会一直转圈
+            live.reset_ws_listeners().await;
+
+            let phase_name = phase_label(&phase).unwrap_or(phase.as_str());
+            let reset_msg = if phase_name.is_empty() {
+                format!("🔄 {}", crate::i18n::t("common.lcuReset"))
+            } else {
+                format!("🔄 {} ({})", crate::i18n::t("common.lcuReset"), phase_name)
+            };
+
+            match phase.as_str() {
+                // 4. 加载/等待重连 → 调用 reconnect API（指数退避重试最多 5 次）
+                "GameStart" | "Reconnect" => {
+                    let mut last_err = None;
+                    for i in 0..5 {
+                        match client
+                            .request("POST", "/lol-gameflow/v1/reconnect", None, false)
+                            .await
+                        {
+                            Ok(_) => {
+                                log::info!("[MainWindow] 游戏重连 API 调用成功");
+                                last_err = None;
+                                break;
+                            }
+                            Err(e) => {
+                                last_err = Some(e);
+                                if i < 4 {
+                                    tokio::time::sleep(Duration::from_millis(500 * (1 << i))).await;
+                                }
                             }
                         }
                     }
+                    let _ = entity.update(cx, |this, cx| match last_err {
+                        None => this.toast(
+                            ToastKind::Success,
+                            format!("🔄 {}", crate::i18n::t("common.reconnectTriggered")),
+                            cx,
+                        ),
+                        Some(e) => this.toast(
+                            ToastKind::Error,
+                            format!("{}: {}", crate::i18n::t("common.reconnectFailed"), e),
+                            cx,
+                        ),
+                    });
                 }
-                let _ = entity.update(cx, |this, cx| match last_err {
-                    // 对照 Vue A04
-                    None => this.toast(
-                        ToastKind::Success,
-                        format!("🔄 {}", crate::i18n::t("common.reconnectTriggered")),
-                        cx,
-                    ),
-                    // 对照 Vue A05
-                    Some(e) => this.toast(
-                        ToastKind::Error,
-                        format!("{}: {}", crate::i18n::t("common.reconnectFailed"), e),
-                        cx,
-                    ),
-                });
-            } else {
-                // 其他阶段 → 请求回到大厅房间阶段并刷新
-                let result = client
-                    .request(
-                        "POST",
-                        "/lol-gameflow/v1/session/request-lobby-phase",
-                        None,
-                        false,
-                    )
-                    .await;
-                let _ = entity.update(cx, |this, cx| match result {
-                    // 对照 Vue A04
-                    Ok(_) => this.toast(
-                        ToastKind::Success,
-                        format!("🔄 {}", crate::i18n::t("common.reconnectTriggered")),
-                        cx,
-                    ),
-                    // 对照 Vue A05
-                    Err(e) => this.toast(
-                        ToastKind::Error,
-                        format!("{}: {}", crate::i18n::t("common.reconnectFailed"), e),
-                        cx,
-                    ),
-                });
+                // 5. 结算态 → play-again 重建大厅（仅结算流程内可用，其余阶段 LCU 返回 400）
+                "WaitingForStats" | "PreEndOfGame" | "EndOfGame" => {
+                    let result = client
+                        .post("/lol-lobby/v2/play-again", Some(serde_json::json!({})))
+                        .await;
+                    let _ = entity.update(cx, |this, cx| match result {
+                        Ok(_) => this.toast(ToastKind::Success, reset_msg, cx),
+                        Err(e) => this.toast(
+                            ToastKind::Error,
+                            format!("{}: {}", crate::i18n::t("common.reconnectFailed"), e),
+                            cx,
+                        ),
+                    });
+                }
+                // 6. 选人/排队等阶段 → 只重置监听，避免拆房或掉队
+                _ => {
+                    let _ =
+                        entity.update(cx, |this, cx| this.toast(ToastKind::Info, reset_msg, cx));
+                }
             }
         })
         .detach();
