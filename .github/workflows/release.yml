@@ -65,6 +65,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -119,17 +121,12 @@ jobs:
         id: changelog
         shell: bash
         run: |
-          TAG="${{ needs.create-release.outputs.version }}"
-          git fetch --tags --quiet
-          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${TAG}$" | head -1 || echo "")
-          if [ -z "$PREV_TAG" ]; then
-            NOTES=$(git log --format="- %s" -20)
-          else
-            NOTES=$(git log --format="- %s" "${PREV_TAG}..${TAG}")
-          fi
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          NOTES="$(bash .github/scripts/generate-release-notes.sh "${{ needs.create-release.outputs.version }}")"
+          {
+            echo "notes<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build Release
         run: cargo build --release -p yuumi-gpui
@@ -255,18 +252,12 @@ jobs:
       - name: Get changelog
         id: changelog
         run: |
-          TAG_NAME="${{ needs.create-release.outputs.version }}"
-          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${TAG_NAME}$" | head -1 || echo "")
-          if [ -z "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --oneline --format="- %s" -20)
-          else
-            CHANGELOG=$(git log --oneline --format="- %s" "${PREV_TAG}..${TAG_NAME}")
-          fi
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "## Changes in this release" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          NOTES="$(bash .github/scripts/generate-release-notes.sh "${{ needs.create-release.outputs.version }}")"
+          {
+            echo "notes<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Download Windows installer artifacts
         uses: actions/download-artifact@v4
