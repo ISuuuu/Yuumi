@@ -16,6 +16,7 @@ use crate::components::collapse_card::{
     action_button, checkbox, collapse_card, number_stepper, setting_row, settings_card_item,
 };
 use crate::components::dropdown::{select_dropdown, select_dropdown_item};
+use crate::components::markdown;
 use crate::components::switch::Switch;
 use crate::components::text_field::{text_field, TextFieldOptions};
 use crate::theme::Theme;
@@ -2524,7 +2525,7 @@ impl SettingsView {
                             div()
                                 .text_size(px(12.0))
                                 .text_color(Theme::TEXT_MUTED())
-                                .child("v2.5.0"),
+                                .child(concat!("v", env!("CARGO_PKG_VERSION"))),
                         ),
                 )
                 .child(
@@ -2553,6 +2554,15 @@ impl SettingsView {
                         )),
                 ),
         )
+    }
+
+    /// 与本地版本匹配的 release；缺失时回退到最新一条（对齐 Vue 版 currentRelease 逻辑）。
+    fn current_release(&self) -> Option<&yuumi_core::update::ReleaseEntry> {
+        let version = env!("CARGO_PKG_VERSION");
+        self.release_notes
+            .iter()
+            .find(|r| r.tag.trim_start_matches('v').eq_ignore_ascii_case(version))
+            .or_else(|| self.release_notes.first())
     }
 
     // ─── 更新日志模态浮层 (F-V07) ───
@@ -2598,13 +2608,43 @@ impl SettingsView {
                                 .items_center()
                                 .justify_between()
                                 .child(
-                                    div().flex().items_center().gap(px(10.0)).child(
-                                        div()
-                                            .text_size(px(15.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(Theme::TEXT_PRIMARY())
-                                            .child(crate::i18n::t("settings.aboutHistoryTitle")),
-                                    ),
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(10.0))
+                                        .child(
+                                            div()
+                                                .text_size(px(15.0))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(Theme::TEXT_PRIMARY())
+                                                .child(crate::i18n::t(
+                                                    "settings.aboutHistoryTitle",
+                                                )),
+                                        )
+                                        .when_some(self.current_release(), |d, release| {
+                                            d.child(
+                                                div()
+                                                    .px(px(8.0))
+                                                    .py(px(2.0))
+                                                    .rounded_full()
+                                                    .bg(Theme::ACCENT_PRIMARY().opacity(0.12))
+                                                    .text_size(px(11.0))
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(Theme::ACCENT_PRIMARY())
+                                                    .child(release.tag.clone()),
+                                            )
+                                            .when_some(
+                                                release.published_at.get(0..10),
+                                                |d, date| {
+                                                    d.child(
+                                                        div()
+                                                            .text_size(px(12.0))
+                                                            .text_color(Theme::TEXT_MUTED())
+                                                            .child(date.to_string()),
+                                                    )
+                                                },
+                                            )
+                                        }),
                                 )
                                 .child(
                                     div()
@@ -2647,14 +2687,15 @@ impl SettingsView {
                                     d.child(crate::i18n::t("settings.aboutHistoryLoading"))
                                 })
                                 .when_some(self.release_error.clone(), |d, error| d.child(error))
-                                .children(self.release_notes.iter().map(|release| {
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(6.0))
-                                        .child(format!("{}  {}", release.tag, release.published_at))
-                                        .child(release.body.clone())
-                                })),
+                                .when_some(self.current_release(), |d, release| {
+                                    d.child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap(px(10.0))
+                                            .children(markdown::render_markdown(&release.body)),
+                                    )
+                                }),
                         ),
                 ),
         )

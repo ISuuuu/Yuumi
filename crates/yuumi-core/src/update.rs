@@ -229,6 +229,41 @@ fn verify(public_key: &str, signature: &str, bytes: &[u8]) -> Result<(), String>
         .map_err(|e| format!("更新签名校验失败: {e}"))
 }
 
+/// 读取更新日志磁盘缓存；`max_age` 限定新鲜度，`require_current` 要求缓存包含当前版本。
+fn read_cached_entries(
+    cache_path: &Path,
+    max_age: Option<Duration>,
+    current_version: Option<&str>,
+    require_current: bool,
+) -> Option<Vec<ReleaseEntry>> {
+    let text = std::fs::read_to_string(cache_path).ok()?;
+    let entries = serde_json::from_str::<Vec<ReleaseEntry>>(&text).ok()?;
+    if entries.is_empty() {
+        return None;
+    }
+    if let Some(max_age) = max_age {
+        let fresh = std::fs::metadata(cache_path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age < max_age);
+        if !fresh {
+            return None;
+        }
+    }
+    if require_current {
+        let contains_current = current_version.filter(|s| !s.is_empty()).is_none_or(|v| {
+            entries
+                .iter()
+                .any(|e| e.tag.trim_start_matches('v') == v.trim_start_matches('v'))
+        });
+        if !contains_current {
+            return None;
+        }
+    }
+    Some(entries)
+}
+
 pub async fn release_changelog(
     client: &reqwest::Client,
     url: &str,
@@ -237,40 +272,42 @@ pub async fn release_changelog(
     force_refresh: bool,
 ) -> Result<Vec<ReleaseEntry>, String> {
     if !force_refresh {
-        if let Ok(metadata) = std::fs::metadata(cache_path) {
-            if metadata
-                .modified()
-                .ok()
-                .and_then(|t| t.elapsed().ok())
-                .is_some_and(|age| age < Duration::from_secs(86400))
-            {
-                if let Ok(text) = std::fs::read_to_string(cache_path) {
-                    if let Ok(entries) = serde_json::from_str::<Vec<ReleaseEntry>>(&text) {
-                        let contains_current =
-                            current_version.filter(|s| !s.is_empty()).is_none_or(|v| {
-                                entries.iter().any(|e| {
-                                    e.tag.trim_start_matches('v') == v.trim_start_matches('v')
-                                })
-                            });
-                        if !entries.is_empty() && contains_current {
-                            return Ok(entries);
-                        }
-                    }
-                }
-            }
+        if let Some(entries) = read_cached_entries(
+            cache_path,
+            Some(Duration::from_secs(86400)),
+            current_version,
+            true,
+        ) {
+            return Ok(entries);
         }
     }
-    let releases: Vec<GithubRelease> = client
-        .get(url)
-        .header(reqwest::header::USER_AGENT, "Yuumi")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| format!("解析版本数据失败: {e}"))?;
+    let fetch = async {
+        let response = client
+            .get(url)
+            .header(reqwest::header::USER_AGENT, "Yuumi")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let response = response.error_for_status().map_err(|e| e.to_string())?;
+        response
+            .json::<Vec<GithubRelease>>()
+            .await
+            .map_err(|e| format!("解析版本数据失败: {e}"))
+    };
+    let releases: Vec<GithubRelease> = match fetch.await {
+        Ok(releases) => releases,
+        Err(e) => {
+            // GitHub 不可达：常规加载兜底使用本地缓存（允许过期、不要求包含当前版本），
+            // 显式刷新仍报错以提示用户网络异常
+            if !force_refresh {
+                if let Some(entries) = read_cached_entries(cache_path, None, current_version, false)
+                {
+                    return Ok(entries);
+                }
+            }
+            return Err(e);
+        }
+    };
     let entries: Vec<ReleaseEntry> = releases
         .into_iter()
         .map(|r| ReleaseEntry {
@@ -741,6 +778,36 @@ mod integration_tests {
         assert!(release_changelog(&client, &url, &path, None, true)
             .await
             .is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+    #[tokio::test]
+    async fn stale_cache_falls_back_when_github_unreachable() {
+        // 缓存里只有 v1.0.0，而本地版本是 9.9.9：快路径校验不通过，走网络；
+        // 网络不可达时应兜底返回缓存内容（force 显式刷新仍报错）
+        let path = std::env::temp_dir().join(format!(
+            "yuumi-release-stale-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(
+            &path,
+            r#"[{"tag":"v1.0.0","body":"cached notes","published_at":"2025-01-01"}]"#,
+        )
+        .unwrap();
+        let client = reqwest::Client::new();
+        let unreachable = "http://127.0.0.1:1/releases";
+        let entries = release_changelog(&client, unreachable, &path, Some("9.9.9"), false)
+            .await
+            .unwrap();
+        assert_eq!(entries[0].body, "cached notes");
+        assert!(
+            release_changelog(&client, unreachable, &path, Some("9.9.9"), true)
+                .await
+                .is_err()
+        );
         std::fs::remove_file(path).unwrap();
     }
     #[tokio::test]

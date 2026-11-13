@@ -262,7 +262,15 @@ impl MainWindow {
             let cache = yuumi_core::runtime::app_data_dir()
                 .join("cache")
                 .join("yuumi-releases.json");
-            update::release_changelog(&client, update::RELEASES_URL, &cache, None, force).await
+            // 传入当前版本：缓存缺失当前版本时自动强制刷新（对齐 Vue 版调用）
+            update::release_changelog(
+                &client,
+                update::RELEASES_URL,
+                &cache,
+                Some(env!("CARGO_PKG_VERSION")),
+                force,
+            )
+            .await
         });
         cx.spawn(async move |entity, cx| {
             let result = task

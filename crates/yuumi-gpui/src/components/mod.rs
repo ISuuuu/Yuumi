@@ -5,6 +5,7 @@ pub mod dropdown;
 pub mod icon;
 pub mod input;
 pub mod lcu_image;
+pub mod markdown;
 pub mod notice_popup;
 pub mod offline_state;
 pub mod sidebar;
