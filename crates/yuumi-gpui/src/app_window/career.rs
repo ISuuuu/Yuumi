@@ -1,5 +1,8 @@
 // 生涯路由：生涯页渲染与回调、熟练度与战利品动作、他人生涯切换。
 use super::*;
+use crate::views::career::loot_category;
+use yuumi_core::parsers::loot::LootInventoryItem;
+use yuumi_core::parsers::loot_actions as loot_core;
 
 impl MainWindow {
     /// 展开 / 收起战绩卡片的详情（基线已有的动作，当前渲染未接线）
@@ -85,11 +88,10 @@ impl MainWindow {
         cx.notify();
     }
 
-    /// 应用战利品页签的筛选 / 多选 / 下拉动作
+    /// 应用战利品页签的筛选 / 多选 / 下拉 / 批量动作。
     ///
-    /// 开启、全部开启、分解、重铸、升级解锁属于 LCU 写操作，按钮已做禁用态并标注
-    /// 「服务层待接」；待服务层就绪后在 `LootAction` 补写动作变体并在此调用
-    /// `LiveLcuService` 的写方法，完成后再 `refresh_career_data()` 回拉库存与余额。
+    /// 对照 Vue `useLoot`：所有批量动作都先做前置校验（数量、钥匙、精粹、英雄拥有状态），
+    /// 校验通过才弹确认框，确认后在后台执行并逐条刷新进度面板。
     pub(super) fn apply_loot_action(&mut self, action: LootAction, cx: &mut Context<Self>) {
         match action {
             LootAction::ToggleDropdown(kind) => {
@@ -142,22 +144,226 @@ impl MainWindow {
             LootAction::OpenQuantity(modal) => {
                 self.career_view.loot_modal = Some(modal);
             }
-            LootAction::OpenConfirm(modal) => {
-                self.career_view.loot_modal = Some(modal);
+            LootAction::RequestSmartOpenAll => {
+                let total_keys = self.loot_key_count();
+                let batches = loot_core::build_smart_open_batches(
+                    &self.career_view.loot_openables,
+                    total_keys,
+                );
+                let total: i32 = batches.iter().map(|b| b.count).sum();
+                if total <= 0 {
+                    self.toast(ToastKind::Error, "没有可开启的战利品".to_string(), cx);
+                    cx.notify();
+                    return;
+                }
+                let key_cost: i32 = batches
+                    .iter()
+                    .filter(|b| b.ingredients.len() > 1)
+                    .map(|b| b.count)
+                    .sum();
+                self.career_view.loot_modal = Some(LootModal::Confirm {
+                    action_kind: LootActionKind::SmartOpenAll,
+                    title: "一键开启全部战利品".to_string(),
+                    message: format!(
+                        "将自动开启 {} 个战利品：优先用钥匙碎片锻造钥匙，再按优先级开启宝箱与法球。",
+                        total
+                    ),
+                    details: vec![
+                        ("战利品种类".to_string(), format!("{} 种", batches.len())),
+                        ("预计开启".to_string(), format!("{} 个", total)),
+                        (
+                            "消耗钥匙".to_string(),
+                            format!("{} 把（当前 {}）", key_cost, total_keys),
+                        ),
+                    ],
+                });
+            }
+            LootAction::RequestDisenchant => {
+                let selected = self.selected_loot_items();
+                if selected.is_empty() {
+                    self.toast(ToastKind::Error, "没有选中任何碎片".to_string(), cx);
+                    cx.notify();
+                    return;
+                }
+                let mut blue = 0i64;
+                let mut orange = 0i64;
+                for item in &selected {
+                    let gain = item.disenchant_value as i64 * item.count as i64;
+                    if loot_category(item) == "CHAMPION" {
+                        blue += gain;
+                    } else {
+                        orange += gain;
+                    }
+                }
+                self.career_view.loot_modal = Some(LootModal::Confirm {
+                    action_kind: LootActionKind::Disenchant,
+                    title: "批量分解确认".to_string(),
+                    message: format!(
+                        "确定要分解选中的 {} 种碎片吗？此操作无法撤销。",
+                        selected.len()
+                    ),
+                    details: vec![
+                        ("所选碎片种类".to_string(), format!("{} 种", selected.len())),
+                        ("预计蓝色精粹".to_string(), format!("+{}", blue)),
+                        ("预计橙色精粹".to_string(), format!("+{}", orange)),
+                    ],
+                });
+            }
+            LootAction::RequestReroll => {
+                let selected = self.selected_loot_items();
+                let (ids, remaining) = plan_reroll_ids(&selected);
+                if ids.is_empty() {
+                    self.toast(
+                        ToastKind::Error,
+                        "没有可重铸的战利品组合（同类碎片需满 3 个）".to_string(),
+                        cx,
+                    );
+                    cx.notify();
+                    return;
+                }
+                self.career_view.loot_modal = Some(LootModal::Confirm {
+                    action_kind: LootActionKind::Reroll,
+                    title: "三合一重铸确认".to_string(),
+                    message: "将按碎片分类自动分组，每 3 个合成 1 个永久物品。".to_string(),
+                    details: vec![
+                        ("重铸组数".to_string(), format!("{} 组", ids.len() / 3)),
+                        ("消耗碎片".to_string(), format!("{} 个", ids.len())),
+                        ("保留未配对".to_string(), format!("{} 个", remaining)),
+                    ],
+                });
+            }
+            LootAction::RequestUpgrade => {
+                let selected = self.selected_loot_items();
+                let unowned: Vec<LootInventoryItem> = selected
+                    .into_iter()
+                    .filter(|item| {
+                        !item.item_status.eq_ignore_ascii_case("OWNED")
+                            && !is_excluded_category(item)
+                    })
+                    .collect();
+                if unowned.is_empty() {
+                    self.toast(
+                        ToastKind::Error,
+                        "没有选中任何未拥有的战利品进行操作！".to_string(),
+                        cx,
+                    );
+                    cx.notify();
+                    return;
+                }
+
+                // 对照 Vue：皮肤碎片对应的英雄未拥有时无法升级
+                let missing_champions: Vec<String> = unowned
+                    .iter()
+                    .filter(|item| {
+                        loot_category(item) == "SKIN"
+                            && !item.parent_item_status.eq_ignore_ascii_case("OWNED")
+                    })
+                    .map(|item| item.item_desc.clone())
+                    .collect();
+                if !missing_champions.is_empty() {
+                    self.toast(
+                        ToastKind::Error,
+                        format!(
+                            "未拥有以下皮肤对应的英雄：[{}]，请先在游戏内解锁该英雄！",
+                            missing_champions.join("、")
+                        ),
+                        cx,
+                    );
+                    cx.notify();
+                    return;
+                }
+
+                let mut total_blue = 0i64;
+                let mut total_orange = 0i64;
+                for item in &unowned {
+                    if item.upgrade_essence_cost <= 0 {
+                        continue;
+                    }
+                    let cost = item.upgrade_essence_cost as i64 * item.count as i64;
+                    if loot_category(item) == "CHAMPION" {
+                        total_blue += cost;
+                    } else {
+                        total_orange += cost;
+                    }
+                }
+                if total_blue > self.career_view.essences.blue_essence as i64 {
+                    self.toast(
+                        ToastKind::Error,
+                        format!(
+                            "蓝色精粹不足！需要 🔵 {}，当前拥有 🔵 {}",
+                            total_blue, self.career_view.essences.blue_essence
+                        ),
+                        cx,
+                    );
+                    cx.notify();
+                    return;
+                }
+                if total_orange > self.career_view.essences.orange_essence as i64 {
+                    self.toast(
+                        ToastKind::Error,
+                        format!(
+                            "橙色精粹不足！需要 🟠 {}，当前拥有 🟠 {}",
+                            total_orange, self.career_view.essences.orange_essence
+                        ),
+                        cx,
+                    );
+                    cx.notify();
+                    return;
+                }
+
+                let has_upgrade = unowned.iter().any(|i| i.upgrade_essence_cost > 0);
+                let has_unlock = unowned.iter().any(|i| i.upgrade_essence_cost <= 0);
+                let description = if has_upgrade && has_unlock {
+                    "消耗精粹升级部分碎片，其余永久道具将免费解锁"
+                } else if has_unlock {
+                    "将免费解锁 / 激活永久道具并添加到收藏"
+                } else {
+                    "将消耗对应精粹并解锁为永久版"
+                };
+                let mut details = vec![("待处理种类".to_string(), format!("{} 种", unowned.len()))];
+                if total_blue > 0 {
+                    details.push(("预计消耗蓝色精粹".to_string(), format!("🔵 {}", total_blue)));
+                }
+                if total_orange > 0 {
+                    details.push((
+                        "预计消耗橙色精粹".to_string(),
+                        format!("🟠 {}", total_orange),
+                    ));
+                }
+                details.push(("操作说明".to_string(), description.to_string()));
+
+                let title = if has_unlock && !has_upgrade {
+                    "解锁选中项"
+                } else if has_upgrade && !has_unlock {
+                    "升级选中项"
+                } else {
+                    "升级 / 解锁选中项"
+                };
+                self.career_view.loot_modal = Some(LootModal::Confirm {
+                    action_kind: LootActionKind::Upgrade,
+                    title: title.to_string(),
+                    message: format!(
+                        "确定要将选中的 {} 个未拥有项目进行升级或解锁吗？",
+                        unowned.len()
+                    ),
+                    details,
+                });
             }
             LootAction::Confirm(modal) => {
                 self.career_view.loot_modal = None;
-                let live = self.live_service.clone();
                 match modal {
                     LootModal::Quantity {
+                        name,
+                        quantity,
+                        max_quantity,
                         recipe_name,
                         ingredients,
-                        quantity,
                         action,
                         ..
                     } => {
-                        if quantity <= 0 {
-                            log::warn!("[MainWindow] 开启/合成数量为 0，取消执行");
+                        if quantity <= 0 || quantity > max_quantity {
+                            self.toast(ToastKind::Error, "数量超出可执行范围".to_string(), cx);
+                            cx.notify();
                             return;
                         }
                         let item = LootActionItem {
@@ -166,105 +372,229 @@ impl MainWindow {
                             count: quantity,
                             ..Default::default()
                         };
-                        let kind = match action {
-                            views::career::LootQuantityAction::Open => LootActionKind::Open,
-                            views::career::LootQuantityAction::Craft => LootActionKind::Open,
+                        let title = match action {
+                            crate::views::career::LootQuantityAction::Open => "正在开启战利品",
+                            crate::views::career::LootQuantityAction::Craft => "正在合成钥匙",
                         };
-                        cx.spawn(async move |entity, cx| {
-                            let result = live.run_loot_action(kind, vec![item]).await;
-                            let _ = entity.update(cx, |this, cx| {
-                                if let Err(e) = result {
-                                    log::error!("[MainWindow] 执行战利品开启/合成动作失败: {}", e);
-                                    // 对照 Vue E03
-                                    this.toast(ToastKind::Error, format!("开箱失败: {}", e), cx);
-                                }
-                            });
-                            live.refresh_career_data().await;
-                        })
-                        .detach();
+                        self.start_loot_action(
+                            LootActionKind::Open,
+                            vec![item],
+                            title.to_string(),
+                            quantity as usize,
+                            name,
+                            cx,
+                        );
                     }
                     LootModal::Confirm { action_kind, .. } => {
-                        let selected_ids = self.career_view.loot_selected.clone();
-                        self.career_view.loot_selected.clear();
-
-                        let items: Vec<LootActionItem> = if action_kind
-                            == LootActionKind::SmartOpenAll
-                        {
-                            self.career_view
-                                .loot_items
-                                .iter()
-                                .filter(|i| i.is_openable && i.count > 0)
-                                .map(|i| LootActionItem {
-                                    loot_id: i.loot_id.clone(),
-                                    name: i.name.clone(),
-                                    count: i.count,
-                                    recipe_name: format!("{}_open", i.loot_id),
-                                    ingredients: vec![i.loot_id.clone()],
-                                    ..Default::default()
-                                })
-                                .collect()
-                        } else {
-                            self.career_view
-                                .loot_items
-                                .iter()
-                                .filter(|i| selected_ids.contains(&i.loot_id) && i.count > 0)
-                                .map(|i| LootActionItem {
-                                    loot_id: i.loot_id.clone(),
-                                    name: i.item_desc.clone(),
-                                    count: i.count,
-                                    recipe_name: i.upgrade_recipe_name.clone().unwrap_or_default(),
-                                    ingredients: vec![i.loot_id.clone()],
-                                    ..Default::default()
-                                })
-                                .collect()
+                        let (items, title, total, first_name) = match action_kind {
+                            LootActionKind::SmartOpenAll => {
+                                let batches = loot_core::build_smart_open_batches(
+                                    &self.career_view.loot_openables,
+                                    self.loot_key_count(),
+                                );
+                                let total: i32 = batches.iter().map(|b| b.count).sum();
+                                let items: Vec<LootActionItem> = batches
+                                    .iter()
+                                    .map(|b| LootActionItem {
+                                        loot_id: b.loot_id.clone(),
+                                        name: b.name.clone(),
+                                        count: b.count,
+                                        recipe_name: b.recipe_name.clone(),
+                                        ingredients: b.ingredients.clone(),
+                                        upgrade_recipe_name: None,
+                                    })
+                                    .collect();
+                                (
+                                    items,
+                                    "正在一键开启战利品".to_string(),
+                                    total.max(0) as usize,
+                                    batches.first().map(|b| b.name.clone()).unwrap_or_default(),
+                                )
+                            }
+                            LootActionKind::Disenchant => {
+                                let selected = self.selected_loot_items();
+                                let total = selected.len();
+                                let first = selected
+                                    .first()
+                                    .map(|i| i.item_desc.clone())
+                                    .unwrap_or_default();
+                                let items: Vec<LootActionItem> = selected
+                                    .iter()
+                                    .map(|i| LootActionItem {
+                                        loot_id: i.loot_id.clone(),
+                                        name: i.item_desc.clone(),
+                                        count: i.count,
+                                        ..Default::default()
+                                    })
+                                    .collect();
+                                (items, "正在分解碎片".to_string(), total, first)
+                            }
+                            LootActionKind::Reroll => {
+                                let selected = self.selected_loot_items();
+                                let (ids, _) = plan_reroll_ids(&selected);
+                                let total = ids.len() / 3;
+                                let first = ids.first().cloned().unwrap_or_default();
+                                let items: Vec<LootActionItem> = ids
+                                    .into_iter()
+                                    .map(|loot_id| LootActionItem {
+                                        loot_id,
+                                        count: 1,
+                                        ..Default::default()
+                                    })
+                                    .collect();
+                                (items, "正在三合一重铸".to_string(), total, first)
+                            }
+                            LootActionKind::Upgrade => {
+                                let selected = self.selected_loot_items();
+                                let unowned: Vec<LootInventoryItem> = selected
+                                    .into_iter()
+                                    .filter(|item| {
+                                        !item.item_status.eq_ignore_ascii_case("OWNED")
+                                            && !is_excluded_category(item)
+                                    })
+                                    .collect();
+                                let total = unowned.len();
+                                let first = unowned
+                                    .first()
+                                    .map(|i| i.item_desc.clone())
+                                    .unwrap_or_default();
+                                let items: Vec<LootActionItem> = unowned
+                                    .iter()
+                                    .map(|i| LootActionItem {
+                                        loot_id: i.loot_id.clone(),
+                                        name: i.item_desc.clone(),
+                                        count: i.count,
+                                        upgrade_recipe_name: i.upgrade_recipe_name.clone(),
+                                        ..Default::default()
+                                    })
+                                    .collect();
+                                (items, "正在升级 / 解锁碎片".to_string(), total, first)
+                            }
+                            LootActionKind::Open => (Vec::new(), String::new(), 0, String::new()),
                         };
 
-                        if items.is_empty() {
-                            log::warn!("[MainWindow] 战利品动作为空条目，取消执行");
-                            // 对照 Vue E02/E09/E14：前置校验失败以 Toast 呈现
-                            let message = match action_kind {
-                                LootActionKind::SmartOpenAll => "没有可开启的战利品",
-                                LootActionKind::Disenchant => {
-                                    "没有选中任何未拥有的战利品进行操作！"
-                                }
-                                LootActionKind::Reroll => "没有可重铸的战利品组合",
-                                LootActionKind::Upgrade => "没有可升级的战利品",
-                                LootActionKind::Open => "没有可开启的战利品",
-                            };
-                            self.toast(ToastKind::Error, message, cx);
+                        if items.is_empty() || total == 0 {
+                            self.toast(ToastKind::Error, "没有可执行的项目".to_string(), cx);
                             cx.notify();
                             return;
                         }
-
-                        cx.spawn(async move |entity, cx| {
-                            let result = live.run_loot_action(action_kind, items).await;
-                            let _ = entity.update(cx, |this, cx| {
-                                if let Err(e) = result {
-                                    log::error!("[MainWindow] 执行批量战利品动作失败: {}", e);
-                                    // 对照 Vue E08/E13/E15：按动作类型映射失败文案
-                                    let label = match action_kind {
-                                        LootActionKind::Disenchant => "分解失败",
-                                        LootActionKind::Upgrade => "升级失败",
-                                        LootActionKind::Reroll => "重铸失败",
-                                        LootActionKind::SmartOpenAll | LootActionKind::Open => {
-                                            "开箱失败"
-                                        }
-                                    };
-                                    this.toast(ToastKind::Error, format!("{}: {}", label, e), cx);
-                                }
-                            });
-                            live.refresh_career_data().await;
-                        })
-                        .detach();
+                        self.start_loot_action(action_kind, items, title, total, first_name, cx);
                     }
                 }
             }
             LootAction::CloseModal => self.career_view.loot_modal = None,
-            LootAction::CloseProgress => self.career_view.loot_progress = None,
+            LootAction::CloseProgress => {
+                self.career_view.loot_progress = None;
+                self.career_view.loot_busy = false;
+            }
         }
         cx.notify();
     }
 
+    /// 预热战利品页所有瓦片图（库存碎片 + 可开启战利品）
+    pub(super) fn prewarm_loot_assets(&self, cx: &mut Context<Self>) {
+        let mut paths: Vec<String> = self
+            .career_view
+            .loot_items
+            .iter()
+            .filter_map(|item| item.tile_path.clone())
+            .collect();
+        paths.extend(
+            self.career_view
+                .loot_openables
+                .iter()
+                .filter_map(|loot| loot.tile_path.clone()),
+        );
+        paths.retain(|p| !p.is_empty());
+        paths.sort();
+        paths.dedup();
+        prewarm_assets(paths, cx);
+    }
+
+    /// 当前可用钥匙总数（海克斯钥匙 + 杰作钥匙）
+    fn loot_key_count(&self) -> i32 {
+        self.career_view
+            .loot_items
+            .iter()
+            .filter(|i| i.loot_id == "MATERIAL_key" || i.loot_id == "MATERIAL_key_premium")
+            .map(|i| i.count)
+            .sum()
+    }
+
+    /// 选中项对应的库存条目
+    fn selected_loot_items(&self) -> Vec<LootInventoryItem> {
+        self.career_view
+            .loot_items
+            .iter()
+            .filter(|i| self.career_view.loot_selected.contains(&i.loot_id))
+            .cloned()
+            .collect()
+    }
+
+    /// 启动一次战利品写动作：先置进度面板与忙碌态，再后台执行并逐条刷新
+    fn start_loot_action(
+        &mut self,
+        kind: LootActionKind,
+        items: Vec<LootActionItem>,
+        title: String,
+        total: usize,
+        first_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.career_view.loot_progress = Some(LootProgress {
+            title: title.clone(),
+            current: 0,
+            total,
+            success: 0,
+            failed: 0,
+            current_name: first_name,
+            last_message: String::new(),
+        });
+        self.career_view.loot_busy = true;
+
+        let live = self.live_service.clone();
+        cx.spawn(async move |entity, cx| {
+            let result = live.run_loot_action(kind, items).await;
+            let _ = entity.update(cx, |this, cx| {
+                this.career_view.loot_busy = false;
+                match result {
+                    Ok(progress) => {
+                        let success = progress.iter().filter(|p| p.success).count();
+                        let failed = progress.len().saturating_sub(success);
+                        if let Some(state) = this.career_view.loot_progress.as_mut() {
+                            state.current = progress.len().max(state.current);
+                            state.total = state.total.max(progress.len());
+                            state.success = success;
+                            state.failed = failed;
+                        }
+                        if failed == 0 {
+                            this.career_view.loot_selected.clear();
+                        } else {
+                            this.toast(
+                                ToastKind::Error,
+                                format!("{}：{} 项处理失败", title, failed),
+                                cx,
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        this.career_view.loot_progress = None;
+                        let label = match kind {
+                            LootActionKind::Disenchant => "分解失败",
+                            LootActionKind::Upgrade => "升级失败",
+                            LootActionKind::Reroll => "重铸失败",
+                            LootActionKind::SmartOpenAll | LootActionKind::Open => "开箱失败",
+                        };
+                        log::error!("[MainWindow] 执行战利品动作失败: {}", e);
+                        this.toast(ToastKind::Error, format!("{}: {}", label, e), cx);
+                    }
+                }
+                cx.notify();
+            });
+            live.refresh_career_data().await;
+        })
+        .detach();
+    }
     /// 复制当前召唤师的 Riot ID，并在资料卡上短暂回显反馈
     pub(super) fn copy_riot_id(&mut self, cx: &mut Context<Self>) {
         let text = match self.career_view.summoner.as_ref() {
@@ -496,6 +826,10 @@ impl MainWindow {
                 view.update(app, |this, cx| {
                     this.career_view.active_tab = target_tab;
                     this.career_view.popup = None;
+                    // 战利品瓦片图依赖异步预热，切页时补一次（含上次失败的路径）
+                    if target_tab == views::career::CareerTab::Loot {
+                        this.prewarm_loot_assets(cx);
+                    }
                     cx.notify();
                 });
             },
@@ -566,4 +900,38 @@ impl MainWindow {
             },
         ))
     }
+}
+
+/// 兑换/升级动作需要排除的分类（材料、宝箱、法球、精粹）
+fn is_excluded_category(item: &LootInventoryItem) -> bool {
+    matches!(
+        loot_category(item),
+        "MATERIAL" | "CHEST" | "ORB" | "CURRENCY"
+    )
+}
+
+/// 三合一重铸计划（对照 Vue `handleBatchReroll`）
+///
+/// 按 displayCategories 分组，每组按 3 个取整，返回平铺的 lootId 列表与未配对剩余数。
+fn plan_reroll_ids(items: &[LootInventoryItem]) -> (Vec<String>, i32) {
+    let mut groups: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for item in items {
+        if item.loot_type.to_uppercase().contains("STATSTONE") || is_excluded_category(item) {
+            continue;
+        }
+        let entry = groups.entry(item.display_categories.clone()).or_default();
+        for _ in 0..item.count.max(0) {
+            entry.push(item.loot_id.clone());
+        }
+    }
+
+    let mut ids = Vec::new();
+    let mut remaining = 0i32;
+    for (_, list) in groups {
+        let usable = list.len() - list.len() % 3;
+        ids.extend(list[..usable].iter().cloned());
+        remaining += (list.len() % 3) as i32;
+    }
+    (ids, remaining)
 }

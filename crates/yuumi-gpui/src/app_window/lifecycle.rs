@@ -439,18 +439,43 @@ impl MainWindow {
                     .loot_progress
                     .take()
                     .unwrap_or(LootProgress {
+                        title: "正在处理战利品".to_string(),
                         current: 0,
                         total: 0,
                         success: 0,
+                        failed: 0,
                         current_name: String::new(),
+                        last_message: String::new(),
                     });
                 state.current = progress.current.max(0) as usize;
-                state.total = progress.total.max(0) as usize;
+                state.total = state.total.max(progress.total.max(0) as usize);
                 state.current_name = progress.loot_name;
                 if progress.success {
                     state.success += 1;
+                    state.last_message = if progress.reward_desc.is_empty() {
+                        "处理成功".to_string()
+                    } else {
+                        format!("获得: {}", progress.reward_desc)
+                    };
+                } else {
+                    state.failed += 1;
+                    state.last_message = format!(
+                        "失败: {}",
+                        progress.error_msg.unwrap_or_else(|| "未知错误".to_string())
+                    );
                 }
                 self.career_view.loot_progress = Some(state);
+                cx.notify();
+            }
+            LiveLcuEvent::OpenableLootLoaded(openables) => {
+                log::info!("[MainWindow] 接收到可开启战利品: count={}", openables.len());
+                let tile_paths: Vec<String> = openables
+                    .iter()
+                    .filter_map(|loot| loot.tile_path.clone())
+                    .filter(|p| !p.is_empty())
+                    .collect();
+                prewarm_assets(tile_paths, cx);
+                self.career_view.loot_openables = openables;
                 cx.notify();
             }
             LiveLcuEvent::RecentTeammatesLoaded(teammates) => {

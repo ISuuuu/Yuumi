@@ -12,7 +12,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use yuumi_core::parsers::game_info::{rank_tier_label, RankedQueueEntry, RankedStats};
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
-use yuumi_core::parsers::loot_actions::LootActionKind;
+use yuumi_core::parsers::loot_actions::{loot_priority_index, LootActionKind, OpenableLoot};
 use yuumi_core::parsers::mastery::ChampionMasteryItem;
 use yuumi_core::parsers::summoner::SummonerInfo;
 use yuumi_core::parsers::teammates::RecentTeammate;
@@ -464,6 +464,8 @@ pub enum LootModal {
         name: String,
         owned: i32,
         quantity: i32,
+        /// 可执行上限（钥匙碎片按 count/3，需钥匙的按 min(持有量, 钥匙数)）
+        max_quantity: i32,
         need_key: bool,
         key_count: i32,
         key_name: Option<String>,
@@ -476,18 +478,22 @@ pub enum LootModal {
         action_kind: LootActionKind,
         title: String,
         message: String,
-        selected: usize,
-        gain_blue: i64,
-        gain_orange: i64,
+        /// 明细行（对照 Vue 确认弹窗的 details：数量 / 精粹消耗 / 操作说明）
+        details: Vec<(String, String)>,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LootProgress {
+    /// 面板标题（开启中 / 分解中 / 重铸中 / 升级中）
+    pub title: String,
     pub current: usize,
     pub total: usize,
     pub success: usize,
+    pub failed: usize,
     pub current_name: String,
+    /// 最近一条结果描述（成功奖励或错误信息）
+    pub last_message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -504,7 +510,11 @@ pub enum LootAction {
     SelectAllFiltered,
     ClearSelection,
     OpenQuantity(LootModal),
-    OpenConfirm(LootModal),
+    /// 一键开启全部（前置校验与分批在动作层完成）
+    RequestSmartOpenAll,
+    RequestDisenchant,
+    RequestReroll,
+    RequestUpgrade,
     Confirm(LootModal),
     CloseModal,
     CloseProgress,
@@ -588,6 +598,10 @@ pub struct CareerView {
     pub recent_teammates: Vec<RecentTeammate>,
     pub essences: EssenceBalances,
     pub loot_items: Vec<LootInventoryItem>,
+    /// 可开启战利品（含真实配方名与钥匙需求，来自 core `fetch_openable_loots`）
+    pub loot_openables: Vec<OpenableLoot>,
+    /// 动作执行中（对照 Vue `isOpening`）：按钮统一置灰，避免重复点击
+    pub loot_busy: bool,
     pub loot_filter_type: LootTypeFilter,
     pub loot_filter_owned: LootOwnedFilter,
     pub loot_filter_value_basis: LootValueBasis,
@@ -623,6 +637,8 @@ impl Default for CareerView {
             recent_teammates: Vec::new(),
             essences: EssenceBalances::default(),
             loot_items: Vec::new(),
+            loot_openables: Vec::new(),
+            loot_busy: false,
             loot_filter_type: LootTypeFilter::Champion,
             loot_filter_owned: LootOwnedFilter::All,
             loot_filter_value_basis: LootValueBasis::Disenchant,
@@ -2494,8 +2510,17 @@ impl CareerView {
             .map(|i| i.count)
             .sum();
 
-        let materials: Vec<&LootInventoryItem> =
-            self.loot_items.iter().filter(|i| i.is_openable).collect();
+        // 对照 Vue sortedOpenableLoots：按开启优先级 + 名称倒序排列
+        let mut materials: Vec<&OpenableLoot> = self
+            .loot_openables
+            .iter()
+            .filter(|loot| loot.count > 0)
+            .collect();
+        materials.sort_by(|a, b| {
+            loot_priority_index(&a.loot_id)
+                .cmp(&loot_priority_index(&b.loot_id))
+                .then_with(|| b.name.cmp(&a.name))
+        });
 
         let filtered = self.filtered_loot();
         let has_filtered = !filtered.is_empty();
@@ -2607,19 +2632,8 @@ impl CareerView {
                             )
                             .when(!materials.is_empty(), |this| {
                                 let action_cb = on_action.clone();
-                                let total_keys = key_count;
-                                let can_smart_open = total_keys > 0;
-                                let confirm_modal = LootModal::Confirm {
-                                    action_kind: LootActionKind::SmartOpenAll,
-                                    title: "一键开启全部战利品".to_string(),
-                                    message: format!(
-                                        "将自动开启所有拥有钥匙的宝箱与法球，当前可用钥匙 x{}。",
-                                        total_keys
-                                    ),
-                                    selected: materials.len(),
-                                    gain_blue: 0,
-                                    gain_orange: 0,
-                                };
+                                // 对照 Vue：一键开启需要至少一把钥匙，动作执行中禁用
+                                let can_smart_open = key_count > 0 && !self.loot_busy;
                                 this.child(
                                     div()
                                         .px(px(14.0))
@@ -2648,9 +2662,7 @@ impl CareerView {
                                                 MouseButton::Left,
                                                 move |_ev, win, app| {
                                                     action_cb(
-                                                        LootAction::OpenConfirm(
-                                                            confirm_modal.clone(),
-                                                        ),
+                                                        LootAction::RequestSmartOpenAll,
                                                         win,
                                                         app,
                                                     )
@@ -2678,38 +2690,61 @@ impl CareerView {
                             .gap(px(12.0))
                             .children(materials.into_iter().map(|item| {
                                 let action_cb = on_action.clone();
-                                let is_frag = item.loot_id == "MATERIAL_key_fragment";
-                                let need_key = item.loot_id.starts_with("CHEST_")
-                                    && !item.loot_id.contains("masterwork");
+                                let is_frag = item
+                                    .loot_id
+                                    .eq_ignore_ascii_case("MATERIAL_key_fragment");
+                                let need_key = item.need_key;
+                                // 对照 Vue maxOpenQuantity：碎片按 3 个合 1 次，需钥匙的受钥匙数限制
+                                let max_quantity = if is_frag {
+                                    item.count / 3
+                                } else if need_key {
+                                    item.count.min(item.key_count)
+                                } else {
+                                    item.count
+                                }
+                                .max(0);
+                                let mut ingredients = vec![item.loot_id.clone()];
+                                if need_key {
+                                    if let Some(key) = &item.key_loot_id {
+                                        ingredients.push(key.clone());
+                                    }
+                                }
                                 let quantity_modal = LootModal::Quantity {
                                     loot_id: item.loot_id.clone(),
                                     name: item.name.clone(),
                                     owned: item.count,
-                                    quantity: 1,
+                                    quantity: max_quantity.max(1),
+                                    max_quantity,
                                     need_key,
-                                    key_count,
-                                    key_name: Some("符文熔炉钥匙".to_string()),
+                                    key_count: item.key_count,
+                                    key_name: item.key_name.clone(),
                                     tile_path: item.tile_path.clone(),
                                     action: if is_frag {
                                         LootQuantityAction::Craft
                                     } else {
                                         LootQuantityAction::Open
                                     },
-                                    recipe_name: if is_frag {
-                                        "MATERIAL_key_fragment_forge".to_string()
-                                    } else {
-                                        format!("{}_open", item.loot_id)
-                                    },
-                                    ingredients: vec![item.loot_id.clone()],
+                                    recipe_name: item.recipe_name.clone(),
+                                    ingredients,
                                 };
 
+                                let card_cb = on_action.clone();
+                                let card_modal = quantity_modal.clone();
                                 div()
                                     .p(px(14.0))
                                     .rounded_xl()
                                     .bg(Theme::CARD_BG())
                                     .border_1()
                                     .border_color(Theme::CARD_BORDER())
+                                    .cursor_pointer()
                                     .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        card_cb(
+                                            LootAction::OpenQuantity(card_modal.clone()),
+                                            win,
+                                            app,
+                                        )
+                                    })
                                     .flex()
                                     .items_center()
                                     .justify_between()
@@ -3169,6 +3204,29 @@ impl CareerView {
                                                                         "未拥有"
                                                                     }),
                                                             )
+                                                            // 对照 Vue：皮肤碎片且英雄未拥有时给出提示
+                                                            .when(
+                                                                cat == "SKIN"
+                                                                    && !owned
+                                                                    && !item
+                                                                        .parent_item_status
+                                                                        .eq_ignore_ascii_case("OWNED"),
+                                                                |this| {
+                                                                    this.child(
+                                                                        div()
+                                                                            .px(px(6.0))
+                                                                            .py(px(1.0))
+                                                                            .rounded_sm()
+                                                                            .bg(rgba(0xef44441e))
+                                                                            .text_size(px(10.0))
+                                                                            .font_weight(
+                                                                                FontWeight::SEMIBOLD,
+                                                                            )
+                                                                            .text_color(Theme::LOSS_TEXT())
+                                                                            .child("无英雄"),
+                                                                    )
+                                                                },
+                                                            )
                                                             .child(
                                                                 div()
                                                                     .text_size(px(11.0))
@@ -3194,39 +3252,10 @@ impl CareerView {
                     .when(has_filtered, |this| {
                         let action_cb = on_action.clone();
                         let selected_count = self.loot_selected.len();
-                        let confirm_disenchant = LootModal::Confirm {
-                            action_kind: LootActionKind::Disenchant,
-                            title: "批量分解确认".to_string(),
-                            message: format!(
-                                "确定要分解选中的 {} 项战利品碎片吗？",
-                                selected_count
-                            ),
-                            selected: selected_count,
-                            gain_blue,
-                            gain_orange,
-                        };
-                        let confirm_reroll = LootModal::Confirm {
-                            action_kind: LootActionKind::Reroll,
-                            title: "重铸确认".to_string(),
-                            message: format!(
-                                "确定要重铸选中的 {} 项碎片吗？（每 3 个碎片合成 1 个永久物品）",
-                                selected_count
-                            ),
-                            selected: selected_count,
-                            gain_blue: 0,
-                            gain_orange: 0,
-                        };
-                        let confirm_upgrade = LootModal::Confirm {
-                            action_kind: LootActionKind::Upgrade,
-                            title: "批量升级 / 解锁确认".to_string(),
-                            message: format!(
-                                "确定要升级 / 解锁选中的 {} 项战利品吗？",
-                                selected_count
-                            ),
-                            selected: selected_count,
-                            gain_blue: 0,
-                            gain_orange: 0,
-                        };
+                        // 对照 Vue：动作执行中三个按钮统一禁用
+                        let disenchant_enabled = has_selection && !self.loot_busy;
+                        let reroll_enabled = can_reroll && !self.loot_busy;
+                        let upgrade_enabled = can_upgrade && !self.loot_busy;
 
                         this.child(
                             div()
@@ -3306,37 +3335,34 @@ impl CareerView {
                                         })
                                         .child({
                                             let cb = action_cb.clone();
-                                            let modal = confirm_disenchant.clone();
                                             div()
                                                 .px(px(12.0))
                                                 .py(px(5.0))
                                                 .rounded_md()
                                                 .border_1()
-                                                .border_color(if has_selection {
+                                                .border_color(if disenchant_enabled {
                                                     Theme::ACCENT_PRIMARY()
                                                 } else {
                                                     Theme::CARD_BORDER()
                                                 })
-                                                .bg(if has_selection {
+                                                .bg(if disenchant_enabled {
                                                     Theme::ACCENT_LIGHT()
                                                 } else {
                                                     Theme::BADGE_BG()
                                                 })
                                                 .text_size(px(12.5))
                                                 .font_weight(FontWeight::SEMIBOLD)
-                                                .text_color(if has_selection {
+                                                .text_color(if disenchant_enabled {
                                                     Theme::ACCENT_PRIMARY()
                                                 } else {
                                                     Theme::TEXT_MUTED()
                                                 })
-                                                .when(has_selection, |el| {
+                                                .when(disenchant_enabled, |el| {
                                                     el.cursor_pointer().on_mouse_down(
                                                         MouseButton::Left,
                                                         move |_ev, win, app| {
                                                             cb(
-                                                                LootAction::OpenConfirm(
-                                                                    modal.clone(),
-                                                                ),
+                                                                LootAction::RequestDisenchant,
                                                                 win,
                                                                 app,
                                                             )
@@ -3347,37 +3373,34 @@ impl CareerView {
                                         })
                                         .child({
                                             let cb = action_cb.clone();
-                                            let modal = confirm_reroll.clone();
                                             div()
                                                 .px(px(12.0))
                                                 .py(px(5.0))
                                                 .rounded_md()
                                                 .border_1()
-                                                .border_color(if can_reroll {
+                                                .border_color(if reroll_enabled {
                                                     Theme::ACCENT_PRIMARY()
                                                 } else {
                                                     Theme::CARD_BORDER()
                                                 })
-                                                .bg(if can_reroll {
+                                                .bg(if reroll_enabled {
                                                     Theme::ACCENT_LIGHT()
                                                 } else {
                                                     Theme::BADGE_BG()
                                                 })
                                                 .text_size(px(12.5))
                                                 .font_weight(FontWeight::SEMIBOLD)
-                                                .text_color(if can_reroll {
+                                                .text_color(if reroll_enabled {
                                                     Theme::ACCENT_PRIMARY()
                                                 } else {
                                                     Theme::TEXT_MUTED()
                                                 })
-                                                .when(can_reroll, |el| {
+                                                .when(reroll_enabled, |el| {
                                                     el.cursor_pointer().on_mouse_down(
                                                         MouseButton::Left,
                                                         move |_ev, win, app| {
                                                             cb(
-                                                                LootAction::OpenConfirm(
-                                                                    modal.clone(),
-                                                                ),
+                                                                LootAction::RequestReroll,
                                                                 win,
                                                                 app,
                                                             )
@@ -3388,37 +3411,34 @@ impl CareerView {
                                         })
                                         .child({
                                             let cb = action_cb.clone();
-                                            let modal = confirm_upgrade.clone();
                                             div()
                                                 .px(px(12.0))
                                                 .py(px(5.0))
                                                 .rounded_md()
                                                 .border_1()
-                                                .border_color(if can_upgrade {
+                                                .border_color(if upgrade_enabled {
                                                     Theme::ACCENT_PRIMARY()
                                                 } else {
                                                     Theme::CARD_BORDER()
                                                 })
-                                                .bg(if can_upgrade {
+                                                .bg(if upgrade_enabled {
                                                     Theme::ACCENT_LIGHT()
                                                 } else {
                                                     Theme::BADGE_BG()
                                                 })
                                                 .text_size(px(12.5))
                                                 .font_weight(FontWeight::SEMIBOLD)
-                                                .text_color(if can_upgrade {
+                                                .text_color(if upgrade_enabled {
                                                     Theme::ACCENT_PRIMARY()
                                                 } else {
                                                     Theme::TEXT_MUTED()
                                                 })
-                                                .when(can_upgrade, |el| {
+                                                .when(upgrade_enabled, |el| {
                                                     el.cursor_pointer().on_mouse_down(
                                                         MouseButton::Left,
                                                         move |_ev, win, app| {
                                                             cb(
-                                                                LootAction::OpenConfirm(
-                                                                    modal.clone(),
-                                                                ),
+                                                                LootAction::RequestUpgrade,
                                                                 win,
                                                                 app,
                                                             )
@@ -3477,6 +3497,7 @@ impl CareerView {
                 name,
                 owned,
                 quantity,
+                max_quantity,
                 need_key,
                 key_count,
                 tile_path,
@@ -3485,16 +3506,13 @@ impl CareerView {
                 ingredients,
                 key_name,
             } => {
-                let max_qty = if *need_key {
-                    (*owned).min(*key_count).max(0)
-                } else {
-                    (*owned).max(0)
-                };
+                let max_qty = (*max_quantity).max(0);
                 let minus_modal = LootModal::Quantity {
                     loot_id: loot_id.clone(),
                     name: name.clone(),
                     owned: *owned,
                     quantity: (*quantity - 1).max(1),
+                    max_quantity: *max_quantity,
                     need_key: *need_key,
                     key_count: *key_count,
                     key_name: key_name.clone(),
@@ -3508,6 +3526,7 @@ impl CareerView {
                     name: name.clone(),
                     owned: *owned,
                     quantity: (*quantity + 1).min(max_qty.max(1)),
+                    max_quantity: *max_quantity,
                     need_key: *need_key,
                     key_count: *key_count,
                     key_name: key_name.clone(),
@@ -3776,9 +3795,7 @@ impl CareerView {
             LootModal::Confirm {
                 title,
                 message,
-                selected,
-                gain_blue,
-                gain_orange,
+                details,
                 ..
             } => div()
                 .w(px(440.0))
@@ -3827,7 +3844,7 @@ impl CareerView {
                         .text_color(Theme::TEXT_PRIMARY())
                         .child(message.clone()),
                 )
-                .when(*gain_blue > 0 || *gain_orange > 0, |this| {
+                .when(!details.is_empty(), |this| {
                     this.child(
                         div()
                             .flex()
@@ -3836,60 +3853,24 @@ impl CareerView {
                             .p(px(10.0))
                             .rounded_lg()
                             .bg(Theme::HOVER_BG())
-                            .child(
+                            .children(details.iter().map(|(label, value)| {
                                 div()
                                     .flex()
                                     .items_center()
                                     .justify_between()
+                                    .gap_3()
                                     .text_size(px(12.5))
-                                    .child(div().text_color(Theme::TEXT_MUTED()).child("已选项目:"))
+                                    .child(
+                                        div().text_color(Theme::TEXT_MUTED()).child(label.clone()),
+                                    )
                                     .child(
                                         div()
+                                            .flex_none()
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(Theme::TEXT_PRIMARY())
-                                            .child(format!("{} 项", selected)),
-                                    ),
-                            )
-                            .when(*gain_blue > 0, |el| {
-                                el.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .justify_between()
-                                        .text_size(px(12.5))
-                                        .child(
-                                            div()
-                                                .text_color(Theme::TEXT_MUTED())
-                                                .child("预计获得蓝色精粹:"),
-                                        )
-                                        .child(
-                                            div()
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::ACCENT_PRIMARY())
-                                                .child(format!("+{}", format_num(*gain_blue))),
-                                        ),
-                                )
-                            })
-                            .when(*gain_orange > 0, |el| {
-                                el.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .justify_between()
-                                        .text_size(px(12.5))
-                                        .child(
-                                            div()
-                                                .text_color(Theme::TEXT_MUTED())
-                                                .child("预计获得橙色精粹:"),
-                                        )
-                                        .child(
-                                            div()
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::GOLD())
-                                                .child(format!("+{}", format_num(*gain_orange))),
-                                        ),
-                                )
-                            }),
+                                            .child(value.clone()),
+                                    )
+                            })),
                     )
                 })
                 .child(
@@ -3968,9 +3949,9 @@ impl CareerView {
                             .font_weight(FontWeight::BOLD)
                             .text_color(Theme::TEXT_PRIMARY())
                             .child(if is_done {
-                                "战利品处理完成"
+                                format!("{}（已完成）", progress.title)
                             } else {
-                                "正在处理战利品..."
+                                progress.title.clone()
                             }),
                     )
                     .when(is_done, |this| {
@@ -3997,6 +3978,14 @@ impl CareerView {
                     .text_color(Theme::TEXT_MUTED())
                     .child(format!("当前条目: {}", progress.current_name)),
             )
+            .when(!progress.last_message.is_empty(), |this| {
+                this.child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(Theme::TEXT_PRIMARY())
+                        .child(progress.last_message.clone()),
+                )
+            })
             .child(
                 div()
                     .w_full()
@@ -4027,6 +4016,11 @@ impl CareerView {
                         div()
                             .text_color(Theme::WIN_TEXT())
                             .child(format!("成功 {} 项", progress.success)),
+                    )
+                    .child(
+                        div()
+                            .text_color(Theme::LOSS_TEXT())
+                            .child(format!("失败 {} 项", progress.failed)),
                     )
                     .child(
                         div()
@@ -4297,7 +4291,7 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
         )
 }
 
-fn loot_category(item: &LootInventoryItem) -> &'static str {
+pub(crate) fn loot_category(item: &LootInventoryItem) -> &'static str {
     let raw = if item.display_categories.is_empty() {
         format!("{} {}", item.loot_type, item.loot_id)
     } else {

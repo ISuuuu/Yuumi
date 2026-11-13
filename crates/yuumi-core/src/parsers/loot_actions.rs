@@ -1,12 +1,16 @@
 //! 战利品动作服务层（只读配方查询 + LCU 写操作 + 批量编排）
 //!
 //! 全部对外函数返回 `Result<T, String>`，统一复用 `LcuClient::get/post`。
-//! 本模块只提供纯函数：不启动后台任务、不派发事件，进度以 `Vec<LootActionProgress>` 聚合返回，
-//! 由上层（services/live_lcu.rs）在用户主动触发时调用并广播事件。
+//! 本模块只提供纯函数：不启动后台任务、不派发事件；每条动作完成时通过 `on_progress`
+//! 回调即时上报（对照 Vue 的 `loot-*-progress` 事件），最终仍以 `Vec<LootActionProgress>` 聚合返回。
 
 use crate::lcu::client::LcuClient;
+use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// 逐条进度回调：动作层每完成一步立即调用，用于上层实时广播
+pub type LootProgressSink<'a> = Option<&'a mut dyn FnMut(&LootActionProgress)>;
 
 /// 单次动作允许的最大循环次数（防止异常入参导致死循环）
 pub const MAX_LOOP_COUNT: i32 = 500;
@@ -148,6 +152,269 @@ pub async fn find_recipe_name(
         .ok_or_else(|| format!("未找到包含关键字 '{}' 的配方", keyword))
 }
 
+// ───────────────────────── 可开启战利品（配方 / 钥匙解析） ─────────────────────────
+
+fn is_key_fragment_loot_id(loot_id: &str) -> bool {
+    loot_id.eq_ignore_ascii_case("MATERIAL_key_fragment")
+}
+
+/// 对照 Vue `is_openable_loot`：宝箱 / 法球 / 胶囊 / 传送门 / 钥匙碎片
+fn is_openable_loot(loot_type: &str, loot_id: &str) -> bool {
+    let ty = loot_type.to_ascii_uppercase();
+    let id = loot_id.to_ascii_uppercase();
+    matches!(ty.as_str(), "CHEST" | "ORB" | "PORTAL")
+        || id.contains("ORB")
+        || id.contains("CHEST")
+        || (ty == "MATERIAL"
+            && (id.contains("ORB")
+                || id.contains("CHEST")
+                || id.contains("CAPSULE")
+                || is_key_fragment_loot_id(loot_id)))
+}
+
+/// 从配方槽位中查找钥匙槽位，返回 (key_loot_id, need_key)
+fn find_key_slot_loot_id(recipe: &Value) -> Option<String> {
+    let slots = recipe.get("slots").and_then(|v| v.as_array())?;
+    if slots.len() <= 1 {
+        return None;
+    }
+    let key_slot = slots.iter().find(|slot| {
+        if let Some(loot_ids) = slot.get("lootIds").and_then(|v| v.as_array()) {
+            if loot_ids.iter().any(|id| {
+                id.as_str()
+                    .is_some_and(|s| s.to_lowercase().contains("key"))
+            }) {
+                return true;
+            }
+        }
+        slot.get("slotRules")
+            .and_then(|sr| sr.get("queryValue"))
+            .and_then(|qv| qv.as_str())
+            .is_some_and(|q| q.to_lowercase().contains("key"))
+    })?;
+
+    let from_loot_ids = key_slot
+        .get("lootIds")
+        .and_then(|v| v.as_array())
+        .and_then(|ids| {
+            ids.iter().find_map(|id| {
+                id.as_str()
+                    .filter(|s| s.to_lowercase().contains("key"))
+                    .map(|s| s.to_string())
+            })
+        });
+    if from_loot_ids.is_some() {
+        return from_loot_ids;
+    }
+    key_slot
+        .get("slotRules")
+        .and_then(|sr| sr.get("queryValue"))
+        .and_then(|qv| qv.as_str())
+        .map(|s| s.to_string())
+}
+
+/// 拉取当前账号可开启的战利品（含真实配方名、是否需要钥匙、钥匙持有量）
+///
+/// 对照 Vue `get_openable_loots`：LCU 不提供「用哪个配方开启」的字段，只能逐个查询
+/// `recipes/initial-item/{lootId}` 反推，因此这里以受限并发拉取。
+pub async fn fetch_openable_loots(client: &LcuClient) -> Result<Vec<OpenableLoot>, String> {
+    let raw = client.get("/lol-loot/v1/player-loot").await?;
+    let arr = raw
+        .as_array()
+        .ok_or_else(|| "战利品数据格式错误，期望数组".to_string())?;
+
+    let mut loot_counts = std::collections::HashMap::new();
+    for item in arr {
+        if let (Some(loot_id), Some(count)) = (
+            item.get("lootId").and_then(|v| v.as_str()),
+            item.get("count").and_then(|v| v.as_i64()),
+        ) {
+            loot_counts.insert(loot_id.to_string(), count as i32);
+        }
+    }
+
+    let mut candidates: Vec<(String, String, i32, Option<String>)> = Vec::new();
+    for item in arr {
+        let loot_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let loot_id = item
+            .get("lootId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let count = item.get("count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        if loot_id.is_empty() || count <= 0 || !is_openable_loot(loot_type, loot_id) {
+            continue;
+        }
+
+        let raw_name = item
+            .get("localizedName")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                item.get("itemDesc")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or(loot_id)
+            .to_string();
+        let name = super::loot::normalize_loot_name(loot_id, &raw_name);
+        let tile_path = item
+            .get("tilePath")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .or_else(|| item.get("imagePath").and_then(|v| v.as_str()))
+            .map(|s| s.to_string());
+
+        candidates.push((loot_id.to_string(), name, count, tile_path));
+    }
+
+    let loot_counts = std::sync::Arc::new(loot_counts);
+    let arr = std::sync::Arc::new(arr.clone());
+    let results: Vec<Option<OpenableLoot>> = stream::iter(candidates)
+        .map(|(loot_id, name, count, tile_path)| {
+            let loot_client = client.clone();
+            let counts = loot_counts.clone();
+            let all = arr.clone();
+            async move {
+                let recipes = fetch_recipes_raw(&loot_client, &loot_id).await.ok()?;
+                let recipe = recipes.iter().find(|r| {
+                    r.get("recipeName")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|n| !n.is_empty())
+                        && r.get("slots").and_then(|v| v.as_array()).is_some()
+                })?;
+                let recipe_name = recipe
+                    .get("recipeName")
+                    .and_then(|v| v.as_str())?
+                    .to_string();
+                let key_loot_id = find_key_slot_loot_id(recipe);
+                let key_count = key_loot_id
+                    .as_deref()
+                    .and_then(|id| counts.get(id).copied())
+                    .unwrap_or(0);
+                let key_name = key_loot_id.as_deref().map(|id| {
+                    all.iter()
+                        .find(|item| item.get("lootId").and_then(|v| v.as_str()) == Some(id))
+                        .and_then(|item| item.get("itemDesc").and_then(|v| v.as_str()))
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| {
+                            if id.to_lowercase().contains("premium") {
+                                "杰作钥匙".to_string()
+                            } else {
+                                "海克斯科技钥匙".to_string()
+                            }
+                        })
+                });
+
+                Some(OpenableLoot {
+                    loot_id,
+                    name,
+                    count,
+                    recipe_name,
+                    need_key: key_loot_id.is_some(),
+                    key_loot_id,
+                    key_count,
+                    key_name,
+                    tile_path,
+                })
+            }
+        })
+        .buffer_unordered(8)
+        .collect()
+        .await;
+
+    Ok(results.into_iter().flatten().collect())
+}
+
+/// 开启优先级（数字越小越先开启，对照 Vue `lootPriorityIndex`）
+pub fn loot_priority_index(loot_id: &str) -> i32 {
+    let id = loot_id.to_ascii_uppercase();
+    if id == "CHEST_PROMOTION" {
+        0
+    } else if id == "CHEST_CHAMPION_MASTERY" || id == "CHEST_GENERIC" || id == "CHEST_HEXTECH" {
+        1
+    } else if id.contains("ORB") {
+        2
+    } else if id.contains("CAPSULE") {
+        3
+    } else {
+        4
+    }
+}
+
+/// 智能一键开启的分批计划（对照 Vue `buildSmartOpenBatches`）
+///
+/// 顺序固定为：先用碎片锻造钥匙 → 开启无需钥匙的宝箱/法球 → 按优先级消耗钥匙开启剩余宝箱。
+pub fn build_smart_open_batches(
+    openables: &[OpenableLoot],
+    total_key_count: i32,
+) -> Vec<OpenBatchItem> {
+    let mut batches = Vec::new();
+
+    let fragment = openables
+        .iter()
+        .find(|loot| is_key_fragment_loot_id(&loot.loot_id));
+    let mut forged_keys = 0;
+    if let Some(fragment) = fragment {
+        if fragment.count >= 3 {
+            forged_keys = fragment.count / 3;
+            batches.push(OpenBatchItem {
+                loot_id: fragment.loot_id.clone(),
+                name: fragment.name.clone(),
+                count: forged_keys,
+                recipe_name: fragment.recipe_name.clone(),
+                ingredients: vec![fragment.loot_id.clone()],
+            });
+        }
+    }
+
+    let mut remaining_keys = total_key_count.max(0) + forged_keys;
+
+    for loot in openables
+        .iter()
+        .filter(|l| !l.need_key && l.count > 0 && !is_key_fragment_loot_id(&l.loot_id))
+    {
+        batches.push(OpenBatchItem {
+            loot_id: loot.loot_id.clone(),
+            name: loot.name.clone(),
+            count: loot.count,
+            recipe_name: loot.recipe_name.clone(),
+            ingredients: vec![loot.loot_id.clone()],
+        });
+    }
+
+    let mut key_needed: Vec<&OpenableLoot> = openables
+        .iter()
+        .filter(|l| l.need_key && l.count > 0 && !is_key_fragment_loot_id(&l.loot_id))
+        .collect();
+    key_needed.sort_by_key(|loot| loot_priority_index(&loot.loot_id));
+
+    for loot in key_needed {
+        if remaining_keys <= 0 {
+            break;
+        }
+        let count = loot.count.min(remaining_keys);
+        if count <= 0 {
+            continue;
+        }
+        let mut ingredients = vec![loot.loot_id.clone()];
+        if let Some(key) = &loot.key_loot_id {
+            ingredients.push(key.clone());
+        }
+        batches.push(OpenBatchItem {
+            loot_id: loot.loot_id.clone(),
+            name: loot.name.clone(),
+            count,
+            recipe_name: loot.recipe_name.clone(),
+            ingredients,
+        });
+        remaining_keys -= count;
+    }
+
+    batches
+}
+
 // ───────────────────────── 原子写操作 ─────────────────────────
 
 /// 执行合成 / 开启 / 分解配方（POST /lol-loot/v1/recipes/{name}/craft?repeat=）
@@ -233,30 +500,46 @@ fn make_progress(
 
 // ───────────────────────── 批量编排 ─────────────────────────
 
+/// 上报一条进度（同时入聚合列表，保持返回值兼容）
+fn push_progress(
+    progress: &mut Vec<LootActionProgress>,
+    sink: &mut LootProgressSink<'_>,
+    item: LootActionProgress,
+) {
+    if let Some(cb) = sink.as_deref_mut() {
+        cb(&item);
+    }
+    progress.push(item);
+}
+
 /// 单个开启 / 合成：对同一配方循环 repeat_count 次 craft（每次 repeat=1）
 pub async fn batch_open_loots(
     client: &LcuClient,
     recipe_name: &str,
     ingredients: &[String],
     repeat_count: i32,
+    mut on_progress: LootProgressSink<'_>,
 ) -> Result<Vec<LootActionProgress>, String> {
     let total = clamp_count(repeat_count);
     let mut progress = Vec::new();
     for i in 1..=total {
         let result = craft_loot(client, recipe_name, ingredients, 1).await;
-        progress.push(make_progress(i, total, &result, recipe_name));
+        push_progress(
+            &mut progress,
+            &mut on_progress,
+            make_progress(i, total, &result, recipe_name),
+        );
     }
     Ok(progress)
 }
 
-/// 智能一键全部开启：按优先级排序后逐条目按 count 循环 craft（每次 repeat=1）
+/// 智能一键全部开启：按分批计划的顺序逐条目按 count 循环 craft（每次 repeat=1）
 pub async fn smart_open_all_loots(
     client: &LcuClient,
     batches: &[OpenBatchItem],
+    mut on_progress: LootProgressSink<'_>,
 ) -> Result<Vec<LootActionProgress>, String> {
-    let mut sorted: Vec<OpenBatchItem> = batches.iter().take(MAX_BATCH_ITEMS).cloned().collect();
-    // 优先级：普通宝箱 > 海克斯宝箱 > 法球 > 胶囊 > 其他
-    sorted.sort_by_key(|item| loot_priority(&item.loot_id));
+    let sorted: Vec<OpenBatchItem> = batches.iter().take(MAX_BATCH_ITEMS).cloned().collect();
 
     let total = sorted
         .iter()
@@ -275,32 +558,21 @@ pub async fn smart_open_all_loots(
             }
             current += 1;
             let result = craft_loot(client, &item.recipe_name, &item.ingredients, 1).await;
-            progress.push(make_progress(current, total, &result, &item.name));
+            push_progress(
+                &mut progress,
+                &mut on_progress,
+                make_progress(current, total, &result, &item.name),
+            );
         }
     }
     Ok(progress)
-}
-
-/// 开启优先级（数字越小越先开启）
-fn loot_priority(loot_id: &str) -> i32 {
-    let upper = loot_id.to_ascii_uppercase();
-    if upper.contains("CHEST") && !upper.contains("HEXTECH") && !upper.contains("PREMIUM") {
-        0
-    } else if upper.contains("HEXTECH") {
-        1
-    } else if upper.contains("ORB") {
-        2
-    } else if upper.contains("CAPSULE") {
-        3
-    } else {
-        4
-    }
 }
 
 /// 批量分解：查含 disenchant 关键字的配方，按 count 作为 repeat 一次 craft
 pub async fn disenchant_loot(
     client: &LcuClient,
     items: &[DisenchantItem],
+    mut on_progress: LootProgressSink<'_>,
 ) -> Result<Vec<LootActionProgress>, String> {
     let jobs: Vec<&DisenchantItem> = items.iter().take(MAX_BATCH_ITEMS).collect();
     let total = jobs.len() as i32;
@@ -313,7 +585,11 @@ pub async fn disenchant_loot(
             craft_loot(client, &recipe_name, &body, job.count).await
         }
         .await;
-        progress.push(make_progress(current, total, &result, &job.loot_id));
+        push_progress(
+            &mut progress,
+            &mut on_progress,
+            make_progress(current, total, &result, &job.loot_id),
+        );
     }
     Ok(progress)
 }
@@ -322,6 +598,7 @@ pub async fn disenchant_loot(
 pub async fn reroll_loot(
     client: &LcuClient,
     loot_ids: &[String],
+    mut on_progress: LootProgressSink<'_>,
 ) -> Result<Vec<LootActionProgress>, String> {
     let ids: Vec<String> = loot_ids
         .iter()
@@ -345,7 +622,11 @@ pub async fn reroll_loot(
             craft_loot(client, &recipe_name, group, 1).await
         }
         .await;
-        progress.push(make_progress(current, total, &result, &group[0]));
+        push_progress(
+            &mut progress,
+            &mut on_progress,
+            make_progress(current, total, &result, &group[0]),
+        );
     }
     Ok(progress)
 }
@@ -354,6 +635,7 @@ pub async fn reroll_loot(
 pub async fn upgrade_loot(
     client: &LcuClient,
     items: &[DisenchantItem],
+    mut on_progress: LootProgressSink<'_>,
 ) -> Result<Vec<LootActionProgress>, String> {
     let jobs: Vec<&DisenchantItem> = items.iter().take(MAX_BATCH_ITEMS).collect();
     let total = jobs.len() as i32;
@@ -370,7 +652,11 @@ pub async fn upgrade_loot(
         } else {
             upgrade_shard(client, job).await
         };
-        progress.push(make_progress(current, total, &result, &job.loot_id));
+        push_progress(
+            &mut progress,
+            &mut on_progress,
+            make_progress(current, total, &result, &job.loot_id),
+        );
     }
     Ok(progress)
 }
@@ -469,5 +755,72 @@ fn collect_currency_ingredients(value: &Value, out: &mut Vec<String>) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn openable(
+        loot_id: &str,
+        need_key: bool,
+        count: i32,
+        key: Option<&str>,
+        key_count: i32,
+    ) -> OpenableLoot {
+        OpenableLoot {
+            loot_id: loot_id.to_string(),
+            name: loot_id.to_string(),
+            count,
+            recipe_name: format!("{}_OPEN", loot_id),
+            need_key,
+            key_loot_id: key.map(|k| k.to_string()),
+            key_count,
+            key_name: None,
+            tile_path: None,
+        }
+    }
+
+    #[test]
+    fn smart_open_forges_key_fragments_first() {
+        let openables = vec![
+            openable("CHEST_128", false, 2, None, 0),
+            openable("MATERIAL_key_fragment", false, 7, None, 0),
+        ];
+        let batches = build_smart_open_batches(&openables, 0);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].loot_id, "MATERIAL_key_fragment");
+        assert_eq!(batches[0].count, 2);
+        assert_eq!(batches[1].loot_id, "CHEST_128");
+        assert_eq!(batches[1].count, 2);
+    }
+
+    #[test]
+    fn smart_open_consumes_keys_by_priority() {
+        let openables = vec![
+            openable("CHEST_generic", true, 3, Some("MATERIAL_key"), 2),
+            openable("CHEST_promotion", true, 1, Some("MATERIAL_key"), 2),
+            openable("CHEST_128", false, 1, None, 0),
+        ];
+        let batches = build_smart_open_batches(&openables, 2);
+        // 无钥匙宝箱先开
+        assert_eq!(batches[0].loot_id, "CHEST_128");
+        // 钥匙按优先级分配：CHEST_promotion 优先级更高，先消耗 1 把
+        assert_eq!(batches[1].loot_id, "CHEST_promotion");
+        assert_eq!(batches[1].count, 1);
+        assert_eq!(
+            batches[1].ingredients,
+            vec!["CHEST_promotion".to_string(), "MATERIAL_key".to_string()]
+        );
+        // 剩余 1 把钥匙给 CHEST_generic，实际只开 1 个
+        assert_eq!(batches[2].loot_id, "CHEST_generic");
+        assert_eq!(batches[2].count, 1);
+    }
+
+    #[test]
+    fn smart_open_skips_when_out_of_keys() {
+        let openables = vec![openable("CHEST_generic", true, 3, Some("MATERIAL_key"), 0)];
+        assert!(build_smart_open_batches(&openables, 0).is_empty());
     }
 }

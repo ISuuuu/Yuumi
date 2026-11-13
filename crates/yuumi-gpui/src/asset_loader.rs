@@ -239,22 +239,45 @@ impl AssetLoader {
         }
     }
 
+    /// 读取原始字节：磁盘缓存优先，未命中再走 LCU / CDragon
+    async fn fetch_raw_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
+        let core_cache = Arc::clone(&self.core_cache);
+        let path_owned = path.to_string();
+        // 磁盘缓存读取是阻塞文件 I/O，放阻塞池避免占用 Tokio 异步线程
+        let disk_hit =
+            tokio::task::spawn_blocking(move || core_cache.try_read_disk_cache(&path_owned))
+                .await
+                .map_err(|e| format!("后台读取磁盘缓存失败: {}", e))?;
+
+        match disk_hit {
+            Some(raw) => Ok(raw),
+            None => self.core_cache.fetch_asset_bytes(path).await,
+        }
+    }
+
     /// 实际执行磁盘缓存读取、网络拉取与 BGRA 解码（结果不落缓存的裸路径）
     async fn load_uncached(&self, path: &str) -> Result<Arc<RenderImage>, String> {
         let bytes = if let Some(builtin) = Self::get_builtin_image_bytes(path) {
             builtin.to_vec()
         } else {
-            let core_cache = Arc::clone(&self.core_cache);
-            let path_owned = path.to_string();
-            // 磁盘缓存读取是阻塞文件 I/O，放阻塞池避免占用 Tokio 异步线程
-            let disk_hit =
-                tokio::task::spawn_blocking(move || core_cache.try_read_disk_cache(&path_owned))
-                    .await
-                    .map_err(|e| format!("后台读取磁盘缓存失败: {}", e))?;
-
-            match disk_hit {
+            // 对照 Vue `LcuImage` 的「失败重试一次」：LCU 刚启动或 CDragon 瞬时 5xx 时可自愈
+            let mut last_err = String::new();
+            let mut fetched = None;
+            for attempt in 0..2 {
+                if attempt > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                }
+                match self.fetch_raw_bytes(path).await {
+                    Ok(raw) => {
+                        fetched = Some(raw);
+                        break;
+                    }
+                    Err(e) => last_err = e,
+                }
+            }
+            match fetched {
                 Some(raw) => raw,
-                None => self.core_cache.fetch_asset_bytes(path).await?,
+                None => return Err(last_err),
             }
         };
 

@@ -71,6 +71,8 @@ pub enum LiveLcuEvent {
     LootSummaryLoaded(EssenceBalances, Vec<LootInventoryItem>),
     /// 战利品写动作的单条进度（由 run_loot_action 逐条广播）
     LootActionProgress(LootActionProgress),
+    /// 可开启战利品列表（含真实配方名、钥匙需求与钥匙持有量）
+    OpenableLootLoaded(Vec<loot_actions::OpenableLoot>),
     /// 最近队友聚合完成（近期最多 20 场同队队友列表）
     RecentTeammatesLoaded(Vec<RecentTeammate>),
     /// 本人排位数据（单排 / 灵活等队列段位）
@@ -877,16 +879,37 @@ impl LiveLcuService {
             }
         });
 
-        let _ = tokio::join!(matches_task, mastery_task, loot_task, ranked_task);
+        // 并发拉取可开启战利品（需要逐个查询配方，独立于库存拉取）
+        let c_openable = client.clone();
+        let event_tx_openable = self.event_tx.clone();
+        let openable_task = tokio::spawn(async move {
+            match loot_actions::fetch_openable_loots(&c_openable).await {
+                Ok(openables) => {
+                    log::info!("[LiveLcu] 成功拉取可开启战利品: count={}", openables.len());
+                    let _ = event_tx_openable.send(LiveLcuEvent::OpenableLootLoaded(openables));
+                }
+                Err(e) => {
+                    log::warn!("[LiveLcu] 拉取可开启战利品失败: {}", e);
+                }
+            }
+        });
+
+        let _ = tokio::join!(
+            matches_task,
+            mastery_task,
+            loot_task,
+            ranked_task,
+            openable_task
+        );
 
         log::info!("[LiveLcu] 召唤师生涯数据全部拉取完毕并派发完成");
     }
 
-    /// 战利品写动作统一入口（供 main.rs 在用户主动点击时调用）。
+    /// 战利品写动作统一入口（供 GPUI 在用户主动点击时调用）。
     ///
     /// 这里只提供入口：启动流程与任何自动流程都不会调用本方法，也不会在内部
-    /// 常驻后台任务。返回聚合后的逐条进度，并逐条广播
-    /// `LiveLcuEvent::LootActionProgress`，由 main.rs 消费后刷新进度面板。
+    /// 常驻后台任务。每完成一条动作就通过 `LiveLcuEvent::LootActionProgress`
+    /// 即时上报（对照 Vue 的 `loot-*-progress` 事件），同时聚合返回。
     pub async fn run_loot_action(
         &self,
         kind: LootActionKind,
@@ -896,6 +919,11 @@ impl LiveLcuService {
             .get_client()
             .await
             .ok_or_else(|| "英雄联盟客户端未连接".to_string())?;
+
+        let tx = self.event_tx.clone();
+        let mut sink = move |p: &LootActionProgress| {
+            let _ = tx.send(LiveLcuEvent::LootActionProgress(p.clone()));
+        };
 
         let progress = match kind {
             LootActionKind::Open => {
@@ -907,6 +935,7 @@ impl LiveLcuService {
                     &first.recipe_name,
                     &first.ingredients,
                     first.count,
+                    Some(&mut sink),
                 )
                 .await?
             }
@@ -921,11 +950,11 @@ impl LiveLcuService {
                         ingredients: i.ingredients.clone(),
                     })
                     .collect();
-                loot_actions::smart_open_all_loots(&client, &batches).await?
+                loot_actions::smart_open_all_loots(&client, &batches, Some(&mut sink)).await?
             }
             LootActionKind::Disenchant => {
                 let jobs = to_disenchant_items(&items);
-                loot_actions::disenchant_loot(&client, &jobs).await?
+                loot_actions::disenchant_loot(&client, &jobs, Some(&mut sink)).await?
             }
             LootActionKind::Reroll => {
                 // 对照 Vue：每个条目按 count 展开为 loot_id，3 个一组重铸
@@ -936,20 +965,14 @@ impl LiveLcuService {
                         ids.push(item.loot_id.clone());
                     }
                 }
-                loot_actions::reroll_loot(&client, &ids).await?
+                loot_actions::reroll_loot(&client, &ids, Some(&mut sink)).await?
             }
             LootActionKind::Upgrade => {
                 let jobs = to_disenchant_items(&items);
-                loot_actions::upgrade_loot(&client, &jobs).await?
+                loot_actions::upgrade_loot(&client, &jobs, Some(&mut sink)).await?
             }
         };
 
-        // 仅在用户主动调用本入口时才会执行；逐条广播进度事件
-        for p in &progress {
-            let _ = self
-                .event_tx
-                .send(LiveLcuEvent::LootActionProgress(p.clone()));
-        }
         Ok(progress)
     }
 
