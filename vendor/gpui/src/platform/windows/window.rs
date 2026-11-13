@@ -17,13 +17,13 @@ use futures::channel::oneshot::{self, Receiver};
 use raw_window_handle as rwh;
 use smallvec::SmallVec;
 use windows::{
+    core::*,
     Win32::{
         Foundation::*,
         Graphics::Gdi::*,
         System::{Com::*, LibraryLoader::*, Ole::*, SystemServices::*},
         UI::{Controls::*, HiDpi::*, Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
     },
-    core::*,
 };
 
 use crate::*;
@@ -514,9 +514,15 @@ impl Drop for WindowsWindow {
             .executor
             .spawn(async move {
                 let handle = this.hwnd;
-                unsafe {
-                    RevokeDragDrop(handle).log_err();
-                    DestroyWindow(handle).log_err();
+                // [Yuumi patch] 用户点击原生关闭按钮时，hwnd 已在 WM_CLOSE → WM_DESTROY
+                // 期间被系统销毁；此处再对死句柄调用 RevokeDragDrop / DestroyWindow 会抛出
+                // DRAGDROP_E_INVALIDHWND(0x80040102) 与 ERROR_INVALID_WINDOW_HANDLE(0x80070578)。
+                // 仅当窗口仍存在时才做清理，避免每次关闭窗口都刷出两条 ERROR。
+                if unsafe { IsWindow(Some(handle)) }.as_bool() {
+                    unsafe {
+                        RevokeDragDrop(handle).log_err();
+                        DestroyWindow(handle).log_err();
+                    }
                 }
             })
             .detach();
@@ -1398,7 +1404,7 @@ fn set_window_composition_attribute(hwnd: HWND, color: Option<Color>, state: u32
 #[cfg(test)]
 mod tests {
     use super::ClickState;
-    use crate::{DevicePixels, MouseButton, point};
+    use crate::{point, DevicePixels, MouseButton};
     use std::time::Duration;
 
     #[test]

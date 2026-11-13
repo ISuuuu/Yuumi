@@ -4,7 +4,9 @@ set -e
 staged_files=$(git diff --cached --name-only --diff-filter=ACMR || true)
 [ -z "$staged_files" ] && exit 0
 
-staged_rs=$(printf '%s\n' "$staged_files" | grep '\.rs$' || true)
+# vendor/ 下是第三方源码（gpui 为 edition 2024，含 let-chains），rustfmt --edition 2021 会直接失败；
+# 且不应重新格式化上游代码，这里排除，仅格式化本仓库自己的 Rust 文件。
+staged_rs=$(printf '%s\n' "$staged_files" | grep '\.rs$' | grep -v '^vendor/' || true)
 needs_clippy=$(printf '%s\n' "$staged_files" | grep -E '(\.rs$|Cargo\.toml$|Cargo\.lock$)' || true)
 
 if [ -n "$staged_rs" ]; then

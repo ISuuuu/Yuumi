@@ -58,6 +58,27 @@ mod prompts;
 use crate::util::atomic_incr_if_not_zero;
 pub use prompts::*;
 
+/// [Yuumi patch] 窗口关闭竞态容错：`WM_ACTIVATE` 等系统通知可能晚于窗口销毁消息到达，
+/// 此时窗口已从 App 移除，`update` 只会返回 "window not found"。这属于正常竞态而非窗口
+/// 异常，直接忽略以免关闭窗口时刷 ERROR；其它错误仍按 ERROR 记录。
+trait IgnoreClosedWindow<T> {
+    fn ignore_closed_window(self) -> Option<T>;
+}
+
+impl<T> IgnoreClosedWindow<T> for Result<T> {
+    fn ignore_closed_window(self) -> Option<T> {
+        match self {
+            Ok(value) => Some(value),
+            Err(error) => {
+                if error.to_string() != "window not found" {
+                    log::error!("{error:?}");
+                }
+                None
+            }
+        }
+    }
+}
+
 pub(crate) const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1536.), px(864.));
 
 /// Represents the two different phases when dispatching events.
@@ -1109,7 +1130,7 @@ impl Window {
 
                         SystemWindowTabController::update_last_active(cx, window.handle.id);
                     })
-                    .log_err();
+                    .ignore_closed_window();
             }
         }));
         platform_window.on_hover_status_change(Box::new({
