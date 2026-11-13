@@ -53,9 +53,9 @@ impl Default for AutoMatchConfig {
             auto_handle_invite: false,
             auto_create_lobby: false,
             default_game_mode: 2400,
-            aram_team_side: false,
+            aram_team_side: true,
             aram_team_side_visible: false,
-            tag_reminder: false,
+            tag_reminder: true,
         }
     }
 }
