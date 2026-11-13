@@ -528,8 +528,9 @@ impl LiveLcuService {
                 let previous_phase = self.get_current_phase().await;
                 if phase_str.as_str() == "ChampSelect" && previous_phase != "ChampSelect" {
                     reset_bench_user_hidden();
-                    // 新一轮对局：清空玩家数据缓存，避免复用上一局拉到的战绩与段位
+                    // 新一轮对局：清空玩家数据缓存与落盘快照，避免复用上一局拉到的战绩与段位
                     clear_player_data_cache();
+                    LiveGameInfo::clear_cache();
                 }
                 let phase = GamePhase::from(phase_str.as_str());
                 *self.current_phase.write().await = phase_str.clone();
@@ -1235,6 +1236,46 @@ impl LiveLcuService {
             return;
         }
 
+        // 局内同 gameId 的完整快照直接复用：一局打多久都不再重跑流水线
+        // （对齐旧版 Vue：玩家数据在整局内常驻，只有进入下一轮选人才失效）
+        if src.game_id.unwrap_or(0) > 0 {
+            let reuse_existing = {
+                let guard = self.game_info.read().await;
+                guard.as_ref().is_some_and(|info| {
+                    info.game_id == src.game_id
+                        && !info.blue_team.is_empty()
+                        && !info.red_team.is_empty()
+                })
+            };
+            if reuse_existing {
+                *self.last_game_info_key.write().await = key;
+                log::debug!("[LiveLcu] 局内快照已存在，跳过重拉");
+                // 面板可能在断线时被清空过：把已有快照重新广播一次，避免恢复成空态
+                if let Some(existing) = self.game_info.read().await.clone() {
+                    let _ = self.event_tx.send(LiveLcuEvent::GameInfoUpdated(existing));
+                }
+                return;
+            }
+        }
+
+        // 应用重启 / LCU 重连后：落盘快照与本局 gameId 一致时直接恢复，不重新拉取
+        if self.game_info.read().await.is_none() {
+            if let Some(game_id) = src.game_id.filter(|id| *id > 0) {
+                if let Some(saved) = LiveGameInfo::load_cache().filter(|saved| {
+                    saved.game_id == Some(game_id)
+                        && !saved.blue_team.is_empty()
+                        && !saved.red_team.is_empty()
+                }) {
+                    log::info!("[LiveLcu] 从本地快照恢复对局信息: game_id={game_id}");
+                    *self.last_game_info_key.write().await = key;
+                    let saved = Arc::new(saved);
+                    *self.game_info.write().await = Some(saved.clone());
+                    let _ = self.event_tx.send(LiveLcuEvent::GameInfoUpdated(saved));
+                    return;
+                }
+            }
+        }
+
         let source = source.unwrap();
         let recent = self.get_recent_matches().await;
 
@@ -1307,6 +1348,9 @@ impl LiveLcuService {
             log::debug!("[LiveLcu] 丢弃过期阶段的对局信息快照: requested={}", phase);
             return;
         }
+
+        // 真实对局（带 gameId）落盘，供断线重连 / 应用重启后直接恢复
+        info.save_cache();
 
         let info = Arc::new(info);
         *self.last_game_info_key.write().await = key;

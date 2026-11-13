@@ -21,12 +21,12 @@ use crate::views::saved_players::tag_badge_colors;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::collections::HashMap;
-use yuumi_core::gameflow::match_stats::{AggregatedPositions, PositionKey};
+use yuumi_core::gameflow::match_stats::{normalize_position, AggregatedPositions, PositionKey};
 use yuumi_core::gameflow::team_builder::MapSide;
 use yuumi_core::parsers::game_info::{
-    FateInfo, GameInfoPlayer, LiveGameInfo, MasteryBadge, TopChampion,
+    is_ranked_tier, FateInfo, GameInfoPlayer, LiveGameInfo, MasteryBadge, TopChampion,
 };
-use yuumi_core::parsers::match_parser::MatchDisplay;
+use yuumi_core::parsers::match_parser::{is_laned_mode, MatchDisplay};
 
 /// 视图模式：按队伍(5列) 或 全部战绩(10列)
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -1114,12 +1114,15 @@ impl GameInfoView {
                                     .items_center()
                                     .gap(px(4.0))
                                     .text_size(px(11.0))
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(tier_color(&player.rank_tier))
-                                            .child(player.rank_display.clone()),
-                                    )
+                                    // 未定级不画段位文案
+                                    .when(is_ranked_tier(&player.rank_tier), |el| {
+                                        el.child(
+                                            div()
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(tier_color(&player.rank_tier))
+                                                .child(player.rank_display.clone()),
+                                        )
+                                    })
                                     .when(player.recent_wins > 0, |el| {
                                         el.child(
                                             div()
@@ -1233,11 +1236,13 @@ impl GameInfoView {
 
         // 列头 (G07)
         let col_header = if compact {
-            // 10 列紧凑模式 (compact 分支)：三行紧凑布局
+            // 10 列紧凑模式 (compact 分支)：头像独占一行，其下依次为召唤师 ID、
+            // 英雄等级与段位、近期 50 局峡谷胜负、今日位置占比（无位置数据时省略该行）
             div()
-                .h(px(58.0))
                 .flex_shrink_0()
-                .p(px(3.0))
+                .relative()
+                .py(px(4.0))
+                .px(px(3.0))
                 .border_b_1()
                 .border_color(Theme::CARD_BORDER())
                 .bg(if let Some(col) = premade_bg {
@@ -1247,243 +1252,230 @@ impl GameInfoView {
                 })
                 .flex()
                 .flex_col()
-                .justify_between()
-                // 前两行：左侧头像与胜率/胜负 + 右侧名称与段位
-                .child(
-                    div()
-                        .flex()
-                        .items_start()
-                        .gap(px(3.5))
-                        // 头像列（含胜率竖条、头像、下方胜负）
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .items_start()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(2.0))
-                                        // 胜率竖条 (wr-bar, G07)
-                                        .child({
-                                            let diff = (player.win_rate as f32 - 50.0).abs();
-                                            let fill_h = (26.0 * (diff / 50.0).min(1.0)).max(2.0);
-                                            let bar_color = if player.win_rate >= 50 {
-                                                Theme::WIN_BAR()
-                                            } else {
-                                                Theme::LOSS_BAR()
-                                            };
-                                            div()
-                                                .w(px(3.0))
-                                                .h(px(26.0))
-                                                .rounded(px(1.5))
-                                                .bg(Theme::CARD_BORDER())
-                                                .overflow_hidden()
-                                                .relative()
-                                                .child(
-                                                    div()
-                                                        .absolute()
-                                                        .bottom_0()
-                                                        .w_full()
-                                                        .h(px(fill_h))
-                                                        .bg(bar_color),
-                                                )
-                                        })
-                                        // 英雄头像 (26x26, G07, G10)
-                                        .child(
-                                            div()
-                                                .relative()
-                                                .size(px(26.0))
-                                                .rounded(px(5.0))
-                                                .border_1()
-                                                .border_color(if is_top {
-                                                    Theme::GOLD()
-                                                } else {
-                                                    Theme::CARD_BORDER()
-                                                })
-                                                .overflow_hidden()
-                                                .child(if player.champion_id > 0 {
-                                                    LcuImage::new(format!(
-                                                        "/lol-game-data/assets/v1/champion-icons/{}.png",
-                                                        player.champion_id
-                                                    ))
-                                                    .size(px(26.0))
-                                                    .shape(LcuImageShape::Rounded)
-                                                    .placeholder("?".to_string())
-                                                    .into_any_element()
-                                                } else {
-                                                    div()
-                                                        .size(px(26.0))
-                                                        .bg(Theme::CARD_BG())
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .text_size(px(10.0))
-                                                        .font_weight(FontWeight::BOLD)
-                                                        .text_color(Theme::TEXT_MUTED())
-                                                        .child("?")
-                                                        .into_any_element()
-                                                })
-                                                // 熟练度角标：招牌 ★ / 练英雄 练 (G07)
-                                                .children(mastery_corner_badge(player, 10.0)),
-                                        ),
-                                )
-                                // 头像下方胜负统计 (G07)；腾讯客户端不返回排位负场，0 负时只显示胜场
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(1.5))
-                                        .text_size(px(8.5))
-                                        .font_weight(FontWeight::BOLD)
-                                        .when(player.recent_wins > 0, |el| {
-                                            el.child(
-                                                div()
-                                                    .text_color(Theme::WIN_TEXT())
-                                                    .child(format!("{}胜", player.recent_wins)),
-                                            )
-                                        })
-                                        .when(player.recent_losses > 0, |el| {
-                                            el.child(
-                                                div()
-                                                    .text_color(Theme::LOSS_TEXT())
-                                                    .child(format!("{}负", player.recent_losses)),
-                                            )
-                                        }),
-                                ),
-                        )
-                        // 右侧信息：第一行昵称(点击查战绩)，第二行短段位
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap(px(1.0))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(2.0))
-                                        .child({
-                                            let mut name_el = div()
-                                                .text_size(px(10.5))
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::TEXT_PRIMARY())
-                                                .truncate();
-                                            if is_valid_target {
-                                                let on_search = on_player_search.clone();
-                                                let p_name = player_name.clone();
-                                                let p_tag = player_tag.clone();
-                                                name_el = name_el
-                                                    .cursor_pointer()
-                                                    .hover(|s| s.text_color(Theme::ACCENT_PRIMARY()))
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        move |_ev, win, app| {
-                                                            on_search(
-                                                                p_name.clone(),
-                                                                if p_tag.is_empty() { None } else { Some(p_tag.clone()) },
-                                                                win,
-                                                                app,
-                                                            );
-                                                        },
-                                                    );
-                                            }
-                                            name_el.child(display_name.clone())
-                                        })
-                                        .when(!player.data_available, |el| {
-                                            el.child(icon(
-                                                "icons/lock.svg",
-                                                9.0,
-                                                hsla(38.0 / 360.0, 0.92, 0.50, 1.0),
-                                            ))
-                                        }),
-                                )
-                                // 段位行：左侧挂英雄熟练度，右侧段位
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(3.0))
-                                        .min_w_0()
-                                        .children(mastery_inline(player, true))
-                                        .child(
-                                            div()
-                                                .text_size(px(9.5))
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(tier_color(&player.rank_tier))
-                                                .truncate()
-                                                .child(tier_short_name(
-                                                    &player.rank_tier,
-                                                    &player.rank_division,
-                                                )),
-                                        ),
-                                ),
-                        ),
-                )
-                // 第三行：左侧常用位置，右侧宿命/标记徽标 (G07)
+                .items_center()
+                .gap(px(1.0))
+                // 第一行：胜率竖条 + 英雄头像（32x32，带招牌/练英雄角标）
                 .child(
                     div()
                         .flex()
                         .items_center()
-                        .justify_between()
-                        .text_size(px(8.5))
-                        .text_color(Theme::TEXT_MUTED())
+                        .justify_center()
+                        .gap(px(2.5))
+                        .child({
+                            let diff = (player.win_rate as f32 - 50.0).abs();
+                            let fill_h = (32.0 * (diff / 50.0).min(1.0)).max(3.0);
+                            let bar_color = if player.win_rate >= 50 {
+                                Theme::WIN_BAR()
+                            } else {
+                                Theme::LOSS_BAR()
+                            };
+                            div()
+                                .w(px(3.0))
+                                .h(px(32.0))
+                                .rounded(px(1.5))
+                                .bg(Theme::CARD_BORDER())
+                                .overflow_hidden()
+                                .relative()
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .bottom_0()
+                                        .w_full()
+                                        .h(px(fill_h))
+                                        .bg(bar_color),
+                                )
+                        })
                         .child(
                             div()
-                                .font_weight(FontWeight::MEDIUM)
-                                .truncate()
-                                // 无分路数据（大乱斗/战绩隐藏）时不显示，避免出现「胜率 45%」这类无关信息
-                                .when_some(
-                                    position_stats_compact(player.positions.as_ref()),
-                                    |el, text| el.child(text),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(2.0))
-                                .when_some(player.fate.as_ref(), |el, fate| {
-                                    el.child(
-                                        div()
-                                            .size(px(12.0))
-                                            .rounded(px(2.5))
-                                            .bg(if fate.ally {
-                                                rgba(0x0577482e)
-                                            } else {
-                                                rgba(0xbf242a26)
-                                            })
-                                            .text_size(px(8.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(if fate.ally {
-                                                Theme::WIN_TEXT()
-                                            } else {
-                                                Theme::LOSS_TEXT()
-                                            })
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .child(if fate.ally { "友" } else { "敌" }),
-                                    )
+                                .relative()
+                                .size(px(32.0))
+                                .rounded(px(6.0))
+                                .border_1()
+                                .border_color(if is_top {
+                                    Theme::GOLD()
+                                } else {
+                                    Theme::CARD_BORDER()
                                 })
-                                .when_some(player.saved_tag.clone(), |el, tag| {
-                                    let (tag_bg, tag_text, _) = tag_badge_colors(&tag);
-                                    el.child(
-                                        div()
-                                            .px(px(2.5))
-                                            .py(px(0.5))
-                                            .rounded(px(2.0))
-                                            .bg(tag_bg)
-                                            .text_size(px(8.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(tag_text)
-                                            .child(tag.clone()),
-                                    )
-                                }),
+                                .overflow_hidden()
+                                .child(if player.champion_id > 0 {
+                                    LcuImage::new(format!(
+                                        "/lol-game-data/assets/v1/champion-icons/{}.png",
+                                        player.champion_id
+                                    ))
+                                    .size(px(32.0))
+                                    .shape(LcuImageShape::Rounded)
+                                    .placeholder("?".to_string())
+                                    .into_any_element()
+                                } else {
+                                    div()
+                                        .size(px(32.0))
+                                        .bg(Theme::CARD_BG())
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_size(px(12.0))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(Theme::TEXT_MUTED())
+                                        .child("?")
+                                        .into_any_element()
+                                })
+                                // 熟练度角标：招牌 ★ / 练英雄 练（放大到 15px 便于识别）
+                                .children(mastery_corner_badge(player, 15.0)),
                         ),
+                )
+                // 第二行：召唤师 ID（点击查询战绩），其后挂锁标 / 宿命 / 标记徽标
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .h(px(16.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(2.0))
+                        .child({
+                            let mut name_el = div()
+                                .text_size(px(10.5))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(Theme::TEXT_PRIMARY())
+                                .truncate();
+                            if is_valid_target {
+                                let on_search = on_player_search.clone();
+                                let p_name = player_name.clone();
+                                let p_tag = player_tag.clone();
+                                name_el = name_el
+                                    .cursor_pointer()
+                                    .hover(|s| s.text_color(Theme::ACCENT_PRIMARY()))
+                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                        on_search(
+                                            p_name.clone(),
+                                            if p_tag.is_empty() {
+                                                None
+                                            } else {
+                                                Some(p_tag.clone())
+                                            },
+                                            win,
+                                            app,
+                                        );
+                                    });
+                            }
+                            name_el.child(display_name.clone())
+                        })
+                        .when(!player.data_available, |el| {
+                            el.child(icon(
+                                "icons/lock.svg",
+                                9.0,
+                                hsla(38.0 / 360.0, 0.92, 0.50, 1.0),
+                            ))
+                        }),
+                )
+                // 第三行：英雄等级（熟练度 Lv.）+ 段位
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .h(px(14.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(3.0))
+                        .children(mastery_inline(player, true))
+                        // 未定级不画段位文案
+                        .when(is_ranked_tier(&player.rank_tier), |el| {
+                            el.child(
+                                div()
+                                    .text_size(px(9.5))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(tier_color(&player.rank_tier))
+                                    .truncate()
+                                    .child(tier_short_name(
+                                        &player.rank_tier,
+                                        &player.rank_division,
+                                    )),
+                            )
+                        }),
+                )
+                // 第四行：近期 50 局召唤师峡谷胜负（未打过峡谷时留白，保持十列列头等高）
+                .child(
+                    div()
+                        .h(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(2.5))
+                        .text_size(px(9.0))
+                        .font_weight(FontWeight::BOLD)
+                        .when(player.recent_wins > 0, |el| {
+                            el.child(
+                                div()
+                                    .text_color(Theme::WIN_TEXT())
+                                    .child(format!("{}胜", player.recent_wins)),
+                            )
+                        })
+                        .when(player.recent_losses > 0, |el| {
+                            el.child(
+                                div()
+                                    .text_color(Theme::LOSS_TEXT())
+                                    .child(format!("{}负", player.recent_losses)),
+                            )
+                        }),
+                )
+                // 第五行：今日主打位置（分路图标 + 占比）；无分路数据时该行留白，保持十列列头等高
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .h(px(11.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(2.0))
+                        .children(position_icon_stats(player.positions.as_ref())),
+                )
+                // 右上角：宿命徽标与路人集标签（绝对定位，出现与否都不影响列头行高）
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(2.0))
+                        .right(px(2.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(1.5))
+                        .when_some(player.fate.as_ref(), |el, fate| {
+                            el.child(
+                                div()
+                                    .px(px(2.5))
+                                    .py(px(0.5))
+                                    .rounded(px(2.5))
+                                    .bg(if fate.ally {
+                                        rgba(0x0577482e)
+                                    } else {
+                                        rgba(0xbf242a26)
+                                    })
+                                    .text_size(px(8.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(if fate.ally {
+                                        Theme::WIN_TEXT()
+                                    } else {
+                                        Theme::LOSS_TEXT()
+                                    })
+                                    .child(if fate.ally { "友" } else { "敌" }),
+                            )
+                        })
+                        .when_some(player.saved_tag.clone(), |el, tag| {
+                            let (tag_bg, tag_text, _) = tag_badge_colors(&tag);
+                            el.child(
+                                div()
+                                    .px(px(2.5))
+                                    .py(px(0.5))
+                                    .rounded(px(2.0))
+                                    .bg(tag_bg)
+                                    .text_size(px(8.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(tag_text)
+                                    .child(tag),
+                            )
+                        }),
                 )
         } else {
             // 5 列正常模式 (!compact 分支)：高度 48px，左右布局 (G07)
@@ -1681,16 +1673,19 @@ impl GameInfoView {
                                         .gap(px(3.0))
                                         .min_w_0()
                                         .children(mastery_inline(player, false))
-                                        .child(
-                                            div()
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(tier_color(&player.rank_tier))
-                                                .truncate()
-                                                .child(tier_short_name(
-                                                    &player.rank_tier,
-                                                    &player.rank_division,
-                                                )),
-                                        ),
+                                        // 未定级不画段位文案
+                                        .when(is_ranked_tier(&player.rank_tier), |el| {
+                                            el.child(
+                                                div()
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(tier_color(&player.rank_tier))
+                                                    .truncate()
+                                                    .child(tier_short_name(
+                                                        &player.rank_tier,
+                                                        &player.rank_division,
+                                                    )),
+                                            )
+                                        }),
                                 ),
                         ),
                 )
@@ -1742,7 +1737,7 @@ impl GameInfoView {
             let mut slots: Vec<gpui::AnyElement> = filtered_matches
                 .iter()
                 .take(10)
-                .map(|m| Self::render_match_card(m, compact))
+                .map(|m| Self::render_match_card(m, compact, player.fate.as_ref()))
                 .collect();
             let empty_slots = 10usize.saturating_sub(slots.len());
             slots.extend((0..empty_slots).map(|_| div().flex_1().into_any_element()));
@@ -1779,40 +1774,46 @@ impl GameInfoView {
     }
 
     /// 渲染单场战绩卡片 (MatchCard) (G08, G10)
-    fn render_match_card(m: &MatchDisplay, compact: bool) -> gpui::AnyElement {
+    fn render_match_card(
+        m: &MatchDisplay,
+        compact: bool,
+        fate: Option<&FateInfo>,
+    ) -> gpui::AnyElement {
         let is_win = m.win;
         let is_remake = m.remake;
+        // 宿命标记：这一局正是双方最近一次同局（友/敌同列头徽标语义）
+        let fate_marker = fate.filter(|fate| fate.game_id > 0 && fate.game_id == m.game_id);
+        // 分路图标：仅召唤师峡谷类队列有分路概念（对齐旧版 InferMatchPosition：
+        // 解析层已按 roleBoundItem → 装备 → 惩戒/辅助装 → lane+role 顺序推断）
+        let lane_icon = if is_laned_mode(m.queue_id) {
+            normalize_position(m.position.as_deref())
+        } else {
+            None
+        };
 
-        // 对齐 Vue .col-match 的 135° 浅色渐变：首端约为状态色的 70%、末端 20%
-        // （默认胜负色即 14% → 4%）。色相仍取自运行时胜负/重开色，保留自定义配色；
-        // 两端预合成到页面底色，卡片阴影不再透进卡面。
-        let (bg, border, text_color) = if is_remake {
+        // 对齐参考稿：小卡为纯色浅底（不再是 135° 渐变），底色与描边都按卡面实色预合成，
+        // 色相仍取自运行时胜负/重开色，自定义配色即时生效。
+        let (bg, border) = if is_remake {
             (
-                Theme::gradient_over_page(
-                    Theme::REMAKE_BG().opacity(0.7),
-                    Theme::REMAKE_BG().opacity(0.2),
-                ),
-                Theme::REMAKE_BORDER(),
-                Theme::REMAKE_TEXT(),
+                Theme::over_card(Theme::REMAKE_BG()),
+                Theme::over_card(Theme::REMAKE_BORDER()),
             )
         } else if is_win {
             (
-                Theme::gradient_over_page(
-                    Theme::WIN_BG().opacity(0.7),
-                    Theme::WIN_BG().opacity(0.2),
-                ),
-                Theme::WIN_BORDER(),
-                Theme::WIN_TEXT(),
+                Theme::over_card(Theme::WIN_BG()),
+                Theme::over_card(Theme::WIN_BORDER()),
             )
         } else {
             (
-                Theme::gradient_over_page(
-                    Theme::LOSS_BG().opacity(0.7),
-                    Theme::LOSS_BG().opacity(0.2),
-                ),
-                Theme::LOSS_BORDER(),
-                Theme::LOSS_TEXT(),
+                Theme::over_card(Theme::LOSS_BG()),
+                Theme::over_card(Theme::LOSS_BORDER()),
             )
+        };
+        // 标题固定深灰，胜负只靠卡面底色区分（参考稿同样不随胜负变色）
+        let title_color = if is_remake {
+            Theme::REMAKE_TEXT()
+        } else {
+            Theme::TEXT_SECONDARY()
         };
 
         let time_text = format_month_day(m.time_stamp);
@@ -1844,7 +1845,7 @@ impl GameInfoView {
                     .child(
                         div()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(text_color)
+                            .text_color(title_color)
                             .truncate()
                             .child(if is_remake {
                                 "重开".to_string()
@@ -1854,9 +1855,32 @@ impl GameInfoView {
                     )
                     .child(
                         div()
-                            .text_color(Theme::TEXT_MUTED())
+                            .flex()
+                            .items_center()
+                            .gap(px(2.0))
                             .flex_shrink_0()
-                            .child(time_text),
+                            .children(lane_icon.map(|position| {
+                                position_icon(position, if compact { 11.0 } else { 12.0 })
+                            }))
+                            .children(fate_marker.map(|fate| {
+                                div()
+                                    .px(px(2.0))
+                                    .rounded(px(2.0))
+                                    .bg(if fate.ally {
+                                        rgba(0x0577482e)
+                                    } else {
+                                        rgba(0xbf242a26)
+                                    })
+                                    .text_size(px(8.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(if fate.ally {
+                                        Theme::WIN_TEXT()
+                                    } else {
+                                        Theme::LOSS_TEXT()
+                                    })
+                                    .child(if fate.ally { "友" } else { "敌" })
+                            }))
+                            .child(div().text_color(Theme::TEXT_MUTED()).child(time_text)),
                     ),
             )
             // 主体行：英雄头像（带等级角标，支持双位数完整展示）+ KDA (G08, G10)
@@ -1921,7 +1945,7 @@ impl GameInfoView {
                                     .child(
                                         div()
                                             .font_weight(FontWeight::EXTRA_BOLD)
-                                            .text_color(Theme::LOSS_TEXT())
+                                            .text_color(Theme::DEATH_RED())
                                             .child(format!("{}", m.deaths)),
                                     )
                                     .child(span_sep())
@@ -2458,12 +2482,16 @@ fn player_summary_tooltip(player: &GameInfoPlayer) -> Vec<TooltipLine> {
     }
     let mut lines = vec![TooltipLine::title(name)];
 
-    let rank = if player.summoner_level > 0 {
-        format!("Lv.{} · {}", player.summoner_level, player.rank_display)
-    } else {
-        player.rank_display.clone()
+    // 未定级只保留等级，不显示「未定级」
+    let rank = match (player.summoner_level > 0, is_ranked_tier(&player.rank_tier)) {
+        (true, true) => format!("Lv.{} · {}", player.summoner_level, player.rank_display),
+        (true, false) => format!("Lv.{}", player.summoner_level),
+        (false, true) => player.rank_display.clone(),
+        (false, false) => String::new(),
     };
-    lines.push(TooltipLine::body(rank));
+    if !rank.is_empty() {
+        lines.push(TooltipLine::body(rank));
+    }
 
     // 近期胜负：只统计召唤师峡谷对局（排除重开/娱乐模式），对齐旧版「近 50 局统计胜负」
     if player.recent_wins + player.recent_losses > 0 {
@@ -2574,24 +2602,40 @@ fn player_summary_tooltip(player: &GameInfoPlayer) -> Vec<TooltipLine> {
     lines
 }
 
-/// 位置分布元素：无分路数据时不渲染（避免用「补位」之类的会话占位糊弄）
+/// 位置分布元素：分路图标 + 简称与占比（对齐旧版），无分路数据时不渲染
 fn render_position_stats(player: &GameInfoPlayer) -> AnyElement {
-    let Some(text) = position_stats_text(player.positions.as_ref()) else {
+    let Some(positions) = player.positions.as_ref() else {
         return div().into_any_element();
     };
-    let element = div()
-        .text_size(px(9.5))
-        .text_color(Theme::TEXT_MUTED())
-        .truncate()
-        .child(text);
-    match player.positions.as_ref() {
-        Some(positions) => with_tooltip(
-            format!("gi-pos-{}", player.puuid),
-            element,
-            position_tooltip(positions),
-        ),
-        None => element.into_any_element(),
+    let Some(primary) = positions.primary_position else {
+        return div().into_any_element();
+    };
+    let label = |position: PositionKey, percentage: u32| {
+        div()
+            .text_size(px(9.5))
+            .text_color(Theme::TEXT_MUTED())
+            .child(format!("{} {}%", position.short_name(), percentage))
+            .into_any_element()
+    };
+    let mut items = vec![
+        position_icon(primary, 11.0),
+        label(primary, positions.primary_percentage),
+    ];
+    if let Some(secondary) = positions.secondary_position {
+        items.push(span_sep().into_any_element());
+        items.push(position_icon(secondary, 11.0));
+        items.push(label(secondary, positions.secondary_percentage));
     }
+    with_tooltip(
+        format!("gi-pos-{}", player.puuid),
+        div()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .min_w_0()
+            .children(items),
+        position_tooltip(positions),
+    )
 }
 
 /// 毫秒时间戳 → MM/DD HH:mm
@@ -2758,38 +2802,41 @@ fn render_mastery_pill(puuid: &str, mastery: &MasteryBadge) -> AnyElement {
     )
 }
 
-/// 位置分布文案（上路 60% / 野 15%）；无分路数据（大乱斗/战绩隐藏）时返回 None
-fn position_stats_text(positions: Option<&AggregatedPositions>) -> Option<String> {
-    let positions = positions?;
-    let primary = positions.primary_position?;
-    let mut text = format!(
-        "{} {}%",
-        primary.display_name(),
-        positions.primary_percentage
-    );
-    if let Some(secondary) = positions.secondary_position {
-        text.push_str(&format!(
-            " / {} {}%",
-            secondary.short_name(),
-            positions.secondary_percentage
-        ));
+/// 分路位置图标（旧版 Vue 的彩色位图，按原色渲染，不做主题着色）
+fn position_icon(position: PositionKey, size: f32) -> AnyElement {
+    match crate::assets::position_icon_image(position.as_str()) {
+        Some(image) => img(image).flex_none().size(px(size)).into_any_element(),
+        // 解码失败时留同等大小的空位，避免文字换行错位
+        None => div().flex_none().size(px(size)).into_any_element(),
     }
-    Some(text)
 }
 
-/// 紧凑模式位置文案（上60%/野15%，副位置也带简称，避免只剩百分比看不懂）
-fn position_stats_compact(positions: Option<&AggregatedPositions>) -> Option<String> {
-    let positions = positions?;
-    let primary = positions.primary_position?;
-    let mut text = format!("{}{}%", primary.short_name(), positions.primary_percentage);
+/// 列头位置行：分路图标 + 简称与占比，次位置用 / 分隔；无分路数据时返回空
+fn position_icon_stats(positions: Option<&AggregatedPositions>) -> Vec<AnyElement> {
+    let Some(positions) = positions else {
+        return Vec::new();
+    };
+    let Some(primary) = positions.primary_position else {
+        return Vec::new();
+    };
+    let label = |position: PositionKey, percentage: u32| {
+        div()
+            .text_size(px(8.5))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(Theme::TEXT_MUTED())
+            .child(format!("{} {}%", position.short_name(), percentage))
+            .into_any_element()
+    };
+    let mut items = vec![
+        position_icon(primary, 10.0),
+        label(primary, positions.primary_percentage),
+    ];
     if let Some(secondary) = positions.secondary_position {
-        text.push_str(&format!(
-            "/{}{}%",
-            secondary.short_name(),
-            positions.secondary_percentage
-        ));
+        items.push(span_sep().into_any_element());
+        items.push(position_icon(secondary, 10.0));
+        items.push(label(secondary, positions.secondary_percentage));
     }
-    Some(text)
+    items
 }
 
 /// 格式化对局毫秒时间戳为月/日 (MM/DD)

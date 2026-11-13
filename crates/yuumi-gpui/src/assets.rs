@@ -64,6 +64,49 @@ const LOGO_PNG: &[u8] = include_bytes!("../assets/logo.png");
 /// `assets/icons/opgg.svg` 渲染出的 96×96 原色位图。
 const OPGG_LOGO_PNG: &[u8] = include_bytes!("../assets/icons/opgg-logo.png");
 
+/// 分路位置图标（沿用旧版 Vue 的 5 张彩色小图：浅色小地图 + 彩色分路）
+///
+/// 这些是小尺寸彩色位图，走 SVG 的 alpha 蒙版会被涂成单色而丢掉分路配色，
+/// 因此与 OP.GG 徽标一样内嵌 PNG 原色渲染。
+const POSITION_ICON_FILES: [(&str, &[u8]); 5] = [
+    ("TOP", include_bytes!("../assets/images/positions/top.png")),
+    (
+        "JUNGLE",
+        include_bytes!("../assets/images/positions/jungle.png"),
+    ),
+    (
+        "MIDDLE",
+        include_bytes!("../assets/images/positions/middle.png"),
+    ),
+    (
+        "BOTTOM",
+        include_bytes!("../assets/images/positions/bottom.png"),
+    ),
+    (
+        "UTILITY",
+        include_bytes!("../assets/images/positions/utility.png"),
+    ),
+];
+
+static POSITION_ICONS: OnceLock<std::collections::HashMap<&'static str, Arc<RenderImage>>> =
+    OnceLock::new();
+
+/// 同步获取分路位置图标，键为 PositionKey::as_str()（TOP / JUNGLE / MIDDLE / BOTTOM / UTILITY）
+pub fn position_icon_image(key: &str) -> Option<Arc<RenderImage>> {
+    let icons = POSITION_ICONS.get_or_init(|| {
+        POSITION_ICON_FILES
+            .iter()
+            .filter_map(|(name, bytes)| {
+                crate::asset_loader::AssetLoader::decode_bytes_to_render_image(bytes)
+                    .map_err(|error| log::warn!("[Assets] 分路图标 {name} 解码失败: {error}"))
+                    .ok()
+                    .map(|image| (*name, image))
+            })
+            .collect()
+    });
+    icons.get(key).cloned()
+}
+
 static LOGO_IMAGE: OnceLock<Option<Arc<RenderImage>>> = OnceLock::new();
 static OPGG_LOGO_IMAGE: OnceLock<Option<Arc<RenderImage>>> = OnceLock::new();
 

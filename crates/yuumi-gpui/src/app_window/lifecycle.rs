@@ -316,8 +316,9 @@ impl MainWindow {
                 log::info!("[MainWindow] 接收到游戏阶段更新: {:?}", phase);
                 // 与 Vue 的 watch 语义对齐：只在“进入”选人阶段时自动开窗。
                 // LCU 会重复推送同一阶段，若按每次通知开窗，用户手动关闭后会被再次拉起。
+                let previous_phase = self.current_phase.clone();
                 let entering_champ_select =
-                    phase == GamePhase::ChampSelect && self.current_phase != "ChampSelect";
+                    phase == GamePhase::ChampSelect && previous_phase != "ChampSelect";
                 self.current_phase = phase.as_str().to_string();
                 let in_game = matches!(
                     phase,
@@ -383,6 +384,17 @@ impl MainWindow {
                     GamePhase::PreEndOfGame | GamePhase::EndOfGame | GamePhase::WaitingForStats
                 ) {
                     self.try_record_encounters(cx);
+                }
+
+                // 对齐旧版 Vue：进入选人 / 开局 / 对局中时自动跳到「对局信息」。
+                // 只切路由，保留用户上次选的视图（按队伍 / 全部战绩）与队伍页签。
+                // 阶段值未变化时（LCU 会重复推送）不重复跳转，避免打断用户当前操作。
+                let live_phase = matches!(
+                    phase,
+                    GamePhase::ChampSelect | GamePhase::GameStart | GamePhase::InProgress
+                );
+                if live_phase && previous_phase != self.current_phase {
+                    self.switch_route(Route::GameInfo, cx);
                 }
                 cx.notify();
             }

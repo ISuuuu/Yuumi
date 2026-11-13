@@ -615,6 +615,14 @@ impl Theme {
         Self::BG_APP().blend(fg)
     }
 
+    /// 先把卡片底色合成到页面底色，再叠加前景色。
+    ///
+    /// 对局信息胜负小卡直接以「页面底色 + 卡片白底」的最终卡面作为混合基准，
+    /// 与参考稿取样出的实色一致，且 Mica 开关前后像素稳定。
+    pub fn over_card(fg: Hsla) -> Hsla {
+        Self::over_page(Self::CARD_BG()).blend(fg)
+    }
+
     /// 135° 两端线性渐变（对齐 Vue 的 linear-gradient(135deg, from, to)）。
     ///
     /// 两端先按各自 alpha 预合成到页面底色，渐变结果不透明，卡片阴影不会透进卡面。
@@ -941,6 +949,76 @@ mod tests {
         assert!((to_u8(win.r) - 209).abs() <= 3, "r = {}", to_u8(win.r));
         assert!((to_u8(win.g) - 235).abs() <= 3, "g = {}", to_u8(win.g));
         assert!((to_u8(win.b) - 207).abs() <= 3, "b = {}", to_u8(win.b));
+
+        // over_card 以页面底色上的卡面白底为基准，对局信息胜负小卡与参考稿取样一致：
+        // 胜 #d6eed0 / 负 #f5d0cd，描边 #afdea3 / #eca29d
+        let win_card = Theme::over_card(Theme::WIN_BG()).to_rgb();
+        assert!(
+            (to_u8(win_card.r) - 214).abs() <= 2,
+            "r = {}",
+            to_u8(win_card.r)
+        );
+        assert!(
+            (to_u8(win_card.g) - 238).abs() <= 2,
+            "g = {}",
+            to_u8(win_card.g)
+        );
+        assert!(
+            (to_u8(win_card.b) - 208).abs() <= 2,
+            "b = {}",
+            to_u8(win_card.b)
+        );
+
+        let loss_card = Theme::over_card(Theme::LOSS_BG()).to_rgb();
+        assert!(
+            (to_u8(loss_card.r) - 245).abs() <= 2,
+            "r = {}",
+            to_u8(loss_card.r)
+        );
+        assert!(
+            (to_u8(loss_card.g) - 208).abs() <= 2,
+            "g = {}",
+            to_u8(loss_card.g)
+        );
+        assert!(
+            (to_u8(loss_card.b) - 205).abs() <= 2,
+            "b = {}",
+            to_u8(loss_card.b)
+        );
+
+        let win_edge = Theme::over_card(Theme::WIN_BORDER()).to_rgb();
+        assert!(
+            (to_u8(win_edge.r) - 175).abs() <= 2,
+            "r = {}",
+            to_u8(win_edge.r)
+        );
+        assert!(
+            (to_u8(win_edge.g) - 222).abs() <= 2,
+            "g = {}",
+            to_u8(win_edge.g)
+        );
+        assert!(
+            (to_u8(win_edge.b) - 163).abs() <= 2,
+            "b = {}",
+            to_u8(win_edge.b)
+        );
+
+        let loss_edge = Theme::over_card(Theme::LOSS_BORDER()).to_rgb();
+        assert!(
+            (to_u8(loss_edge.r) - 236).abs() <= 2,
+            "r = {}",
+            to_u8(loss_edge.r)
+        );
+        assert!(
+            (to_u8(loss_edge.g) - 162).abs() <= 2,
+            "g = {}",
+            to_u8(loss_edge.g)
+        );
+        assert!(
+            (to_u8(loss_edge.b) - 157).abs() <= 2,
+            "b = {}",
+            to_u8(loss_edge.b)
+        );
 
         restore_default_palette();
     }
