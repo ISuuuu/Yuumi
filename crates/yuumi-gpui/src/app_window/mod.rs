@@ -32,8 +32,8 @@ use crate::theme::Theme;
 use crate::tray::{TrayAction, TrayManager};
 use crate::views;
 use crate::views::career::{
-    CareerBarAction, CareerHeaderStats, CareerView, LootAction, LootModal, LootProgress,
-    MasteryFilterAction,
+    CareerBarAction, CareerHeaderStats, CareerPopup, CareerView, LootAction, LootModal,
+    LootProgress, MasteryFilterAction,
 };
 use crate::views::game_info::{GameInfoTeamTab, GameInfoView, GameInfoViewMode};
 use crate::views::home::HomeView;

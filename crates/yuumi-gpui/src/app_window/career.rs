@@ -41,11 +41,12 @@ impl MainWindow {
     ) {
         match action {
             CareerBarAction::TogglePopup(kind) => {
-                self.career_view.popup = if self.career_view.popup == Some(kind) {
-                    None
-                } else {
-                    Some(kind)
-                };
+                let opening = self.career_view.popup != Some(kind);
+                self.career_view.popup = if opening { Some(kind) } else { None };
+                // 对齐 Vue：面板打开时按当前查看的召唤师补齐队友数据
+                if opening && kind == CareerPopup::Teammates {
+                    self.ensure_recent_teammates(cx);
+                }
             }
             CareerBarAction::ClosePopup => self.career_view.popup = None,
             CareerBarAction::SelectQueue(id) => {
@@ -54,6 +55,73 @@ impl MainWindow {
             }
         }
         cx.notify();
+    }
+
+    /// 打开「最近队友」面板时，按当前查看的召唤师补齐队友数据。
+    ///
+    /// 对齐 Vue：面板打开时若缓存与当前对象不匹配就重新统计（切换他人、换对局后都会刷新），
+    /// 避免展示上一位召唤师或上一批对局的队友。
+    pub(super) fn ensure_recent_teammates(&mut self, cx: &mut Context<Self>) {
+        let Some(puuid) = self.career_view.summoner.as_ref().map(|s| s.puuid.clone()) else {
+            return;
+        };
+        if self.career_view.recent_teammates_loading
+            || self.career_view.recent_teammates_for.as_deref() == Some(puuid.as_str())
+        {
+            return;
+        }
+        let game_ids: Vec<u64> = self.matches.iter().map(|m| m.display.game_id).collect();
+        if game_ids.is_empty() {
+            return;
+        }
+
+        // 切换查看对象后旧数据立即失效，不要继续展示别人的队友
+        self.career_view.recent_teammates.clear();
+        self.career_view.recent_teammates_loading = true;
+        cx.notify();
+
+        let live = self.live_service.clone();
+        let target = puuid.clone();
+        cx.spawn(async move |entity, cx| {
+            let Some(client) = live.get_client().await else {
+                let _ = entity.update(cx, |this, cx| {
+                    this.career_view.recent_teammates_loading = false;
+                    cx.notify();
+                });
+                return;
+            };
+            let tagged = std::collections::HashMap::new();
+            match yuumi_core::parsers::teammates::fetch_recent_teammates(
+                &client, &game_ids, &target, &tagged,
+            )
+            .await
+            {
+                Ok(teammates) => {
+                    let icons: Vec<String> = teammates.iter().map(|t| t.icon.clone()).collect();
+                    let _ = entity.update(cx, |this, cx| {
+                        // 拉取期间又切换了查看对象，丢弃本次结果
+                        let still_current =
+                            this.career_view.summoner.as_ref().map(|s| s.puuid.as_str())
+                                == Some(target.as_str());
+                        if still_current {
+                            prewarm_assets(icons, cx);
+                            this.career_view.recent_teammates = teammates;
+                            this.career_view.recent_teammates_for = Some(target.clone());
+                        }
+                        this.career_view.recent_teammates_loading = false;
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    log::warn!("[MainWindow] 统计最近队友失败: {}", e);
+                    let _ = entity.update(cx, |this, cx| {
+                        this.career_view.recent_teammates_loading = false;
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
     }
 
     /// 更新熟练度页的英雄搜索词
@@ -663,6 +731,10 @@ impl MainWindow {
         self.career_view.active_tab = views::career::CareerTab::Matches;
         self.career_view.summoner = Some(other_summoner);
         self.career_view.ranked = None;
+        // 队友数据属于被查看的召唤师，切换对象后立即失效
+        self.career_view.recent_teammates.clear();
+        self.career_view.recent_teammates_for = None;
+        self.career_view.recent_teammates_loading = false;
         self.matches.clear();
         self.stats = CareerHeaderStats::compute(&[]);
         cx.notify();
@@ -789,6 +861,9 @@ impl MainWindow {
         if let Some(own) = self.own_summoner.clone() {
             self.career_view.summoner = Some(own);
         }
+        self.career_view.recent_teammates.clear();
+        self.career_view.recent_teammates_for = None;
+        self.career_view.recent_teammates_loading = false;
         self.matches = self.own_matches.clone();
         self.stats = self.own_stats.clone();
         self.career_view.ranked = self.own_ranked.clone();

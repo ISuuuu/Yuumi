@@ -1,4 +1,6 @@
-use crate::components::dropdown::{dropdown_item, dropdown_menu, dropdown_trigger};
+use crate::components::dropdown::{
+    dropdown_item, dropdown_menu, dropdown_trigger, dropdown_trigger_aligned,
+};
 use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
 use crate::components::offline_state::render_lcu_offline_state;
@@ -596,6 +598,9 @@ pub struct CareerView {
     pub selected_queue: Option<i32>,
     pub popup: Option<CareerPopup>,
     pub recent_teammates: Vec<RecentTeammate>,
+    /// 当前队友列表对应的召唤师 PUUID（切换查看对象后据此判断是否重新拉取）
+    pub recent_teammates_for: Option<String>,
+    pub recent_teammates_loading: bool,
     pub essences: EssenceBalances,
     pub loot_items: Vec<LootInventoryItem>,
     /// 可开启战利品（含真实配方名与钥匙需求，来自 core `fetch_openable_loots`）
@@ -635,6 +640,8 @@ impl Default for CareerView {
             selected_queue: None,
             popup: None,
             recent_teammates: Vec::new(),
+            recent_teammates_for: None,
+            recent_teammates_loading: false,
             essences: EssenceBalances::default(),
             loot_items: Vec::new(),
             loot_openables: Vec::new(),
@@ -1337,15 +1344,92 @@ impl CareerView {
             .find(|o| o.id == self.selected_queue)
             .map(|o| o.label)
             .unwrap_or("全部");
-        // 分路占比以「有分路信息的对局」为分母（对齐 Vue computeAggregatedPositions）
-        let valid_total = matches
-            .iter()
-            .filter(|m| position_to_zh(m.display.position.as_deref()) != "全能")
-            .count()
-            .max(1);
         let sum_kills: i32 = matches.iter().map(|m| m.display.kills).sum();
         let sum_deaths: i32 = matches.iter().map(|m| m.display.deaths).sum();
         let sum_assists: i32 = matches.iter().map(|m| m.display.assists).sum();
+
+        // 常玩位置胶囊：无有效分路信息时整块隐藏（对齐 Vue `v-if="aggregatedPositions.totalValid > 0"`）
+        let positions_pill = (!positions.is_empty()).then(|| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .px(px(8.0))
+                .py(px(3.0))
+                .rounded(px(6.0))
+                .bg(Theme::HOVER_BG())
+                .border_1()
+                .border_color(Theme::CARD_BORDER())
+                .child(
+                    div()
+                        .text_size(px(11.5))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(Theme::TEXT_MUTED())
+                        .child("常玩位置:"),
+                )
+                .children(positions.iter().map(|p| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(3.0))
+                        .text_size(px(11.5))
+                        .child(
+                            div()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(Theme::TEXT_PRIMARY())
+                                .child(p.position.display_name()),
+                        )
+                        .child(
+                            div()
+                                .text_color(Theme::TEXT_MUTED())
+                                .child(format!("{}%", p.percentage)),
+                        )
+                }))
+        });
+
+        // 近期常用英雄：场次徽标按胜率着色（对齐 Vue wr-high / wr-mid / wr-low）
+        let champions_row = (!champions.is_empty()).then(|| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .children(champions.iter().map(|c| {
+                    let badge_color = if c.win_rate >= 60 {
+                        Theme::WIN_TEXT()
+                    } else if c.win_rate < 45 {
+                        Theme::TEXT_MUTED()
+                    } else {
+                        Theme::ACCENT_PRIMARY()
+                    };
+                    div()
+                        .id(SharedString::from(format!(
+                            "recent-champ-{}",
+                            c.champion_id
+                        )))
+                        .relative()
+                        .size(px(28.0))
+                        .child(
+                            LcuImage::new(c.icon_url.clone())
+                                .size(px(28.0))
+                                .shape(LcuImageShape::Circle)
+                                .placeholder("英"),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .bottom(px(-3.0))
+                                .right(px(-3.0))
+                                .px(px(3.0))
+                                .py(px(1.0))
+                                .rounded(px(3.0))
+                                .bg(rgba(0x0f172ae0))
+                                .text_size(px(9.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(badge_color)
+                                .child(c.games.to_string()),
+                        )
+                }))
+        });
 
         div()
             .w(px(1000.0))
@@ -1417,104 +1501,19 @@ impl CareerView {
                             .child(format!("({:.1})", stats.avg_kda_ratio)),
                     ),
             )
-            // 常玩位置胶囊
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .px(px(8.0))
-                    .py(px(3.0))
-                    .rounded(px(6.0))
-                    .bg(Theme::HOVER_BG())
-                    .border_1()
-                    .border_color(Theme::CARD_BORDER())
-                    .when(positions.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .text_size(px(11.5))
-                                .text_color(Theme::TEXT_MUTED())
-                                .child("常玩位置: 暂无"),
-                        )
-                    })
-                    .when(!positions.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .text_size(px(11.5))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(Theme::TEXT_MUTED())
-                                .child("常玩位置:"),
-                        )
-                    })
-                    .children(positions.into_iter().map(|(label, count)| {
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(3.0))
-                            .text_size(px(11.5))
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY())
-                                    .child(label),
-                            )
-                            .child(
-                                div()
-                                    .text_color(Theme::TEXT_MUTED())
-                                    .child(format!("{}%", count * 100 / valid_total)),
-                            )
-                    })),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .when(champions.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .text_size(px(11.5))
-                                .text_color(Theme::TEXT_MUTED())
-                                .child("暂无英雄数据"),
-                        )
-                    })
-                    .children(champions.into_iter().map(|(name, icon_url, count)| {
-                        div()
-                            .id(SharedString::from(format!("recent-champ-{}", name)))
-                            .relative()
-                            .size(px(28.0))
-                            .child(
-                                LcuImage::new(icon_url)
-                                    .size(px(28.0))
-                                    .shape(LcuImageShape::Circle)
-                                    .placeholder("英"),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .bottom(px(-2.0))
-                                    .right(px(-2.0))
-                                    .px(px(3.0))
-                                    .rounded_full()
-                                    .bg(Theme::CARD_BG())
-                                    .border_1()
-                                    .border_color(Theme::CARD_BORDER())
-                                    .text_size(px(9.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY())
-                                    .child(count.to_string()),
-                            )
-                    })),
-            )
+            .children(positions_pill)
+            .children(champions_row)
             .child(div().flex_1())
             // 动作 1：最近队友（在队列下拉之前）
             .child({
                 let on_toggle = on_bar.clone();
-                dropdown_trigger(
+                // 面板宽 420px 且按钮靠近窗口右侧，右对齐锚定避免菜单超出窗口
+                dropdown_trigger_aligned(
                     "career-teammates-trigger",
                     "最近队友".to_string(),
                     self.popup == Some(CareerPopup::Teammates),
                     self.render_teammates_menu(on_click_teammate),
+                    true,
                     move |win, app| {
                         on_toggle(
                             CareerBarAction::TogglePopup(CareerPopup::Teammates),
@@ -1555,7 +1554,8 @@ impl CareerView {
         &self,
         on_click_teammate: impl Fn(RecentTeammate, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
-        let empty = self.recent_teammates.is_empty();
+        let loading = self.recent_teammates_loading;
+        let empty = !loading && self.recent_teammates.is_empty();
         div()
             .id("teammates-menu-scroll")
             .w(px(420.0))
@@ -1588,7 +1588,17 @@ impl CareerView {
                             .child("近 20 场同队数据"),
                     ),
             )
-            .child(if empty {
+            .child(if loading {
+                div()
+                    .py(px(24.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(12.0))
+                    .text_color(Theme::TEXT_MUTED())
+                    .child("正在统计最近队友…")
+                    .into_any_element()
+            } else if empty {
                 div()
                     .py(px(24.0))
                     .flex()

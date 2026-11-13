@@ -479,9 +479,16 @@ impl MainWindow {
                 cx.notify();
             }
             LiveLcuEvent::RecentTeammatesLoaded(teammates) => {
+                // 该事件只描述登录账号，查看他人生涯时不能覆盖对方数据
+                if self.career_view.is_viewing_other {
+                    return;
+                }
                 let icon_paths: Vec<String> = teammates.iter().map(|t| t.icon.clone()).collect();
                 prewarm_assets(icon_paths, cx);
                 self.career_view.recent_teammates = teammates;
+                self.career_view.recent_teammates_for =
+                    self.career_view.summoner.as_ref().map(|s| s.puuid.clone());
+                self.career_view.recent_teammates_loading = false;
                 cx.notify();
             }
         }

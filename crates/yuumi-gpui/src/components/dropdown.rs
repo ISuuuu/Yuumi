@@ -25,6 +25,21 @@ pub fn dropdown_trigger(
     menu: impl IntoElement,
     on_toggle: impl Fn(&mut Window, &mut App) + 'static + Clone,
 ) -> impl IntoElement {
+    dropdown_trigger_aligned(id, label, open, menu, false, on_toggle)
+}
+
+/// 同 dropdown_trigger，可指定浮层的展开方向。
+///
+/// align_right = true 时菜单右边缘贴按钮右边缘、向左展开，用于靠近窗口右侧且
+/// 宽度较大的浮层（如最近队友面板），避免菜单超出窗口被裁掉。
+pub fn dropdown_trigger_aligned(
+    id: &'static str,
+    label: String,
+    open: bool,
+    menu: impl IntoElement,
+    align_right: bool,
+    on_toggle: impl Fn(&mut Window, &mut App) + 'static + Clone,
+) -> impl IntoElement {
     let on_click = on_toggle.clone();
     let open_at_render = open;
 
@@ -78,7 +93,8 @@ pub fn dropdown_trigger(
                     div()
                         .absolute()
                         .top_full()
-                        .left_0()
+                        .when(align_right, |this| this.right_0())
+                        .when(!align_right, |this| this.left_0())
                         .mt(px(4.0))
                         .id(SharedString::from(format!("{}-menu", id)))
                         .occlude()
