@@ -848,6 +848,59 @@ fn should_overwrite_cache(prev: Option<&LiveGameInfo>, next: &LiveGameInfo) -> b
     }
     next.blue_team.len() + next.red_team.len() >= prev.blue_team.len() + prev.red_team.len()
 }
+
+/// 两份快照是否属于同一局：gameId 相等，或上一份是刚结束的选人快照
+/// （gameId 尚未产生，选人必然紧邻对局开始）。演示数据与跨局快照一律不算同局。
+fn is_same_match_snapshot(prev: &LiveGameInfo, next: &LiveGameInfo) -> bool {
+    if prev.is_demo || next.game_id.is_none() {
+        return false;
+    }
+    prev.game_id == next.game_id || (prev.game_id.is_none() && prev.phase == "ChampSelect")
+}
+
+/// 两名玩家是否同一人：puuid 或 summonerId 任一强身份相等
+fn same_strong_identity(a: &GameInfoPlayer, b: &GameInfoPlayer) -> bool {
+    (!a.puuid.is_empty() && a.puuid == b.puuid)
+        || (a.summoner_id != 0 && a.summoner_id == b.summoner_id)
+}
+
+/// 队伍残缺补齐（对齐旧版 Vue「新队伍更短时保留已有更全的，不让整列消失」）：
+/// 隐藏战绩玩家会被 LCU 从 gameflow 的 teamOne/teamTwo 剔除（2999 与
+/// playerChampionSelections 里仍可见），导致选人阶段还在的玩家到加载阶段整列消失。
+/// 从上一份同局快照按强身份把缺失玩家补回，返回 (蓝方补回数, 红方补回数)。
+pub fn merge_missing_players_from_prev(
+    next: &mut LiveGameInfo,
+    prev: &LiveGameInfo,
+) -> (usize, usize) {
+    if !is_same_match_snapshot(prev, next) {
+        return (0, 0);
+    }
+    let merge_side = |next_team: &mut Vec<GameInfoPlayer>, prev_team: &[GameInfoPlayer]| {
+        let target = prev_team.len().min(5);
+        // 整边恢复（session 单边被清空）时保留上一份快照的组队编号；
+        // 部分补人时旧编号在新队伍里已失效，置空防止与现有分组误配同色
+        let full_restore = next_team.is_empty();
+        let mut added = 0;
+        for player in prev_team {
+            if next_team.len() >= target {
+                break;
+            }
+            if next_team.iter().any(|p| same_strong_identity(p, player)) {
+                continue;
+            }
+            let mut player = player.clone();
+            if !full_restore {
+                player.premade_group_id = None;
+            }
+            next_team.push(player);
+            added += 1;
+        }
+        added
+    };
+    let blue = merge_side(&mut next.blue_team, &prev.blue_team);
+    let red = merge_side(&mut next.red_team, &prev.red_team);
+    (blue, red)
+}
 #[allow(clippy::too_many_arguments)]
 fn make_mock_match(
     queue_id: i32,
@@ -3446,6 +3499,119 @@ mod tests {
         assert!(info.red_team.iter().any(|p| p.puuid == local.puuid));
         assert_eq!(info.blue_team.len(), 5);
         assert_eq!(info.red_team.len(), 5);
+    }
+
+    #[test]
+    fn shrunken_gameflow_team_recovers_hidden_player_from_champ_select() {
+        // 选人阶段：我方含一名隐藏战绩玩家（无 puuid / summonerId，仅所选英雄可见）
+        let mut champ_src = champ_select_source();
+        let hidden = champ_src.blue.last_mut().expect("我方应有玩家");
+        hidden.puuid = None;
+        hidden.summoner_id = None;
+
+        let champ_info = build_live_game_info(
+            &champ_src,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &HashMap::new(),
+            &GameDataAssets::default(),
+        );
+        assert_eq!(champ_info.blue_team.len(), 5);
+        let hidden_cid = champ_info.blue_team[4].champion_id;
+        assert!(champ_info.blue_team[4].puuid.is_empty());
+
+        // 进入对局：LCU 把隐藏战绩玩家从队伍名单剔除，其余 4 人身份齐全
+        let mut game_src = champ_src;
+        game_src.phase = "InProgress".to_string();
+        game_src.game_id = Some(7012345678);
+        game_src.blue.pop();
+
+        let mut game_info = build_live_game_info(
+            &game_src,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &HashMap::new(),
+            &GameDataAssets::default(),
+        );
+        assert_eq!(game_info.blue_team.len(), 4);
+
+        // 从选人快照补回该玩家，保留所选英雄
+        let added = merge_missing_players_from_prev(&mut game_info, &champ_info);
+        assert_eq!(added, (1, 0));
+        assert_eq!(game_info.blue_team.len(), 5);
+        let recovered = &game_info.blue_team[4];
+        assert!(recovered.puuid.is_empty());
+        assert_eq!(recovered.champion_id, hidden_cid);
+        // 部分补人时旧组队编号已失效，不应与新队伍分组误配
+        assert_eq!(recovered.premade_group_id, None);
+    }
+
+    #[test]
+    fn mid_game_shrunken_session_recovers_full_side() {
+        // 同局中途 session 残缺（单边被清空）时整边恢复，组队编号保留
+        let full_src = gameflow_source();
+        let prev = build_live_game_info(
+            &full_src,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &HashMap::new(),
+            &GameDataAssets::default(),
+        );
+
+        let mut shrunk_src = full_src.clone();
+        shrunk_src.blue.clear();
+        let mut next = build_live_game_info(
+            &shrunk_src,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &HashMap::new(),
+            &GameDataAssets::default(),
+        );
+        let premade_before = prev.blue_team.iter().find_map(|p| p.premade_group_id);
+        let added = merge_missing_players_from_prev(&mut next, &prev);
+        assert_eq!(added, (5, 0));
+        assert_eq!(next.blue_team.len(), 5);
+        assert_eq!(
+            next.blue_team.iter().find_map(|p| p.premade_group_id),
+            premade_before
+        );
+    }
+
+    #[test]
+    fn merge_skips_across_different_games_and_demo() {
+        let prev = build_live_game_info(
+            &gameflow_source(),
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &HashMap::new(),
+            &GameDataAssets::default(),
+        );
+
+        // 跨局：gameId 不同不补
+        let mut next_src = gameflow_source();
+        next_src.game_id = Some(999);
+        next_src.blue.pop();
+        let mut next = build_live_game_info(
+            &next_src,
+            SELF_PUUID,
+            Some(SELF_SUMMONER_ID),
+            &MyRecentContext::default(),
+            &HashMap::new(),
+            &GameDataAssets::default(),
+        );
+        assert_eq!(merge_missing_players_from_prev(&mut next, &prev), (0, 0));
+        assert_eq!(next.blue_team.len(), 4);
+
+        // 演示数据：即使 gameId 碰巧相同也不得混入真实对局
+        let demo = LiveGameInfo::create_demo();
+        next.game_id = demo.game_id;
+        assert_eq!(merge_missing_players_from_prev(&mut next, &demo), (0, 0));
+        assert_eq!(next.blue_team.len(), 4);
     }
 
     #[test]

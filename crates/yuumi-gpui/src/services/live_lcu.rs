@@ -22,8 +22,8 @@ use yuumi_core::lcu::{
 use yuumi_core::parsers::game_info::{
     clear_player_data_cache, fetch_live_game_info, fetch_live_game_info_quick,
     fetch_liveclient_snapshot, fetch_ranked_stats, liveclient_map_side, liveclient_teams,
-    merge_liveclient_teams, ChampSelectSnapshot, GameInfoSource, GameflowSessionSnapshot,
-    LiveGameInfo, RankedStats,
+    merge_liveclient_teams, merge_missing_players_from_prev, ChampSelectSnapshot, GameInfoSource,
+    GameflowSessionSnapshot, LiveGameInfo, RankedStats,
 };
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
 use yuumi_core::parsers::loot_actions::{
@@ -1396,8 +1396,12 @@ impl LiveLcuService {
         );
         let _ = self.event_tx.send(LiveLcuEvent::GameInfoLoading);
 
+        // 在快取覆写前捕获上一份快照：对局阶段隐藏战绩玩家会被 gameflow 从
+        // teamOne/teamTwo 剔除，需要从同局上一份快照（含选人阶段）把人补回
+        let prev_snapshot = self.game_info.read().await.clone();
+
         // 第一段：身份 + 段位（快），先把 10 人骨架顶上去，避免面板空等 8~9 秒
-        let quick = fetch_live_game_info_quick(
+        let mut quick = fetch_live_game_info_quick(
             &client,
             &summoner.puuid,
             self_summoner_id,
@@ -1406,6 +1410,7 @@ impl LiveLcuService {
             &assets,
         )
         .await;
+        merge_prev_teams(&mut quick, prev_snapshot.as_deref());
         // 拉取期间阶段已切换（对局结束）时丢弃本次快照，避免覆盖结算页面
         if self.is_stale_game_info_fetch(phase).await {
             log::debug!("[LiveLcu] 丢弃过期阶段的对局信息快照: requested={}", phase);
@@ -1428,22 +1433,9 @@ impl LiveLcuService {
         )
         .await;
 
-        // 对局进行中精简防丢：若当前 session 只剩单边队伍，而同局先前已记录完整敌我数据，保留先前非空队伍
-        if let Some(prev) = self.game_info.read().await.as_ref() {
-            let prev_is_same_match = prev.phase != "ChampSelect"
-                && info.game_id.is_some()
-                && info.game_id == prev.game_id;
-            if prev_is_same_match {
-                if info.blue_team.is_empty() && !prev.blue_team.is_empty() {
-                    log::info!("[LiveLcu] 继承先前蓝方队伍 ({} 人)", prev.blue_team.len());
-                    info.blue_team = prev.blue_team.clone();
-                }
-                if info.red_team.is_empty() && !prev.red_team.is_empty() {
-                    log::info!("[LiveLcu] 继承先前红方队伍 ({} 人)", prev.red_team.len());
-                    info.red_team = prev.red_team.clone();
-                }
-            }
-        }
+        // 对局进行中精简防丢：session 偶发残缺（隐藏战绩玩家被剔除 / 加载瞬间有人未连入），
+        // 从上一份同局快照补回缺失玩家，不让整列消失
+        merge_prev_teams(&mut info, self.game_info.read().await.as_deref());
 
         log::info!(
             "[LiveLcu] 对局信息就绪: {} vs {} (user_side={:?})",
@@ -1471,6 +1463,20 @@ impl LiveLcuService {
     async fn is_stale_game_info_fetch(&self, requested_phase: &str) -> bool {
         is_in_game_phase(requested_phase) && !is_in_game_phase(&self.get_current_phase().await)
     }
+}
+
+/// 队伍残缺时从上一份同局快照补回缺失玩家（隐藏战绩玩家会被 gameflow 从
+/// teamOne/teamTwo 剔除，选人阶段却仍在），返回是否发生补回
+fn merge_prev_teams(info: &mut LiveGameInfo, prev: Option<&LiveGameInfo>) -> bool {
+    let Some(prev) = prev else {
+        return false;
+    };
+    let (blue, red) = merge_missing_players_from_prev(info, prev);
+    if blue == 0 && red == 0 {
+        return false;
+    }
+    log::info!("[LiveLcu] 对局队伍残缺，已从上一份快照补回缺失玩家: 蓝方 +{blue} / 红方 +{red}");
+    true
 }
 
 /// 是否处于对局结算阶段（同一局会依次推送 WaitingForStats → PreEndOfGame → EndOfGame）
