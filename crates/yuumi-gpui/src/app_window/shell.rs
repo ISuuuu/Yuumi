@@ -256,6 +256,15 @@ impl Render for MainWindow {
                                                 _ => {
                                                     this.main_scroll_handle
                                                         .set_offset(Point::default());
+                                                    if matches!(
+                                                        this.current_route,
+                                                        Route::Tools | Route::Settings
+                                                    ) {
+                                                        this.retained_scroll_offsets.insert(
+                                                            this.current_route,
+                                                            Point::default(),
+                                                        );
+                                                    }
                                                 }
                                             }
                                             cx.notify();
@@ -392,14 +401,37 @@ impl MainWindow {
         .detach();
     }
 
+    /// 路由切换时的滚动位置过渡：工具集/设置离开时记住位置、回来时恢复（仅本次会话内，
+    /// 不持久化——重启后自然回到初始位置）；其余路由维持切走即回顶的旧行为。
+    fn transition_main_scroll(&mut self, from: Route, to: Route) {
+        if from == to {
+            return;
+        }
+        if matches!(from, Route::Tools | Route::Settings) {
+            self.retained_scroll_offsets
+                .insert(from, self.main_scroll_handle.offset());
+        }
+        if matches!(to, Route::Tools | Route::Settings) {
+            let offset = self
+                .retained_scroll_offsets
+                .get(&to)
+                .copied()
+                .unwrap_or_default();
+            self.main_scroll_handle.set_offset(offset);
+        } else {
+            self.main_scroll_handle.set_offset(Point::default());
+        }
+    }
+
     pub(super) fn switch_route(&mut self, route: Route, cx: &mut Context<Self>) {
         if route != self.current_route {
+            let previous = self.current_route;
             self.route_history.push(self.current_route);
             if self.route_history.len() > 20 {
                 self.route_history.remove(0);
             }
             self.current_route = route;
-            self.main_scroll_handle.set_offset(Point::default());
+            self.transition_main_scroll(previous, route);
             if self.current_route == Route::SavedPlayers {
                 self.reload_saved_players(cx);
                 // 对照 Vue 版 refreshRoster：每次进入路人集都补齐缺失的召唤师身份
@@ -416,7 +448,9 @@ impl MainWindow {
     /// 返回上一路由（标题栏返回键）
     pub(super) fn go_back(&mut self, cx: &mut Context<Self>) {
         if let Some(previous) = self.route_history.pop() {
+            let from = self.current_route;
             self.current_route = previous;
+            self.transition_main_scroll(from, previous);
             cx.notify();
         }
     }

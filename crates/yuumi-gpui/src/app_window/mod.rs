@@ -13,6 +13,7 @@ use gpui::{
     TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind,
     WindowOptions,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -163,6 +164,8 @@ pub struct MainWindow {
     game_assets: Option<Arc<GameDataAssets>>,
     /// 主视口全局滚动跟踪句柄（用于监听滚动到底部与回到顶部）
     main_scroll_handle: ScrollHandle,
+    /// 工具集/设置离开时记住的滚动位置（仅本次会话内，重启即清空回到初始位置）
+    retained_scroll_offsets: HashMap<Route, Point<Pixels>>,
     /// 是否有版本更新（用于在侧栏设置图标显示红点）
     f_update: f_updates::UpdateFlow,
     has_update: bool,
@@ -419,6 +422,7 @@ impl MainWindow {
             bench_session: None,
             game_assets: None,
             main_scroll_handle: ScrollHandle::new(),
+            retained_scroll_offsets: HashMap::new(),
             f_update: f_updates::UpdateFlow::default(),
             has_update: false,
             notice_popup_open: false,
