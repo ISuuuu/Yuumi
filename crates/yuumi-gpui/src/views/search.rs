@@ -14,6 +14,7 @@ use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
 use crate::components::offline_state::render_lcu_offline_state;
 use crate::components::text_field::search_input_field;
+use crate::components::tooltip::{with_tooltip, TooltipLine};
 use crate::match_model::{GameDetail, GameDetailPlayer, GameDetailTeam, MatchItem};
 use crate::theme::Theme;
 use crate::views::career::format_local_month_day;
@@ -1659,6 +1660,17 @@ impl SearchView {
         let win = team.win;
         let is_blue = team.team_id == 100;
         let is_aram_hex = queue_id == 2400 || queue_id == 2450;
+        // 海克斯强化列宽（按队伍最大强化数固定，保证各行装备列对齐）
+        let augment_slots = if is_aram_hex {
+            team.players
+                .iter()
+                .map(|p| p.augment_icon_urls.len())
+                .max()
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let augment_col_w = augment_slots as f32 * 30.0;
 
         div()
             .w_full()
@@ -1771,6 +1783,9 @@ impl SearchView {
                             .text_size(px(11.5))
                             .font_weight(FontWeight::BOLD)
                             .text_color(Theme::TEXT_MUTED())
+                            .when(augment_slots > 0, |this| {
+                                this.child(div().w(px(augment_col_w)).text_center().child("强化"))
+                            })
                             .child(div().w(px(210.0)).text_center().child("装备"))
                             .child(div().w(px(70.0)).text_center().child("KDA"))
                             .child(div().w(px(42.0)).text_center().child("补刀"))
@@ -1780,11 +1795,18 @@ impl SearchView {
             )
             // 2. 玩家列表 (S11)
             .child(
-                div().flex().flex_col().children(
-                    team.players.iter().map(|p| {
-                        self.render_player_row(p, win, is_aram_hex, on_player_click.clone())
-                    }),
-                ),
+                div()
+                    .flex()
+                    .flex_col()
+                    .children(team.players.iter().map(|p| {
+                        self.render_player_row(
+                            p,
+                            win,
+                            is_aram_hex,
+                            augment_slots,
+                            on_player_click.clone(),
+                        )
+                    })),
             )
     }
 
@@ -1808,6 +1830,7 @@ impl SearchView {
         p: &GameDetailPlayer,
         win: bool,
         is_aram_hex: bool,
+        augment_slots: usize,
         on_player_click: impl Fn(String, u64, String, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         let is_self = self
@@ -2026,6 +2049,44 @@ impl SearchView {
                 div()
                     .flex()
                     .items_center()
+                    // 海克斯强化 (仅海克斯队列，固定宽度列对齐队头「强化」标签)
+                    .when(augment_slots > 0, |this| {
+                        this.child(
+                            div()
+                                .w(px(augment_slots as f32 * 30.0))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(px(2.0))
+                                .children(p.augment_icon_urls.iter().enumerate().map(
+                                    |(idx, url)| {
+                                        let name = p
+                                            .augment_names
+                                            .get(idx)
+                                            .cloned()
+                                            .unwrap_or_else(|| "海克斯强化".to_string());
+                                        with_tooltip(
+                                            format!("sd-aug-{}-{}", p.participant_id, idx),
+                                            div()
+                                                .size(px(28.0))
+                                                .rounded(px(4.0))
+                                                .border_1()
+                                                .border_color(rgba(0xa855f772))
+                                                .bg(rgba(0x9333ea1e))
+                                                .overflow_hidden()
+                                                .when(!url.is_empty(), |el| {
+                                                    el.child(
+                                                        LcuImage::new(url.clone())
+                                                            .size(px(28.0))
+                                                            .shape(LcuImageShape::ItemSlot),
+                                                    )
+                                                }),
+                                            vec![TooltipLine::title(name)],
+                                        )
+                                    },
+                                )),
+                        )
+                    })
                     // 装备槽 (6格 + 1饰品槽，每个 28x28，S11)
                     .child(
                         div()

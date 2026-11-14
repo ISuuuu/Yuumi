@@ -5,6 +5,7 @@ use crate::components::icon::icon;
 use crate::components::lcu_image::{LcuImage, LcuImageShape};
 use crate::components::offline_state::render_lcu_offline_state;
 use crate::components::text_field::{text_field, TextFieldOptions};
+use crate::components::tooltip::{with_tooltip, TooltipLine};
 use crate::match_model::{
     compute_match_stats, position_to_zh, top_champions, top_positions, MatchItem,
 };
@@ -1760,6 +1761,7 @@ impl CareerView {
         let gold_str = format_num(m.display.gold as i64);
         let pos_str = position_to_zh(m.display.position.as_deref());
         let item_urls = m.display.item_icon_urls.clone();
+        let augment_names = m.display.augment_names.clone();
         let champ_level = m.display.champ_level;
         let kills = m.display.kills;
         let deaths = m.display.deaths;
@@ -2023,22 +2025,34 @@ impl CareerView {
                         (queue_id == 2400 || queue_id == 2450)
                             && !m.display.augment_icon_urls.is_empty(),
                         |this| {
-                            this.child(div().flex().gap(px(2.0)).mr(px(4.0)).children(
-                                m.display.augment_icon_urls.iter().map(|url| {
-                                    div()
-                                        .size(px(22.0))
-                                        .rounded(px(4.0))
-                                        .border_1()
-                                        .border_color(rgba(0xa855f772))
-                                        .bg(rgba(0x9333ea1e))
-                                        .overflow_hidden()
-                                        .child(
-                                            LcuImage::new(url.clone())
-                                                .size(px(22.0))
-                                                .placeholder("海"),
-                                        )
-                                }),
-                            ))
+                            this.child(
+                                div().flex().gap(px(2.0)).mr(px(4.0)).children(
+                                    m.display.augment_icon_urls.iter().enumerate().map(
+                                        |(idx, url)| {
+                                            let name = augment_names
+                                                .get(idx)
+                                                .cloned()
+                                                .unwrap_or_else(|| "海克斯强化".to_string());
+                                            with_tooltip(
+                                                format!("career-aug-{}-{}", game_id, idx),
+                                                div()
+                                                    .size(px(22.0))
+                                                    .rounded(px(4.0))
+                                                    .border_1()
+                                                    .border_color(rgba(0xa855f772))
+                                                    .bg(rgba(0x9333ea1e))
+                                                    .overflow_hidden()
+                                                    .child(
+                                                        LcuImage::new(url.clone())
+                                                            .size(px(22.0))
+                                                            .placeholder("海"),
+                                                    ),
+                                                vec![TooltipLine::title(name)],
+                                            )
+                                        },
+                                    ),
+                                ),
+                            )
                         },
                     )
                     .child(div().flex().gap(px(2.0)).children((0..6).map(|idx| {

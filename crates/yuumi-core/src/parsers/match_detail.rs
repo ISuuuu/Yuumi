@@ -159,6 +159,7 @@ pub struct GameDetailPlayer {
     pub ward_icon_url: String,
     pub augment_ids: Vec<i32>,
     pub augment_names: Vec<String>,
+    pub augment_icon_urls: Vec<String>,
 }
 
 impl RawGameDetail {
@@ -292,13 +293,14 @@ impl RawGameDetail {
             ]));
 
             let mut augment_names = Vec::new();
+            let mut augment_icon_urls = Vec::new();
             for &aid in &aug_ids {
-                let name = assets
-                    .augments
-                    .get(&aid)
-                    .map(|a| a.name.clone())
-                    .unwrap_or_else(|| "海克斯强化".to_string());
+                let (name, icon) = match assets.augments.get(&aid) {
+                    Some(a) => (a.name.clone(), a.icon_path.clone()),
+                    None => ("海克斯强化".to_string(), String::new()),
+                };
                 augment_names.push(name);
+                augment_icon_urls.push(icon);
             }
 
             let player = GameDetailPlayer {
@@ -329,6 +331,7 @@ impl RawGameDetail {
                 ward_icon_url,
                 augment_ids: aug_ids,
                 augment_names,
+                augment_icon_urls,
             };
 
             if p.team_id == 100 {

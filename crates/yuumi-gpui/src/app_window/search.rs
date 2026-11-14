@@ -66,6 +66,12 @@ fn match_detail_asset_paths(detail: &GameDetail) -> Vec<String> {
             }
         }
         paths.extend(p.item_icon_urls.iter().filter(|u| !u.is_empty()).cloned());
+        paths.extend(
+            p.augment_icon_urls
+                .iter()
+                .filter(|u| !u.is_empty())
+                .cloned(),
+        );
     }
     paths.sort();
     paths.dedup();
