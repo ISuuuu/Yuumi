@@ -84,6 +84,8 @@ pub struct PersonalizationConfig {
     pub dark_deaths_number_color: String,
     #[serde(default = "default_theme_color")]
     pub theme_color: String,
+    /// 战绩卡片样式：false=经典三色底，true=YuumiX 风格竖条样式（默认，中性底 + 左侧胜负色条）
+    pub match_card_strip_style: bool,
 }
 
 impl Default for PersonalizationConfig {
@@ -99,6 +101,7 @@ impl Default for PersonalizationConfig {
             light_deaths_number_color: "#ffb60000".into(),
             dark_deaths_number_color: "#ffff8d8d".into(),
             theme_color: "#009faa".into(),
+            match_card_strip_style: true,
         }
     }
 }

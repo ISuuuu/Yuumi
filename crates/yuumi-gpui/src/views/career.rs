@@ -1722,12 +1722,14 @@ impl CareerView {
         on_select: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
         on_replay: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
-        let (bg_color, border_color, win_text_color, win_label) = if m.display.remake {
+        let strip_style = Theme::match_card_strip_style();
+        let (bg_color, border_color, win_text_color, win_label, strip_color) = if m.display.remake {
             (
                 Theme::REMAKE_BG(),
                 Theme::REMAKE_BORDER(),
                 Theme::REMAKE_TEXT(),
                 "重开",
+                Theme::REMAKE_BAR(),
             )
         } else if m.display.win {
             (
@@ -1735,6 +1737,7 @@ impl CareerView {
                 Theme::WIN_BORDER(),
                 Theme::WIN_TEXT(),
                 "胜利",
+                Theme::WIN_BAR(),
             )
         } else {
             (
@@ -1742,10 +1745,21 @@ impl CareerView {
                 Theme::LOSS_BORDER(),
                 Theme::LOSS_TEXT(),
                 "失败",
+                Theme::LOSS_BAR(),
             )
         };
         // 半透明胜负底色先合成到页面底色，避免 GPUI 在背景之下绘制的阴影透进卡片内部
-        let bg_color = Theme::over_page(bg_color);
+        // 竖条样式（YuumiX 风格）改走中性卡片底，胜负信息由左侧色条与文字标注承载
+        let bg_color = if strip_style {
+            Theme::CARD_BG()
+        } else {
+            Theme::over_page(bg_color)
+        };
+        let border_color = if strip_style {
+            Theme::CARD_BORDER()
+        } else {
+            border_color
+        };
 
         let champion_name = m.display.name.clone();
         let champion_icon_url = m.display.champion_icon_url.clone();
@@ -1799,8 +1813,22 @@ impl CareerView {
             .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                 select_cb(game_id, win, app);
             })
+            .relative()
             .flex()
             .items_center()
+            // 竖条样式：左侧 4px 胜负/重开色条（上下留边距，对齐 YuumiX 方案 A）
+            .when(strip_style, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left(px(6.0))
+                        .top(px(12.0))
+                        .bottom(px(12.0))
+                        .w(px(4.0))
+                        .rounded(px(2.0))
+                        .bg(strip_color),
+                )
+            })
             // 1. 英雄面板 (头像、等级、技能、符文)
             .child(
                 div()

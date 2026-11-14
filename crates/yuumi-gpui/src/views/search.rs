@@ -1112,7 +1112,84 @@ impl SearchView {
                             let gid = item.display.game_id;
                             let is_selected = Some(gid) == selected_game_id;
                             let win = item.display.win;
+                            let remake = item.display.remake;
+                            let strip_style = Theme::match_card_strip_style();
                             let cb = select_cb.clone();
+
+                            // 竖条样式（YuumiX 风格）：强调色承载胜负/重开语义，底色走中性卡片色
+                            let (strip_color, result_label, accent_color) = if remake {
+                                (Theme::REMAKE_BAR(), "重开", Theme::REMAKE_TEXT())
+                            } else if win {
+                                (Theme::WIN_BAR(), "胜利", Theme::WIN_TEXT())
+                            } else {
+                                (Theme::LOSS_BAR(), "失败", Theme::LOSS_TEXT())
+                            };
+                            let (card_bg, hover_bg, border_color) = if strip_style {
+                                (
+                                    Theme::CARD_BG(),
+                                    Theme::CARD_BG_HOVER(),
+                                    Theme::CARD_BORDER(),
+                                )
+                            } else {
+                                (
+                                    if win {
+                                        Theme::over_page(Theme::WIN_BG())
+                                    } else {
+                                        Theme::over_page(Theme::LOSS_BG())
+                                    },
+                                    if win {
+                                        Theme::over_page(Theme::WIN_BG_HOVER())
+                                    } else {
+                                        Theme::over_page(Theme::LOSS_BG_HOVER())
+                                    },
+                                    if win {
+                                        Theme::WIN_BORDER()
+                                    } else {
+                                        Theme::LOSS_BORDER()
+                                    },
+                                )
+                            };
+
+                            // 第一行模式名：竖条样式在名称旁追加彩色胜负/重开标注（对齐 YuumiX MatchCardView）
+                            let mode_row = if strip_style {
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .min_w(px(0.0))
+                                            .text_size(px(12.5))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::TEXT_PRIMARY())
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .child(queue_id_to_name(
+                                                item.display.queue_id,
+                                                &item.display.map,
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .text_size(px(10.5))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(accent_color)
+                                            .child(result_label),
+                                    )
+                            } else {
+                                div()
+                                    .text_size(px(12.5))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(Theme::TEXT_PRIMARY())
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .child(queue_id_to_name(
+                                        item.display.queue_id,
+                                        &item.display.map,
+                                    ))
+                            };
 
                             div()
                                 .id(ElementId::NamedInteger("mini-card".into(), gid))
@@ -1124,37 +1201,41 @@ impl SearchView {
                                 .py_2()
                                 .cursor_pointer()
                                 // 选中态带 shadow_sm()，胜负底色需预合成到页面底色，避免阴影透进卡片
-                                .bg(if win {
-                                    Theme::over_page(Theme::WIN_BG())
-                                } else {
-                                    Theme::over_page(Theme::LOSS_BG())
-                                })
+                                .bg(card_bg)
                                 .border_1()
                                 .border_color(if is_selected {
-                                    if win {
+                                    if strip_style {
+                                        accent_color
+                                    } else if win {
                                         Theme::WIN_TEXT()
                                     } else {
                                         Theme::LOSS_BORDER()
                                     }
-                                } else if win {
-                                    Theme::WIN_BORDER()
                                 } else {
-                                    Theme::LOSS_BORDER()
+                                    border_color
                                 })
                                 .when(is_selected, |s| s.border_2().shadow_sm())
-                                .hover(|s| {
-                                    s.bg(if win {
-                                        Theme::over_page(Theme::WIN_BG_HOVER())
-                                    } else {
-                                        Theme::over_page(Theme::LOSS_BG_HOVER())
-                                    })
-                                })
+                                .hover(|s| s.bg(hover_bg))
                                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                                     cb(gid, win, app);
                                 })
+                                .relative()
                                 .flex()
                                 .items_center()
                                 .gap(px(10.0))
+                                // 竖条样式：左侧 4px 胜负/重开色条（上下留边距，对齐 YuumiX 方案 A）
+                                .when(strip_style, |this| {
+                                    this.child(
+                                        div()
+                                            .absolute()
+                                            .left(px(4.0))
+                                            .top(px(8.0))
+                                            .bottom(px(8.0))
+                                            .w(px(4.0))
+                                            .rounded(px(2.0))
+                                            .bg(strip_color),
+                                    )
+                                })
                                 // 头像 36x36 (S07)
                                 .child(
                                     div()
@@ -1179,18 +1260,7 @@ impl SearchView {
                                         .flex_col()
                                         .justify_between()
                                         .h_full()
-                                        .child(
-                                            div()
-                                                .text_size(px(12.5))
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(Theme::TEXT_PRIMARY())
-                                                .overflow_hidden()
-                                                .whitespace_nowrap()
-                                                .child(queue_id_to_name(
-                                                    item.display.queue_id,
-                                                    &item.display.map,
-                                                )),
-                                        )
+                                        .child(mode_row)
                                         .child(
                                             div()
                                                 .text_size(px(11.5))

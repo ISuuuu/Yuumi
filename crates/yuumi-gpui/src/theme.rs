@@ -17,6 +17,9 @@ static RUNTIME_COLORS: LazyLock<RwLock<HashMap<&'static str, Hsla>>> =
 /// 当前是否处于深色主题（由 Theme::apply 写入；Auto 模式跟随系统）。
 static DARK_MODE_ACTIVE: LazyLock<RwLock<bool>> = LazyLock::new(|| RwLock::new(false));
 
+/// 战绩卡片是否启用 YuumiX 风格（中性底 + 左侧胜负色条），由 Theme::apply 随配置写入。
+static MATCH_CARD_STRIP: LazyLock<RwLock<bool>> = LazyLock::new(|| RwLock::new(false));
+
 /// 运行时覆盖查询：命中覆盖表取覆盖值，否则按当前主题回落到内置默认。
 fn runtime_or(key: &'static str, default: Hsla) -> Hsla {
     RUNTIME_COLORS
@@ -682,6 +685,11 @@ impl Theme {
         }
     }
 
+    /// 战绩卡片是否启用竖条样式（YuumiX 风格）。由 `apply` 随个性化配置写入，渲染层直接读取。
+    pub fn match_card_strip_style() -> bool {
+        MATCH_CARD_STRIP.read().map(|v| *v).unwrap_or(false)
+    }
+
     /// 按个性化配置重建运行时色板。应用启动与设置页相关项保存后调用。
     ///
     /// `system_dark` 为当前 Windows 系统深色偏好（Auto 模式使用）。
@@ -765,6 +773,9 @@ impl Theme {
             parse_hex_color(&personalization.light_deaths_number_color)
         };
         map.insert("DEATH_RED", Hsla::from(death));
+
+        *MATCH_CARD_STRIP.write().unwrap_or_else(|e| e.into_inner()) =
+            personalization.match_card_strip_style;
 
         *RUNTIME_COLORS.write().unwrap_or_else(|e| e.into_inner()) = map;
     }
@@ -1094,5 +1105,23 @@ mod tests {
         assert!((a - 1.0).abs() < 0.01);
         let back_hex = hsva_to_hex(h, s, v, a, false);
         assert_eq!(back_hex, "#009FAA");
+    }
+
+    #[test]
+    fn theme_apply_writes_match_card_strip_style() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default_palette();
+        assert!(Theme::match_card_strip_style(), "默认应为竖条样式");
+
+        // 关闭竖条样式回落经典三色底
+        let p = PersonalizationConfig {
+            match_card_strip_style: false,
+            ..PersonalizationConfig::default()
+        };
+        Theme::apply(&p, false);
+        assert!(!Theme::match_card_strip_style());
+
+        restore_default_palette();
+        assert!(Theme::match_card_strip_style());
     }
 }

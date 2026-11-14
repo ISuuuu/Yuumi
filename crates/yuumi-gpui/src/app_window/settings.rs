@@ -15,6 +15,20 @@ impl MainWindow {
         ));
     }
 
+    /// 按 picker key 取配置中的色值字符串（alpha 唯一真相源，透明度一律实时解析自它）
+    fn config_color_hex(&self, key: &str) -> &str {
+        let p = &self.app_config.personalization;
+        match key {
+            "theme_color" => &p.theme_color,
+            "win_color" => &p.win_card_color,
+            "lose_color" => &p.lose_card_color,
+            "remake_color" => &p.remake_card_color,
+            "light_death" => &p.light_deaths_number_color,
+            "dark_death" => &p.dark_deaths_number_color,
+            _ => "",
+        }
+    }
+
     pub(crate) fn initialize_window_appearance(&mut self, window: &Window) {
         self.apply_theme();
         self.apply_language();
@@ -424,6 +438,12 @@ impl MainWindow {
                 self.app_config.personalization.remake_card_color = color;
                 self.persist_config(cx);
             }
+            SettingsAction::ToggleMatchCardStrip => {
+                self.app_config.personalization.match_card_strip_style =
+                    !self.app_config.personalization.match_card_strip_style;
+                // persist_config → apply_theme → Theme::apply 会同步全局竖条样式开关
+                self.persist_config(cx);
+            }
             SettingsAction::SetLightDeathsColor(color) => {
                 self.settings_view.color_hex_input = color.clone();
                 self.app_config.personalization.light_deaths_number_color = color;
@@ -457,8 +477,9 @@ impl MainWindow {
                 self.settings_view.color_picker_s = s.clamp(0.0, 1.0);
                 self.settings_view.color_picker_v = v.clamp(0.0, 1.0);
                 let h = self.settings_view.color_picker_h;
-                let a = self.settings_view.color_picker_a;
                 let supports_alpha = matches!(key, "win_color" | "lose_color" | "remake_color");
+                // 采样合成沿用当前色值的 alpha（透明度真相源在 config 色值，不单独缓存）
+                let a = crate::views::settings::hex_to_hsva(self.config_color_hex(key)).3;
                 let hex = crate::views::settings::hsva_to_hex(
                     h,
                     self.settings_view.color_picker_s,
@@ -484,8 +505,9 @@ impl MainWindow {
                 self.settings_view.color_picker_h = h.rem_euclid(360.0);
                 let s = self.settings_view.color_picker_s;
                 let v = self.settings_view.color_picker_v;
-                let a = self.settings_view.color_picker_a;
                 let supports_alpha = matches!(key, "win_color" | "lose_color" | "remake_color");
+                // 采样合成沿用当前色值的 alpha（透明度真相源在 config 色值，不单独缓存）
+                let a = crate::views::settings::hex_to_hsva(self.config_color_hex(key)).3;
                 let hex = crate::views::settings::hsva_to_hex(
                     self.settings_view.color_picker_h,
                     s,
@@ -508,17 +530,11 @@ impl MainWindow {
                 self.persist_config_silent(cx);
             }
             SettingsAction::SampleAlpha(key, a) => {
-                self.settings_view.color_picker_a = a.clamp(0.0, 1.0);
+                let a = a.clamp(0.0, 1.0);
                 let h = self.settings_view.color_picker_h;
                 let s = self.settings_view.color_picker_s;
                 let v = self.settings_view.color_picker_v;
-                let hex = crate::views::settings::hsva_to_hex(
-                    h,
-                    s,
-                    v,
-                    self.settings_view.color_picker_a,
-                    true,
-                );
+                let hex = crate::views::settings::hsva_to_hex(h, s, v, a, true);
                 self.settings_view.color_hex_input = hex.clone();
                 match key {
                     "win_color" => self.app_config.personalization.win_card_color = hex,
@@ -529,12 +545,11 @@ impl MainWindow {
                 self.persist_config_silent(cx);
             }
             SettingsAction::SelectColorPreset(key, hex) => {
-                let (h, s, v, a) = crate::views::settings::hex_to_hsva(&hex);
+                let (h, s, v, _) = crate::views::settings::hex_to_hsva(&hex);
                 self.settings_view.color_picker_key = key;
                 self.settings_view.color_picker_h = h;
                 self.settings_view.color_picker_s = s;
                 self.settings_view.color_picker_v = v;
-                self.settings_view.color_picker_a = a;
                 self.settings_view.color_hex_input = hex.clone();
                 match key {
                     "theme_color" => self.app_config.personalization.theme_color = hex,
@@ -556,15 +571,17 @@ impl MainWindow {
             SettingsAction::ApplyColorPickerHex(key) => {
                 let input = self.settings_view.color_hex_input.trim();
                 let supports_alpha = matches!(key, "win_color" | "lose_color" | "remake_color");
-                let cur_alpha = (self.settings_view.color_picker_a * 100.0).round() as u32;
+                // 输入 6 位色时沿用配置当前色的 alpha（透明度真相源在 config 色值）
+                let cur_alpha = (crate::views::settings::hex_to_hsva(self.config_color_hex(key)).3
+                    * 100.0)
+                    .round() as u32;
                 if let Some(valid) =
                     crate::views::settings::normalize_hex_input(input, supports_alpha, cur_alpha)
                 {
-                    let (h, s, v, a) = crate::views::settings::hex_to_hsva(&valid);
+                    let (h, s, v, _) = crate::views::settings::hex_to_hsva(&valid);
                     self.settings_view.color_picker_h = h;
                     self.settings_view.color_picker_s = s;
                     self.settings_view.color_picker_v = v;
-                    self.settings_view.color_picker_a = a;
                     self.settings_view.color_hex_input = valid.clone();
                     match key {
                         "theme_color" => self.app_config.personalization.theme_color = valid,
@@ -676,14 +693,13 @@ impl MainWindow {
                         self.settings_view.close_all_color_pickers();
                         self.settings_view.open_theme_color_picker = next;
                         if next {
-                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                            let (h, s, v, _) = crate::views::settings::hex_to_hsva(
                                 &self.app_config.personalization.theme_color,
                             );
                             self.settings_view.color_picker_key = "theme_color";
                             self.settings_view.color_picker_h = h;
                             self.settings_view.color_picker_s = s;
                             self.settings_view.color_picker_v = v;
-                            self.settings_view.color_picker_a = a;
                             self.settings_view.color_hex_input =
                                 self.app_config.personalization.theme_color.clone();
                         }
@@ -693,14 +709,13 @@ impl MainWindow {
                         self.settings_view.close_all_color_pickers();
                         self.settings_view.open_win_color_picker = next;
                         if next {
-                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                            let (h, s, v, _) = crate::views::settings::hex_to_hsva(
                                 &self.app_config.personalization.win_card_color,
                             );
                             self.settings_view.color_picker_key = "win_color";
                             self.settings_view.color_picker_h = h;
                             self.settings_view.color_picker_s = s;
                             self.settings_view.color_picker_v = v;
-                            self.settings_view.color_picker_a = a;
                             self.settings_view.color_hex_input =
                                 self.app_config.personalization.win_card_color.clone();
                         }
@@ -710,14 +725,13 @@ impl MainWindow {
                         self.settings_view.close_all_color_pickers();
                         self.settings_view.open_lose_color_picker = next;
                         if next {
-                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                            let (h, s, v, _) = crate::views::settings::hex_to_hsva(
                                 &self.app_config.personalization.lose_card_color,
                             );
                             self.settings_view.color_picker_key = "lose_color";
                             self.settings_view.color_picker_h = h;
                             self.settings_view.color_picker_s = s;
                             self.settings_view.color_picker_v = v;
-                            self.settings_view.color_picker_a = a;
                             self.settings_view.color_hex_input =
                                 self.app_config.personalization.lose_card_color.clone();
                         }
@@ -727,14 +741,13 @@ impl MainWindow {
                         self.settings_view.close_all_color_pickers();
                         self.settings_view.open_remake_color_picker = next;
                         if next {
-                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                            let (h, s, v, _) = crate::views::settings::hex_to_hsva(
                                 &self.app_config.personalization.remake_card_color,
                             );
                             self.settings_view.color_picker_key = "remake_color";
                             self.settings_view.color_picker_h = h;
                             self.settings_view.color_picker_s = s;
                             self.settings_view.color_picker_v = v;
-                            self.settings_view.color_picker_a = a;
                             self.settings_view.color_hex_input =
                                 self.app_config.personalization.remake_card_color.clone();
                         }
@@ -744,14 +757,13 @@ impl MainWindow {
                         self.settings_view.close_all_color_pickers();
                         self.settings_view.open_light_death_color_picker = next;
                         if next {
-                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                            let (h, s, v, _) = crate::views::settings::hex_to_hsva(
                                 &self.app_config.personalization.light_deaths_number_color,
                             );
                             self.settings_view.color_picker_key = "light_death";
                             self.settings_view.color_picker_h = h;
                             self.settings_view.color_picker_s = s;
                             self.settings_view.color_picker_v = v;
-                            self.settings_view.color_picker_a = a;
                             self.settings_view.color_hex_input = self
                                 .app_config
                                 .personalization
@@ -764,14 +776,13 @@ impl MainWindow {
                         self.settings_view.close_all_color_pickers();
                         self.settings_view.open_dark_death_color_picker = next;
                         if next {
-                            let (h, s, v, a) = crate::views::settings::hex_to_hsva(
+                            let (h, s, v, _) = crate::views::settings::hex_to_hsva(
                                 &self.app_config.personalization.dark_deaths_number_color,
                             );
                             self.settings_view.color_picker_key = "dark_death";
                             self.settings_view.color_picker_h = h;
                             self.settings_view.color_picker_s = s;
                             self.settings_view.color_picker_v = v;
-                            self.settings_view.color_picker_a = a;
                             self.settings_view.color_hex_input = self
                                 .app_config
                                 .personalization
