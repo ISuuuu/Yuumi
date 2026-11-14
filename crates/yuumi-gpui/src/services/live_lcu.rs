@@ -1067,6 +1067,25 @@ impl LiveLcuService {
         Ok(progress)
     }
 
+    /// 获取当前玩家在选人会话中可用的英雄 ID 列表（拥有 + 周免），未激活选人时 LCU 返回 404
+    pub async fn fetch_pickable_champion_ids(&self) -> Result<Vec<i32>, String> {
+        let client = self
+            .get_client()
+            .await
+            .ok_or_else(|| "英雄联盟客户端未连接".to_string())?;
+        let value = client
+            .get("/lol-champ-select/v1/pickable-champion-ids")
+            .await?;
+        Ok(value
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_i64().map(|n| n as i32))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
     /// 一键换取大乱斗板凳席英雄
     pub async fn swap_bench_champion(&self, champion_id: i32) -> Result<(), String> {
         let client = self

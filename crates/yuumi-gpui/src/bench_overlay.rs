@@ -16,7 +16,7 @@ use gpui::*;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use yuumi_core::agents::ChampSelectSession;
+use yuumi_core::agents::{ChampSelectSession, ChampSelectTimer};
 use yuumi_core::lcu::game_data::GameDataAssets;
 
 /// 悬浮窗坐标持久化文件名（位于应用数据目录）
@@ -109,6 +109,16 @@ pub struct BenchOverlayView {
     /// 当前登录玩家已选英雄
     my_champion_id: i32,
     queue_id: i32,
+    /// 本局当前玩家可用英雄 ID（拥有 + 周免）；为空视为未获取到、不过滤
+    pickable_ids: Vec<i32>,
+    /// 本轮选人是否已尝试拉取可用英雄列表（失败后本轮不再重试，降级为不过滤）
+    pickable_fetching: bool,
+    /// 前 15 秒准备阶段保护期（由 session.timer 计算，apply_session 时刷新）
+    in_protection: bool,
+    /// 经换人生效验证归属本人的英雄（手持过的牌），保护期内保持点亮可点
+    unlocked_my_champions: Vec<i32>,
+    /// 上一帧本方手持英雄 ID，用于把换下退回板凳的旧牌点亮
+    previous_my_champion_id: i32,
     /// 正在提交换人请求的英雄 ID（用于禁用重复点击）
     pending_champion: Option<i32>,
     /// 最近一次操作反馈
@@ -127,6 +137,11 @@ impl BenchOverlayView {
             team: Vec::new(),
             my_champion_id: 0,
             queue_id: 0,
+            pickable_ids: Vec::new(),
+            pickable_fetching: false,
+            in_protection: false,
+            unlocked_my_champions: Vec::new(),
+            previous_my_champion_id: 0,
             pending_champion: None,
             status: None,
             _bounds_subscription: None,
@@ -185,13 +200,38 @@ impl BenchOverlayView {
             })
             .collect();
 
-        // 换人请求已落地（板凳席不再包含该英雄）则清除 pending 状态
+        // 前 15 秒准备阶段保护期（板凳牌归属保护窗口）
+        self.in_protection = session
+            .timer
+            .as_ref()
+            .is_some_and(ChampSelectTimer::is_bench_protection);
+
+        // 追踪手持英雄变化：换下退回板凳的旧牌点亮（保护期内可随时换回）
+        let my_cid = session.local_champion_id();
+        if self.previous_my_champion_id > 0
+            && self.previous_my_champion_id != my_cid
+            && !self
+                .unlocked_my_champions
+                .contains(&self.previous_my_champion_id)
+        {
+            self.unlocked_my_champions
+                .push(self.previous_my_champion_id);
+        }
+        // 提交换人后的生效验证：手持变为点击目标 → 该牌确属本人，保持点亮
         if let Some(pending) = self.pending_champion {
+            if my_cid > 0 && my_cid == pending && !self.unlocked_my_champions.contains(&my_cid) {
+                self.unlocked_my_champions.push(my_cid);
+            }
+            // 换人请求已落地（板凳席不再包含该英雄）则清除 pending 状态
             if !self.bench.iter().any(|slot| slot.champion_id == pending) {
                 self.pending_champion = None;
             }
         }
+        if my_cid > 0 {
+            self.previous_my_champion_id = my_cid;
+        }
 
+        self.ensure_pickable_ids(cx);
         self.preload_icons(cx);
         cx.notify();
     }
@@ -202,9 +242,63 @@ impl BenchOverlayView {
         self.team.clear();
         self.my_champion_id = 0;
         self.queue_id = 0;
+        self.pickable_ids.clear();
+        self.pickable_fetching = false;
+        self.in_protection = false;
+        self.unlocked_my_champions.clear();
+        self.previous_my_champion_id = 0;
         self.pending_champion = None;
         self.status = None;
         cx.notify();
+    }
+
+    /// 当前玩家是否可用该英雄（列表为空视为未获取到、不过滤）
+    fn is_pickable(&self, champion_id: i32) -> bool {
+        self.pickable_ids.is_empty() || self.pickable_ids.contains(&champion_id)
+    }
+
+    /// 拉取当前玩家可用英雄列表（拥有 + 周免），用于置灰未拥有的板凳席英雄。
+    /// 每轮选人最多尝试一次：404（选人会话未激活）静默终止，其余失败重试 2 次；
+    /// 仍失败则本轮降级为不过滤（与旧版行为一致，避免误伤可选英雄）。
+    fn ensure_pickable_ids(&mut self, cx: &mut Context<Self>) {
+        if !self.pickable_ids.is_empty() || self.pickable_fetching {
+            return;
+        }
+        self.pickable_fetching = true;
+
+        let service = self.live_service.clone();
+        cx.spawn(async move |this, cx| {
+            let mut ids = None;
+            for retries in (0..=2).rev() {
+                match service.fetch_pickable_champion_ids().await {
+                    Ok(list) => {
+                        ids = Some(list);
+                        break;
+                    }
+                    Err(e) => {
+                        if e.contains("404") {
+                            break;
+                        }
+                        if retries > 0 {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_secs(2))
+                                .await;
+                        } else {
+                            log::warn!("[BenchOverlay] 拉取可用英雄列表失败，本轮不过滤: {}", e);
+                        }
+                    }
+                }
+            }
+            let _ = this.update(cx, |view, cx| {
+                if let Some(list) = ids {
+                    view.pickable_ids = list;
+                    // 拉取失败（含 404）保持 pickable_fetching=true，本轮选人不再重试
+                    view.pickable_fetching = false;
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// 异步预热当前展示英雄的图标，解码完成后重绘
@@ -249,6 +343,12 @@ impl BenchOverlayView {
             cx.notify();
             return;
         }
+        if !self.is_pickable(champion_id) {
+            self.status = Some("未拥有/不可用".into());
+            cx.notify();
+            return;
+        }
+        // 保护期置灰的牌仍放行请求：LCU 自己裁决归属（自己的牌可换回，队友的牌会被拒绝）
 
         self.pending_champion = Some(champion_id);
         self.status = Some("换人中…".into());
@@ -340,7 +440,13 @@ impl BenchOverlayView {
     fn render_slot(&self, slot: &BenchSlot, cx: &mut Context<Self>) -> impl IntoElement {
         let champion_id = slot.champion_id;
         let is_pending = self.pending_champion == Some(champion_id);
-        let highlight = is_pending || champion_id == self.my_champion_id || slot.is_mine;
+        // 遮挡分两层：未拥有（拥有+周免之外）恒置灰硬拦；前 15 秒保护期内的牌
+        // 置灰仅为视觉提示，点击仍放行由 LCU 裁决，换成功的牌经验证后取消遮挡
+        let pickable = self.is_pickable(champion_id);
+        let unlocked = self.unlocked_my_champions.contains(&champion_id);
+        let dimmed = !pickable || (self.in_protection && !unlocked);
+        let highlight =
+            !dimmed && (is_pending || champion_id == self.my_champion_id || slot.is_mine);
         let border_color = if highlight {
             Theme::AURORA_CYAN()
         } else {
@@ -363,14 +469,15 @@ impl BenchOverlayView {
             .overflow_hidden()
             .border_2()
             .border_color(border_color)
-            .opacity(if is_pending { 0.4 } else { 1.0 })
-            .when(!is_pending, |this| {
+            .opacity(if is_pending || dimmed { 0.4 } else { 1.0 })
+            .when(!is_pending && !dimmed, |this| {
                 this.cursor_pointer()
                     .hover(|s| s.border_color(Theme::AURORA_CYAN()))
             })
             .child(
                 LcuImage::new(champion_icon_path(champion_id))
                     .size(px(44.0))
+                    .grayscale(dimmed)
                     .placeholder(slot.name.clone()),
             )
             .when(!is_pending, |this| {

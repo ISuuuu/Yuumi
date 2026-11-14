@@ -37,6 +37,8 @@ pub struct LcuImage {
     placeholder_bg: Option<Hsla>,
     /// 缩放适应方式
     fit: ObjectFit,
+    /// 是否灰度显示（未拥有/禁用态视觉）
+    grayscale: bool,
 }
 
 impl LcuImage {
@@ -51,6 +53,7 @@ impl LcuImage {
             placeholder_text: None,
             placeholder_bg: None,
             fit: ObjectFit::Cover,
+            grayscale: false,
         }
     }
 
@@ -112,6 +115,12 @@ impl LcuImage {
         self
     }
 
+    /// 设置是否灰度显示（未拥有/禁用态视觉）
+    pub fn grayscale(mut self, grayscale: bool) -> Self {
+        self.grayscale = grayscale;
+        self
+    }
+
     /// 尝试从当前全局加载器同步获取已解码的 RenderImage
     #[allow(dead_code)]
     pub fn get_render_image(&self) -> Option<Arc<RenderImage>> {
@@ -167,15 +176,18 @@ impl IntoElement for LcuImage {
                 LcuImageShape::Circle => img(render_img)
                     .size_full()
                     .object_fit(self.fit)
-                    .rounded_full(),
+                    .rounded_full()
+                    .grayscale(self.grayscale),
                 LcuImageShape::ItemSlot => img(render_img)
                     .size_full()
                     .object_fit(self.fit)
-                    .rounded(px(3.0)),
+                    .rounded(px(3.0))
+                    .grayscale(self.grayscale),
                 LcuImageShape::Rounded => img(render_img)
                     .size_full()
                     .object_fit(self.fit)
-                    .rounded_lg(),
+                    .rounded_lg()
+                    .grayscale(self.grayscale),
             };
             container.child(image)
         } else {

@@ -128,9 +128,29 @@ pub struct ChampSelectPlayer {
 pub struct ChampSelectTimer {
     pub adjusted_time_left_in_phase: Option<u64>,
     pub phase: Option<String>,
+    /// 本阶段总时长（毫秒），与剩余时间相减得已流逝时间
+    #[serde(default)]
+    pub total_time_in_phase: Option<u64>,
     /// LCU 生成该 timer 快照时的 epoch 毫秒，用于校正推送延迟
     #[serde(default)]
     pub internal_now_in_epoch_ms: Option<u64>,
+}
+
+/// 板凳席前 15 秒准备阶段保护期时长（毫秒）：期间共享板凳牌仅归属者可换回
+const BENCH_PROTECT_WINDOW_MS: u64 = 15_000;
+
+impl ChampSelectTimer {
+    /// 是否处于板凳席前 15 秒准备阶段保护期（大乱斗开局各自选牌 / 队友保护窗口）。
+    /// timer 数据缺失或不完整时保守返回 false（不过滤），与旧版兜底行为一致。
+    pub fn is_bench_protection(&self) -> bool {
+        if self.phase.as_deref() == Some("FINALIZATION") {
+            return false;
+        }
+        match (self.total_time_in_phase, self.adjusted_time_left_in_phase) {
+            (Some(total), Some(left)) => total.saturating_sub(left) < BENCH_PROTECT_WINDOW_MS,
+            _ => false,
+        }
+    }
 }
 
 impl ChampSelectSession {
@@ -841,6 +861,34 @@ mod tests {
     }
 
     #[test]
+    fn test_bench_protection_window_detection() {
+        // 选人开始 5 秒：保护期内
+        let timer: ChampSelectTimer = serde_json::from_str(
+            r#"{"phase":"BAN_PICK","totalTimeInPhase":30000,"adjustedTimeLeftInPhase":25000}"#,
+        )
+        .unwrap();
+        assert!(timer.is_bench_protection());
+
+        // 已过 15 秒：保护期外
+        let timer: ChampSelectTimer = serde_json::from_str(
+            r#"{"phase":"BAN_PICK","totalTimeInPhase":30000,"adjustedTimeLeftInPhase":12000}"#,
+        )
+        .unwrap();
+        assert!(!timer.is_bench_protection());
+
+        // FINALIZATION 阶段全面开放，即使已流逝时间不足 15 秒
+        let timer: ChampSelectTimer = serde_json::from_str(
+            r#"{"phase":"FINALIZATION","totalTimeInPhase":30000,"adjustedTimeLeftInPhase":28000}"#,
+        )
+        .unwrap();
+        assert!(!timer.is_bench_protection());
+
+        // timer 字段不完整：保守放行（不过滤）
+        let timer: ChampSelectTimer = serde_json::from_str(r#"{"phase":"BAN_PICK"}"#).unwrap();
+        assert!(!timer.is_bench_protection());
+    }
+
+    #[test]
     fn test_bench_queue_family_detection() {
         let mut session: ChampSelectSession =
             serde_json::from_str(r#"{"actions":[],"queueId":450}"#).unwrap();
@@ -1024,6 +1072,7 @@ mod tests {
         let timer = ChampSelectTimer {
             adjusted_time_left_in_phase: Some(30_000),
             phase: Some("BAN_PICK".into()),
+            total_time_in_phase: None,
             internal_now_in_epoch_ms: Some(1_000),
         };
         assert_eq!(compute_lock_delay_ms(Some(&timer), 1_000), 25_000);
@@ -1033,6 +1082,7 @@ mod tests {
         let short = ChampSelectTimer {
             adjusted_time_left_in_phase: Some(3_000),
             phase: Some("BAN_PICK".into()),
+            total_time_in_phase: None,
             internal_now_in_epoch_ms: Some(1_000),
         };
         assert_eq!(compute_lock_delay_ms(Some(&short), 1_000), 0);

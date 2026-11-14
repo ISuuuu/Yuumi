@@ -8,7 +8,7 @@ pub mod supervisor;
 
 pub use auto_bp::{
     handle_champ_select_session, request_bench_swap, request_reroll, BenchChampion,
-    ChampSelectSession,
+    ChampSelectSession, ChampSelectTimer,
 };
 pub use auto_match::{handle_phase_change, handle_ready_check, ReadyCheckData};
 pub use config::{
