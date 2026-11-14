@@ -84,6 +84,7 @@ pub enum SettingsAction {
     SetWinCardColor(String),
     SetLoseCardColor(String),
     SetRemakeCardColor(String),
+    ToggleMatchCardStrip,
     SetLightDeathsColor(String),
     SetDarkDeathsColor(String),
     ResetThemeColor,
@@ -370,7 +371,6 @@ fn render_color_picker(
     h: f32,
     s: f32,
     v: f32,
-    a: f32,
     palette: &[(&'static str, &'static str)],
     hex_input: &str,
     hex_focus: Option<&FocusHandle>,
@@ -385,6 +385,9 @@ fn render_color_picker(
     on_close: impl Fn(&mut Window, &mut App) + 'static + Clone,
 ) -> impl IntoElement {
     let swatch_color = parse_hex_color(color_hex);
+    // 透明度唯一真相源 = 当前色值的 alpha 实时解析，不依赖共享采样状态，
+    // 避免状态与色值脱节导致面板打开时显示错误的百分比
+    let alpha = swatch_color.a;
     let hex_display = color_hex.to_uppercase();
 
     div()
@@ -392,7 +395,9 @@ fn render_color_picker(
         .relative()
         .child(
             div()
-                .w(px(width_px))
+                // 最小宽度而非固定宽度：带透明度的按钮需容纳「色块 + #AARRGGBB + 百分比」，
+                // 内容超出时按钮随内容撑开，避免百分比文字溢出按钮框
+                .min_w(px(width_px))
                 .h(px(28.0))
                 .px(px(8.0))
                 .rounded_md()
@@ -441,7 +446,7 @@ fn render_color_picker(
                         div()
                             .text_size(px(10.5))
                             .text_color(Theme::TEXT_MUTED())
-                            .child(format!("{:.0}%", a * 100.0)),
+                            .child(format!("{:.0}%", alpha * 100.0)),
                     )
                 }),
         )
@@ -518,7 +523,10 @@ fn render_color_picker(
                                                     .bg(Theme::HOVER_BG())
                                                     .text_size(px(10.5))
                                                     .text_color(Theme::TEXT_MUTED())
-                                                    .child(format!("透明度: {:.0}%", a * 100.0)),
+                                                    .child(format!(
+                                                        "透明度: {:.0}%",
+                                                        alpha * 100.0
+                                                    )),
                                             )
                                         }),
                                 )
@@ -761,7 +769,7 @@ fn render_color_picker(
                                                 div()
                                                     .text_size(px(10.5))
                                                     .text_color(Theme::TEXT_MUTED())
-                                                    .child(format!("{:.0}%", a * 100.0)),
+                                                    .child(format!("{:.0}%", alpha * 100.0)),
                                             ),
                                     )
                                     .child(
@@ -808,7 +816,9 @@ fn render_color_picker(
                                             .child(
                                                 div()
                                                     .absolute()
-                                                    .left(px((a * 256.0 - 6.0).clamp(0.0, 244.0)))
+                                                    .left(px(
+                                                        (alpha * 256.0 - 6.0).clamp(0.0, 244.0)
+                                                    ))
                                                     .top(px(0.0))
                                                     .size(px(12.0))
                                                     .rounded_full()
@@ -965,7 +975,6 @@ pub struct SettingsView {
     pub color_picker_h: f32,
     pub color_picker_s: f32,
     pub color_picker_v: f32,
-    pub color_picker_a: f32,
     pub color_hex_input: String,
     pub color_hex_focus: Option<FocusHandle>,
 
@@ -989,9 +998,8 @@ impl Default for SettingsView {
 
 impl SettingsView {
     pub fn new() -> Self {
-        let mut open_sections = HashSet::new();
         // 默认折叠项保持收起，按需点击展开
-        open_sections.insert("lolpath".to_string());
+        let open_sections = HashSet::new();
 
         Self {
             open_sections,
@@ -1012,7 +1020,6 @@ impl SettingsView {
             color_picker_h: 184.0,
             color_picker_s: 1.0,
             color_picker_v: 0.67,
-            color_picker_a: 1.0,
             color_hex_input: String::new(),
             color_hex_focus: None,
 
@@ -1895,6 +1902,7 @@ impl SettingsView {
     {
         let p = &config.personalization;
         let act_mica = on_action.clone();
+        let act_strip = on_action.clone();
         let act_toggle_theme_dd = on_action.clone();
         let act_toggle_scale_dd = on_action.clone();
         let act_toggle_lang_dd = on_action.clone();
@@ -1958,7 +1966,6 @@ impl SettingsView {
                     self.color_picker_h,
                     self.color_picker_s,
                     self.color_picker_v,
-                    self.color_picker_a,
                     palette,
                     &self.color_hex_input,
                     self.color_hex_focus.as_ref(),
@@ -2121,6 +2128,17 @@ impl SettingsView {
                     .flex()
                     .flex_col()
                     .gap(px(10.0))
+                    // 卡片样式切换：经典三色底 / 竖条样式（YuumiX 风格）
+                    .child(setting_row(
+                        crate::i18n::t("settings.matchCardStripTitle"),
+                        Some(crate::i18n::t("settings.matchCardStripDesc")),
+                        div()
+                            .cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                act_strip(SettingsAction::ToggleMatchCardStrip, win, app)
+                            })
+                            .child(Switch::new(p.match_card_strip_style)),
+                    ))
                     .child(setting_row(
                         crate::i18n::t("settings.winCard"),
                         None,
