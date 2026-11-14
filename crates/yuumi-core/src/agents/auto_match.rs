@@ -91,8 +91,9 @@ struct LobbyFlags {
 /// auto_match Worker 的事件级状态：跨事件去重与阶段复位
 #[derive(Default)]
 pub struct AutoMatchState {
-    /// 本轮 ReadyCheck 是否已发起过接受
-    ready_check_accepted: bool,
+    /// [D04-e] 已发起过自动接受的 match_epoch；同局去重，新局代际变化自动失效，
+    /// 上一局残留的 ReadyCheck 事件（Accepted 残留）不会毒化新局守卫
+    ready_check_accepted_epoch: Option<u64>,
     /// 本局是否已自动点赞
     honored: bool,
     /// [D04-e] 已发送过标记提醒的对局代际（match_epoch）；新对局自动失效
@@ -113,6 +114,17 @@ impl AutoMatchState {
             return false;
         }
         self.tag_reminder_epoch = Some(epoch);
+        true
+    }
+
+    /// [D04-e] 同局去重：同一 match_epoch 只放行一次自动接受。
+    /// ReadyCheck 被终止后 LCU 仍可能推送 playerResponse="Accepted" 的残留事件，
+    /// 该事件落点晚于阶段重置，若用布尔标志会被跨局毒化——按代际去重后自然免疫。
+    fn claim_ready_accept(&mut self, epoch: u64) -> bool {
+        if self.ready_check_accepted_epoch == Some(epoch) {
+            return false;
+        }
+        self.ready_check_accepted_epoch = Some(epoch);
         true
     }
 }
@@ -144,7 +156,6 @@ pub async fn handle_phase_change(
 
     // 离开 ReadyCheck：立即取消仍在延迟等待中的接受任务
     if current != GamePhase::ReadyCheck {
-        state.ready_check_accepted = false;
         supervisor.cancel(&TaskKind::AutoAccept).await;
     }
     // 离开 Reconnect：取消退避等待中的重连任务
@@ -173,8 +184,11 @@ pub async fn handle_phase_change(
 
     match current {
         GamePhase::ReadyCheck => {
-            if config.auto_accept && !state.ready_check_accepted {
-                state.ready_check_accepted = true;
+            // on_phase_changed 已推进代际（NewMatchStarted 时 epoch+1），snapshot 即为本局代际
+            let epoch = lifecycle.snapshot().await.match_epoch;
+            if config.auto_accept && state.claim_ready_accept(epoch) {
+                // 新代际触发前清掉可能滞留的旧接受任务，避免 RejectNew 误拒本轮
+                supervisor.cancel(&TaskKind::AutoAccept).await;
                 spawn_auto_accept(client, config.auto_accept_delay, supervisor, lifecycle).await;
             }
         }
@@ -250,8 +264,10 @@ pub async fn handle_ready_check(
     if !config.auto_accept {
         return;
     }
-    // 只在本轮 ReadyCheck 未处理过时发起一次
-    if state.ready_check_accepted {
+    // [D04-e] 按 match_epoch 去重：同局只放行一次；上一局残留的 Accepted 事件
+    // 即使落点晚于 Terminated 重置，也只会登记旧代际，毒化不了新局守卫
+    let epoch = lifecycle.snapshot().await.match_epoch;
+    if state.ready_check_accepted_epoch == Some(epoch) {
         return;
     }
 
@@ -262,15 +278,15 @@ pub async fn handle_ready_check(
     );
 
     if responded {
-        state.ready_check_accepted = true;
+        // 玩家已响应：仅登记当前局代际（新局代际变化后自动放行）
+        let _ = state.claim_ready_accept(epoch);
         return;
     }
     if !is_in_progress {
-        state.ready_check_accepted = false;
         return;
     }
 
-    state.ready_check_accepted = true;
+    let _ = state.claim_ready_accept(epoch);
     spawn_auto_accept(client, config.auto_accept_delay, supervisor, lifecycle).await;
 }
 
@@ -1150,6 +1166,22 @@ mod tests {
         assert!(state.claim_tag_reminder(2));
         assert!(!state.claim_tag_reminder(2));
         assert!(state.claim_tag_reminder(3));
+    }
+
+    /// 自动接受按 match_epoch 去重：复现「ReadyCheck 被拒后下一局不自动接受」事故——
+    /// 第一局接受（epoch=2）→ 有人拒绝（Terminated）→ LCU 推送残留的 Accepted 事件
+    /// （同 epoch 重复登记应被拒）→ 新一轮 ReadyCheck（epoch=3）必须重新放行。
+    #[test]
+    fn test_ready_accept_dedup_per_match_epoch() {
+        let mut state = AutoMatchState::new();
+        // 第一局：phase=ReadyCheck(epoch=2) 首次触发
+        assert!(state.claim_ready_accept(2));
+        // 第一局内残留的 Accepted 事件重复登记同一代际 —— 同局去重
+        assert!(!state.claim_ready_accept(2));
+        // 第二局：新一轮 ReadyCheck(epoch=3) 必须重新放行（事故场景的关键断言）
+        assert!(state.claim_ready_accept(3));
+        // 第二局内残留事件同样被去重
+        assert!(!state.claim_ready_accept(3));
     }
 
     #[tokio::test]
