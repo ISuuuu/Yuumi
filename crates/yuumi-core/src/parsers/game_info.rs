@@ -901,6 +901,70 @@ pub fn merge_missing_players_from_prev(
     let red = merge_side(&mut next.red_team, &prev.red_team);
     (blue, red)
 }
+
+/// 判断是否为有效的真实玩家 PUUID（排除空串及全零占位符）
+fn is_valid_player_puuid(puuid: &str) -> bool {
+    let trimmed = puuid.trim();
+    !trimmed.is_empty() && trimmed != "00000000-0000-0000-0000-000000000000"
+}
+
+/// 检查当前对局快照中仍缺失战绩或未完成完整阶段（`PLAYER_DATA_STAGE_FULL`）的真实玩家 PUUID 列表。
+///
+/// 排除人机（`is_bot`）与隐藏/匿名玩家（`puuid` 为空或全零）。
+pub fn find_incomplete_player_puuids(info: &LiveGameInfo) -> Vec<String> {
+    let game_id = info.game_id.unwrap_or(0);
+    info.players()
+        .filter(|player| !player.is_bot && is_valid_player_puuid(&player.puuid))
+        .filter(|player| {
+            let stage = cached_player_data_stage(&player.puuid, game_id);
+            match stage {
+                Some(PLAYER_DATA_STAGE_FULL) => false,
+                Some(_) => true,
+                None => player.matches.is_empty() || !player.data_available,
+            }
+        })
+        .map(|player| player.puuid.clone())
+        .collect()
+}
+
+/// 将 `updated` 中指定的玩家（及新算出的宿命信息）增量合并回 `target` 快照，返回是否有字段变化。
+pub fn merge_updated_players(
+    target: &mut LiveGameInfo,
+    updated: &LiveGameInfo,
+    updated_puuids: &HashSet<String>,
+) -> bool {
+    let updated_by_puuid: HashMap<&str, &GameInfoPlayer> = updated
+        .players()
+        .filter(|p| is_valid_player_puuid(&p.puuid))
+        .map(|p| (p.puuid.as_str(), p))
+        .collect();
+    if updated_by_puuid.is_empty() {
+        return false;
+    }
+
+    let mut changed = false;
+    for player in target
+        .blue_team
+        .iter_mut()
+        .chain(target.red_team.iter_mut())
+    {
+        let Some(fresh) = updated_by_puuid.get(player.puuid.as_str()) else {
+            continue;
+        };
+        if updated_puuids.contains(&player.puuid) {
+            *player = (*fresh).clone();
+            changed = true;
+        } else if player.fate.is_none() && fresh.fate.is_some() {
+            player.fate = fresh.fate.clone();
+            changed = true;
+        }
+    }
+
+    if changed {
+        target.snapshot_at = updated.snapshot_at;
+    }
+    changed
+}
 #[allow(clippy::too_many_arguments)]
 fn make_mock_match(
     queue_id: i32,
@@ -2432,6 +2496,18 @@ pub fn clear_player_data_cache() {
     }
 }
 
+/// 查询指定玩家在当前对局缓存中的完成阶段（不克隆数据体）
+fn cached_player_data_stage(puuid: &str, game_id: u64) -> Option<u8> {
+    let cache = cached_player_data_map().lock().ok()?;
+    let entry = cache.get(puuid)?;
+    let same_game = entry.game_id == game_id || entry.game_id == 0;
+    let idle_expired = entry.game_id == 0 && entry.fetched_at.elapsed() > PLAYER_DATA_TTL;
+    if !same_game || idle_expired {
+        return None;
+    }
+    Some(entry.stage)
+}
+
 /// 读取缓存条目：返回数据与完成阶段
 ///
 /// 对齐旧版 Vue：同一局（gameId 相同）内的数据全程复用，不按时间过期；
@@ -2645,6 +2721,8 @@ pub async fn fetch_live_game_info(
         recent_matches,
         assets,
         true,
+        None,
+        None::<fn(LiveGameInfo) -> std::future::Ready<bool>>,
     )
     .await
 }
@@ -2666,12 +2744,96 @@ pub async fn fetch_live_game_info_quick(
         recent_matches,
         assets,
         false,
+        None,
+        None::<fn(LiveGameInfo) -> std::future::Ready<bool>>,
     )
     .await
 }
 
+/// 逐人渐进构建当前对局信息：每完成一名玩家即拼装最新快照回调推送，
+/// 10 人基础战绩全部就绪后再异步回捞宿命详情并追加推送（回调返回 `false` 时中止）。
+pub async fn fetch_live_game_info_progressive<F, Fut>(
+    client: &LcuClient,
+    self_puuid: &str,
+    self_summoner_id: Option<i64>,
+    source: GameInfoSource,
+    recent_matches: &[MatchDisplay],
+    assets: &GameDataAssets,
+    on_update: F,
+) -> LiveGameInfo
+where
+    F: FnMut(LiveGameInfo) -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    fetch_live_game_info_inner(
+        client,
+        self_puuid,
+        self_summoner_id,
+        source,
+        recent_matches,
+        assets,
+        true,
+        None,
+        Some(on_update),
+    )
+    .await
+}
+
+/// 增量补全指定 PUUID 列表的完整玩家数据（逐人渐进回调推送，宿命后置）。
 #[allow(clippy::too_many_arguments)]
-async fn fetch_live_game_info_inner(
+pub async fn fetch_live_game_info_missing_progressive<F, Fut>(
+    client: &LcuClient,
+    self_puuid: &str,
+    self_summoner_id: Option<i64>,
+    source: GameInfoSource,
+    recent_matches: &[MatchDisplay],
+    assets: &GameDataAssets,
+    only_puuids: &HashSet<String>,
+    on_update: F,
+) -> LiveGameInfo
+where
+    F: FnMut(LiveGameInfo) -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    fetch_live_game_info_inner(
+        client,
+        self_puuid,
+        self_summoner_id,
+        source,
+        recent_matches,
+        assets,
+        true,
+        Some(only_puuids),
+        Some(on_update),
+    )
+    .await
+}
+
+/// 从已拉取的玩家战绩中筛选与本人近期对局重叠的局号（最多 `FATE_DETAIL_LIMIT` 场）
+fn collect_fate_overlap_ids(
+    fetch_map: &HashMap<String, PlayerFetchData>,
+    my_game_ids: &[u64],
+) -> Vec<u64> {
+    let mut overlap_ids: Vec<u64> = Vec::new();
+    for data in fetch_map.values() {
+        for game_id in data.recent.iter().map(|m| m.game_id) {
+            if my_game_ids.contains(&game_id) && !overlap_ids.contains(&game_id) {
+                overlap_ids.push(game_id);
+            }
+        }
+    }
+    overlap_ids.sort_by_key(|game_id| {
+        my_game_ids
+            .iter()
+            .position(|id| id == game_id)
+            .unwrap_or(usize::MAX)
+    });
+    overlap_ids.truncate(FATE_DETAIL_LIMIT);
+    overlap_ids
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fetch_live_game_info_inner<F, Fut>(
     client: &LcuClient,
     self_puuid: &str,
     self_summoner_id: Option<i64>,
@@ -2679,7 +2841,13 @@ async fn fetch_live_game_info_inner(
     recent_matches: &[MatchDisplay],
     assets: &GameDataAssets,
     full: bool,
-) -> LiveGameInfo {
+    only_puuids: Option<&HashSet<String>>,
+    mut on_update: Option<F>,
+) -> LiveGameInfo
+where
+    F: FnMut(LiveGameInfo) -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
     let puuids = source.puuids();
 
     // 会话内的身份线索：对局阶段 gameflow session 的 summonerName/displayName 常为空串，
@@ -2701,17 +2869,27 @@ async fn fetch_live_game_info_inner(
         })
         .collect();
 
-    let targets: Vec<(String, Option<IdentityHint>)> = puuids
-        .into_iter()
-        .map(|puuid| {
-            let hint = hints.get(&puuid).cloned();
-            (puuid, hint)
-        })
-        .collect();
-
     // 本局真实 gameId：用于把玩家数据缓存绑定到这一局（同一局内全程复用，跨局失效）
     let game_id = source.game_id.unwrap_or(0);
-    let fetched: Vec<(String, PlayerFetchData)> = stream::iter(targets)
+
+    // 预填充已有缓存（如 quick 阶段刚写入的骨架数据），避免逐人渐进更新时其余玩家退化为未知
+    let mut fetch_map: HashMap<String, PlayerFetchData> = HashMap::new();
+    let mut targets: Vec<(String, Option<IdentityHint>)> = Vec::with_capacity(puuids.len());
+    for puuid in puuids {
+        if let Some((cached, _)) = cached_player_data(&puuid, game_id) {
+            fetch_map.insert(puuid.clone(), cached);
+        }
+        if only_puuids.is_some_and(|filter| !filter.contains(&puuid)) {
+            continue;
+        }
+        let hint = hints.get(&puuid).cloned();
+        targets.push((puuid, hint));
+    }
+
+    let my_game_ids: Vec<u64> = recent_matches.iter().map(|m| m.game_id).collect();
+    let latest_my_game_id = my_game_ids.first().copied();
+
+    let mut fetch_stream = stream::iter(targets)
         .map(|(puuid, hint)| async move {
             let is_self = puuid == self_puuid;
             let data = fetch_player_data(
@@ -2726,58 +2904,124 @@ async fn fetch_live_game_info_inner(
             .await;
             (puuid, data)
         })
-        .buffer_unordered(PLAYER_FETCH_CONCURRENCY)
-        .collect()
-        .await;
-    let fetch_map: HashMap<String, PlayerFetchData> = fetched.into_iter().collect();
+        .buffer_unordered(PLAYER_FETCH_CONCURRENCY);
 
-    // 本人战绩交集 → 仅回捞少量详情用于宿命判定
-    let my_game_ids: Vec<u64> = recent_matches.iter().map(|m| m.game_id).collect();
-    let mut overlap_ids: Vec<u64> = Vec::new();
-    for data in fetch_map.values() {
-        for game_id in data.recent.iter().map(|m| m.game_id) {
-            if my_game_ids.contains(&game_id) && !overlap_ids.contains(&game_id) {
-                overlap_ids.push(game_id);
+    let mut aborted = false;
+    let mut has_emitted = false;
+    while let Some((puuid, data)) = fetch_stream.next().await {
+        fetch_map.insert(puuid, data);
+        if let Some(cb) = on_update.as_mut() {
+            let snapshot = build_live_game_info(
+                &source,
+                self_puuid,
+                self_summoner_id,
+                &MyRecentContext {
+                    latest_game_id: latest_my_game_id,
+                    games: Vec::new(),
+                },
+                &fetch_map,
+                assets,
+            );
+            has_emitted = true;
+            if !cb(snapshot).await {
+                aborted = true;
+                break;
             }
         }
     }
-    overlap_ids.sort_by_key(|game_id| {
-        my_game_ids
+
+    if aborted || !full {
+        return build_live_game_info(
+            &source,
+            self_puuid,
+            self_summoner_id,
+            &MyRecentContext {
+                latest_game_id: latest_my_game_id,
+                games: Vec::new(),
+            },
+            &fetch_map,
+            assets,
+        );
+    }
+
+    if !has_emitted {
+        if let Some(cb) = on_update.as_mut() {
+            let snapshot = build_live_game_info(
+                &source,
+                self_puuid,
+                self_summoner_id,
+                &MyRecentContext {
+                    latest_game_id: latest_my_game_id,
+                    games: Vec::new(),
+                },
+                &fetch_map,
+                assets,
+            );
+            if !cb(snapshot).await {
+                aborted = true;
+            }
+        }
+    }
+
+    if aborted {
+        return build_live_game_info(
+            &source,
+            self_puuid,
+            self_summoner_id,
+            &MyRecentContext {
+                latest_game_id: latest_my_game_id,
+                games: Vec::new(),
+            },
+            &fetch_map,
+            assets,
+        );
+    }
+
+    // 宿命回捞后置：10 人基础战绩全部就绪推送后再异步拉取交集对局详情
+    let overlap_ids = collect_fate_overlap_ids(&fetch_map, &my_game_ids);
+    let my_games: Vec<MyRecentGame> = if overlap_ids.is_empty() {
+        Vec::new()
+    } else {
+        let details: Vec<GameDetail> = stream::iter(overlap_ids)
+            .map(|game_id| async move { fetch_game_detail(client, game_id, assets).await.ok() })
+            .buffer_unordered(3)
+            .filter_map(|detail| async move { detail })
+            .collect()
+            .await;
+
+        let mut games: Vec<MyRecentGame> = details
             .iter()
-            .position(|id| id == game_id)
-            .unwrap_or(usize::MAX)
-    });
-    overlap_ids.truncate(FATE_DETAIL_LIMIT);
+            .filter_map(|detail| MyRecentGame::from_detail(detail, self_puuid))
+            .collect();
+        games.sort_by_key(|game| {
+            my_game_ids
+                .iter()
+                .position(|id| id == &game.game_id)
+                .unwrap_or(usize::MAX)
+        });
+        games
+    };
 
-    let details: Vec<GameDetail> = stream::iter(overlap_ids)
-        .map(|game_id| async move { fetch_game_detail(client, game_id, assets).await.ok() })
-        .buffer_unordered(3)
-        .filter_map(|detail| async move { detail })
-        .collect()
-        .await;
-
-    let mut my_games: Vec<MyRecentGame> = details
-        .iter()
-        .filter_map(|detail| MyRecentGame::from_detail(detail, self_puuid))
-        .collect();
-    my_games.sort_by_key(|game| {
-        my_game_ids
-            .iter()
-            .position(|id| id == &game.game_id)
-            .unwrap_or(usize::MAX)
-    });
-
-    build_live_game_info(
+    let has_fate_games = !my_games.is_empty();
+    let final_info = build_live_game_info(
         &source,
         self_puuid,
         self_summoner_id,
         &MyRecentContext {
-            latest_game_id: my_game_ids.first().copied(),
+            latest_game_id: latest_my_game_id,
             games: my_games,
         },
         &fetch_map,
         assets,
-    )
+    );
+
+    if has_fate_games {
+        if let Some(cb) = on_update.as_mut() {
+            let _ = cb(final_info.clone()).await;
+        }
+    }
+
+    final_info
 }
 
 // ─── 对局中预缓存（对局结束记录相遇玩家） ───
@@ -4360,5 +4604,141 @@ mod tests {
             "游戏名"
         );
         assert_eq!(preferred_summoner_name(None, None, " 兜底 "), "兜底");
+    }
+
+    #[test]
+    fn find_incomplete_player_puuids_filters_bots_hidden_and_stage_full() {
+        let mut info = LiveGameInfo::create_demo();
+        let test_game_id = 998_877_661u64;
+        info.is_demo = false;
+        info.game_id = Some(test_game_id);
+
+        let full_puuid = "test-incomplete-full-001".to_string();
+        let quick_puuid = "test-incomplete-quick-002".to_string();
+        let uncached_empty_puuid = "test-incomplete-uncached-003".to_string();
+        let bot_puuid = "test-incomplete-bot-004".to_string();
+
+        // 构造 5 个典型场景玩家
+        info.blue_team.truncate(4);
+        info.red_team.truncate(1);
+
+        info.blue_team[0].puuid = full_puuid.clone();
+        info.blue_team[0].is_bot = false;
+        info.blue_team[0].matches.clear();
+
+        info.blue_team[1].puuid = quick_puuid.clone();
+        info.blue_team[1].is_bot = false;
+        info.blue_team[1].data_available = true;
+        info.blue_team[1].matches.clear();
+
+        info.blue_team[2].puuid = uncached_empty_puuid.clone();
+        info.blue_team[2].is_bot = false;
+        info.blue_team[2].matches.clear();
+
+        info.blue_team[3].puuid = bot_puuid.clone();
+        info.blue_team[3].is_bot = true;
+        info.blue_team[3].matches.clear();
+
+        // 隐藏/匿名玩家（空 puuid）
+        info.red_team[0].puuid = String::new();
+        info.red_team[0].is_bot = false;
+        info.red_team[0].matches.clear();
+
+        store_player_data(
+            &full_puuid,
+            &PlayerFetchData::default(),
+            PLAYER_DATA_STAGE_FULL,
+            test_game_id,
+        );
+        store_player_data(
+            &quick_puuid,
+            &PlayerFetchData::default(),
+            PLAYER_DATA_STAGE_QUICK,
+            test_game_id,
+        );
+
+        let incomplete = find_incomplete_player_puuids(&info);
+        assert_eq!(incomplete, vec![quick_puuid.clone(), uncached_empty_puuid]);
+
+        // 清理测试写入的缓存条目，避免污染全局状态
+        if let Ok(mut cache) = cached_player_data_map().lock() {
+            cache.remove(&full_puuid);
+            cache.remove(&quick_puuid);
+        }
+    }
+
+    #[test]
+    fn merge_updated_players_updates_only_specified_players_and_fate() {
+        let mut target = LiveGameInfo::create_demo();
+        target.is_demo = false;
+        target.snapshot_at = 1000;
+        target.blue_team.truncate(2);
+        target.red_team.truncate(1);
+
+        target.blue_team[0].puuid = "p-keep".to_string();
+        target.blue_team[0].summoner_name = "已有玩家".to_string();
+        target.blue_team[0].fate = None;
+
+        target.blue_team[1].puuid = "p-missing".to_string();
+        target.blue_team[1].summoner_name = "待补全".to_string();
+        target.blue_team[1].matches.clear();
+
+        target.red_team[0].puuid = String::new();
+        target.red_team[0].summoner_name = "隐藏玩家".to_string();
+
+        let mut updated = target.clone();
+        updated.snapshot_at = 2000;
+        updated.blue_team[0].summoner_name = "不应被覆盖的名称".to_string();
+        updated.blue_team[0].fate = Some(FateInfo {
+            ally: true,
+            is_last_game: true,
+            game_id: 12345,
+            game_creation: 1_794_000_000_000,
+            champion_id: 103,
+            champion_name: "阿狸".to_string(),
+            ally_count: 1,
+            enemy_count: 0,
+        });
+        updated.blue_team[1].summoner_name = "已补全玩家".to_string();
+        updated.blue_team[1].data_available = true;
+
+        let filter: HashSet<String> = ["p-missing".to_string()].into_iter().collect();
+        let changed = merge_updated_players(&mut target, &updated, &filter);
+        assert!(changed);
+        assert_eq!(target.snapshot_at, 2000);
+        assert_eq!(target.blue_team[0].summoner_name, "已有玩家");
+        assert!(
+            target.blue_team[0].fate.is_some(),
+            "其余玩家的宿命信息应同步补全"
+        );
+        assert_eq!(target.blue_team[1].summoner_name, "已补全玩家");
+        assert!(target.blue_team[1].data_available);
+        assert_eq!(target.red_team[0].summoner_name, "隐藏玩家");
+    }
+
+    #[test]
+    fn collect_fate_overlap_ids_orders_by_recent_and_caps_at_limit() {
+        let my_game_ids = vec![101, 102, 103, 104, 105, 106, 107];
+        let mut fetch_map = HashMap::new();
+
+        let make_match = |game_id| {
+            let mut m = make_mock_match(420, "单双排", true, 1, 5, 2, 5, "10:00");
+            m.game_id = game_id;
+            m
+        };
+        let mut d1 = PlayerFetchData::default();
+        for gid in [106, 102, 104, 999] {
+            d1.recent.push(make_match(gid));
+        }
+        let mut d2 = PlayerFetchData::default();
+        for gid in [107, 101, 103, 105, 102] {
+            d2.recent.push(make_match(gid));
+        }
+        fetch_map.insert("p1".to_string(), d1);
+        fetch_map.insert("p2".to_string(), d2);
+
+        let overlap = collect_fate_overlap_ids(&fetch_map, &my_game_ids);
+        assert_eq!(overlap, vec![101, 102, 103, 104, 105]);
+        assert_eq!(overlap.len(), FATE_DETAIL_LIMIT);
     }
 }

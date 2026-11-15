@@ -1,6 +1,6 @@
 //! 真实 LCU 实时连接与数据编排管理服务
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch, RwLock};
 use tokio::task::JoinHandle;
@@ -20,10 +20,11 @@ use yuumi_core::lcu::{
     ws::{start_ws, LcuWsEvent, LcuWsHandle},
 };
 use yuumi_core::parsers::game_info::{
-    clear_player_data_cache, fetch_live_game_info, fetch_live_game_info_quick,
-    fetch_liveclient_snapshot, fetch_ranked_stats, liveclient_map_side, liveclient_teams,
-    merge_liveclient_teams, merge_missing_players_from_prev, ChampSelectSnapshot, GameInfoSource,
-    GameflowSessionSnapshot, LiveGameInfo, RankedStats,
+    clear_player_data_cache, fetch_live_game_info_missing_progressive,
+    fetch_live_game_info_progressive, fetch_live_game_info_quick, fetch_liveclient_snapshot,
+    fetch_ranked_stats, find_incomplete_player_puuids, liveclient_map_side, liveclient_teams,
+    merge_liveclient_teams, merge_missing_players_from_prev, merge_updated_players,
+    ChampSelectSnapshot, GameInfoSource, GameflowSessionSnapshot, LiveGameInfo, RankedStats,
 };
 use yuumi_core::parsers::loot::{EssenceBalances, LootInventoryItem};
 use yuumi_core::parsers::loot_actions::{
@@ -1201,13 +1202,12 @@ impl LiveLcuService {
                 }
             }
             "GameStart" | "InProgress" | "Reconnect" => {
-                // 对局刚开始时，LCU gameflow session 可能只填充了一侧队伍；若单边为空则短暂重试
+                // 对局刚开始时，LCU gameflow session 可能双边或单边尚为空；
+                // 非自定义/非人机对局做短间隔重试（双边空最多 5 次，单边空最多 3 次）
                 let mut session_val = None;
-                for attempt in 0..3 {
-                    if attempt > 0 {
-                        sleep(Duration::from_millis(800)).await;
-                    }
-                    match client.get("/lol-gameflow/v1/session").await {
+                let mut retries = 0u8;
+                loop {
+                    let max_retries = match client.get("/lol-gameflow/v1/session").await {
                         Ok(value) => {
                             let t1_len = value
                                 .pointer("/gameData/teamOne")
@@ -1223,24 +1223,47 @@ impl LiveLcuService {
                                 .pointer("/gameData/queue/isCustom")
                                 .and_then(|v| v.as_bool())
                                 .unwrap_or(false);
+                            let queue_id = value
+                                .pointer("/gameData/queue/id")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(0);
+                            let is_bot_queue = (800..=899).contains(&queue_id);
                             session_val = Some(value);
-                            if is_custom || (t1_len > 0 && t2_len > 0) {
+                            if is_custom || is_bot_queue || (t1_len > 0 && t2_len > 0) {
                                 break;
                             }
+                            let limit = if t1_len == 0 && t2_len == 0 { 5 } else { 3 };
                             log::debug!(
-                                "[LiveLcu] 对局会话队伍尚不完整 (t1={}, t2={})，第 {}/3 次等待",
+                                "[LiveLcu] 对局会话队伍尚不完整 (t1={}, t2={})，已重试 {}/{} 次",
                                 t1_len,
                                 t2_len,
-                                attempt + 1
+                                retries,
+                                limit
                             );
+                            limit
                         }
                         Err(e) => {
+                            let limit = 5;
                             log::debug!(
-                                "[LiveLcu] 读取对局会话失败 (第 {}/3 次): {}",
-                                attempt + 1,
+                                "[LiveLcu] 读取对局会话失败 (已重试 {}/{} 次): {}",
+                                retries,
+                                limit,
                                 e
                             );
+                            limit
                         }
+                    };
+                    if retries >= max_retries {
+                        break;
+                    }
+                    retries += 1;
+                    sleep(Duration::from_millis(350)).await;
+                    if self.is_stale_game_info_fetch(phase).await {
+                        log::debug!(
+                            "[LiveLcu] 队伍重试期间阶段已离开局内，放弃拉取: requested={}",
+                            phase
+                        );
+                        return;
                     }
                 }
 
@@ -1345,24 +1368,95 @@ impl LiveLcuService {
             return;
         }
 
-        // 局内同 gameId 的完整快照直接复用：一局打多久都不再重跑流水线
-        // （对齐旧版 Vue：玩家数据在整局内常驻，只有进入下一轮选人才失效）
+        // 局内同 gameId 的完整快照直接复用；若仍有非人机/非隐藏玩家缺失战绩，仅针对缺项 PUUID 静默补全
         if src.game_id.unwrap_or(0) > 0 {
-            let reuse_existing = {
+            let existing_snapshot = {
                 let guard = self.game_info.read().await;
-                guard.as_ref().is_some_and(|info| {
-                    info.game_id == src.game_id
-                        && !info.blue_team.is_empty()
-                        && !info.red_team.is_empty()
-                })
+                guard
+                    .as_ref()
+                    .filter(|info| {
+                        info.game_id == src.game_id
+                            && !info.blue_team.is_empty()
+                            && !info.red_team.is_empty()
+                    })
+                    .cloned()
             };
-            if reuse_existing {
-                *self.last_game_info_key.write().await = key;
-                log::debug!("[LiveLcu] 局内快照已存在，跳过重拉");
-                // 面板可能在断线时被清空过：把已有快照重新广播一次，避免恢复成空态
-                if let Some(existing) = self.game_info.read().await.clone() {
-                    let _ = self.event_tx.send(LiveLcuEvent::GameInfoUpdated(existing));
+            if let Some(existing) = existing_snapshot {
+                let missing_puuids = find_incomplete_player_puuids(&existing);
+                // 面板可能在断线时被清空过：先把已有快照重新广播一次，避免恢复成空态
+                let _ = self
+                    .event_tx
+                    .send(LiveLcuEvent::GameInfoUpdated(existing.clone()));
+
+                if missing_puuids.is_empty() {
+                    *self.last_game_info_key.write().await = key;
+                    log::debug!("[LiveLcu] 局内快照已完整，跳过重拉");
+                    return;
                 }
+
+                let missing_set: HashSet<String> = missing_puuids.iter().cloned().collect();
+                log::info!(
+                    "[LiveLcu] 局内快照存在 {} 名缺项玩家，发起增量补全",
+                    missing_set.len()
+                );
+                let recent = self.get_recent_matches().await;
+                let source_cloned = src.clone();
+                let this = self;
+                let missing_ref = &missing_set;
+                let existing_ref = existing.as_ref();
+                let updated = fetch_live_game_info_missing_progressive(
+                    &client,
+                    &summoner.puuid,
+                    self_summoner_id,
+                    source_cloned,
+                    &recent,
+                    &assets,
+                    &missing_set,
+                    move |partial| async move {
+                        if this.is_stale_game_info_fetch(phase).await {
+                            log::debug!(
+                                "[LiveLcu] 增量补全期间阶段已过期，中止推送: requested={}",
+                                phase
+                            );
+                            return false;
+                        }
+                        let mut merged = {
+                            let guard = this.game_info.read().await;
+                            guard
+                                .as_ref()
+                                .map(|g| (**g).clone())
+                                .unwrap_or_else(|| existing_ref.clone())
+                        };
+                        if merge_updated_players(&mut merged, &partial, missing_ref) {
+                            let merged = Arc::new(merged);
+                            *this.game_info.write().await = Some(merged.clone());
+                            let _ = this.event_tx.send(LiveLcuEvent::GameInfoUpdated(merged));
+                        }
+                        true
+                    },
+                )
+                .await;
+
+                if self.is_stale_game_info_fetch(phase).await {
+                    log::debug!("[LiveLcu] 丢弃过期阶段的增量补全快照: requested={}", phase);
+                    return;
+                }
+
+                let mut final_merged = {
+                    let guard = self.game_info.read().await;
+                    guard
+                        .as_ref()
+                        .map(|g| (**g).clone())
+                        .unwrap_or_else(|| updated.clone())
+                };
+                merge_updated_players(&mut final_merged, &updated, &missing_set);
+                final_merged.save_cache();
+                let final_merged = Arc::new(final_merged);
+                *self.last_game_info_key.write().await = key;
+                *self.game_info.write().await = Some(final_merged.clone());
+                let _ = self
+                    .event_tx
+                    .send(LiveLcuEvent::GameInfoUpdated(final_merged));
                 return;
             }
         }
@@ -1422,20 +1516,37 @@ impl LiveLcuService {
             let _ = self.event_tx.send(LiveLcuEvent::GameInfoUpdated(quick));
         }
 
-        // 第二段：战绩 / 熟练度 / 宿命（复用上面的骨架缓存）
-        let mut info = fetch_live_game_info(
+        // 第二段：逐人渐进拉取战绩/熟练度，10 人基础战绩就绪后再异步回捞宿命（复用上面的骨架缓存）
+        let prev_for_stream = self.game_info.read().await.clone();
+        let this = self;
+        let prev_ref = prev_for_stream.as_deref();
+        let mut info = fetch_live_game_info_progressive(
             &client,
             &summoner.puuid,
             self_summoner_id,
             source,
             &recent,
             &assets,
+            move |mut partial| async move {
+                // 对局进行中精简防丢：session 偶发残缺（隐藏战绩玩家被剔除 / 加载瞬间有人未连入），
+                // 从上一份同局快照补回缺失玩家，不让整列消失
+                merge_prev_teams(&mut partial, prev_ref);
+                if this.is_stale_game_info_fetch(phase).await {
+                    log::debug!(
+                        "[LiveLcu] 丢弃过期阶段的渐进对局信息快照: requested={}",
+                        phase
+                    );
+                    return false;
+                }
+                let partial = Arc::new(partial);
+                *this.game_info.write().await = Some(partial.clone());
+                let _ = this.event_tx.send(LiveLcuEvent::GameInfoUpdated(partial));
+                true
+            },
         )
         .await;
 
-        // 对局进行中精简防丢：session 偶发残缺（隐藏战绩玩家被剔除 / 加载瞬间有人未连入），
-        // 从上一份同局快照补回缺失玩家，不让整列消失
-        merge_prev_teams(&mut info, self.game_info.read().await.as_deref());
+        merge_prev_teams(&mut info, prev_for_stream.as_deref());
 
         log::info!(
             "[LiveLcu] 对局信息就绪: {} vs {} (user_side={:?})",
