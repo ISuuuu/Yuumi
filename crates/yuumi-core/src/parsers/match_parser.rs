@@ -876,8 +876,8 @@ pub fn merge_lcu_and_sgp_matches(
 }
 
 /// 智能获取战绩列表：
-/// 优先请求 LCU 本地接口，并在首批 (beg_index == 0) 或显式指定 force_sgp 时并发请求 SGP（腾讯国服），
-/// 按 game_id 去重合并并按 time_stamp 降序排列。
+/// 腾讯国服首页 (beg_index == 0) 或显式指定 force_sgp 时优先请求 SGP（5s 超时），
+/// SGP 返回非空则直接返回（避免被慢速 LCU 接口拖住）；仅在 SGP 超时/失败/空结果时退回 LCU。
 pub async fn fetch_match_history_smart(
     client: &LcuClient,
     puuid: &str,
@@ -900,49 +900,35 @@ pub async fn fetch_match_history_smart(
         return fetch_match_history(client, puuid, Some(beg_index), Some(end_index), assets).await;
     }
 
-    // 并发请求 LCU 与 SGP
-    let lcu_fut = fetch_match_history(client, puuid, Some(beg_index), Some(end_index), assets);
-    let sgp_fut = fetch_match_history_sgp(client, puuid, beg_index, end_index, assets);
-
-    let (lcu_res, sgp_res) = tokio::join!(lcu_fut, sgp_fut);
-
-    let (lcu_matches, lcu_err) = match lcu_res {
-        Ok(list) => (list, None),
-        Err(e) => {
-            log::debug!("[fetch_match_history_smart] LCU 拉取战绩失败: {}", e);
-            (Vec::new(), Some(e))
-        }
-    };
-    let sgp_matches = match sgp_res {
-        Ok(list) => list,
-        Err(e) => {
-            log::debug!("[fetch_match_history_smart] SGP 拉取跳过或失败: {}", e);
-            if lcu_matches.is_empty() {
-                if let Some(le) = lcu_err {
-                    return Err(le);
-                }
+    // SGP 优先：避免 tokio::join! 死等慢速 LCU 接口
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        fetch_match_history_sgp(client, puuid, beg_index, end_index, assets),
+    )
+    .await
+    {
+        Ok(Ok(mut sgp_matches)) if !sgp_matches.is_empty() => {
+            let max_len = (end_index - beg_index + 1) as usize;
+            if sgp_matches.len() > max_len {
+                sgp_matches.truncate(max_len);
             }
-            Vec::new()
+            return Ok(sgp_matches);
         }
-    };
-
-    if sgp_matches.is_empty() {
-        return if lcu_matches.is_empty() {
-            if let Some(le) = lcu_err {
-                Err(le)
-            } else {
-                Ok(Vec::new())
-            }
-        } else {
-            Ok(lcu_matches)
-        };
-    }
-    if lcu_matches.is_empty() {
-        return Ok(sgp_matches);
+        Ok(Ok(_)) => {
+            log::debug!("[fetch_match_history_smart] SGP 返回空结果，退回 LCU");
+        }
+        Ok(Err(e)) => {
+            log::debug!(
+                "[fetch_match_history_smart] SGP 拉取跳过或失败，退回 LCU: {}",
+                e
+            );
+        }
+        Err(_) => {
+            log::debug!("[fetch_match_history_smart] SGP 拉取超过 5s，退回 LCU");
+        }
     }
 
-    let max_len = (end_index - beg_index + 1) as usize;
-    Ok(merge_lcu_and_sgp_matches(lcu_matches, sgp_matches, max_len))
+    fetch_match_history(client, puuid, Some(beg_index), Some(end_index), assets).await
 }
 
 // ─── 队列 ID 映射 ───
