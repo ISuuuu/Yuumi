@@ -42,7 +42,7 @@ fn group_entry(assets: Option<&GameDataAssets>, entry: &IdWinRate) -> impl IntoE
         .child(
             div()
                 .min_w(px(50.0))
-                .text_size(px(9.92))
+                .text_size(px(11.0))
                 .text_color(Theme::TEXT_MUTED())
                 .child(games_count(entry.play)),
         )

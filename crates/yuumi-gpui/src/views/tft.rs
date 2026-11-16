@@ -1848,7 +1848,7 @@ fn centered_state(
                 .px(px(12.0))
                 .py(px(4.0))
                 .rounded(px(6.0))
-                .bg(Theme::ACCENT_PRIMARY())
+                .bg(Theme::ACCENT_SOLID_BG())
                 .text_size(px(12.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(Theme::TEXT_ON_PRIMARY())

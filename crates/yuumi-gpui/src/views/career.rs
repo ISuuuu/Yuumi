@@ -742,6 +742,7 @@ impl CareerView {
         matches: &[MatchItem],
         stats: &CareerHeaderStats,
         is_connected: bool,
+        content_width: f32,
         on_tab_change: impl Fn(CareerTab, &mut Window, &mut App) + 'static + Clone,
         on_select_match: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
         on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
@@ -800,18 +801,23 @@ impl CareerView {
                     .min_h_0()
                     .overflow_hidden()
                     .child(self.render_summoner_header(
+                        content_width,
                         on_refresh.clone(),
                         on_copy_name,
                         on_history,
                         on_back_to_me,
                     ))
                     .when(!is_viewing_other, |this| {
-                        this.child(self.render_tabs(on_tab_change))
+                        this.child(self.render_tabs(content_width, on_tab_change))
                     })
+                    // GPUI/Taffy 约束：滚动区、grid 与嵌套容器仅靠 w_full() 容易按内容收缩或错位，
+                    // 这里及各页签主区块需显式绑定同一 px(content_width) 并保持 flex_col 才能稳定对齐。
                     .child(
                         div()
-                            .w_full()
+                            .w(px(content_width))
                             .flex_1()
+                            .flex()
+                            .flex_col()
                             .min_h_0()
                             .overflow_hidden()
                             .when(
@@ -820,6 +826,7 @@ impl CareerView {
                                     this.child(self.render_matches_tab(
                                         matches,
                                         stats,
+                                        content_width,
                                         on_select_match,
                                         on_career_bar,
                                         on_click_teammate,
@@ -831,6 +838,7 @@ impl CareerView {
                                 active_tab == CareerTab::Mastery && !is_viewing_other,
                                 |this| {
                                     this.child(self.render_mastery_tab(
+                                        content_width,
                                         mastery_focus,
                                         mastery_search_focused,
                                         on_mastery_query,
@@ -841,6 +849,7 @@ impl CareerView {
                             )
                             .when(active_tab == CareerTab::Loot && !is_viewing_other, |this| {
                                 this.child(self.render_loot_tab(
+                                    content_width,
                                     loot_refresh,
                                     loot_value_focus,
                                     loot_value_focused,
@@ -854,6 +863,7 @@ impl CareerView {
 
     fn render_summoner_header(
         &self,
+        content_width: f32,
         on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_copy_name: impl Fn(&mut Window, &mut App) + 'static + Clone,
         on_history: impl Fn(&mut Window, &mut App) + 'static + Clone,
@@ -899,7 +909,7 @@ impl CareerView {
         let is_viewing_other = self.is_viewing_other;
 
         div()
-            .w(px(1000.0))
+            .w(px(content_width))
             .bg(Theme::over_page(Theme::CARD_BG()))
             .border_1()
             .border_color(Theme::CARD_BORDER())
@@ -1117,10 +1127,11 @@ impl CareerView {
 
     fn render_tabs(
         &self,
+        content_width: f32,
         on_tab_change: impl Fn(CareerTab, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
         div()
-            .w(px(1000.0))
+            .w(px(content_width))
             .flex()
             .items_center()
             .gap(px(8.0))
@@ -1174,15 +1185,18 @@ impl CareerView {
             )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_matches_tab(
         &self,
         matches: &[MatchItem],
         stats: &CareerHeaderStats,
+        content_width: f32,
         on_select_match: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
         on_career_bar: impl Fn(CareerBarAction, &mut Window, &mut App) + 'static + Clone,
         on_click_teammate: impl Fn(RecentTeammate, &mut Window, &mut App) + 'static + Clone,
         on_replay: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
+        let compact_cards = content_width < 900.0;
         let shown: Vec<&MatchItem> = matches
             .iter()
             .filter(|m| {
@@ -1198,28 +1212,31 @@ impl CareerView {
             .flex_col()
             .min_h_0()
             .overflow_hidden()
-            // 2. 段位表 (1000px)
-            .child(self.render_ranked_card())
-            // 3. 近期对局横条 (1000px)
+            // 2. 段位表
+            .child(self.render_ranked_card(content_width))
+            // 3. 近期对局横条
             .child(self.render_recent_bar(
+                content_width,
                 matches,
                 stats,
                 on_career_bar,
                 on_click_teammate,
             ))
-            // 4. 对局明细列表 (1000px)
+            // 4. 对局明细列表
             .child(
                 div()
                     .id("career-scroll-area")
-                    .w(px(1000.0))
+                    .w(px(content_width))
                     .flex_1()
+                    .min_w_0()
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.matches_scroll_handle)
                     .mt(px(16.0))
                     .child(if is_empty {
                         div()
-                            .w(px(1000.0))
+                            .w(px(content_width))
+                            .min_w_0()
                             .bg(Theme::CARD_BG())
                             .border_1()
                             .border_color(Theme::CARD_BORDER())
@@ -1247,7 +1264,8 @@ impl CareerView {
                     } else {
                         let replay_cb = on_replay.clone();
                         div()
-                            .w(px(1000.0))
+                            .w(px(content_width))
+                            .min_w_0()
                             .flex()
                             .flex_col()
                             .gap(px(10.0))
@@ -1255,14 +1273,14 @@ impl CareerView {
                             .children(
                                 shown
                                     .into_iter()
-                                    .map(move |m| Self::render_match_card(m, on_select_match.clone(), replay_cb.clone())),
+                                    .map(move |m| Self::render_match_card(m, content_width, compact_cards, on_select_match.clone(), replay_cb.clone())),
                             )
                             .into_any_element()
                     }),
             )
     }
 
-    fn render_ranked_card(&self) -> impl IntoElement {
+    fn render_ranked_card(&self, content_width: f32) -> impl IntoElement {
         const COLUMNS: [(&str, f32); 9] = [
             ("类型", 96.0),
             ("总场次", 76.0),
@@ -1284,7 +1302,7 @@ impl CareerView {
         };
 
         div()
-            .w(px(1000.0))
+            .w(px(content_width))
             .flex_none()
             // 表体近白底预合成到页面底色；表头的 HOVER_BG 继续叠在这层之上
             .bg(Theme::over_page(Theme::CARD_BG()))
@@ -1292,50 +1310,64 @@ impl CareerView {
             .border_color(Theme::CARD_BORDER())
             .rounded_xl()
             .overflow_hidden()
-            .flex()
-            .flex_col()
             .child(
                 div()
-                    .flex()
-                    .rounded_t(px(11.0))
-                    .items_center()
-                    .px(px(16.0))
-                    .py(px(6.0))
-                    .bg(Theme::HOVER_BG())
-                    .border_b_1()
-                    .border_color(Theme::CARD_BORDER())
-                    .children(COLUMNS.iter().map(|(label, width)| {
-                        ranked_cell(
-                            label.to_string(),
-                            *width,
-                            Theme::TEXT_MUTED(),
-                            13.1,
-                            FontWeight::SEMIBOLD,
-                        )
-                    })),
+                    .id("career-ranked-scroll")
+                    .w_full()
+                    .overflow_x_scroll()
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w(px(998.0))
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .flex()
+                                    .rounded_t(px(11.0))
+                                    .items_center()
+                                    .px(px(16.0))
+                                    .py(px(6.0))
+                                    .bg(Theme::HOVER_BG())
+                                    .border_b_1()
+                                    .border_color(Theme::CARD_BORDER())
+                                    .children(COLUMNS.iter().map(|(label, width)| {
+                                        ranked_cell(
+                                            label.to_string(),
+                                            *width,
+                                            Theme::TEXT_MUTED(),
+                                            13.1,
+                                            FontWeight::SEMIBOLD,
+                                        )
+                                    })),
+                            )
+                            .children(rows.into_iter().enumerate().map(|(idx, values)| {
+                                let is_last = idx + 1 == 2;
+                                let mut row = div().flex().items_center().px(px(16.0)).py(px(8.0));
+                                if !is_last {
+                                    row = row.border_b_1().border_color(Theme::CARD_BORDER());
+                                }
+                                row.children(
+                                    values.into_iter().zip(COLUMNS.iter()).enumerate().map(
+                                        |(col, (value, (_, width)))| {
+                                            let (color, weight) = match col {
+                                                0 => (Theme::TEXT_PRIMARY(), FontWeight::SEMIBOLD),
+                                                // 段位列在 Vue 侧为品牌青加粗
+                                                5 => (Theme::ACCENT_PRIMARY(), FontWeight::BOLD),
+                                                _ => (Theme::TEXT_PRIMARY(), FontWeight::NORMAL),
+                                            };
+                                            ranked_cell(value, *width, color, 13.1, weight)
+                                        },
+                                    ),
+                                )
+                            })),
+                    ),
             )
-            .children(rows.into_iter().enumerate().map(|(idx, values)| {
-                let is_last = idx + 1 == 2;
-                let mut row = div().flex().items_center().px(px(16.0)).py(px(8.0));
-                if !is_last {
-                    row = row.border_b_1().border_color(Theme::CARD_BORDER());
-                }
-                row.children(values.into_iter().zip(COLUMNS.iter()).enumerate().map(
-                    |(col, (value, (_, width)))| {
-                        let (color, weight) = match col {
-                            0 => (Theme::TEXT_PRIMARY(), FontWeight::SEMIBOLD),
-                            // 段位列在 Vue 侧为品牌青加粗
-                            5 => (Theme::ACCENT_PRIMARY(), FontWeight::BOLD),
-                            _ => (Theme::TEXT_PRIMARY(), FontWeight::NORMAL),
-                        };
-                        ranked_cell(value, *width, color, 13.1, weight)
-                    },
-                ))
-            }))
     }
 
     fn render_recent_bar(
         &self,
+        content_width: f32,
         matches: &[MatchItem],
         stats: &CareerHeaderStats,
         on_bar: impl Fn(CareerBarAction, &mut Window, &mut App) + 'static + Clone,
@@ -1436,7 +1468,8 @@ impl CareerView {
         });
 
         div()
-            .w(px(1000.0))
+            .w(px(content_width))
+            .min_w_0()
             .flex_none()
             .relative()
             // Vue .recent-summary-bar 用 --settings-collapse-bg（浅灰蓝），并预合成到页面底色
@@ -1453,6 +1486,7 @@ impl CareerView {
             // 近期对局汇总文本流（对齐 Vue .summary-text）
             .child(
                 div()
+                    .flex_shrink_0()
                     .flex()
                     .items_center()
                     .gap(px(8.0))
@@ -1505,9 +1539,17 @@ impl CareerView {
                             .child(format!("({:.1})", stats.avg_kda_ratio)),
                     ),
             )
-            .children(positions_pill)
-            .children(champions_row)
-            .child(div().flex_1())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .flex()
+                    .items_center()
+                    .gap(px(16.0))
+                    .children(positions_pill)
+                    .children(champions_row),
+            )
             // 动作 1：最近队友（在队列下拉之前）
             .child({
                 let on_toggle = on_bar.clone();
@@ -1722,6 +1764,8 @@ impl CareerView {
 
     pub fn render_match_card(
         m: &MatchItem,
+        content_width: f32,
+        compact: bool,
         on_select: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
         on_replay: impl Fn(u64, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
@@ -1799,9 +1843,10 @@ impl CareerView {
         // 回放按钮仅卡片 hover 时浮现（对齐 Vue .replay-action-panel 的 opacity 过渡）
         let group_id = SharedString::from(format!("match-card-{}", game_id));
 
-        div()
-            .w(px(1000.0))
-            .h(px(82.0))
+        let card = div()
+            .w(px(content_width))
+            .min_w_0()
+            .overflow_hidden()
             .flex_shrink_0()
             .rounded(px(10.0))
             .border_1()
@@ -1817,8 +1862,6 @@ impl CareerView {
                 select_cb(game_id, win, app);
             })
             .relative()
-            .flex()
-            .items_center()
             // 竖条样式：左侧 4px 胜负/重开色条（上下留边距，对齐 YuumiX 方案 A）
             .when(strip_style, |this| {
                 this.child(
@@ -1831,391 +1874,435 @@ impl CareerView {
                         .rounded(px(2.0))
                         .bg(strip_color),
                 )
-            })
-            // 1. 英雄面板 (头像、等级、技能、符文)
+            });
+
+        // 1. 英雄面板 (头像、等级、技能、符文)
+        let hero_panel = div()
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .min_w(px(100.0))
+            .flex_shrink_0()
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .min_w(px(100.0))
-                    .flex_shrink_0()
+                    .relative()
+                    .size(px(52.0))
                     .child(
-                        div()
-                            .relative()
+                        LcuImage::new(champion_icon_url)
                             .size(px(52.0))
-                            .child(
-                                LcuImage::new(champion_icon_url)
-                                    .size(px(52.0))
-                                    .shape(LcuImageShape::Circle)
-                                    .placeholder(champion_name),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .bottom(px(-2.0))
-                                    .right(px(-2.0))
-                                    .size(px(18.0))
-                                    .rounded_full()
-                                    .bg(Theme::CARD_BG())
-                                    .border_1()
-                                    .border_color(Theme::CARD_BORDER())
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_size(px(11.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(Theme::TEXT_PRIMARY())
-                                    .child(champ_level.to_string()),
-                            ),
+                            .shape(LcuImageShape::Circle)
+                            .placeholder(champion_name),
                     )
                     .child(
                         div()
+                            .absolute()
+                            .bottom(px(-2.0))
+                            .right(px(-2.0))
+                            .size(px(18.0))
+                            .rounded_full()
+                            .bg(Theme::CARD_BG())
+                            .border_1()
+                            .border_color(Theme::CARD_BORDER())
                             .flex()
-                            .gap(px(3.0))
                             .items_center()
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(2.0))
-                                    .child(
-                                        div()
-                                            .size(px(22.0))
-                                            .rounded(px(3.0))
-                                            .border_1()
-                                            .border_color(Theme::CARD_BORDER())
-                                            .overflow_hidden()
-                                            .child(
-                                                LcuImage::new(spell1_icon_url)
-                                                    .size(px(22.0))
-                                                    .placeholder("D"),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .size(px(22.0))
-                                            .rounded(px(3.0))
-                                            .border_1()
-                                            .border_color(Theme::CARD_BORDER())
-                                            .overflow_hidden()
-                                            .child(
-                                                LcuImage::new(spell2_icon_url)
-                                                    .size(px(22.0))
-                                                    .placeholder("F"),
-                                            ),
-                                    ),
-                            )
-                            .when(queue_id != 2400 && queue_id != 2450, |this| {
-                                this.child(
-                                    div()
-                                        .size(px(22.0))
-                                        .rounded_full()
-                                        .border_1()
-                                        .border_color(Theme::CARD_BORDER())
-                                        .overflow_hidden()
-                                        .child(
-                                            LcuImage::new(rune_icon_url)
-                                                .size(px(22.0))
-                                                .shape(LcuImageShape::Circle)
-                                                .placeholder("符"),
-                                        ),
-                                )
-                            }),
+                            .justify_center()
+                            .text_size(px(11.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(Theme::TEXT_PRIMARY())
+                            .child(champ_level.to_string()),
                     ),
             )
-            // 2. 胜负面板 (胜负、位置、模式、时长)
             .child(
                 div()
                     .flex()
-                    .flex_col()
-                    .justify_center()
-                    .min_w(px(90.0))
-                    .flex_shrink_0()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .text_size(px(16.0))
-                                    .line_height(px(20.0))
-                                    .font_weight(FontWeight::EXTRA_BOLD)
-                                    .text_color(win_text_color)
-                                    .child(win_label),
-                            )
-                            .when(pos_str != "全能", |this| {
-                                this.child(
-                                    div()
-                                        .px(px(4.0))
-                                        .py(px(1.0))
-                                        .rounded_sm()
-                                        .bg(Theme::BADGE_BG())
-                                        .text_size(px(10.0))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(Theme::TEXT_SECONDARY())
-                                        .child(pos_str),
-                                )
-                            }),
-                    )
+                    .gap(px(3.0))
+                    .items_center()
                     .child(
                         div()
                             .flex()
                             .flex_col()
-                            .gap(px(1.0))
-                            .mt(px(2.0))
+                            .gap(px(2.0))
                             .child(
                                 div()
-                                    .text_size(px(13.0))
-                                    .line_height(px(17.0))
-                                    .text_color(Theme::TEXT_MUTED())
-                                    .child(queue_name.clone()),
+                                    .size(px(22.0))
+                                    .rounded(px(3.0))
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER())
+                                    .overflow_hidden()
+                                    .child(
+                                        LcuImage::new(spell1_icon_url)
+                                            .size(px(22.0))
+                                            .placeholder("D"),
+                                    ),
                             )
                             .child(
                                 div()
-                                    .text_size(px(12.0))
-                                    .line_height(px(15.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(Theme::TEXT_MUTED())
-                                    .child(duration_str),
+                                    .size(px(22.0))
+                                    .rounded(px(3.0))
+                                    .border_1()
+                                    .border_color(Theme::CARD_BORDER())
+                                    .overflow_hidden()
+                                    .child(
+                                        LcuImage::new(spell2_icon_url)
+                                            .size(px(22.0))
+                                            .placeholder("F"),
+                                    ),
                             ),
-                    ),
-            )
-            // 3. KDA 面板 (杀/死/助 + 倍率)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .justify_center()
-                    .min_w(px(105.0))
-                    .flex_shrink_0()
-                    .child(
-                        div().text_size(px(16.0)).line_height(px(20.0)).child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.0))
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::TEXT_PRIMARY())
-                                        .child(kills.to_string()),
-                                )
-                                .child(div().text_color(Theme::TEXT_MUTED()).child("/"))
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::LOSS_TEXT())
-                                        .child(deaths.to_string()),
-                                )
-                                .child(div().text_color(Theme::TEXT_MUTED()).child("/"))
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(Theme::TEXT_PRIMARY())
-                                        .child(assists.to_string()),
-                                ),
-                        ),
                     )
-                    .child(
-                        div()
-                            .mt(px(2.0))
-                            .text_size(px(13.0))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(kda_color)
-                            .child(format!("{} KDA", kda_ratio)),
-                    ),
-            )
-            // 4. 补刀面板 (靠左)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .min_w(px(44.0))
-                    .flex_shrink_0()
-                    .mr(px(6.0))
-                    .child(icon("icons/cs.svg", 14.0, Theme::TEXT_MUTED()))
-                    .child(
-                        div()
-                            .text_size(px(13.6))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(Theme::TEXT_MUTED())
-                            .child(cs_str),
-                    ),
-            )
-            // 5. 装备面板 (6件常规装备 + 独立饰品 + 海克斯强化)
+                    .when(queue_id != 2400 && queue_id != 2450, |this| {
+                        this.child(
+                            div()
+                                .size(px(22.0))
+                                .rounded_full()
+                                .border_1()
+                                .border_color(Theme::CARD_BORDER())
+                                .overflow_hidden()
+                                .child(
+                                    LcuImage::new(rune_icon_url)
+                                        .size(px(22.0))
+                                        .shape(LcuImageShape::Circle)
+                                        .placeholder("符"),
+                                ),
+                        )
+                    }),
+            );
+
+        // 2. 胜负面板 (胜负、位置、模式、时长)
+        let result_panel = div()
+            .flex()
+            .flex_col()
+            .justify_center()
+            .min_w(px(90.0))
+            .flex_shrink_0()
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(6.0))
-                    .min_w(px(0.0))
-                    .when(
-                        (queue_id == 2400 || queue_id == 2450)
-                            && !m.display.augment_icon_urls.is_empty(),
-                        |this| {
-                            this.child(
-                                div().flex().gap(px(2.0)).mr(px(4.0)).children(
-                                    m.display.augment_icon_urls.iter().enumerate().map(
-                                        |(idx, url)| {
-                                            let name = augment_names
-                                                .get(idx)
-                                                .cloned()
-                                                .unwrap_or_else(|| "海克斯强化".to_string());
-                                            with_tooltip(
-                                                format!("career-aug-{}-{}", game_id, idx),
-                                                div()
-                                                    .size(px(22.0))
-                                                    .rounded(px(4.0))
-                                                    .border_1()
-                                                    .border_color(rgba(0xa855f772))
-                                                    .bg(rgba(0x9333ea1e))
-                                                    .overflow_hidden()
-                                                    .child(
-                                                        LcuImage::new(url.clone())
-                                                            .size(px(22.0))
-                                                            .placeholder("海"),
-                                                    ),
-                                                vec![TooltipLine::title(name)],
-                                            )
-                                        },
-                                    ),
-                                ),
-                            )
-                        },
-                    )
-                    .child(div().flex().gap(px(2.0)).children((0..6).map(|idx| {
-                        let url = item_urls.get(idx).cloned().unwrap_or_default();
-                        div()
-                            .size(px(28.0))
-                            .rounded(px(4.0))
-                            .bg(Theme::HOVER_BG())
-                            .border_1()
-                            .border_color(Theme::CARD_BORDER())
-                            .overflow_hidden()
-                            .when(!url.is_empty(), |this| {
-                                this.child(LcuImage::new(url).size(px(28.0)).placeholder(""))
-                            })
-                    })))
                     .child(
                         div()
-                            .size(px(28.0))
-                            .rounded(px(4.0))
-                            .bg(rgba(0xf59e0b0d))
-                            .border_1()
-                            .border_color(rgba(0xf59e0b4c))
-                            .ml(px(2.0))
-                            .overflow_hidden()
-                            .when_some(
-                                item_urls.get(6).cloned().filter(|u| !u.is_empty()),
-                                |this, url| {
-                                    this.child(LcuImage::new(url).size(px(28.0)).placeholder("眼"))
-                                },
-                            ),
-                    ),
-            )
-            // 6. 金币面板 (固定右侧，ml_auto)
-            .child(
-                div()
-                    .ml_auto()
-                    .mr(px(24.0))
-                    .min_w(px(62.0))
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(px(13.6))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(Theme::TEXT_MUTED())
-                            .child(gold_str),
+                            .text_size(px(16.0))
+                            .line_height(px(20.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .text_color(win_text_color)
+                            .child(win_label),
                     )
-                    .child(icon("icons/gold.svg", 14.0, Theme::GOLD())),
+                    .when(pos_str != "全能", |this| {
+                        this.child(
+                            div()
+                                .px(px(4.0))
+                                .py(px(1.0))
+                                .rounded_sm()
+                                .bg(Theme::BADGE_BG())
+                                .text_size(px(10.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(Theme::TEXT_SECONDARY())
+                                .child(pos_str),
+                        )
+                    }),
             )
-            // 7. 时间面板 (地图与日期时间)
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .items_end()
-                    .min_w(px(80.0))
-                    .flex_shrink_0()
-                    .whitespace_nowrap()
-                    .text_size(px(13.1))
-                    .text_color(Theme::TEXT_MUTED())
-                    .when(!map_name.is_empty(), |this| {
-                        this.child(div().child(map_name))
-                    })
-                    .child(div().mt(px(4.0)).child(time_str)),
-            )
-            // 8. 回放按钮 (点击阻止卡片事件冒泡，接通真实回放服务)
-            .child({
-                let replay_cb = on_replay;
-                let replay_state = crate::replay_store::get_replay_state(game_id);
-                div()
-                    .ml(px(14.0))
-                    .flex_shrink_0()
-                    .opacity(0.0)
-                    .group_hover(group_id.clone(), |s| s.opacity(1.0))
+                    .gap(px(1.0))
+                    .mt(px(2.0))
                     .child(
                         div()
-                            .size(px(30.0))
-                            .rounded_md()
-                            .border_1()
-                            .border_color(match replay_state {
-                                crate::match_model::ReplayState::Watch => Theme::WIN_BORDER(),
+                            .text_size(px(13.0))
+                            .line_height(px(17.0))
+                            .text_color(Theme::TEXT_MUTED())
+                            .child(queue_name.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .line_height(px(15.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(Theme::TEXT_MUTED())
+                            .child(duration_str),
+                    ),
+            );
+
+        // 3. KDA 面板 (杀/死/助 + 倍率)
+        let kda_panel = div()
+            .flex()
+            .flex_col()
+            .justify_center()
+            .min_w(px(105.0))
+            .flex_shrink_0()
+            .child(
+                div().text_size(px(16.0)).line_height(px(20.0)).child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .child(
+                            div()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(Theme::TEXT_PRIMARY())
+                                .child(kills.to_string()),
+                        )
+                        .child(div().text_color(Theme::TEXT_MUTED()).child("/"))
+                        .child(
+                            div()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(Theme::LOSS_TEXT())
+                                .child(deaths.to_string()),
+                        )
+                        .child(div().text_color(Theme::TEXT_MUTED()).child("/"))
+                        .child(
+                            div()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(Theme::TEXT_PRIMARY())
+                                .child(assists.to_string()),
+                        ),
+                ),
+            )
+            .child(
+                div()
+                    .mt(px(2.0))
+                    .text_size(px(13.0))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(kda_color)
+                    .child(format!("{} KDA", kda_ratio)),
+            );
+
+        // 4. 补刀面板 (靠左)
+        let cs_panel = div()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .min_w(px(44.0))
+            .flex_shrink_0()
+            .mr(px(6.0))
+            .child(icon("icons/cs.svg", 14.0, Theme::TEXT_MUTED()))
+            .child(
+                div()
+                    .text_size(px(13.6))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(Theme::TEXT_MUTED())
+                    .child(cs_str),
+            );
+
+        // 5. 装备面板 (6件常规装备 + 独立饰品 + 海克斯强化)
+        let items_panel = div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .min_w(px(0.0))
+            .when(
+                (queue_id == 2400 || queue_id == 2450) && !m.display.augment_icon_urls.is_empty(),
+                |this| {
+                    this.child(
+                        div().flex().gap(px(2.0)).mr(px(4.0)).children(
+                            m.display
+                                .augment_icon_urls
+                                .iter()
+                                .enumerate()
+                                .map(|(idx, url)| {
+                                    let name = augment_names
+                                        .get(idx)
+                                        .cloned()
+                                        .unwrap_or_else(|| "海克斯强化".to_string());
+                                    with_tooltip(
+                                        format!("career-aug-{}-{}", game_id, idx),
+                                        div()
+                                            .size(px(22.0))
+                                            .rounded(px(4.0))
+                                            .border_1()
+                                            .border_color(rgba(0xa855f772))
+                                            .bg(rgba(0x9333ea1e))
+                                            .overflow_hidden()
+                                            .child(
+                                                LcuImage::new(url.clone())
+                                                    .size(px(22.0))
+                                                    .placeholder("海"),
+                                            ),
+                                        vec![TooltipLine::title(name)],
+                                    )
+                                }),
+                        ),
+                    )
+                },
+            )
+            .child(div().flex().gap(px(2.0)).children((0..6).map(|idx| {
+                let url = item_urls.get(idx).cloned().unwrap_or_default();
+                div()
+                    .size(px(28.0))
+                    .rounded(px(4.0))
+                    .bg(Theme::HOVER_BG())
+                    .border_1()
+                    .border_color(Theme::CARD_BORDER())
+                    .overflow_hidden()
+                    .when(!url.is_empty(), |this| {
+                        this.child(LcuImage::new(url).size(px(28.0)).placeholder(""))
+                    })
+            })))
+            .child(
+                div()
+                    .size(px(28.0))
+                    .rounded(px(4.0))
+                    .bg(rgba(0xf59e0b0d))
+                    .border_1()
+                    .border_color(rgba(0xf59e0b4c))
+                    .ml(px(2.0))
+                    .overflow_hidden()
+                    .when_some(
+                        item_urls.get(6).cloned().filter(|u| !u.is_empty()),
+                        |this, url| this.child(LcuImage::new(url).size(px(28.0)).placeholder("眼")),
+                    ),
+            );
+
+        // 6. 金币面板 (固定右侧，ml_auto)
+        let gold_panel = div()
+            .ml_auto()
+            .mr(px(if compact { 12.0 } else { 14.0 }))
+            .min_w(px(62.0))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(px(13.6))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(Theme::TEXT_MUTED())
+                    .child(gold_str),
+            )
+            .child(icon("icons/gold.svg", 14.0, Theme::GOLD()));
+
+        // 7. 时间面板 (地图与日期时间)
+        let time_panel = div()
+            .flex()
+            .flex_col()
+            .items_end()
+            .min_w(px(80.0))
+            .flex_shrink_0()
+            .whitespace_nowrap()
+            .text_size(px(13.1))
+            .text_color(Theme::TEXT_MUTED())
+            .when(!map_name.is_empty(), |this| {
+                this.child(div().child(map_name))
+            })
+            .child(div().mt(px(4.0)).child(time_str));
+
+        // 8. 回放按钮 (点击阻止卡片事件冒泡，接通真实回放服务)
+        let replay_panel = {
+            let replay_cb = on_replay;
+            let replay_state = crate::replay_store::get_replay_state(game_id);
+            div()
+                .ml(px(if compact { 0.0 } else { 10.0 }))
+                .flex_shrink_0()
+                .opacity(0.0)
+                .group_hover(group_id.clone(), |s| s.opacity(1.0))
+                .child(
+                    div()
+                        .size(px(30.0))
+                        .rounded_md()
+                        .border_1()
+                        .border_color(match replay_state {
+                            crate::match_model::ReplayState::Watch => Theme::WIN_BORDER(),
+                            crate::match_model::ReplayState::Downloading
+                            | crate::match_model::ReplayState::Checking => Theme::ACCENT_PRIMARY(),
+                            crate::match_model::ReplayState::Error => Theme::LOSS_BORDER(),
+                            _ => Theme::CARD_BORDER(),
+                        })
+                        .bg(Theme::CARD_BG())
+                        .hover(|s| {
+                            s.bg(Theme::HOVER_BG())
+                                .border_color(Theme::ACCENT_PRIMARY())
+                        })
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                            app.stop_propagation();
+                            replay_cb(game_id, win, app);
+                        })
+                        .child(icon(
+                            match replay_state {
+                                crate::match_model::ReplayState::Watch => "icons/play.svg",
+                                crate::match_model::ReplayState::Error => "icons/refresh.svg",
+                                _ => "icons/play.svg",
+                            },
+                            13.0,
+                            match replay_state {
+                                crate::match_model::ReplayState::Watch => Theme::WIN_TEXT(),
+                                crate::match_model::ReplayState::Error => Theme::LOSS_TEXT(),
                                 crate::match_model::ReplayState::Downloading
                                 | crate::match_model::ReplayState::Checking => {
                                     Theme::ACCENT_PRIMARY()
                                 }
-                                crate::match_model::ReplayState::Error => Theme::LOSS_BORDER(),
-                                _ => Theme::CARD_BORDER(),
-                            })
-                            .bg(Theme::CARD_BG())
-                            .hover(|s| {
-                                s.bg(Theme::HOVER_BG())
-                                    .border_color(Theme::ACCENT_PRIMARY())
-                            })
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_pointer()
-                            .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                app.stop_propagation();
-                                replay_cb(game_id, win, app);
-                            })
-                            .child(icon(
-                                match replay_state {
-                                    crate::match_model::ReplayState::Watch => "icons/play.svg",
-                                    crate::match_model::ReplayState::Error => "icons/refresh.svg",
-                                    _ => "icons/play.svg",
-                                },
-                                13.0,
-                                match replay_state {
-                                    crate::match_model::ReplayState::Watch => Theme::WIN_TEXT(),
-                                    crate::match_model::ReplayState::Error => Theme::LOSS_TEXT(),
-                                    crate::match_model::ReplayState::Downloading
-                                    | crate::match_model::ReplayState::Checking => {
-                                        Theme::ACCENT_PRIMARY()
-                                    }
-                                    _ => Theme::TEXT_MUTED(),
-                                },
-                            )),
-                    )
-            })
+                                _ => Theme::TEXT_MUTED(),
+                            },
+                        )),
+                )
+        };
+
+        if compact {
+            card.min_h(px(82.0))
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .gap(px(12.0))
+                        .child(hero_panel)
+                        .child(result_panel)
+                        .child(kda_panel)
+                        .child(div().ml_auto().child(replay_panel)),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(cs_panel)
+                        .child(items_panel)
+                        .child(gold_panel)
+                        .child(time_panel),
+                )
+                .into_any_element()
+        } else {
+            card.h(px(82.0))
+                .flex()
+                .items_center()
+                .child(hero_panel)
+                .child(result_panel)
+                .child(kda_panel)
+                .child(cs_panel)
+                .child(items_panel)
+                .child(gold_panel)
+                .child(time_panel)
+                .child(replay_panel)
+                .into_any_element()
+        }
     }
 
     fn render_mastery_tab(
         &self,
+        content_width: f32,
         focus: &FocusHandle,
         search_focused: bool,
         on_query: impl Fn(String, &mut Window, &mut App) + 'static + Clone,
         on_filter: impl Fn(MasteryFilterAction, &mut Window, &mut App) + 'static + Clone,
         on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
+        let stat_cols = if content_width < 760.0 { 2 } else { 4 };
+        let card_cols = if content_width < 680.0 {
+            2
+        } else if content_width < 900.0 {
+            3
+        } else {
+            4
+        };
         let total_points: i64 = self.mastery_list.iter().map(|m| m.champion_points).sum();
         let total_champs = self.mastery_list.len();
         let granted = self.mastery_list.iter().filter(|m| m.chest_granted).count();
@@ -2280,10 +2367,10 @@ impl CareerView {
             .overflow_hidden()
             .child(
                 div()
-                    .w(px(1000.0))
+                    .w(px(content_width))
                     .flex_none()
                     .grid()
-                    .grid_cols(4)
+                    .grid_cols(stat_cols)
                     .gap_3()
                     .child(mastery_stat(
                         "熟练英雄总数",
@@ -2314,9 +2401,10 @@ impl CareerView {
             )
             .child(
                 div()
-                    .w(px(1000.0))
+                    .w(px(content_width))
                     .flex_none()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .justify_between()
                     .gap(px(12.0))
@@ -2506,7 +2594,7 @@ impl CareerView {
             .child(
                 div()
                     .id("mastery-scroll-area")
-                    .w(px(1000.0))
+                    .w(px(content_width))
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
@@ -2514,7 +2602,7 @@ impl CareerView {
                     .mt(px(14.0))
                     .child(if list.is_empty() {
                         div()
-                            .w(px(1000.0))
+                            .w(px(content_width))
                             .bg(Theme::CARD_BG())
                             .border_1()
                             .border_color(Theme::CARD_BORDER())
@@ -2540,9 +2628,9 @@ impl CareerView {
                             .into_any_element()
                     } else {
                         div()
-                            .w(px(1000.0))
+                            .w(px(content_width))
                             .grid()
-                            .grid_cols(4)
+                            .grid_cols(card_cols)
                             .gap(px(14.0))
                             .pb(px(24.0))
                             .children(list.into_iter().map(mastery_card))
@@ -2553,11 +2641,20 @@ impl CareerView {
 
     fn render_loot_tab(
         &self,
+        content_width: f32,
         on_refresh: impl Fn(&mut Window, &mut App) + 'static + Clone,
         value_focus: &FocusHandle,
         value_focused: bool,
         on_action: impl Fn(LootAction, &mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
+        let material_cols = if content_width < 720.0 { 2 } else { 3 };
+        let item_cols = if content_width < 680.0 {
+            2
+        } else if content_width < 900.0 {
+            3
+        } else {
+            4
+        };
         let key_count: i32 = self
             .loot_items
             .iter()
@@ -2643,7 +2740,7 @@ impl CareerView {
             // 区块一：可开启战利品（材料）
             .child(
                 div()
-                    .w(px(1000.0))
+                    .w(px(content_width))
                     .flex_none()
                     .p(px(16.0))
                     .rounded_xl()
@@ -2740,8 +2837,9 @@ impl CareerView {
                             .into_any_element()
                     } else {
                         div()
+                            .w_full()
                             .grid()
-                            .grid_cols(3)
+                            .grid_cols(material_cols)
                             .gap(px(12.0))
                             .children(materials.into_iter().map(|item| {
                                 let action_cb = on_action.clone();
@@ -2918,7 +3016,7 @@ impl CareerView {
             // 区块二：碎片库存管理
             .child(
                 div()
-                    .w(px(1000.0))
+                    .w(px(content_width))
                     .flex_none()
                     .p(px(16.0))
                     .rounded_xl()
@@ -3131,8 +3229,9 @@ impl CareerView {
                             .into_any_element()
                     } else {
                         div()
+                            .w_full()
                             .grid()
-                            .grid_cols(4)
+                            .grid_cols(item_cols)
                             .gap_3()
                             .children(filtered.into_iter().map(|item| {
                                 let selected = self.loot_selected.contains(&item.loot_id);
@@ -4257,7 +4356,7 @@ fn mastery_card(m: &ChampionMasteryItem) -> impl IntoElement {
                         .child(
                             div()
                                 .h_full()
-                                .w(px(213.0 * pct / 100.0))
+                                .w(relative((pct / 100.0).clamp(0.0, 1.0)))
                                 .rounded_full()
                                 .bg(Theme::ACCENT_PRIMARY()),
                         ),

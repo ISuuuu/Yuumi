@@ -908,10 +908,12 @@ impl MainWindow {
         let view_loot = view_entity.clone();
         let view_replay = view_entity.clone();
         let is_connected = matches!(self.connection_status, ConnectionStatus::Connected { .. });
+        let content_width = (self.content_area_width(window) - 48.0).clamp(0.0, 1000.0);
         el.child(self.career_view.render(
             &self.matches,
             stats,
             is_connected,
+            content_width,
             move |target_tab, _window, app| {
                 view.update(app, |this, cx| {
                     this.career_view.active_tab = target_tab;

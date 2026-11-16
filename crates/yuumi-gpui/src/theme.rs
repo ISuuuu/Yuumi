@@ -250,7 +250,11 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn WIN_TEXT() -> Hsla {
-        let fallback = Self::WIN_TEXT_DEFAULT;
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.4390, 0.6350, 0.5160, 1.0) // #34d399
+        } else {
+            Self::WIN_TEXT_DEFAULT
+        };
         runtime_or("WIN_TEXT", fallback)
     }
 
@@ -287,7 +291,11 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn LOSS_TEXT() -> Hsla {
-        let fallback = Self::LOSS_TEXT_DEFAULT;
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.9750, 0.9520, 0.7140, 1.0) // #fb7185
+        } else {
+            Self::LOSS_TEXT_DEFAULT
+        };
         runtime_or("LOSS_TEXT", fallback)
     }
 
@@ -321,7 +329,11 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn REMAKE_TEXT() -> Hsla {
-        let fallback = Self::REMAKE_TEXT_DEFAULT;
+        let fallback = if is_dark_mode_active() {
+            const_hsla(0.5833, 0.1544, 0.6549, 1.0) // #94a3b8
+        } else {
+            Self::REMAKE_TEXT_DEFAULT
+        };
         runtime_or("REMAKE_TEXT", fallback)
     }
 
@@ -363,8 +375,27 @@ impl Theme {
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
     #[allow(dead_code)]
     pub fn TEXT_ACCENT() -> Hsla {
-        let fallback = Self::TEXT_ACCENT_DEFAULT;
+        let fallback = if is_dark_mode_active() {
+            Hsla {
+                l: Self::TEXT_ACCENT_DEFAULT.l.max(0.48),
+                ..Self::TEXT_ACCENT_DEFAULT
+            }
+        } else {
+            Hsla {
+                l: Self::TEXT_ACCENT_DEFAULT.l.min(0.26),
+                ..Self::TEXT_ACCENT_DEFAULT
+            }
+        };
         runtime_or("TEXT_ACCENT", fallback)
+    }
+    /// 实色品牌背景（用于承载白色文字的按钮/选中项，确保对比度 >= 4.5:1）
+    #[allow(dead_code)]
+    pub fn ACCENT_SOLID_BG() -> Hsla {
+        let accent = Self::ACCENT_PRIMARY();
+        Hsla {
+            l: accent.l.min(0.26),
+            ..accent
+        }
     }
     pub const TEXT_ON_PRIMARY_DEFAULT: Hsla = const_hsla(0.0000, 0.0000, 1.0000, 1.0); // 纯白 #ffffff
     /// 运行时色板查询（深色模式/主题色/胜负卡色覆盖），未命中回落默认值
@@ -719,7 +750,18 @@ impl Theme {
         map.insert("SIDEBAR_ACTIVE", Hsla { a: 0.15, ..accent });
         map.insert("SIDEBAR_ACTIVE_BORDER", Hsla { a: 0.30, ..accent });
         map.insert("BORDER_HOVER", Hsla { a: 0.35, ..accent });
-        map.insert("TEXT_ACCENT", accent);
+        let text_accent = if is_dark {
+            Hsla {
+                l: accent.l.max(0.48),
+                ..accent
+            }
+        } else {
+            Hsla {
+                l: accent.l.min(0.26),
+                ..accent
+            }
+        };
+        map.insert("TEXT_ACCENT", text_accent);
 
         // 胜负 / 重开卡片底色（#AARRGGBB 自带透明度，未配置时 parse 回落默认极光色）
         let win = Hsla::from(parse_hex_color(&personalization.win_card_color));

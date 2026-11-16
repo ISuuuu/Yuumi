@@ -94,7 +94,8 @@ pub fn direct_card_row(
                         )
                         .child(
                             div()
-                                .text_size(px(11.5))
+                                .text_size(px(12.0))
+                                .line_height(relative(1.4))
                                 .text_color(Theme::TEXT_MUTED())
                                 .child(desc),
                         ),

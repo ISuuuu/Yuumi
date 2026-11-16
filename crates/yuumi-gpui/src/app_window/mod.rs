@@ -500,6 +500,16 @@ impl MainWindow {
                 .unwrap_or_default(),
         );
     }
+
+    /// 计算主内容区可用宽度（整窗视口宽度扣除当前侧栏宽度）。
+    pub(super) fn content_area_width(&self, window: &Window) -> f32 {
+        let sidebar_w = if self.sidebar_expanded {
+            f32::from(Theme::SIDEBAR_WIDTH_EXPANDED)
+        } else {
+            f32::from(Theme::SIDEBAR_WIDTH)
+        };
+        (f32::from(window.viewport_size().width) - sidebar_w).max(0.0)
+    }
 }
 
 /// 主窗口默认内容区 1200 × 910（对照 Vue `src-tauri/tauri.conf.json`），居中并按可用工作区收敛

@@ -782,7 +782,7 @@ impl SavedPlayersView {
                                 FontWeight::NORMAL
                             })
                             .bg(if is_active {
-                                Theme::ACCENT_PRIMARY()
+                                Theme::ACCENT_SOLID_BG()
                             } else {
                                 hsla(0.0, 0.0, 0.0, 0.0)
                             })
@@ -1391,7 +1391,7 @@ impl SavedPlayersView {
                                         .px_3()
                                         .py_1()
                                         .rounded_sm()
-                                        .bg(Theme::ACCENT_PRIMARY())
+                                        .bg(Theme::ACCENT_SOLID_BG())
                                         .text_color(Theme::TEXT_ON_PRIMARY())
                                         .text_xs()
                                         .cursor_pointer()

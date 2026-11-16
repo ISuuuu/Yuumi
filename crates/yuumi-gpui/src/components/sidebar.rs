@@ -91,12 +91,14 @@ impl Sidebar {
             // 中部：主功能导航 (可根据配置隐藏 TFT / 路人集)
             .child(
                 div()
+                    .id("sidebar-nav-scroll")
                     .flex()
                     .flex_col()
                     .gap(px(6.0))
                     .p(px(8.0))
                     .flex_1()
-                    .overflow_hidden()
+                    .min_h_0()
+                    .overflow_y_scroll()
                     .children(main_routes.into_iter().map(|route| {
                         Self::render_item(route, current_route, expanded, false, on_select.clone())
                     })),
@@ -104,6 +106,7 @@ impl Sidebar {
             // 底部：附加操作区 (OP.GG / 修复 / 公告 / 召唤师卡 / 设置)
             .child(
                 div()
+                    .flex_shrink_0()
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
@@ -179,6 +182,7 @@ impl Sidebar {
             .flex()
             .items_center()
             .h(Theme::NAV_ITEM_HEIGHT)
+            .flex_shrink_0()
             .rounded(Theme::RADIUS_MD)
             .border_1()
             .border_color(if is_active {
@@ -277,6 +281,7 @@ impl Sidebar {
             .flex()
             .items_center()
             .h(Theme::NAV_ITEM_HEIGHT)
+            .flex_shrink_0()
             .rounded(Theme::RADIUS_MD)
             .border_1()
             .border_color(transparent_black())

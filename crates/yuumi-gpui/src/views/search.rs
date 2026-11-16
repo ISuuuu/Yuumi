@@ -506,6 +506,7 @@ impl SearchView {
                     .flex()
                     .flex_col()
                     .flex_1()
+                    .min_h_0()
                     .overflow_hidden()
                     // 1. 顶部搜索工具栏 (S01, S02, S03, S04, S05)
                     .child(self.render_search_bar(
@@ -541,6 +542,7 @@ impl SearchView {
                         div()
                             .relative()
                             .flex_1()
+                            .min_h_0()
                             .flex()
                             .flex_col()
                             .overflow_hidden()
@@ -562,6 +564,7 @@ impl SearchView {
                                     .flex()
                                     .flex_row()
                                     .size_full()
+                                    .min_h_0()
                                     .gap(px(16.0))
                                     .overflow_hidden()
                                     // 左侧：180px 迷你卡片列表 + 分页条 (S06, S07, S08)
@@ -885,7 +888,7 @@ impl SearchView {
                                             Theme::CARD_BORDER()
                                         })
                                         .bg(if is_checked {
-                                            Theme::ACCENT_PRIMARY()
+                                            Theme::ACCENT_SOLID_BG()
                                         } else {
                                             Theme::CARD_BG()
                                         })
@@ -1457,80 +1460,85 @@ impl SearchView {
 
         // 外层保留卡片容器：详情内容通常短于视口高度，卡片底能把剩余高度填满，
         // 否则 Bannner 与队伍块下方会直接露出页面底色，看起来像「底部缺一块」
-        Card::new().flex_1().overflow_hidden().child(match detail {
-            Some(d) => div()
-                .id("match-detail-panel-content")
-                .flex()
-                .flex_col()
-                .size_full()
-                .min_h(px(640.0))
-                .p(px(12.0))
-                .gap_3()
-                .overflow_y_scroll()
-                // 1. 头部大 Banner (S09)
-                .child(self.render_detail_banner(d, on_copy_game_id, on_replay))
-                // 2. 队伍详细数据 (S10, S11: 蓝方 -> 红方)
-                .child(self.render_team_table(&d.blue, d.queue_id, on_player_click.clone()))
-                .child(self.render_team_table(&d.red, d.queue_id, on_player_click))
-                .into_any_element(),
-            None => {
-                let retry_cb = on_retry_detail;
-                div()
+        Card::new()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .overflow_hidden()
+            .child(match detail {
+                Some(d) => div()
+                    .id("match-detail-panel-content")
                     .flex()
                     .flex_col()
-                    .items_center()
-                    .justify_center()
                     .size_full()
+                    .min_h_0()
+                    .p(px(12.0))
                     .gap_3()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(if self.detail_error.is_some() {
-                                Theme::LOSS_TEXT()
-                            } else {
-                                Theme::TEXT_PRIMARY()
-                            })
-                            .child(if is_loading {
-                                "正在拉取对局详细数据...".to_string()
-                            } else if let Some(ref err) = self.detail_error {
-                                format!("对局详情载入失败: {}", err)
-                            } else if let Some(gid) = selected_game_id {
-                                format!("已选对局 ID: {}，等待详情载入", gid)
-                            } else {
-                                "当前队列暂无对局记录".to_string()
-                            }),
-                    )
-                    .when(
-                        self.detail_error.is_some() && selected_game_id.is_some(),
-                        |this| {
-                            let gid = selected_game_id.unwrap();
-                            this.child(
-                                div()
-                                    .px_3()
-                                    .py_1p5()
-                                    .rounded(px(6.0))
-                                    .bg(Theme::CARD_BG())
-                                    .border_1()
-                                    .border_color(Theme::CARD_BORDER())
-                                    .hover(|s| {
-                                        s.bg(Theme::CARD_BG_HOVER())
-                                            .border_color(Theme::ACCENT_PRIMARY())
-                                    })
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(Theme::TEXT_PRIMARY())
-                                    .cursor_pointer()
-                                    .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
-                                        retry_cb(gid, win, app);
-                                    })
-                                    .child("重试载入详情"),
-                            )
-                        },
-                    )
-                    .into_any_element()
-            }
-        })
+                    .overflow_y_scroll()
+                    // 1. 头部大 Banner (S09)
+                    .child(self.render_detail_banner(d, on_copy_game_id, on_replay))
+                    // 2. 队伍详细数据 (S10, S11: 蓝方 -> 红方)
+                    .child(self.render_team_table(&d.blue, d.queue_id, on_player_click.clone()))
+                    .child(self.render_team_table(&d.red, d.queue_id, on_player_click))
+                    .into_any_element(),
+                None => {
+                    let retry_cb = on_retry_detail;
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .size_full()
+                        .gap_3()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(if self.detail_error.is_some() {
+                                    Theme::LOSS_TEXT()
+                                } else {
+                                    Theme::TEXT_PRIMARY()
+                                })
+                                .child(if is_loading {
+                                    "正在拉取对局详细数据...".to_string()
+                                } else if let Some(ref err) = self.detail_error {
+                                    format!("对局详情载入失败: {}", err)
+                                } else if let Some(gid) = selected_game_id {
+                                    format!("已选对局 ID: {}，等待详情载入", gid)
+                                } else {
+                                    "当前队列暂无对局记录".to_string()
+                                }),
+                        )
+                        .when(
+                            self.detail_error.is_some() && selected_game_id.is_some(),
+                            |this| {
+                                let gid = selected_game_id.unwrap();
+                                this.child(
+                                    div()
+                                        .px_3()
+                                        .py_1p5()
+                                        .rounded(px(6.0))
+                                        .bg(Theme::CARD_BG())
+                                        .border_1()
+                                        .border_color(Theme::CARD_BORDER())
+                                        .hover(|s| {
+                                            s.bg(Theme::CARD_BG_HOVER())
+                                                .border_color(Theme::ACCENT_PRIMARY())
+                                        })
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(Theme::TEXT_PRIMARY())
+                                        .cursor_pointer()
+                                        .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
+                                            retry_cb(gid, win, app);
+                                        })
+                                        .child("重试载入详情"),
+                                )
+                            },
+                        )
+                        .into_any_element()
+                }
+            })
     }
 
     /// 详情横幅 (S09: 54x54 地图图标 + 胜负大字 + 元信息 + 回放与复制按钮)
@@ -1562,8 +1570,10 @@ impl SearchView {
                 Theme::LOSS_BORDER()
             })
             .flex()
+            .flex_wrap()
             .items_center()
             .justify_between()
+            .gap_3()
             .child(
                 div()
                     .flex()
@@ -1753,130 +1763,150 @@ impl SearchView {
             })
             .bg(Theme::CARD_BG())
             .overflow_hidden()
-            .flex()
-            .flex_col()
-            // 1. 队头资源概览条 (S10)
             .child(
                 div()
+                    .id(if is_blue {
+                        "search-blue-table-scroll"
+                    } else {
+                        "search-red-table-scroll"
+                    })
                     .w_full()
-                    .rounded_t(px(7.0))
-                    .px(px(16.0))
-                    .py(px(8.0))
-                    .bg(if win {
-                        Theme::WIN_BG()
-                    } else {
-                        Theme::LOSS_BG()
-                    })
-                    .border_b_1()
-                    .border_color(if win {
-                        Theme::WIN_BORDER()
-                    } else {
-                        Theme::LOSS_BORDER()
-                    })
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    // 左侧胜负标签与 6 个团队目标图标 (S10)
+                    .overflow_x_scroll()
                     .child(
                         div()
+                            .w_full()
+                            .min_w(px(720.0 + augment_col_w))
                             .flex()
-                            .items_center()
-                            .gap_3()
-                            // 胜负标签
+                            .flex_col()
+                            // 1. 队头资源概览条 (S10)
                             .child(
                                 div()
-                                    .text_size(px(13.6))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(if win {
-                                        Theme::WIN_TEXT()
+                                    .w_full()
+                                    .rounded_t(px(7.0))
+                                    .px(px(16.0))
+                                    .py(px(8.0))
+                                    .bg(if win {
+                                        Theme::WIN_BG()
                                     } else {
-                                        Theme::LOSS_TEXT()
+                                        Theme::LOSS_BG()
                                     })
-                                    .child(if win { "胜方" } else { "败方" }),
-                            )
-                            // 6 项团队目标小图标与数值统计
-                            .child(
-                                div()
+                                    .border_b_1()
+                                    .border_color(if win {
+                                        Theme::WIN_BORDER()
+                                    } else {
+                                        Theme::LOSS_BORDER()
+                                    })
                                     .flex()
                                     .items_center()
-                                    .gap(px(10.0))
-                                    .text_size(px(12.8))
-                                    .text_color(Theme::TEXT_MUTED())
-                                    .child(self.render_obj_icon("/images/kills.png", team.kills))
-                                    .child(self.render_obj_icon(
-                                        if is_blue {
-                                            "/images/tower-100.png"
-                                        } else {
-                                            "/images/tower-200.png"
-                                        },
-                                        team.tower_kills,
-                                    ))
-                                    .child(self.render_obj_icon(
-                                        if is_blue {
-                                            "/images/inhibitor-100.png"
-                                        } else {
-                                            "/images/inhibitor-200.png"
-                                        },
-                                        team.inhibitor_kills,
-                                    ))
-                                    .child(self.render_obj_icon(
-                                        if is_blue {
-                                            "/images/baron-100.png"
-                                        } else {
-                                            "/images/baron-200.png"
-                                        },
-                                        team.baron_kills,
-                                    ))
-                                    .child(self.render_obj_icon(
-                                        if is_blue {
-                                            "/images/dragon-100.png"
-                                        } else {
-                                            "/images/dragon-200.png"
-                                        },
-                                        team.dragon_kills,
-                                    ))
-                                    .child(self.render_obj_icon(
-                                        if is_blue {
-                                            "/images/herald-100.png"
-                                        } else {
-                                            "/images/herald-200.png"
-                                        },
-                                        team.rift_herald_kills,
-                                    )),
-                            ),
-                    )
-                    // 右侧列头标签：装备、KDA、补刀、金币、伤害 (对齐 Vue 原版)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .text_size(px(11.5))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(Theme::TEXT_MUTED())
-                            .when(augment_slots > 0, |this| {
-                                this.child(div().w(px(augment_col_w)).text_center().child("强化"))
-                            })
-                            .child(div().w(px(210.0)).text_center().child("装备"))
-                            .child(div().w(px(70.0)).text_center().child("KDA"))
-                            .child(div().w(px(42.0)).text_center().child("补刀"))
-                            .child(div().w(px(55.0)).text_right().child("金币"))
-                            .child(div().w(px(60.0)).text_right().child("伤害")),
+                                    .justify_between()
+                                    // 左侧胜负标签与 6 个团队目标图标 (S10)
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_3()
+                                            // 胜负标签
+                                            .child(
+                                                div()
+                                                    .text_size(px(13.6))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(if win {
+                                                        Theme::WIN_TEXT()
+                                                    } else {
+                                                        Theme::LOSS_TEXT()
+                                                    })
+                                                    .child(if win { "胜方" } else { "败方" }),
+                                            )
+                                            // 6 项团队目标小图标与数值统计
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap(px(10.0))
+                                                    .text_size(px(12.8))
+                                                    .text_color(Theme::TEXT_MUTED())
+                                                    .child(self.render_obj_icon(
+                                                        "/images/kills.png",
+                                                        team.kills,
+                                                    ))
+                                                    .child(self.render_obj_icon(
+                                                        if is_blue {
+                                                            "/images/tower-100.png"
+                                                        } else {
+                                                            "/images/tower-200.png"
+                                                        },
+                                                        team.tower_kills,
+                                                    ))
+                                                    .child(self.render_obj_icon(
+                                                        if is_blue {
+                                                            "/images/inhibitor-100.png"
+                                                        } else {
+                                                            "/images/inhibitor-200.png"
+                                                        },
+                                                        team.inhibitor_kills,
+                                                    ))
+                                                    .child(self.render_obj_icon(
+                                                        if is_blue {
+                                                            "/images/baron-100.png"
+                                                        } else {
+                                                            "/images/baron-200.png"
+                                                        },
+                                                        team.baron_kills,
+                                                    ))
+                                                    .child(self.render_obj_icon(
+                                                        if is_blue {
+                                                            "/images/dragon-100.png"
+                                                        } else {
+                                                            "/images/dragon-200.png"
+                                                        },
+                                                        team.dragon_kills,
+                                                    ))
+                                                    .child(self.render_obj_icon(
+                                                        if is_blue {
+                                                            "/images/herald-100.png"
+                                                        } else {
+                                                            "/images/herald-200.png"
+                                                        },
+                                                        team.rift_herald_kills,
+                                                    )),
+                                            ),
+                                    )
+                                    // 右侧列头标签：装备、KDA、补刀、金币、伤害 (对齐 Vue 原版)
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .text_size(px(11.5))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(Theme::TEXT_MUTED())
+                                            .when(augment_slots > 0, |this| {
+                                                this.child(
+                                                    div()
+                                                        .w(px(augment_col_w))
+                                                        .text_center()
+                                                        .child("强化"),
+                                                )
+                                            })
+                                            .child(div().w(px(210.0)).text_center().child("装备"))
+                                            .child(div().w(px(70.0)).text_center().child("KDA"))
+                                            .child(div().w(px(42.0)).text_center().child("补刀"))
+                                            .child(div().w(px(55.0)).text_right().child("金币"))
+                                            .child(div().w(px(60.0)).text_right().child("伤害")),
+                                    ),
+                            )
+                            // 2. 玩家列表 (S11)
+                            .child(div().flex().flex_col().children(team.players.iter().map(
+                                |p| {
+                                    self.render_player_row(
+                                        p,
+                                        win,
+                                        is_aram_hex,
+                                        augment_slots,
+                                        on_player_click.clone(),
+                                    )
+                                },
+                            ))),
                     ),
-            )
-            // 2. 玩家列表 (S11)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .children(team.players.iter().map(|p| {
-                        self.render_player_row(
-                            p,
-                            win,
-                            is_aram_hex,
-                            augment_slots,
-                            on_player_click.clone(),
-                        )
-                    })),
             )
     }
 
@@ -1953,8 +1983,10 @@ impl SearchView {
             })
             .hover(|s| s.bg(Theme::CARD_BG_HOVER()))
             .flex()
+            .flex_wrap()
             .items_center()
             .justify_between()
+            .gap_3()
             // 左半区：头像(40x40)+技能(18x18)+符文(20x20) + 昵称
             .child(
                 div()

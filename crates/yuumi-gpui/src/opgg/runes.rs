@@ -335,7 +335,7 @@ pub fn runes_section(
                             )
                             .child(
                                 div()
-                                    .text_size(px(9.6))
+                                    .text_size(px(11.0))
                                     .text_color(Theme::TEXT_MUTED())
                                     .child(games_count(preset.play)),
                             ),

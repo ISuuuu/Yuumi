@@ -78,27 +78,24 @@ fn bubble(lines: Vec<TooltipLine>) -> Div {
     div()
         .flex()
         .flex_col()
-        .gap(px(2.0))
-        // 不换行：宽度由最长的一行决定，既不折行也不留大片空白
-        .whitespace_nowrap()
-        .max_w(px(560.0))
-        .px(px(8.0))
-        .py(px(6.0))
+        .gap(px(3.0))
+        .max_w(px(360.0))
+        .px(px(10.0))
+        .py(px(7.0))
         .rounded(px(6.0))
         .border_1()
         .border_color(Hsla::from(rgb(0x334155)))
         .bg(rgb(0x0f172a))
-        .text_size(px(10.0))
+        .text_size(px(12.0))
+        .line_height(relative(1.4))
         .children(lines.into_iter().map(|line| {
             div()
+                .min_w_0()
                 .text_color(line.color)
                 .when(line.bold, |el| el.font_weight(FontWeight::BOLD))
                 .child(line.text)
         }))
 }
-
-/// 气泡底边距离触发器底边的像素距离（略大于最小触发器高度即可）
-const BUBBLE_GAP: f32 = 20.0;
 
 /// 给触发元素挂上悬浮气泡（显示在触发器上方）
 pub fn with_tooltip(
@@ -106,7 +103,7 @@ pub fn with_tooltip(
     trigger: impl IntoElement + 'static,
     lines: Vec<TooltipLine>,
 ) -> AnyElement {
-    build_tooltip(group, trigger, lines, true, BUBBLE_GAP)
+    build_tooltip(group, trigger, lines, true)
 }
 
 /// 给触发元素挂上悬浮气泡（显示在触发器下方，用于贴顶的列头）
@@ -115,7 +112,7 @@ pub fn with_tooltip_below(
     trigger: impl IntoElement + 'static,
     lines: Vec<TooltipLine>,
 ) -> AnyElement {
-    build_tooltip(group, trigger, lines, false, 0.0)
+    build_tooltip(group, trigger, lines, false)
 }
 
 fn build_tooltip(
@@ -123,7 +120,6 @@ fn build_tooltip(
     trigger: impl IntoElement + 'static,
     lines: Vec<TooltipLine>,
     above: bool,
-    offset_y: f32,
 ) -> AnyElement {
     let id: SharedString = group.into();
     let visible = is_active(&id);
@@ -156,14 +152,23 @@ fn build_tooltip(
                 .child(trigger),
         )
         .when(visible, |el| {
-            // deferred：整棵树绘制完之后再画，避免被列容器的 overflow_hidden 裁掉
-            let bubble_el = if above {
-                div().absolute().left_0().bottom(px(offset_y))
+            // deferred：整棵树绘制完之后再画，避免被列容器的 overflow_hidden 裁掉；
+            // anchored + snap_to_window_with_margin：在窗口边缘自动避让，避免气泡越出视口
+            let anchor_holder = if above {
+                div().absolute().left_0().top_0()
             } else {
-                // top_full：紧贴触发器下沿（下拉菜单同款写法）
-                div().absolute().left_0().top_full().mt(px(2.0))
+                div().absolute().left_0().top_full()
             };
-            el.child(deferred(bubble_el.child(bubble(lines))))
+            let anchored_bubble = anchored()
+                .anchor(if above {
+                    Corner::BottomLeft
+                } else {
+                    Corner::TopLeft
+                })
+                .offset(point(px(0.0), px(if above { -4.0 } else { 4.0 })))
+                .snap_to_window_with_margin(px(8.0))
+                .child(bubble(lines));
+            el.child(anchor_holder.child(deferred(anchored_bubble)))
         })
         .into_any_element()
 }

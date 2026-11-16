@@ -136,7 +136,7 @@ impl MainWindow {
                     this.exit_game_info_demo(cx);
                 });
             },
-            window.viewport_size().width,
+            px(self.content_area_width(window)),
         ))
     }
 }
