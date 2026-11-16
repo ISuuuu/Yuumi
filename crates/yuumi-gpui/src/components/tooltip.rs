@@ -129,9 +129,12 @@ fn build_tooltip(
 
     div()
         .relative()
+        .flex()
+        .flex_col()
         .child(
             div()
                 .id(id)
+                .w_full()
                 .on_hover(move |is_hovered, _window, cx| {
                     if *is_hovered {
                         ACTIVE_TOOLTIP.with(|active| *active.borrow_mut() = Some(enter.clone()));

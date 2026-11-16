@@ -527,7 +527,8 @@ impl GameInfoView {
                 on_change_tab,
                 on_exit_demo,
             ))
-            // 战绩列横排：十列紧凑模式走 compact 分支 (G04, G07, G10)；每队默认按 5 人分配列宽，保底列宽 115px
+            // 战绩列横排：十列紧凑模式走 compact 分支 (G04, G07, G10)；每队默认按 5 人分配列宽，保底列宽 95px
+            // （950px 低于默认 1200px 窗口可用宽度，避免第 10 列右侧在默认窗口下被横向裁剪）
             .child(
                 div()
                     .id("gameinfo-all-columns-scroll")
@@ -538,14 +539,14 @@ impl GameInfoView {
                         div()
                             .h_full()
                             .w_full()
-                            .min_w(if is_revealed { px(1150.0) } else { px(575.0) })
+                            .min_w(if is_revealed { px(950.0) } else { px(475.0) })
                             .flex()
                             .flex_row()
                             // 友方半区 (默认 5 列)
                             .child(
                                 div()
                                     .w_1_2()
-                                    .min_w(px(575.0))
+                                    .min_w(px(475.0))
                                     .h_full()
                                     .flex()
                                     .flex_row()
@@ -571,7 +572,7 @@ impl GameInfoView {
                                 el.child(
                                     div()
                                         .w_1_2()
-                                        .min_w(px(575.0))
+                                        .min_w(px(475.0))
                                         .h_full()
                                         .border_l_2()
                                         .border_color(Theme::CARD_BORDER())
@@ -1284,6 +1285,7 @@ impl GameInfoView {
             // 10 列紧凑模式 (compact 分支)：头像独占一行，其下依次为召唤师 ID、
             // 英雄等级与段位、近期 50 局峡谷胜负、今日位置占比（无位置数据时省略该行）
             div()
+                .w_full()
                 .flex_shrink_0()
                 .relative()
                 .py(px(4.0))
@@ -1525,6 +1527,7 @@ impl GameInfoView {
         } else {
             // 5 列正常模式 (!compact 分支)：高度 48px，左右布局 (G07)
             div()
+                .w_full()
                 .h(px(48.0))
                 .flex_shrink_0()
                 .p(px(6.0))
