@@ -3,13 +3,89 @@
 //! 基于 `yuumi_core::lcu::AssetCache`，使用 `image` crate 将原始图片解码为 GPUI `RenderImage` (BGRA)，
 //! 并通过 `Arc<RwLock<HashMap<String, Arc<RenderImage>>>>` 在 UI 线程快速获取。
 
-use gpui::RenderImage;
+use gpui::{AppContext, RenderImage};
 use image::Frame;
 use smallvec::SmallVec;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use yuumi_core::lcu::AssetCache;
+
+/// 默认解码图片内存预算：128 MiB（按 BGRA 像素字节计）
+const DEFAULT_DECODED_CACHE_BYTES: usize = 128 * 1024 * 1024;
+/// 单张图片加载失败后的自动重试冷却时间，防止渲染循环重复触发失败请求
+const FAILED_RETRY_COOLDOWN: Duration = Duration::from_secs(10);
+
+struct DecodedCacheEntry {
+    image: Arc<RenderImage>,
+    bytes: usize,
+    seq: u64,
+}
+
+struct DecodedImageCache {
+    max_bytes: usize,
+    total_bytes: usize,
+    next_seq: u64,
+    entries: HashMap<String, DecodedCacheEntry>,
+    lru_queue: VecDeque<(String, u64)>,
+}
+
+impl DecodedImageCache {
+    fn new(max_bytes: usize) -> Self {
+        Self {
+            max_bytes,
+            total_bytes: 0,
+            next_seq: 1,
+            entries: HashMap::new(),
+            lru_queue: VecDeque::new(),
+        }
+    }
+
+    fn get(&mut self, key: &str) -> Option<Arc<RenderImage>> {
+        let entry = self.entries.get_mut(key)?;
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.wrapping_add(1);
+        entry.seq = seq;
+        let image = entry.image.clone();
+        self.lru_queue.push_back((key.to_string(), seq));
+        Some(image)
+    }
+
+    fn insert(&mut self, key: String, image: Arc<RenderImage>) {
+        let bytes = image.as_bytes(0).map(|b| b.len()).unwrap_or(0);
+        if let Some(old) = self.entries.remove(&key) {
+            self.total_bytes = self.total_bytes.saturating_sub(old.bytes);
+        }
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.wrapping_add(1);
+        self.total_bytes = self.total_bytes.saturating_add(bytes);
+        self.entries
+            .insert(key.clone(), DecodedCacheEntry { image, bytes, seq });
+        self.lru_queue.push_back((key.clone(), seq));
+
+        // 超出字节预算时按 LRU 淘汰最久未使用的条目（保留刚插入的新条目）
+        while self.total_bytes > self.max_bytes && self.entries.len() > 1 {
+            let Some((oldest_key, oldest_seq)) = self.lru_queue.pop_front() else {
+                break;
+            };
+            if oldest_key == key {
+                continue;
+            }
+            if let Some(cur) = self.entries.get(&oldest_key) {
+                if cur.seq == oldest_seq {
+                    if let Some(removed) = self.entries.remove(&oldest_key) {
+                        self.total_bytes = self.total_bytes.saturating_sub(removed.bytes);
+                    }
+                }
+            }
+        }
+    }
+
+    fn stats(&self) -> (usize, usize) {
+        (self.entries.len(), self.total_bytes)
+    }
+}
 
 /// 全局单例 AssetLoader
 static ASSET_LOADER: OnceLock<AssetLoader> = OnceLock::new();
@@ -27,9 +103,11 @@ pub fn init_global_asset_loader(core_cache: Arc<AssetCache>) {
 #[derive(Clone)]
 pub struct AssetLoader {
     core_cache: Arc<AssetCache>,
-    decoded_cache: Arc<RwLock<HashMap<String, Arc<RenderImage>>>>,
+    decoded_cache: Arc<Mutex<DecodedImageCache>>,
     /// 正在加载的资源路径集合：同一资源并发请求只发起一次实际加载（P0-2）
     inflight: Arc<Mutex<HashSet<String>>>,
+    /// 最近加载失败的路径冷却时间，避免渲染周期内反复重放失败请求
+    failed_recent: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 impl Default for AssetLoader {
@@ -40,11 +118,25 @@ impl Default for AssetLoader {
 
 impl AssetLoader {
     pub fn new(core_cache: Arc<AssetCache>) -> Self {
+        Self::with_decoded_budget(core_cache, DEFAULT_DECODED_CACHE_BYTES)
+    }
+
+    pub fn with_decoded_budget(core_cache: Arc<AssetCache>, max_decoded_bytes: usize) -> Self {
         Self {
             core_cache,
-            decoded_cache: Arc::new(RwLock::new(HashMap::new())),
+            decoded_cache: Arc::new(Mutex::new(DecodedImageCache::new(max_decoded_bytes))),
             inflight: Arc::new(Mutex::new(HashSet::new())),
+            failed_recent: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// 返回当前已解码缓存的 `(条目数, 像素总字节数)`
+    #[allow(dead_code)]
+    pub fn decoded_cache_stats(&self) -> (usize, usize) {
+        self.decoded_cache
+            .lock()
+            .map(|c| c.stats())
+            .unwrap_or((0, 0))
     }
 
     /// 使用指定本地磁盘目录构造（便于隔离与测试）
@@ -161,17 +253,17 @@ impl AssetLoader {
             return None;
         }
 
-        // 纯内存已解码缓存命中，微秒级返回
-        if let Ok(lock) = self.decoded_cache.read() {
+        // 纯内存已解码缓存命中，微秒级返回并刷新 LRU 热度
+        if let Ok(mut lock) = self.decoded_cache.lock() {
             if let Some(img) = lock.get(trimmed) {
-                return Some(img.clone());
+                return Some(img);
             }
         }
 
         // 内置静态图片在未命中内存缓存时做同步快速解码并写入
         if let Some(builtin) = Self::get_builtin_image_bytes(trimmed) {
             if let Ok(img) = Self::decode_bytes_to_render_image(builtin) {
-                if let Ok(mut lock) = self.decoded_cache.write() {
+                if let Ok(mut lock) = self.decoded_cache.lock() {
                     lock.insert(trimmed.to_string(), img.clone());
                 }
                 return Some(img);
@@ -179,6 +271,53 @@ impl AssetLoader {
         }
 
         None
+    }
+
+    /// 供组件在缓存未命中（如曾被 LRU 淘汰）时按需触发后台加载，并在完成后刷新窗口
+    pub fn schedule_load_if_needed(
+        &self,
+        path: &str,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        if let Ok(lock) = self.inflight.lock() {
+            if lock.contains(trimmed) {
+                return;
+            }
+        }
+        if let Ok(mut failed) = self.failed_recent.lock() {
+            if let Some(at) = failed.get(trimmed) {
+                if at.elapsed() < FAILED_RETRY_COOLDOWN {
+                    return;
+                }
+                failed.remove(trimmed);
+            }
+        }
+        let loader = self.clone();
+        let path_owned = trimmed.to_string();
+        let window_handle = window.window_handle();
+        cx.spawn(async move |cx| {
+            let loaded = if let Some(handle) = yuumi_core::runtime::tokio_handle() {
+                let l = loader.clone();
+                let p = path_owned.clone();
+                handle
+                    .spawn(async move { l.load_render_image(&p).await })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("任务调度失败: {}", e)))
+            } else {
+                Err("Tokio 运行时未初始化".to_string())
+            };
+            if loaded.is_ok() {
+                let _ = cx.update_window(window_handle, |_, w, _| {
+                    w.refresh();
+                });
+            }
+        })
+        .detach();
     }
 
     /// 异步拉取并解码图片（磁盘读 / CPU 解码放 `spawn_blocking` 阻塞池，网络 I/O 留在 Tokio 异步线程）
@@ -201,9 +340,19 @@ impl AssetLoader {
         let result = self.load_uncached(trimmed).await;
         // 先落缓存再移出 inflight：跟随者轮询「缓存未命中且 inflight 已空」即判定失败，
         // 此顺序保证不会观察到「既不在缓存也不在加载中」的中间态
-        if let Ok(render_img) = &result {
-            if let Ok(mut lock) = self.decoded_cache.write() {
-                lock.insert(trimmed.to_string(), render_img.clone());
+        match &result {
+            Ok(render_img) => {
+                if let Ok(mut lock) = self.decoded_cache.lock() {
+                    lock.insert(trimmed.to_string(), render_img.clone());
+                }
+                if let Ok(mut failed) = self.failed_recent.lock() {
+                    failed.remove(trimmed);
+                }
+            }
+            Err(_) => {
+                if let Ok(mut failed) = self.failed_recent.lock() {
+                    failed.insert(trimmed.to_string(), Instant::now());
+                }
             }
         }
         if let Ok(mut inflight) = self.inflight.lock() {
@@ -336,5 +485,35 @@ mod tests {
         assert_eq!(bytes[1], 0);
         assert_eq!(bytes[2], 255);
         assert_eq!(bytes[3], 255);
+    }
+
+    #[test]
+    fn decoded_cache_enforces_byte_budget_with_lru_eviction() {
+        let mut img_buf = image::RgbaImage::new(4, 4); // 16 * 4 = 64 bytes
+        for pixel in img_buf.pixels_mut() {
+            *pixel = image::Rgba([10, 20, 30, 255]);
+        }
+        let mut png_bytes = Vec::new();
+        img_buf
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+
+        let img = AssetLoader::decode_bytes_to_render_image(&png_bytes).unwrap();
+        // 预算最多容纳 2 张（128 bytes）
+        let mut cache = DecodedImageCache::new(128);
+        cache.insert("a".into(), img.clone());
+        cache.insert("b".into(), img.clone());
+        assert_eq!(cache.stats(), (2, 128));
+
+        // 命中 "a" 使其变热，再插入 "c" 时应淘汰最久未使用的 "b"
+        assert!(cache.get("a").is_some());
+        cache.insert("c".into(), img);
+        assert_eq!(cache.stats(), (2, 128));
+        assert!(cache.get("a").is_some());
+        assert!(cache.get("c").is_some());
+        assert!(cache.get("b").is_none());
     }
 }

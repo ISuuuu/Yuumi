@@ -364,26 +364,95 @@ impl MainWindow {
                         this.reload_saved_players(cx);
                     }
                     SavedPlayersAction::ExportTagged => {
-                        match this.saved_players_view.export_tagged_to_file() {
-                            Some(Ok(path)) => {
-                                this.toast(ToastKind::Success, format!("已导出到 {}", path), cx)
+                        if let Some(storage) = this.saved_players_view.storage.clone() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .set_title("导出标记玩家")
+                                .add_filter("JSON", &["json"])
+                                .set_file_name("tagged_players.json")
+                                .save_file()
+                            {
+                                cx.spawn(async move |entity, cx| {
+                                    let work = move || -> Result<String, String> {
+                                        let data = storage
+                                            .export_tagged_players()
+                                            .map_err(|e| format!("导出查询失败: {}", e))?;
+                                        let json = serde_json::to_string_pretty(&data)
+                                            .map_err(|e| format!("JSON 序列化失败: {}", e))?;
+                                        std::fs::write(&path, json)
+                                            .map_err(|e| format!("导出保存失败: {}", e))?;
+                                        Ok(path.display().to_string())
+                                    };
+                                    let res =
+                                        if let Some(handle) = yuumi_core::runtime::tokio_handle() {
+                                            handle.spawn_blocking(work).await.unwrap_or_else(|e| {
+                                                Err(format!("导出任务异常: {}", e))
+                                            })
+                                        } else {
+                                            work()
+                                        };
+                                    let _ = entity.update(cx, |this, cx| {
+                                        match res {
+                                            Ok(p) => this.toast(
+                                                ToastKind::Success,
+                                                format!("已导出到 {}", p),
+                                                cx,
+                                            ),
+                                            Err(msg) => this.toast(ToastKind::Error, msg, cx),
+                                        }
+                                        cx.notify();
+                                    });
+                                })
+                                .detach();
                             }
-                            Some(Err(msg)) => this.toast(ToastKind::Error, msg, cx),
-                            None => {} // 用户取消文件对话框
                         }
                     }
                     SavedPlayersAction::ImportTagged => {
-                        match this.saved_players_view.import_tagged_from_file() {
-                            Some(Ok(count)) => this.toast(
-                                ToastKind::Success,
-                                format!("成功导入 {} 名玩家", count),
-                                cx,
-                            ),
-                            Some(Err(msg)) => this.toast(ToastKind::Error, msg, cx),
-                            None => {} // 用户取消文件对话框
+                        if let Some(storage) = this.saved_players_view.storage.clone() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .set_title("导入标记玩家")
+                                .add_filter("JSON", &["json"])
+                                .pick_file()
+                            {
+                                cx.spawn(async move |entity, cx| {
+                                    let work = move || -> Result<u32, String> {
+                                        let content = std::fs::read_to_string(&path)
+                                            .map_err(|e| format!("读取文件失败: {}", e))?;
+                                        let records: Vec<
+                                            yuumi_core::parsers::saved_player::TaggedPlayerExportDto,
+                                        > = serde_json::from_str(&content).map_err(|e| {
+                                            format!("JSON 解析失败，请确认文件格式: {}", e)
+                                        })?;
+                                        storage
+                                            .import_tagged_players(&records)
+                                            .map_err(|e| format!("导入写入数据库失败: {}", e))
+                                    };
+                                    let res =
+                                        if let Some(handle) = yuumi_core::runtime::tokio_handle() {
+                                            handle.spawn_blocking(work).await.unwrap_or_else(|e| {
+                                                Err(format!("导入任务异常: {}", e))
+                                            })
+                                        } else {
+                                            work()
+                                        };
+                                    let _ = entity.update(cx, |this, cx| {
+                                        match res {
+                                            Ok(count) => {
+                                                this.toast(
+                                                    ToastKind::Success,
+                                                    format!("成功导入 {} 名玩家", count),
+                                                    cx,
+                                                );
+                                                this.reload_saved_players(cx);
+                                                this.backfill_saved_players_identity(cx);
+                                            }
+                                            Err(msg) => this.toast(ToastKind::Error, msg, cx),
+                                        }
+                                        cx.notify();
+                                    });
+                                })
+                                .detach();
+                            }
                         }
-                        this.reload_saved_players(cx);
-                        this.backfill_saved_players_identity(cx);
                     }
                     SavedPlayersAction::LoadMoreGames => {
                         if let Err(msg) = this.saved_players_view.load_more_games() {

@@ -48,6 +48,27 @@ const POST_GAME_HISTORY_DELAY: Duration = Duration::from_secs(3);
 /// 生涯页展示的近期对局条数（LCU 产品接口实际会多返回一场，统一裁剪）
 const CAREER_MATCH_LIMIT: usize = 20;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ConnectionTransition {
+    Keep,
+    Connect,
+    Disconnect,
+    Reconnect,
+}
+
+fn classify_connection_transition(
+    active: Option<&LcuConnectionInfo>,
+    detected: Option<&LcuConnectionInfo>,
+) -> ConnectionTransition {
+    match (active, detected) {
+        (None, None) => ConnectionTransition::Keep,
+        (None, Some(_)) => ConnectionTransition::Connect,
+        (Some(_), None) => ConnectionTransition::Disconnect,
+        (Some(prev), Some(next)) if prev == next => ConnectionTransition::Keep,
+        (Some(_), Some(_)) => ConnectionTransition::Reconnect,
+    }
+}
+
 /// 全局连接状态
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConnectionStatus {
@@ -122,6 +143,10 @@ pub struct LiveLcuService {
     refresh_lock: Arc<RwLock<()>>,
     /// 当前活跃的 WS 订阅句柄（供手动重置时取消旧连接）
     ws_handle: Arc<RwLock<Option<LcuWsHandle>>>,
+    /// 连接代际：每次建立/断开/切换连接时自增，用于拦截旧连接的迟到异步结果
+    connection_gen: Arc<std::sync::atomic::AtomicU64>,
+    /// 当前连接已确认的召唤师 PUUID
+    active_owner_puuid: Arc<RwLock<Option<String>>>,
 }
 
 impl LiveLcuService {
@@ -156,7 +181,50 @@ impl LiveLcuService {
             last_game_info_key: Arc::new(RwLock::new(String::new())),
             refresh_lock: Arc::new(RwLock::new(())),
             ws_handle: Arc::new(RwLock::new(None)),
+            connection_gen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            active_owner_puuid: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// 获取当前连接代际编号
+    pub fn current_connection_gen(&self) -> u64 {
+        self.connection_gen
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// 获取当前活跃连接所属召唤师 PUUID
+    pub async fn current_owner_puuid(&self) -> Option<String> {
+        self.active_owner_puuid.read().await.clone()
+    }
+
+    /// 校验当前连接代际与召唤师归属是否仍匹配（用于拦截跨换号/跨断连的迟到异步结果）
+    async fn is_account_scope_valid(&self, expected_gen: u64, expected_puuid: &str) -> bool {
+        if self.current_connection_gen() != expected_gen {
+            return false;
+        }
+        match self.active_owner_puuid.read().await.as_deref() {
+            Some(current) => current == expected_puuid,
+            None => false,
+        }
+    }
+
+    /// 广播队列发生积压（Lagged）后，生成供 UI 收敛的最新快照事件序列
+    pub async fn current_recovery_events(&self) -> Vec<LiveLcuEvent> {
+        let mut events = Vec::new();
+        events.push(LiveLcuEvent::ConnectionChanged(
+            self.status.borrow().clone(),
+        ));
+        let phase_str = self.current_phase.read().await.clone();
+        events.push(LiveLcuEvent::GamePhaseChanged(GamePhase::from(
+            phase_str.as_str(),
+        )));
+        if let Some(assets) = self.game_data_assets.read().await.clone() {
+            events.push(LiveLcuEvent::GameDataReady(assets));
+        }
+        if let Some(info) = self.game_info.read().await.clone() {
+            events.push(LiveLcuEvent::GameInfoUpdated(info));
+        }
+        events
     }
 
     pub fn subscribe_events(&self) -> broadcast::Receiver<LiveLcuEvent> {
@@ -323,18 +391,52 @@ impl LiveLcuService {
         }
 
         let handle = start_ws(client.port, client.token.clone());
-        let mut rx = handle.subscribe_events();
-        let this = self.clone();
-        tokio::spawn(async move {
-            while let Ok(event) = rx.recv().await {
-                this.handle_ws_event(event).await;
-            }
-            log::info!("[LiveLcu] WS 事件读取任务已结束（手动重置）");
-        });
+        let rx = handle.subscribe_events();
+        let conn_gen = self.current_connection_gen();
+        self.spawn_ws_consumer(rx, conn_gen, "手动重置");
         *self.ws_handle.write().await = Some(handle);
         log::info!("[LiveLcu] 已手动重置 LCU WebSocket 订阅");
 
-        // 重放当前阶段，触发选人会话与对局信息的重新拉取
+        self.replay_current_gameflow_phase(&client).await;
+    }
+
+    /// 订阅 WS 广播并在发生 `RecvError::Lagged` 时恢复消费、补拉当前游戏阶段
+    fn spawn_ws_consumer(
+        &self,
+        mut rx: broadcast::Receiver<LcuWsEvent>,
+        expected_gen: u64,
+        label: &'static str,
+    ) {
+        let this = self.clone();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if this.current_connection_gen() != expected_gen {
+                            break;
+                        }
+                        this.handle_ws_event(event).await;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        log::warn!(
+                            "[LiveLcu] WS 事件消费滞后({label})，跳过 {skipped} 条，恢复消费并同步当前阶段"
+                        );
+                        if this.current_connection_gen() != expected_gen {
+                            break;
+                        }
+                        if let Some(client) = this.get_client().await {
+                            this.replay_current_gameflow_phase(&client).await;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            log::info!("[LiveLcu] WS 事件读取任务已结束（{label}）");
+        });
+    }
+
+    /// 主动拉取并重放当前 gameflow 阶段（代际守卫会避免重复执行已触发过的副作用）
+    async fn replay_current_gameflow_phase(&self, client: &yuumi_core::lcu::client::LcuClient) {
         let Ok(serde_json::Value::String(phase)) =
             client.get("/lol-gameflow/v1/gameflow-phase").await
         else {
@@ -365,222 +467,253 @@ impl LiveLcuService {
         let mut active_info: Option<LcuConnectionInfo> = None;
 
         loop {
-            // 1. 探测 LCU 进程
             let detected = detect_lcu();
-
-            match (detected, &active_info) {
-                (Some(info), None) => {
-                    log::info!(
-                        "[LiveLcu] 检测到本地 LCU 进程: pid={}, port={}",
-                        info.pid,
-                        info.port
-                    );
-                    let _ = self.status.send(ConnectionStatus::Connecting);
-
-                    // 实例化 LcuClient
-                    if let Ok(client) = yuumi_core::lcu::client::LcuClient::new(
-                        info.pid,
-                        info.port,
-                        info.token.clone(),
-                        info.server.clone(),
-                    ) {
-                        // 优先从本地缓存秒级水合 GameDataAssets，再在后台同步 LCU 最新字典（不阻塞 WS 与 Agent 启动）
-                        self.hydrate_game_data_from_disk().await;
-                        let this_assets = self.clone();
-                        let client_assets = client.clone();
-                        tokio::spawn(async move {
-                            this_assets.sync_game_data_from_lcu(&client_assets).await;
-                        });
-
-                        // 同步活跃 LCU 客户端至 AssetCache，以便图片优先通过活跃客户端拉取
-                        self.asset_cache.set_lcu_client(Some(client.clone()));
-                        *self.client.write().await = Some(client.clone());
-
-                        // 获取当前召唤师
-                        log::info!("[LiveLcu] 正在获取当前登录召唤师信息...");
-                        let summoner = match fetch_current_summoner(&client).await {
-                            Ok(s) => {
-                                log::info!(
-                                    "[LiveLcu] 成功获取召唤师: {} (puuid: {})",
-                                    s.full_name(),
-                                    s.puuid
-                                );
-                                Some(s)
-                            }
-                            Err(e) => {
-                                log::warn!("[LiveLcu] 获取当前召唤师失败: {}", e);
-                                None
-                            }
-                        };
-                        let _ = self.status.send(ConnectionStatus::Connected {
-                            info: info.clone(),
-                            summoner: Box::new(summoner.clone()),
-                        });
-                        let _ = self.event_tx.send(LiveLcuEvent::ConnectionChanged(
-                            ConnectionStatus::Connected {
-                                info: info.clone(),
-                                summoner: Box::new(summoner.clone()),
-                            },
-                        ));
-
-                        // 异步并发拉取召唤师战绩、英雄熟练度与战利品
-                        let this_career = self.clone();
-                        tokio::spawn(async move {
-                            this_career.refresh_career_data().await;
-                        });
-
-                        // 「先开软件后开客户端」登录兜底：连接建立时客户端可能尚未登录完成
-                        // （召唤师为 None），且登录完成不一定触发 WS current-summoner 推送；
-                        // 每 2 秒探测一次，直到登录成功或客户端退出。
-                        if summoner.is_none() {
-                            let this_login = self.clone();
-                            let login_client = client.clone();
-                            tokio::spawn(async move {
-                                loop {
-                                    sleep(Duration::from_secs(2)).await;
-                                    // 客户端退出或已重建连接（端口/PID 变化）时停止，交给新一轮连接流程
-                                    let alive = match this_login.client.read().await.clone() {
-                                        None => false,
-                                        Some(current) => {
-                                            current.pid == login_client.pid
-                                                && current.port == login_client.port
-                                        }
-                                    };
-                                    if !alive {
-                                        log::info!("[LiveLcu] 客户端已断开，停止登录完成探测");
-                                        break;
-                                    }
-                                    let has_summoner = matches!(
-                                        &*this_login.status.borrow(),
-                                        ConnectionStatus::Connected { summoner, .. }
-                                            if summoner.is_some()
-                                    );
-                                    if has_summoner {
-                                        break;
-                                    }
-                                    if this_login.apply_current_summoner(&login_client).await {
-                                        log::info!("[LiveLcu] 登录完成探测成功，已获取当前召唤师");
-                                        break;
-                                    }
-                                }
-                            });
-                        }
-
-                        // 启动 Agent 后台 Worker（与本次连接同生命周期）
-                        let runtime = AgentRuntime::start(
-                            client.clone(),
-                            self.supervisor.clone(),
-                            self.lifecycle.clone(),
-                            self.auto_match_cfg.clone(),
-                            self.auto_bp_cfg.clone(),
-                        );
-                        let dispatcher = runtime.dispatcher();
-                        *self.agent_runtime.write().await = Some(runtime);
-
-                        // 获取初始游戏阶段并分发给 Agent、Lifecycle 与 UI
-                        let initial_phase =
-                            match client.get("/lol-gameflow/v1/gameflow-phase").await {
-                                Ok(serde_json::Value::String(p)) => p,
-                                _ => "None".to_string(),
-                            };
-                        log::info!("[LiveLcu] 获取到初始游戏阶段: {}", initial_phase);
-                        *self.current_phase.write().await = initial_phase.clone();
-                        let initial_game_phase = GamePhase::from(initial_phase.as_str());
-                        let _ = self.lifecycle.on_phase_changed(&initial_phase).await;
-                        dispatcher
-                            .dispatch_match(MatchAgentEvent::PhaseChanged(initial_phase.clone()));
-                        let _ = self
-                            .event_tx
-                            .send(LiveLcuEvent::GamePhaseChanged(initial_game_phase));
-
-                        // 处于选人阶段时，主动拉取一次会话以激活 BP Agent 与 UI
-                        if initial_phase == "ChampSelect" {
-                            if let Ok(val) = client.get("/lol-champ-select/v1/session").await {
-                                if let Ok(session) = serde_json::from_value::<
-                                    yuumi_core::agents::auto_bp::ChampSelectSession,
-                                >(val)
-                                {
-                                    dispatcher.dispatch_bp(
-                                        super::agent_runtime::BpAgentEvent::ChampSelect(Box::new(
-                                            session.clone(),
-                                        )),
-                                    );
-                                    let _ = self
-                                        .event_tx
-                                        .send(LiveLcuEvent::ChampSelectUpdated(session));
-                                }
-                            }
-                        } else if initial_phase == "ReadyCheck" {
-                            if let Ok(val) = client.get("/lol-matchmaking/v1/ready-check").await {
-                                if let Ok(ready) = serde_json::from_value::<
-                                    yuumi_core::agents::auto_match::ReadyCheckData,
-                                >(val)
-                                {
-                                    dispatcher.dispatch_match(
-                                        super::agent_runtime::MatchAgentEvent::ReadyCheck(ready),
-                                    );
-                                }
-                            }
-                        }
-
-                        // 重连后若正处于对局，补拉当前 10 人对局信息
-                        self.schedule_game_info_refresh(initial_phase, Duration::ZERO)
-                            .await;
-
-                        // 建立 WebSocket 连接
-                        let ws_handle = start_ws(info.port, info.token.clone());
-                        let mut ws_rx = ws_handle.subscribe_events();
-                        let this_clone = self.clone();
-
-                        tokio::spawn(async move {
-                            while let Ok(event) = ws_rx.recv().await {
-                                this_clone.handle_ws_event(event).await;
-                            }
-                            log::info!("[LiveLcu] WS 事件读取任务已结束");
-                        });
-
-                        *self.ws_handle.write().await = Some(ws_handle);
-                        active_info = Some(info);
-                    }
-                }
-                (None, Some(_)) => {
+            match classify_connection_transition(active_info.as_ref(), detected.as_ref()) {
+                ConnectionTransition::Keep => {}
+                ConnectionTransition::Disconnect => {
                     log::info!("[LiveLcu] LCU 进程已退出，重置连接状态");
-                    if let Some(ws) = self.ws_handle.write().await.take() {
-                        ws.cancel();
-                    }
+                    self.disconnect_active().await;
                     active_info = None;
-                    yuumi_core::lcu::sgp::clear_sgp_token_cache();
-                    self.asset_cache.set_lcu_client(None);
-                    *self.client.write().await = None;
-                    self.game_data_synced_from_lcu
-                        .store(false, std::sync::atomic::Ordering::SeqCst);
-                    *self.game_data_assets.write().await = None;
-                    self.supervisor.cancel_all().await;
-
-                    // 取消对局信息拉取任务并重置去重指纹
-                    if let Some(task) = self.game_info_task.write().await.take() {
-                        task.abort();
-                    }
-                    *self.last_game_info_key.write().await = String::new();
-                    *self.recent_matches.write().await = Vec::new();
-
-                    // 关闭 Agent Worker：先取出（释放锁）再带超时等待，避免跨 await 持锁
-                    let runtime = { self.agent_runtime.write().await.take() };
-                    if let Some(runtime) = runtime {
-                        runtime.shutdown().await;
-                    }
-
-                    let _ = self.lifecycle.on_phase_changed("None").await;
-                    let _ = self.status.send(ConnectionStatus::Disconnected);
-                    let _ = self.event_tx.send(LiveLcuEvent::ConnectionChanged(
-                        ConnectionStatus::Disconnected,
-                    ));
                 }
-                _ => {}
+                ConnectionTransition::Reconnect => {
+                    if let (Some(prev), Some(next)) = (active_info.as_ref(), detected.as_ref()) {
+                        log::info!(
+                            "[LiveLcu] 检测到 LCU 连接身份变化: pid {} -> {}, port {} -> {}，执行断开并重建",
+                            prev.pid,
+                            next.pid,
+                            prev.port,
+                            next.port
+                        );
+                    }
+                    self.disconnect_active().await;
+                    active_info = None;
+                    if let Some(info) = detected {
+                        active_info = self.connect_with_info(info).await;
+                    }
+                }
+                ConnectionTransition::Connect => {
+                    if let Some(info) = detected {
+                        active_info = self.connect_with_info(info).await;
+                    }
+                }
             }
 
             sleep(Duration::from_secs(2)).await;
         }
+    }
+
+    async fn connect_with_info(&self, info: LcuConnectionInfo) -> Option<LcuConnectionInfo> {
+        log::info!(
+            "[LiveLcu] 检测到本地 LCU 进程: pid={}, port={}",
+            info.pid,
+            info.port
+        );
+        let _ = self.status.send(ConnectionStatus::Connecting);
+
+        let Ok(client) = yuumi_core::lcu::client::LcuClient::new(
+            info.pid,
+            info.port,
+            info.token.clone(),
+            info.server.clone(),
+        ) else {
+            return None;
+        };
+
+        let conn_gen = self
+            .connection_gen
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            .wrapping_add(1);
+
+        // 优先从本地缓存秒级水合 GameDataAssets，再在后台同步 LCU 最新字典（不阻塞 WS 与 Agent 启动）
+        self.hydrate_game_data_from_disk().await;
+        let this_assets = self.clone();
+        let client_assets = client.clone();
+        tokio::spawn(async move {
+            this_assets.sync_game_data_from_lcu(&client_assets).await;
+        });
+
+        // 同步活跃 LCU 客户端至 AssetCache，以便图片优先通过活跃客户端拉取
+        self.asset_cache.set_lcu_client(Some(client.clone()));
+        *self.client.write().await = Some(client.clone());
+
+        // 获取当前召唤师
+        log::info!("[LiveLcu] 正在获取当前登录召唤师信息...");
+        let summoner = match fetch_current_summoner(&client).await {
+            Ok(s) => {
+                log::info!(
+                    "[LiveLcu] 成功获取召唤师: {} (puuid: {})",
+                    s.full_name(),
+                    s.puuid
+                );
+                Some(s)
+            }
+            Err(e) => {
+                log::warn!("[LiveLcu] 获取当前召唤师失败: {}", e);
+                None
+            }
+        };
+
+        // 如果在拉取召唤师期间连接已被替换，放弃本次连接初始化
+        if self.current_connection_gen() != conn_gen {
+            return None;
+        }
+
+        *self.active_owner_puuid.write().await = summoner.as_ref().map(|s| s.puuid.clone());
+
+        let _ = self.status.send(ConnectionStatus::Connected {
+            info: info.clone(),
+            summoner: Box::new(summoner.clone()),
+        });
+        let _ = self.event_tx.send(LiveLcuEvent::ConnectionChanged(
+            ConnectionStatus::Connected {
+                info: info.clone(),
+                summoner: Box::new(summoner.clone()),
+            },
+        ));
+
+        // 异步并发拉取召唤师战绩、英雄熟练度与战利品
+        let this_career = self.clone();
+        tokio::spawn(async move {
+            this_career.refresh_career_data().await;
+        });
+
+        // 「先开软件后开客户端」登录兜底：连接建立时客户端可能尚未登录完成
+        if summoner.is_none() {
+            let this_login = self.clone();
+            let login_client = client.clone();
+            tokio::spawn(async move {
+                loop {
+                    sleep(Duration::from_secs(2)).await;
+                    if this_login.current_connection_gen() != conn_gen {
+                        break;
+                    }
+                    let alive = match this_login.client.read().await.clone() {
+                        None => false,
+                        Some(current) => {
+                            current.pid == login_client.pid && current.port == login_client.port
+                        }
+                    };
+                    if !alive {
+                        log::info!("[LiveLcu] 客户端已断开，停止登录完成探测");
+                        break;
+                    }
+                    let has_summoner = matches!(
+                        &*this_login.status.borrow(),
+                        ConnectionStatus::Connected { summoner, .. }
+                            if summoner.is_some()
+                    );
+                    if has_summoner {
+                        break;
+                    }
+                    if this_login.apply_current_summoner(&login_client).await {
+                        log::info!("[LiveLcu] 登录完成探测成功，已获取当前召唤师");
+                        break;
+                    }
+                }
+            });
+        }
+
+        // 启动 Agent 后台 Worker（与本次连接同生命周期）
+        let runtime = AgentRuntime::start(
+            client.clone(),
+            self.supervisor.clone(),
+            self.lifecycle.clone(),
+            self.auto_match_cfg.clone(),
+            self.auto_bp_cfg.clone(),
+        );
+        let dispatcher = runtime.dispatcher();
+        *self.agent_runtime.write().await = Some(runtime);
+
+        // 获取初始游戏阶段并分发给 Agent、Lifecycle 与 UI
+        let initial_phase = match client.get("/lol-gameflow/v1/gameflow-phase").await {
+            Ok(serde_json::Value::String(p)) => p,
+            _ => "None".to_string(),
+        };
+        log::info!("[LiveLcu] 获取到初始游戏阶段: {}", initial_phase);
+        *self.current_phase.write().await = initial_phase.clone();
+        let initial_game_phase = GamePhase::from(initial_phase.as_str());
+        let _ = self.lifecycle.on_phase_changed(&initial_phase).await;
+        dispatcher.dispatch_match(MatchAgentEvent::PhaseChanged(initial_phase.clone()));
+        let _ = self
+            .event_tx
+            .send(LiveLcuEvent::GamePhaseChanged(initial_game_phase));
+
+        // 处于选人阶段时，主动拉取一次会话以激活 BP Agent 与 UI
+        if initial_phase == "ChampSelect" {
+            if let Ok(val) = client.get("/lol-champ-select/v1/session").await {
+                if let Ok(session) =
+                    serde_json::from_value::<yuumi_core::agents::auto_bp::ChampSelectSession>(val)
+                {
+                    dispatcher.dispatch_bp(super::agent_runtime::BpAgentEvent::ChampSelect(
+                        Box::new(session.clone()),
+                    ));
+                    let _ = self
+                        .event_tx
+                        .send(LiveLcuEvent::ChampSelectUpdated(session));
+                }
+            }
+        } else if initial_phase == "ReadyCheck" {
+            if let Ok(val) = client.get("/lol-matchmaking/v1/ready-check").await {
+                if let Ok(ready) =
+                    serde_json::from_value::<yuumi_core::agents::auto_match::ReadyCheckData>(val)
+                {
+                    dispatcher
+                        .dispatch_match(super::agent_runtime::MatchAgentEvent::ReadyCheck(ready));
+                }
+            }
+        }
+
+        // 重连后若正处于对局，补拉当前 10 人对局信息
+        self.schedule_game_info_refresh(initial_phase, Duration::ZERO)
+            .await;
+
+        // 建立 WebSocket 连接
+        let ws_handle = start_ws(info.port, info.token.clone());
+        let ws_rx = ws_handle.subscribe_events();
+        self.spawn_ws_consumer(ws_rx, conn_gen, "主连接");
+
+        *self.ws_handle.write().await = Some(ws_handle);
+        Some(info)
+    }
+
+    async fn disconnect_active(&self) {
+        self.connection_gen
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        *self.active_owner_puuid.write().await = None;
+
+        if let Some(ws) = self.ws_handle.write().await.take() {
+            ws.cancel();
+        }
+        yuumi_core::lcu::sgp::clear_sgp_token_cache();
+        self.asset_cache.set_lcu_client(None);
+        *self.client.write().await = None;
+        self.game_data_synced_from_lcu
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        *self.game_data_assets.write().await = None;
+        self.supervisor.cancel_all().await;
+
+        // 取消对局信息拉取与生涯刷新任务并重置去重指纹
+        if let Some(task) = self.game_info_task.write().await.take() {
+            task.abort();
+        }
+        if let Some(task) = self.career_refresh_task.write().await.take() {
+            task.abort();
+        }
+        *self.last_game_info_key.write().await = String::new();
+        *self.recent_matches.write().await = Vec::new();
+        *self.current_phase.write().await = "None".to_string();
+
+        // 关闭 Agent Worker：先取出（释放锁）再带超时等待，避免跨 await 持锁
+        let runtime = { self.agent_runtime.write().await.take() };
+        if let Some(runtime) = runtime {
+            runtime.shutdown().await;
+        }
+
+        let _ = self.lifecycle.on_phase_changed("None").await;
+        let _ = self.status.send(ConnectionStatus::Disconnected);
+        let _ = self.event_tx.send(LiveLcuEvent::ConnectionChanged(
+            ConnectionStatus::Disconnected,
+        ));
     }
 
     /// 将 WS 事件分发给后台 Agent Worker，并向 UI 广播领域事件
@@ -808,6 +941,7 @@ impl LiveLcuService {
                 if matches!(&**summoner, Some(prev) if prev.puuid == s.puuid)
         );
         if let ConnectionStatus::Connected { info, .. } = current_status {
+            *self.active_owner_puuid.write().await = Some(s.puuid.clone());
             let new_status = ConnectionStatus::Connected {
                 info,
                 summoner: Box::new(Some(s)),
@@ -837,6 +971,7 @@ impl LiveLcuService {
 
     /// 刷新当前登录召唤师的生涯数据，指定拉取的战绩场数上限（1..=100）
     pub async fn refresh_career_data_with_limit(&self, limit: usize) {
+        let expected_gen = self.current_connection_gen();
         let client_opt = self.client.read().await.clone();
         let Some(client) = client_opt else {
             log::warn!("[LiveLcu] 无法刷新生涯数据: LCU client 未连接");
@@ -851,9 +986,20 @@ impl LiveLcuService {
                 return;
             }
         };
+        if self.current_connection_gen() != expected_gen {
+            log::info!("[LiveLcu] 连接代际已变化，放弃过期生涯刷新");
+            return;
+        }
+        *self.active_owner_puuid.write().await = Some(summoner.puuid.clone());
 
         // 2. 获取 GameDataAssets（若未就绪或残缺则优先拉取/等待完整字典）
         let assets = self.ensure_game_data_assets(&client).await;
+        if !self
+            .is_account_scope_valid(expected_gen, &summoner.puuid)
+            .await
+        {
+            return;
+        }
 
         log::info!(
             "[LiveLcu] 开始并发拉取召唤师 [{}] 的生涯对局历史 (限 {} 场)、熟练度与战利品...",
@@ -881,6 +1027,12 @@ impl LiveLcuService {
             .await
             {
                 Ok(mut matches) => {
+                    if !this_matches
+                        .is_account_scope_valid(expected_gen, &puuid_clone)
+                        .await
+                    {
+                        return;
+                    }
                     matches.truncate(fetch_limit);
                     log::info!("[LiveLcu] 成功拉取当前召唤师战绩: count={}", matches.len());
                     // 同步缓存本人近期战绩，供宿命对局判定复用
@@ -894,14 +1046,22 @@ impl LiveLcuService {
                     // 异步聚合近 20 场同队队友数据
                     let c_tm = c_matches.clone();
                     let puuid_tm = puuid_clone.clone();
-                    let tx_tm = this_matches.event_tx.clone();
+                    let this_tm = this_matches.clone();
                     tokio::spawn(async move {
                         let tagged_map = std::collections::HashMap::new();
                         match fetch_recent_teammates(&c_tm, &game_ids, &puuid_tm, &tagged_map).await
                         {
                             Ok(teammates) => {
+                                if !this_tm
+                                    .is_account_scope_valid(expected_gen, &puuid_tm)
+                                    .await
+                                {
+                                    return;
+                                }
                                 log::info!("[LiveLcu] 成功聚合最近队友: count={}", teammates.len());
-                                let _ = tx_tm.send(LiveLcuEvent::RecentTeammatesLoaded(teammates));
+                                let _ = this_tm
+                                    .event_tx
+                                    .send(LiveLcuEvent::RecentTeammatesLoaded(teammates));
                             }
                             Err(e) => {
                                 log::warn!("[LiveLcu] 聚合最近队友失败: {}", e);
@@ -917,26 +1077,50 @@ impl LiveLcuService {
 
         // 并发拉取英雄熟练度
         let c_mastery = client.clone();
-        let event_tx_mastery = self.event_tx.clone();
+        let this_mastery = self.clone();
+        let puuid_mastery = summoner.puuid.clone();
         let mastery_task = tokio::spawn(async move {
             match yuumi_core::parsers::mastery::fetch_champion_mastery_list(&c_mastery).await {
                 Ok(masteries) => {
+                    if !this_mastery
+                        .is_account_scope_valid(expected_gen, &puuid_mastery)
+                        .await
+                    {
+                        return;
+                    }
                     log::info!("[LiveLcu] 成功拉取英雄熟练度: count={}", masteries.len());
-                    let _ = event_tx_mastery.send(LiveLcuEvent::ChampionMasteryLoaded(masteries));
+                    let _ = this_mastery
+                        .event_tx
+                        .send(LiveLcuEvent::ChampionMasteryLoaded(masteries));
                 }
                 Err(e) => {
+                    if !this_mastery
+                        .is_account_scope_valid(expected_gen, &puuid_mastery)
+                        .await
+                    {
+                        return;
+                    }
                     log::warn!("[LiveLcu] 拉取英雄熟练度失败: {}", e);
-                    let _ = event_tx_mastery.send(LiveLcuEvent::MasteryLoadFailed(e));
+                    let _ = this_mastery
+                        .event_tx
+                        .send(LiveLcuEvent::MasteryLoadFailed(e));
                 }
             }
         });
 
         // 并发拉取战利品与精粹
         let c_loot = client.clone();
-        let event_tx_loot = self.event_tx.clone();
+        let this_loot = self.clone();
+        let puuid_loot = summoner.puuid.clone();
         let loot_task = tokio::spawn(async move {
             match yuumi_core::parsers::loot::fetch_loot_summary(&c_loot).await {
                 Ok((balances, items)) => {
+                    if !this_loot
+                        .is_account_scope_valid(expected_gen, &puuid_loot)
+                        .await
+                    {
+                        return;
+                    }
                     log::info!(
                         "[LiveLcu] 成功拉取战利品: 蓝精粹={}, 橙精粹={}, 神话精粹={}, 物品数={}",
                         balances.blue_essence,
@@ -944,7 +1128,9 @@ impl LiveLcuService {
                         balances.mythic_essence,
                         items.len()
                     );
-                    let _ = event_tx_loot.send(LiveLcuEvent::LootSummaryLoaded(balances, items));
+                    let _ = this_loot
+                        .event_tx
+                        .send(LiveLcuEvent::LootSummaryLoaded(balances, items));
                 }
                 Err(e) => {
                     log::warn!("[LiveLcu] 拉取战利品库存失败: {}", e);
@@ -955,15 +1141,23 @@ impl LiveLcuService {
         // 并发拉取排位数据（单排 / 灵活）
         let c_ranked = client.clone();
         let puuid_ranked = summoner.puuid.clone();
-        let event_tx_ranked = self.event_tx.clone();
+        let this_ranked = self.clone();
         let ranked_task = tokio::spawn(async move {
             match fetch_ranked_stats(&c_ranked, &puuid_ranked).await {
                 Ok(stats) => {
+                    if !this_ranked
+                        .is_account_scope_valid(expected_gen, &puuid_ranked)
+                        .await
+                    {
+                        return;
+                    }
                     log::info!(
                         "[LiveLcu] 成功拉取排位数据: 队列数={}",
                         stats.queue_map.len()
                     );
-                    let _ = event_tx_ranked.send(LiveLcuEvent::RankedStatsLoaded(stats));
+                    let _ = this_ranked
+                        .event_tx
+                        .send(LiveLcuEvent::RankedStatsLoaded(stats));
                 }
                 Err(e) => {
                     log::warn!("[LiveLcu] 拉取排位数据失败: {}", e);
@@ -973,12 +1167,21 @@ impl LiveLcuService {
 
         // 并发拉取可开启战利品（需要逐个查询配方，独立于库存拉取）
         let c_openable = client.clone();
-        let event_tx_openable = self.event_tx.clone();
+        let this_openable = self.clone();
+        let puuid_openable = summoner.puuid.clone();
         let openable_task = tokio::spawn(async move {
             match loot_actions::fetch_openable_loots(&c_openable).await {
                 Ok(openables) => {
+                    if !this_openable
+                        .is_account_scope_valid(expected_gen, &puuid_openable)
+                        .await
+                    {
+                        return;
+                    }
                     log::info!("[LiveLcu] 成功拉取可开启战利品: count={}", openables.len());
-                    let _ = event_tx_openable.send(LiveLcuEvent::OpenableLootLoaded(openables));
+                    let _ = this_openable
+                        .event_tx
+                        .send(LiveLcuEvent::OpenableLootLoaded(openables));
                 }
                 Err(e) => {
                     log::warn!("[LiveLcu] 拉取可开启战利品失败: {}", e);
@@ -1745,5 +1948,105 @@ mod tests {
         let reconnected_bp_cfg = service.auto_bp_cfg.borrow().clone();
         assert!(!reconnected_match_cfg.auto_accept);
         assert!(!reconnected_bp_cfg.auto_ban);
+    }
+
+    #[test]
+    fn connection_transition_handles_direct_identity_switch_and_disconnect() {
+        let info_a = LcuConnectionInfo {
+            pid: 1001,
+            port: 50001,
+            token: "tok_a".into(),
+            server: None,
+        };
+        let info_b = LcuConnectionInfo {
+            pid: 1002,
+            port: 50002,
+            token: "tok_b".into(),
+            server: None,
+        };
+
+        // None -> A -> B -> B（不经过 None）
+        assert_eq!(
+            classify_connection_transition(None, None),
+            ConnectionTransition::Keep
+        );
+        assert_eq!(
+            classify_connection_transition(None, Some(&info_a)),
+            ConnectionTransition::Connect
+        );
+        assert_eq!(
+            classify_connection_transition(Some(&info_a), Some(&info_b)),
+            ConnectionTransition::Reconnect
+        );
+        assert_eq!(
+            classify_connection_transition(Some(&info_b), Some(&info_b)),
+            ConnectionTransition::Keep
+        );
+
+        // A -> None -> B
+        assert_eq!(
+            classify_connection_transition(Some(&info_a), None),
+            ConnectionTransition::Disconnect
+        );
+        assert_eq!(
+            classify_connection_transition(None, Some(&info_b)),
+            ConnectionTransition::Connect
+        );
+    }
+
+    #[tokio::test]
+    async fn ws_consumer_survives_broadcast_lag_and_keeps_processing() {
+        let asset_cache = Arc::new(AssetCache::new(None));
+        let service = LiveLcuService::new(asset_cache);
+        let (tx, rx) = broadcast::channel::<LcuWsEvent>(4);
+
+        let expected_gen = service.current_connection_gen();
+        service.spawn_ws_consumer(rx, expected_gen, "lag_test");
+
+        // 发送超过通道容量 4 的事件，制造 RecvError::Lagged，同时最后一个事件是游戏阶段更新
+        for i in 0..20 {
+            let phase = if i == 19 { "Lobby" } else { "None" };
+            let _ = tx.send(LcuWsEvent {
+                uri: "/lol-gameflow/v1/gameflow-phase".to_string(),
+                event_type: "Update".to_string(),
+                data: serde_json::Value::String(phase.to_string()),
+            });
+        }
+
+        // 等待消费循环处理完积压并恢复到最新事件
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert_eq!(service.get_current_phase().await, "Lobby");
+
+        // 确认消费者仍然存活并能继续处理后续事件
+        let _ = tx.send(LcuWsEvent {
+            uri: "/lol-gameflow/v1/gameflow-phase".to_string(),
+            event_type: "Update".to_string(),
+            data: serde_json::Value::String("Matchmaking".to_string()),
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(service.get_current_phase().await, "Matchmaking");
+    }
+
+    #[tokio::test]
+    async fn account_scope_validation_blocks_stale_generation_and_other_puuid() {
+        let asset_cache = Arc::new(AssetCache::new(None));
+        let service = LiveLcuService::new(asset_cache);
+
+        let gen1 = service
+            .connection_gen
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            .wrapping_add(1);
+        *service.active_owner_puuid.write().await = Some("puuid-a".into());
+
+        assert!(service.is_account_scope_valid(gen1, "puuid-a").await);
+        assert!(!service.is_account_scope_valid(gen1, "puuid-b").await);
+
+        // 推进连接代际（模拟断连/重建）后，旧代际即使同 PUUID 也失效
+        let gen2 = service
+            .connection_gen
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            .wrapping_add(1);
+        assert!(!service.is_account_scope_valid(gen1, "puuid-a").await);
+        assert!(service.is_account_scope_valid(gen2, "puuid-a").await);
     }
 }

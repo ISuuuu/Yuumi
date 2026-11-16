@@ -15,16 +15,43 @@ impl MainWindow {
                             .map(|o| o.puuid != s.puuid)
                             .unwrap_or(false);
                         if is_new_account {
-                            // 换号清理上一账号的对局信息、段位与路人集状态
+                            // 换号清理上一账号的对局信息、段位、生涯缓存、TFT 与路人集状态
                             self.game_info = None;
                             self.own_ranked = None;
-                            self.career_view.ranked = None;
+                            self.own_matches.clear();
+                            self.own_stats = CareerHeaderStats::compute(&[]);
+                            if !self.career_view.is_viewing_other {
+                                self.matches.clear();
+                                self.stats = CareerHeaderStats::compute(&[]);
+                                self.career_view.ranked = None;
+                                self.career_view.recent_teammates.clear();
+                                self.career_view.recent_teammates_for = None;
+                                self.career_view.recent_teammates_loading = false;
+                            } else {
+                                self.career_view.ranked = None;
+                            }
+                            self.career_view.mastery_list.clear();
+                            self.career_view.loot_items.clear();
+                            self.career_view.loot_openables.clear();
+
+                            // 清空云顶之弈账号缓存并使在途请求失效（公共阵容与海克斯字典保留）
+                            self.tft_view.summary = None;
+                            self.tft_view.ranked = None;
+                            self.tft_view.error.clear();
+                            self.tft_view.loading = false;
+                            self.tft_view.detail_game_id = None;
+                            self.tft_view.career_request_gen =
+                                self.tft_view.career_request_gen.wrapping_add(1);
+
                             self.saved_players_view.players.clear();
                             self.saved_players_view.total_count = 0;
                             self.saved_players_view.expanded_puuid = None;
                             self.saved_players_view.expanded_games.clear();
                         }
                         self.own_summoner = Some(s.clone());
+                        if is_new_account && self.current_route == Route::Tft {
+                            self.ensure_tft_data(cx);
+                        }
                         self.cloud_tasks
                             .upload_matches(s.puuid.clone(), Vec::new(), false);
                         if !self.career_view.is_viewing_other {
@@ -919,15 +946,20 @@ impl MainWindow {
 
     /// 将全局配置同步进磁盘、Agent 运行时与悬浮窗（带保存成功 Toast 反馈）
     pub(super) fn persist_config(&mut self, cx: &mut Context<Self>) {
-        self.persist_config_with_toast(true, cx);
+        self.persist_config_impl(true, false, cx);
     }
 
     /// 静默同步全局配置（已有专用 Toast 反馈的场景使用，避免双重提示）
     pub(super) fn persist_config_silent(&mut self, cx: &mut Context<Self>) {
-        self.persist_config_with_toast(false, cx);
+        self.persist_config_impl(false, false, cx);
     }
 
-    fn persist_config_with_toast(&mut self, show_toast: bool, cx: &mut Context<Self>) {
+    /// 合并连续高频调整（如取色器拖拽）：UI 立即预览，写盘防抖后台执行
+    pub(super) fn persist_config_debounced(&mut self, cx: &mut Context<Self>) {
+        self.persist_config_impl(false, true, cx);
+    }
+
+    fn persist_config_impl(&mut self, show_toast: bool, debounce: bool, cx: &mut Context<Self>) {
         self.automation = self.app_config.to_automation_settings();
         self.search_view.has_upload_api_url =
             !self.app_config.general.upload_api_url.trim().is_empty();
@@ -942,25 +974,66 @@ impl MainWindow {
         self.live_service
             .update_auto_bp_cfg(self.automation.auto_bp.clone());
 
-        if let Some(tray) = self.tray.as_mut() {
-            let _ = tray.update_menu(self.app_config.functions.hide_tft);
-        }
-
-        if let Err(e) = self.app_config.save() {
-            log::warn!("[Config] 全局配置持久化失败: {}", e);
-            // 对照 Vue B18/B20/B21：用户触发的自动保存失败要以 Toast 呈现
-            self.toast(
-                ToastKind::Error,
-                crate::i18n::t("settings.saveFailedDetail").replace("{error}", &e),
-                cx,
-            );
-        } else if show_toast {
-            self.toast(ToastKind::Success, crate::i18n::t("settings.autoSave"), cx);
+        let hide_tft = self.app_config.functions.hide_tft;
+        if self.last_tray_hide_tft != Some(hide_tft) {
+            self.last_tray_hide_tft = Some(hide_tft);
+            if let Some(tray) = self.tray.as_mut() {
+                let _ = tray.update_menu(hide_tft);
+            }
         }
 
         // 悬浮窗开关变更需立即生效
         self.sync_bench_overlay(cx);
         cx.notify();
+
+        self.config_save_gen = self.config_save_gen.wrapping_add(1);
+        let save_gen = self.config_save_gen;
+        let cfg_snapshot = self.app_config.clone();
+
+        cx.spawn(async move |entity, cx| {
+            if debounce {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(250))
+                    .await;
+                let still_latest = entity
+                    .update(cx, |this, _| this.config_save_gen == save_gen)
+                    .unwrap_or(false);
+                if !still_latest {
+                    return;
+                }
+            }
+
+            let save_res = if let Some(handle) = yuumi_core::runtime::tokio_handle() {
+                handle
+                    .spawn_blocking(move || cfg_snapshot.save())
+                    .await
+                    .unwrap_or_else(|e| Err(format!("配置保存任务异常: {}", e)))
+            } else {
+                cfg_snapshot.save()
+            };
+
+            let _ = entity.update(cx, |this, cx| {
+                if this.config_save_gen != save_gen {
+                    return;
+                }
+                match save_res {
+                    Ok(()) => {
+                        if show_toast {
+                            this.toast(ToastKind::Success, crate::i18n::t("settings.autoSave"), cx);
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("[Config] 全局配置持久化失败: {}", e);
+                        this.toast(
+                            ToastKind::Error,
+                            crate::i18n::t("settings.saveFailedDetail").replace("{error}", &e),
+                            cx,
+                        );
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     /// 进入对局后预缓存本局 10 人身份（对齐 Vue 版 `spawn_cache_current_game`）。

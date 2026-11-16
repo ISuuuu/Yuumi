@@ -587,6 +587,8 @@ pub struct CareerView {
     pub active_tab: CareerTab,
     pub summoner: Option<SummonerInfo>,
     pub is_viewing_other: bool,
+    /// 查看他人生涯请求的代际序号，防止快速切换时旧结果覆盖新页面
+    pub other_request_gen: u64,
     pub copied: bool,
     pub ranked: Option<RankedStats>,
     pub mastery_list: Vec<ChampionMasteryItem>,
@@ -629,6 +631,7 @@ impl Default for CareerView {
             active_tab: CareerTab::Matches,
             summoner: None,
             is_viewing_other: false,
+            other_request_gen: 0,
             copied: false,
             ranked: None,
             mastery_list: Vec::new(),

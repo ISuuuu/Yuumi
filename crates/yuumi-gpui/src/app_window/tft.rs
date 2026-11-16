@@ -137,11 +137,15 @@ impl MainWindow {
         let known_version = self.tft_view.client_version.clone();
         let proxy = self.tft_proxy();
 
+        self.tft_view.career_request_gen = self.tft_view.career_request_gen.wrapping_add(1);
+        let req_gen = self.tft_view.career_request_gen;
+        let conn_gen = service.current_connection_gen();
         self.tft_view.loading = true;
         self.tft_view.error.clear();
         cx.notify();
 
         cx.spawn(async move |this, cx| {
+            let service_for_check = service.clone();
             let result = async move {
                 let client = service
                     .get_client()
@@ -165,14 +169,26 @@ impl MainWindow {
                 } else {
                     known_version
                 };
-                Ok::<_, String>((ranked, summary, version))
+                Ok::<_, String>((puuid, ranked, summary, version))
             }
             .await;
 
             let _ = this.update(cx, |view, cx| {
+                if view.tft_view.career_request_gen != req_gen
+                    || service_for_check.current_connection_gen() != conn_gen
+                {
+                    return;
+                }
+                if let Ok((ref result_puuid, ..)) = result {
+                    if let Some(current_owner) = view.own_summoner.as_ref() {
+                        if current_owner.puuid != *result_puuid {
+                            return;
+                        }
+                    }
+                }
                 view.tft_view.loading = false;
                 match result {
-                    Ok((ranked, summary, version)) => {
+                    Ok((_, ranked, summary, version)) => {
                         view.tft_view.error.clear();
                         view.tft_view.ranked = Some(ranked);
                         if !version.is_empty() {

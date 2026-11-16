@@ -5,7 +5,11 @@
 
 use crate::agents::config::AutomationSettings;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
+
+static CONFIG_SAVE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 pub const CONFIG_VERSION: u32 = 3;
 pub const WEGAME_MARKER: &str = "WeGame";
@@ -300,54 +304,51 @@ impl AppConfig {
         crate::runtime::app_data_dir().join("config.json")
     }
 
-    /// 从指定路径加载配置；文件缺失或损坏时平滑回退默认配置
-    pub fn load_from_path(path: &Path) -> Self {
+    /// 将配置从旧版本逐级迁移到 [`CONFIG_VERSION`]（每步幂等），返回是否发生版本升级。
+    pub fn migrate(&mut self) -> bool {
+        if self.version >= CONFIG_VERSION {
+            return false;
+        }
+        let old = self.version;
+        while self.version < CONFIG_VERSION {
+            match self.version {
+                // v1 → v2：HTTP 代理字段重命名已由 serde alias 在解析时兼容，仅推进版本号
+                1 => {}
+                // v2 → v3：旧版本 LogLevel=0 实际映射到 Info，迁移为 1 以保持既有观测语义
+                2 => {
+                    if self.general.log_level == 0 {
+                        self.general.log_level = 1;
+                    }
+                }
+                _ => {
+                    log::warn!("[Config] 未知配置版本 {}，直接升级到当前版本", self.version);
+                }
+            }
+            self.version += 1;
+        }
+        log::info!("[Config] 配置版本 {} → {}，已应用迁移", old, CONFIG_VERSION);
+        true
+    }
+
+    /// 从指定路径加载配置并返回异常信息；文件不存在视为首次启动，返回 `None`。
+    /// 读取或解析失败时保留原文件不被静默覆盖，回退默认配置并携带原因。
+    pub fn load_with_error_from_path(path: &Path) -> (Self, Option<String>) {
         if !path.exists() {
             log::info!("[Config] 配置文件不存在: {}，使用默认配置", path.display());
-            return Self::default();
+            return (Self::default(), None);
         }
 
         match std::fs::read_to_string(path) {
             Ok(content) => match serde_json::from_str::<Self>(&content) {
-                Ok(cfg) => {
+                Ok(mut cfg) => {
                     log::info!("[Config] 成功从 {} 加载配置", path.display());
-                    cfg
+                    if cfg.migrate() {
+                        if let Err(e) = cfg.save_to_path(path) {
+                            log::warn!("[Config] 迁移后落盘失败({}): {}", path.display(), e);
+                        }
+                    }
+                    (cfg, None)
                 }
-                Err(e) => {
-                    log::warn!(
-                        "[Config] 配置文件解析失败({}), 回退默认配置: {}",
-                        path.display(),
-                        e
-                    );
-                    Self::default()
-                }
-            },
-            Err(e) => {
-                log::warn!(
-                    "[Config] 读取配置文件失败({}), 回退默认配置: {}",
-                    path.display(),
-                    e
-                );
-                Self::default()
-            }
-        }
-    }
-
-    /// 从默认路径加载全局配置
-    pub fn load() -> Self {
-        Self::load_from_path(&Self::default_path())
-    }
-
-    /// 从默认路径加载全局配置并返回异常信息（供 UI 首帧提示，对照 Vue A01）。
-    /// 文件不存在视为首次启动，返回 `None`；读取或解析失败回退默认配置并携带原因。
-    pub fn load_with_error() -> (Self, Option<String>) {
-        let path = Self::default_path();
-        if !path.exists() {
-            return (Self::default(), None);
-        }
-        match std::fs::read_to_string(&path) {
-            Ok(content) => match serde_json::from_str::<Self>(&content) {
-                Ok(cfg) => (cfg, None),
                 Err(e) => {
                     log::warn!(
                         "[Config] 配置文件解析失败({}), 回退默认配置: {}",
@@ -368,15 +369,66 @@ impl AppConfig {
         }
     }
 
-    /// 写入指定路径（自动创建目录）
+    /// 从指定路径加载配置；文件缺失或损坏时平滑回退默认配置
+    pub fn load_from_path(path: &Path) -> Self {
+        Self::load_with_error_from_path(path).0
+    }
+
+    /// 从默认路径加载全局配置
+    pub fn load() -> Self {
+        Self::load_from_path(&Self::default_path())
+    }
+
+    /// 从默认路径加载全局配置并返回异常信息（供 UI 首帧提示，对照 Vue A01）。
+    pub fn load_with_error() -> (Self, Option<String>) {
+        Self::load_with_error_from_path(&Self::default_path())
+    }
+
+    /// 写入指定路径（自动创建目录、串行化写盘、同目录临时文件 + 备份 + 替换）
     pub fn save_to_path(&self, path: &Path) -> Result<(), String> {
+        let _guard = CONFIG_SAVE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("创建配置目录失败 {}: {}", parent.display(), e))?;
         }
+
         let raw =
             serde_json::to_string_pretty(self).map_err(|e| format!("序列化配置失败: {}", e))?;
-        std::fs::write(path, raw).map_err(|e| format!("写入配置文件失败 {}: {}", path.display(), e))
+
+        let tmp_path = path.with_extension("json.tmp");
+        let bak_path = path.with_extension("json.bak");
+
+        let write_res = (|| -> std::io::Result<()> {
+            let mut file = std::fs::File::create(&tmp_path)?;
+            file.write_all(raw.as_bytes())?;
+            file.sync_all()?;
+            Ok(())
+        })();
+
+        if let Err(e) = write_res {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!(
+                "写入配置临时文件失败 {}: {}",
+                tmp_path.display(),
+                e
+            ));
+        }
+
+        if path.is_file() {
+            if let Err(e) = std::fs::copy(path, &bak_path) {
+                log::warn!("[Config] 创建配置备份失败 {}: {}", bak_path.display(), e);
+            }
+        }
+
+        if let Err(e) = std::fs::rename(&tmp_path, path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!("替换配置文件失败 {}: {}", path.display(), e));
+        }
+
+        Ok(())
     }
 
     /// 保存配置到默认路径
@@ -507,5 +559,140 @@ mod tests {
         restored.sync_automation_settings(&settings);
         assert_eq!(restored.functions.auto_play_again_delay, 9);
         assert!(restored.functions.auto_trade);
+    }
+
+    fn temp_test_dir(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "yuumi_cfg_test_{}_{}_{}",
+            name,
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn migrate_v1_and_v2_log_level_zero_becomes_info() {
+        for old_ver in [1u32, 2] {
+            let mut cfg = AppConfig {
+                version: old_ver,
+                general: GeneralConfig {
+                    log_level: 0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            assert!(cfg.migrate());
+            assert_eq!(cfg.version, CONFIG_VERSION);
+            assert_eq!(cfg.general.log_level, 1);
+        }
+    }
+
+    #[test]
+    fn migrate_v2_preserves_explicit_log_levels() {
+        for level in [1u32, 2] {
+            let mut cfg = AppConfig {
+                version: 2,
+                general: GeneralConfig {
+                    log_level: level,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            assert!(cfg.migrate());
+            assert_eq!(cfg.version, CONFIG_VERSION);
+            assert_eq!(cfg.general.log_level, level);
+        }
+    }
+
+    #[test]
+    fn migrate_is_idempotent_on_current_version() {
+        let mut cfg = AppConfig::default();
+        assert_eq!(cfg.version, CONFIG_VERSION);
+        assert!(!cfg.migrate());
+    }
+
+    #[test]
+    fn load_from_path_migrates_v1_v2_and_preserves_unknown_fields() {
+        let dir = temp_test_dir("migrate_disk");
+        let path = dir.join("config.json");
+        let legacy_json = r#"{
+            "Version": 1,
+            "General": {
+                "LogLevel": 0,
+                "EnableGithubProxy": true,
+                "GithubProxyAddr": "127.0.0.1:8888"
+            },
+            "FutureCustomField": "keep_me"
+        }"#;
+        std::fs::write(&path, legacy_json).unwrap();
+
+        let (cfg, err) = AppConfig::load_with_error_from_path(&path);
+        assert!(err.is_none());
+        assert_eq!(cfg.version, CONFIG_VERSION);
+        assert_eq!(cfg.general.log_level, 1);
+        assert!(cfg.general.enable_http_proxy);
+        assert_eq!(cfg.general.http_proxy_addr, "127.0.0.1:8888");
+        assert_eq!(
+            cfg.other.get("FutureCustomField").and_then(|v| v.as_str()),
+            Some("keep_me")
+        );
+
+        let persisted = std::fs::read_to_string(&path).unwrap();
+        let persisted_val: serde_json::Value = serde_json::from_str(&persisted).unwrap();
+        assert_eq!(persisted_val["Version"], CONFIG_VERSION);
+        assert_eq!(persisted_val["General"]["LogLevel"], 1);
+        assert_eq!(persisted_val["FutureCustomField"], "keep_me");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_with_error_preserves_corrupted_file_without_overwriting() {
+        let dir = temp_test_dir("corrupt");
+        let path = dir.join("config.json");
+        let bad_content = "{ broken json";
+        std::fs::write(&path, bad_content).unwrap();
+
+        let (cfg, err) = AppConfig::load_with_error_from_path(&path);
+        assert!(err.is_some());
+        assert_eq!(cfg.version, CONFIG_VERSION);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), bad_content);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_to_path_creates_backup_and_cleans_tmp_on_replace_failure() {
+        let dir = temp_test_dir("atomic_save");
+        let path = dir.join("config.json");
+
+        let mut cfg1 = AppConfig::default();
+        cfg1.general.http_proxy_addr = "127.0.0.1:1111".into();
+        cfg1.save_to_path(&path).unwrap();
+
+        let mut cfg2 = AppConfig::default();
+        cfg2.general.http_proxy_addr = "127.0.0.1:2222".into();
+        cfg2.save_to_path(&path).unwrap();
+
+        let bak_path = path.with_extension("json.bak");
+        assert!(bak_path.is_file());
+        let bak_cfg = AppConfig::load_from_path(&bak_path);
+        assert_eq!(bak_cfg.general.http_proxy_addr, "127.0.0.1:1111");
+        assert!(!path.with_extension("json.tmp").exists());
+
+        // 模拟目标路径本身是目录导致 rename 失败，验证不会残留 .tmp
+        let dir_target = dir.join("dir_as_config.json");
+        std::fs::create_dir_all(&dir_target).unwrap();
+        let err = cfg2.save_to_path(&dir_target).unwrap_err();
+        assert!(err.contains("替换配置文件失败"));
+        assert!(!dir_target.with_extension("json.tmp").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

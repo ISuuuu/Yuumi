@@ -40,7 +40,9 @@ pub fn dropdown_trigger_aligned(
     align_right: bool,
     on_toggle: impl Fn(&mut Window, &mut App) + 'static + Clone,
 ) -> impl IntoElement {
-    let on_click = on_toggle.clone();
+    let on_toggle_rc = std::rc::Rc::new(on_toggle);
+    let on_click = on_toggle_rc.clone();
+    let on_key = on_toggle_rc.clone();
     let open_at_render = open;
 
     div()
@@ -48,6 +50,8 @@ pub fn dropdown_trigger_aligned(
         .relative()
         .child(
             div()
+                .id(SharedString::from(format!("{}-trigger", id)))
+                .tab_index(0)
                 .px(px(PADDING_X))
                 .py(px(5.0))
                 .rounded_md()
@@ -69,10 +73,23 @@ pub fn dropdown_trigger_aligned(
                 .text_color(Theme::TEXT_SECONDARY())
                 .cursor_pointer()
                 .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
+                .focus(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, move |_ev, win, app| {
                     // 展开态：Capture 阶段的 dismiss 已把菜单收起，这里跳过避免「关了又开」
                     if !open_at_render {
                         on_click(win, app);
+                    }
+                })
+                .on_key_down(move |ev, win, app| {
+                    let key = ev.keystroke.key.as_str();
+                    if key == "enter"
+                        || key == "space"
+                        || key == " "
+                        || (!open_at_render && key == "down")
+                        || (open_at_render && key == "escape")
+                    {
+                        app.stop_propagation();
+                        on_key(win, app);
                     }
                 })
                 .child(label)
@@ -87,7 +104,8 @@ pub fn dropdown_trigger_aligned(
                 )),
         )
         .when(open, |this| {
-            let on_dismiss = on_toggle.clone();
+            let on_dismiss = on_toggle_rc.clone();
+            let on_menu_esc = on_toggle_rc.clone();
             this.child(
                 deferred(
                     div()
@@ -107,6 +125,12 @@ pub fn dropdown_trigger_aligned(
                         .on_mouse_down_out(move |_ev, win, app| {
                             on_dismiss(win, app);
                         })
+                        .on_key_down(move |ev, win, app| {
+                            if ev.keystroke.key.as_str() == "escape" {
+                                app.stop_propagation();
+                                on_menu_esc(win, app);
+                            }
+                        })
                         .child(menu),
                 )
                 .with_priority(2),
@@ -120,7 +144,11 @@ pub fn dropdown_item(
     active: bool,
     on_select: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let on_select = std::rc::Rc::new(on_select);
+    let on_click = on_select.clone();
     div()
+        .id(SharedString::from(format!("dropdown-item-{}", label)))
+        .tab_index(0)
         .px(px(PADDING_X))
         .py(px(6.0))
         .text_size(px(12.5))
@@ -136,7 +164,15 @@ pub fn dropdown_item(
         })
         .cursor_pointer()
         .hover(|s| s.bg(Theme::HOVER_BG()))
-        .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_select(win, app))
+        .focus(|s| s.bg(Theme::HOVER_BG()))
+        .on_mouse_down(MouseButton::Left, move |_ev, win, app| on_click(win, app))
+        .on_key_down(move |ev, win, app| {
+            let key = ev.keystroke.key.as_str();
+            if key == "enter" || key == "space" || key == " " {
+                app.stop_propagation();
+                on_select(win, app);
+            }
+        })
         .child(label)
 }
 
@@ -169,13 +205,17 @@ pub fn select_dropdown(
     let current_label = current_label.into();
     let on_toggle = std::rc::Rc::new(on_toggle);
     let on_click = on_toggle.clone();
+    let on_key = on_toggle.clone();
     let open_at_render = open;
+    let trigger_id = (id.clone(), "trigger");
 
     div()
         .id(id)
         .relative()
         .child(
             div()
+                .id(trigger_id)
+                .tab_index(0)
                 .w(px(width_px))
                 .h(px(28.0))
                 .px(px(10.0))
@@ -196,10 +236,23 @@ pub fn select_dropdown(
                 .justify_between()
                 .cursor_pointer()
                 .hover(|s| s.border_color(Theme::ACCENT_PRIMARY()))
+                .focus(|s| s.border_color(Theme::ACCENT_PRIMARY()))
                 .on_mouse_down(MouseButton::Left, move |ev, win, app| {
                     // 展开态：Capture 阶段的 dismiss 已把菜单收起，这里跳过避免「关了又开」
                     if !open_at_render {
                         on_click(ev, win, app);
+                    }
+                })
+                .on_key_down(move |ev, win, app| {
+                    let key = ev.keystroke.key.as_str();
+                    if key == "enter"
+                        || key == "space"
+                        || key == " "
+                        || (!open_at_render && key == "down")
+                        || (open_at_render && key == "escape")
+                    {
+                        app.stop_propagation();
+                        on_key(&MouseDownEvent::default(), win, app);
                     }
                 })
                 .child(

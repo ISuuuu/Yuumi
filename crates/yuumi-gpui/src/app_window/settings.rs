@@ -499,7 +499,7 @@ impl MainWindow {
                     "dark_death" => self.app_config.personalization.dark_deaths_number_color = hex,
                     _ => return,
                 }
-                self.persist_config_silent(cx);
+                self.persist_config_debounced(cx);
             }
             SettingsAction::SampleHue(key, h) => {
                 self.settings_view.color_picker_h = h.rem_euclid(360.0);
@@ -527,7 +527,7 @@ impl MainWindow {
                     "dark_death" => self.app_config.personalization.dark_deaths_number_color = hex,
                     _ => return,
                 }
-                self.persist_config_silent(cx);
+                self.persist_config_debounced(cx);
             }
             SettingsAction::SampleAlpha(key, a) => {
                 let a = a.clamp(0.0, 1.0);
@@ -542,7 +542,7 @@ impl MainWindow {
                     "remake_color" => self.app_config.personalization.remake_card_color = hex,
                     _ => return,
                 }
-                self.persist_config_silent(cx);
+                self.persist_config_debounced(cx);
             }
             SettingsAction::SelectColorPreset(key, hex) => {
                 let (h, s, v, _) = crate::views::settings::hex_to_hsva(&hex);

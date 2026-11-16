@@ -191,6 +191,19 @@ impl IntoElement for LcuImage {
             };
             container.child(image)
         } else {
+            // 未命中内存缓存（含曾被 LRU 淘汰）时按需触发后台加载，完成后自动重绘
+            if !trimmed_src.is_empty() {
+                let src_owned = trimmed_src.to_string();
+                container = container.child(
+                    canvas(
+                        move |_bounds, window, cx| {
+                            global_asset_loader().schedule_load_if_needed(&src_owned, window, cx);
+                        },
+                        |_bounds, (), _window, _cx| {},
+                    )
+                    .size_0(),
+                );
+            }
             // 占位显示：纯白水晶极光风格柔和微光 + 占位文本
             if let Some(txt) = self.placeholder_text {
                 container.child(

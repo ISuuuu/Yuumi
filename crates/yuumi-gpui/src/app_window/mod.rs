@@ -156,6 +156,10 @@ pub struct MainWindow {
     connection_status: ConnectionStatus,
     /// 全局配置（对齐 %APPDATA%/Yuumi/config.json，修改即回写）
     app_config: AppConfig,
+    /// 后台配置保存代际（用于合并连续调色/滑块等高频保存）
+    config_save_gen: u64,
+    /// 上一次同步到托盘菜单的 `hide_tft` 状态，未变化时不重建托盘菜单
+    last_tray_hide_tft: Option<bool>,
     /// 工具箱自动化开关的权威配置（启动时从全局配置同步，变更即回写）
     automation: AutomationSettings,
     /// 当前选人会话快照（大乱斗悬浮窗的数据来源）
@@ -342,12 +346,45 @@ impl MainWindow {
         live_service.start();
 
         // 订阅 LCU 领域事件与连接状态并在 GPUI 主调度器中消费
-        cx.spawn(async move |entity, cx| {
-            while let Ok(event) = event_rx.recv().await {
-                let event_clone = event.clone();
-                let _ = entity.update(cx, |view, cx| {
-                    view.handle_live_event(event_clone, cx);
-                });
+        let recovery_service = live_service.clone();
+        cx.spawn(async move |entity, cx| loop {
+            match event_rx.recv().await {
+                Ok(event) => {
+                    if entity
+                        .update(cx, |view, cx| {
+                            view.handle_live_event(event, cx);
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    log::warn!(
+                        "[MainWindow] LiveLcuEvent 消费滞后，跳过 {} 条，恢复同步最新状态",
+                        skipped
+                    );
+                    let events = if let Some(handle) = yuumi_core::runtime::tokio_handle() {
+                        let svc = recovery_service.clone();
+                        handle
+                            .spawn(async move { svc.current_recovery_events().await })
+                            .await
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    if entity
+                        .update(cx, |view, cx| {
+                            for ev in events {
+                                view.handle_live_event(ev, cx);
+                            }
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         })
         .detach();
@@ -418,6 +455,8 @@ impl MainWindow {
             cloud_match_played: false,
             connection_status: ConnectionStatus::Disconnected,
             app_config,
+            config_save_gen: 0,
+            last_tray_hide_tft: None,
             automation,
             bench_session: None,
             game_assets: None,

@@ -171,8 +171,10 @@ impl Sidebar {
             Theme::TEXT_MUTED()
         };
 
+        let on_select_key = on_select.clone();
         div()
             .id(SharedString::from(format!("nav-item-{}", title)))
+            .tab_index(0)
             .relative()
             .flex()
             .items_center()
@@ -188,6 +190,7 @@ impl Sidebar {
             .when(!expanded, |el| el.justify_center())
             .when(is_active, |el| el.bg(Theme::SIDEBAR_ACTIVE()))
             .when(!is_active, |el| el.hover(|s| s.bg(Theme::HOVER_BG())))
+            .focus(|s| s.border_color(Theme::ACCENT_PRIMARY()))
             .cursor_pointer()
             // 左侧指示条 (4px，对照 Vue ::before)
             .when(is_active, |el| {
@@ -247,6 +250,13 @@ impl Sidebar {
             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                 on_select(route, window, app);
             })
+            .on_key_down(move |ev, window, app| {
+                let key = ev.keystroke.key.as_str();
+                if key == "enter" || key == "space" || key == " " {
+                    app.stop_propagation();
+                    on_select_key(route, window, app);
+                }
+            })
     }
 
     /// 渲染底部独立动作按钮 (非路由页面跳转)
@@ -257,10 +267,12 @@ impl Sidebar {
         expanded: bool,
         on_click: impl Fn(&mut Window, &mut App) + 'static + Clone,
     ) -> impl IntoElement {
-        let cb = on_click;
+        let cb = on_click.clone();
+        let cb_key = on_click;
 
         div()
             .id(id)
+            .tab_index(0)
             .relative()
             .flex()
             .items_center()
@@ -271,6 +283,7 @@ impl Sidebar {
             .when(expanded, |el| el.px(px(14.0)))
             .when(!expanded, |el| el.justify_center())
             .hover(|s| s.bg(Theme::HOVER_BG()))
+            .focus(|s| s.border_color(Theme::ACCENT_PRIMARY()))
             .cursor_pointer()
             .child(icon_el)
             .when(expanded, |el| {
@@ -287,6 +300,13 @@ impl Sidebar {
             })
             .on_mouse_down(MouseButton::Left, move |_ev, window, app| {
                 cb(window, app);
+            })
+            .on_key_down(move |ev, window, app| {
+                let key = ev.keystroke.key.as_str();
+                if key == "enter" || key == "space" || key == " " {
+                    app.stop_propagation();
+                    cb_key(window, app);
+                }
             })
     }
 

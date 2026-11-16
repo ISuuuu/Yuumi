@@ -728,6 +728,8 @@ impl MainWindow {
         let placeholder_icon = other_summoner.icon_path();
 
         self.career_view.is_viewing_other = true;
+        self.career_view.other_request_gen = self.career_view.other_request_gen.wrapping_add(1);
+        let req_gen = self.career_view.other_request_gen;
         self.career_view.active_tab = views::career::CareerTab::Matches;
         self.career_view.summoner = Some(other_summoner);
         self.career_view.ranked = None;
@@ -777,10 +779,17 @@ impl MainWindow {
                 } else {
                     None
                 };
+                let resolved_puuid = real_summoner
+                    .as_ref()
+                    .map(|s| s.puuid.clone())
+                    .filter(|p| !p.trim().is_empty())
+                    .unwrap_or_else(|| puuid.clone());
                 if let Some(real_s) = real_summoner {
                     let real_icon = real_s.icon_path();
                     let _ = entity.update(cx, |this, cx| {
-                        if this.career_view.is_viewing_other {
+                        if this.career_view.is_viewing_other
+                            && this.career_view.other_request_gen == req_gen
+                        {
                             this.career_view.summoner = Some(real_s);
                             // 真实头像替换占位图标后同样需要预热
                             prewarm_assets(vec![real_icon], cx);
@@ -789,10 +798,13 @@ impl MainWindow {
                     });
                 }
                 if let Ok(stats) =
-                    yuumi_core::parsers::game_info::fetch_ranked_stats(&client, &puuid).await
+                    yuumi_core::parsers::game_info::fetch_ranked_stats(&client, &resolved_puuid)
+                        .await
                 {
                     let _ = entity.update(cx, |this, cx| {
-                        if this.career_view.is_viewing_other {
+                        if this.career_view.is_viewing_other
+                            && this.career_view.other_request_gen == req_gen
+                        {
                             this.career_view.ranked = Some(stats);
                             cx.notify();
                         }
@@ -802,7 +814,7 @@ impl MainWindow {
                     let end_idx = (limit as u32).saturating_sub(1);
                     if let Ok(mut matches) = yuumi_core::parsers::match_parser::fetch_match_history(
                         &client,
-                        &puuid,
+                        &resolved_puuid,
                         Some(0),
                         Some(end_idx),
                         &assets,
@@ -813,7 +825,9 @@ impl MainWindow {
                         let items: Vec<MatchItem> =
                             matches.into_iter().map(MatchItem::new).collect();
                         let _ = entity.update(cx, |this, cx| {
-                            if this.career_view.is_viewing_other {
+                            if this.career_view.is_viewing_other
+                                && this.career_view.other_request_gen == req_gen
+                            {
                                 // P0-2：战绩列表图标预热，路径与渲染同源（对齐 MatchHistoryLoaded 入口）
                                 let mut asset_paths = Vec::new();
                                 for m in &items {
@@ -857,6 +871,7 @@ impl MainWindow {
     /// 返回我的生涯模式并恢复本人数据
     pub(super) fn back_to_my_career(&mut self, cx: &mut Context<Self>) {
         self.career_view.is_viewing_other = false;
+        self.career_view.other_request_gen = self.career_view.other_request_gen.wrapping_add(1);
         self.career_view.active_tab = views::career::CareerTab::Matches;
         if let Some(own) = self.own_summoner.clone() {
             self.career_view.summoner = Some(own);

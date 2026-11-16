@@ -97,6 +97,8 @@ pub struct TftView {
     pub error: String,
     pub ranked: Option<TftRankStats>,
     pub summary: Option<TftMatchSummary>,
+    /// 云顶生涯请求代际序号，防止换号或重复请求时旧结果覆盖新账号状态
+    pub career_request_gen: u64,
     /// 客户端版本（`major.minor`）
     pub client_version: String,
     /// 正在查看的对局 gameId（None 表示未展开详情）
@@ -135,6 +137,7 @@ impl TftView {
             error: String::new(),
             ranked: None,
             summary: None,
+            career_request_gen: 0,
             client_version: String::new(),
             detail_game_id: None,
             comps_loading: false,
