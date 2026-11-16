@@ -6,6 +6,29 @@ pub struct UploadPayload {
     pub participants: Vec<ParticipantInfo>,
 }
 
+impl UploadPayload {
+    /// 旧版本待传记录把当前账号放在 matchInfo.participants，发送前统一展平。
+    fn flatten_participants(&mut self) {
+        if self.match_info.participants.is_empty() {
+            return;
+        }
+
+        let nested = std::mem::take(&mut self.match_info.participants);
+        let mut seen: std::collections::HashSet<String> = self
+            .participants
+            .iter()
+            .filter(|p| !p.puuid.is_empty())
+            .map(|p| p.puuid.clone())
+            .collect();
+        for participant in nested {
+            if !participant.puuid.is_empty() && !seen.insert(participant.puuid.clone()) {
+                continue;
+            }
+            self.participants.push(participant);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchInfo {
@@ -328,7 +351,6 @@ struct PlayerInfo {
 
 pub fn build_upload_payload(
     game_detail: &GameDetail,
-    current_summoner_puuid: Option<&str>,
     champion_names: &std::collections::HashMap<i32, String>,
 ) -> UploadPayload {
     let game_creation_iso = game_detail
@@ -364,7 +386,7 @@ pub fn build_upload_payload(
         })
         .collect();
 
-    let mut all_participants: Vec<ParticipantInfo> = game_detail
+    let all_participants: Vec<ParticipantInfo> = game_detail
         .participants
         .iter()
         .map(|p| {
@@ -464,36 +486,10 @@ pub fn build_upload_payload(
         })
         .collect();
 
-    // Smart Split
-    let mut inner_participants = Vec::new();
-    let mut outer_participants = Vec::new();
-
-    if let Some(target_puuid) = current_summoner_puuid {
-        let mut found = false;
-
-        for p in all_participants.drain(..) {
-            if !found && p.puuid == target_puuid {
-                inner_participants.push(p);
-                found = true;
-            } else {
-                outer_participants.push(p);
-            }
-        }
-
-        if inner_participants.is_empty() && !outer_participants.is_empty() {
-            inner_participants.push(outer_participants.remove(0));
-        }
-    } else if !all_participants.is_empty() {
-        inner_participants.push(all_participants.remove(0));
-        outer_participants = all_participants;
-    }
-
-    let mut match_info = match_info;
-    match_info.participants = inner_participants;
-
+    // 服务端要求 matchInfo.participants 为空，全部参与者放在顶层。
     UploadPayload {
         match_info,
-        participants: outer_participants,
+        participants: all_participants,
     }
 }
 
@@ -605,7 +601,7 @@ impl UploadQueue {
             .await?;
         let detail: GameDetail = serde_json::from_value(detail).map_err(|e| e.to_string())?;
         ensure_membership(&detail, puuid)?;
-        let payload = build_upload_payload(&detail, Some(puuid), champions);
+        let payload = build_upload_payload(&detail, champions);
         if payload.match_info.match_id != game_id || game_id == 0 {
             return Err("对局 ID 无效或不匹配".into());
         }
@@ -763,6 +759,8 @@ impl UploadQueue {
         };
         let mut success = 0;
         for payload in payloads {
+            let mut payload = payload;
+            payload.flatten_participants();
             if let Err(e) = self.send_pending(base_url, &payload).await {
                 log::warn!(
                     "[Upload] 待传对局 {} 重试失败: {e}",
