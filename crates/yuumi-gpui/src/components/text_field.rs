@@ -732,7 +732,6 @@ struct RenderSnapshot {
     selection: Option<Range<usize>>,
     composing_text: String,
     scroll_x: f32,
-    caret_x: f32,
     sel_start_x: f32,
     sel_end_x: f32,
 }
@@ -750,14 +749,12 @@ fn read_render_snapshot(focus: &FocusHandle, fallback_text: &str) -> RenderSnaps
             } else {
                 (0.0, 0.0)
             };
-            let caret_x = state.x_for_byte_index(state.cursor);
             return RenderSnapshot {
                 base_text: state.base_text.clone(),
                 cursor: clamp_to_char_boundary(&state.base_text, state.cursor),
                 selection,
                 composing_text: state.composing_text.clone(),
                 scroll_x: state.scroll_x,
-                caret_x,
                 sel_start_x,
                 sel_end_x,
             };
@@ -768,7 +765,6 @@ fn read_render_snapshot(focus: &FocusHandle, fallback_text: &str) -> RenderSnaps
             selection: None,
             composing_text: String::new(),
             scroll_x: 0.0,
-            caret_x: 0.0,
             sel_start_x: 0.0,
             sel_end_x: 0.0,
         }
@@ -791,6 +787,7 @@ fn render_editable_text_area(
 
     let focus_for_prepaint = focus.clone();
     let focus_for_input = focus.clone();
+    let focus_for_caret = focus.clone();
     let current_for_prepaint = text.to_string();
 
     let focus_for_down = focus.clone();
@@ -842,14 +839,14 @@ fn render_editable_text_area(
         })
         .child(
             canvas(
-                move |bounds, window, _cx| {
+                move |bounds, window, cx| {
                     let focused_now = focus_for_prepaint.is_focused(window);
                     sync_active_ime(&focus_for_prepaint, focused_now, &current_for_prepaint);
                     if focused_now {
                         let style = window.text_style();
                         let font_size = px(12.5);
                         let run_font = style.font();
-                        let _ = with_focus_state(&focus_for_prepaint, |s| {
+                        let scroll_changed = with_focus_state(&focus_for_prepaint, |s| {
                             s.text_origin_x = f32::from(bounds.origin.x);
                             s.viewport_width = f32::from(bounds.size.width);
                             let mut offsets = Vec::new();
@@ -880,8 +877,16 @@ fn render_editable_text_area(
                             }
                             s.char_offsets = offsets;
                             let caret_x = s.x_for_byte_index(s.cursor);
+                            let prev_scroll_x = s.scroll_x;
                             s.ensure_cursor_visible(caret_x, s.viewport_width);
+                            (s.scroll_x - prev_scroll_x).abs() > 0.01
                         });
+                        // 文本容器与光标共用 `scroll_x` 做水平位移，而该位移在 render
+                        // 阶段就已确定；滚动量在本帧 prepaint 才更新，需要再要一帧才能
+                        // 让文本与光标同步移动到新的滚动位置（仅在发生滚动时触发）。
+                        if scroll_changed == Some(true) {
+                            cx.refresh_windows();
+                        }
                     }
                     bounds
                 },
@@ -962,14 +967,31 @@ fn render_editable_text_area(
                 .when(
                     is_focused && !disabled && !has_composing && snapshot.selection.is_none(),
                     |d| {
+                        // 光标位置必须在 paint 阶段读取：element 树构建（render）时
+                        // `char_offsets` 还是上一帧的测量结果，直接用于布局会让光标
+                        // 落后一次编辑（停在刚输入的字符之前）。canvas 的 paint 在
+                        // 本帧 prepaint 重新测算字符宽度之后执行，因此始终与文本对齐。
                         d.child(
-                            div()
-                                .absolute()
-                                .top(px(2.0))
-                                .bottom(px(2.0))
-                                .left(px(snapshot.caret_x))
-                                .w(px(1.5))
-                                .bg(Theme::ACCENT_PRIMARY()),
+                            canvas(
+                                |_, _, _| (),
+                                move |bounds, (), window, _cx| {
+                                    let Some(caret_x) = with_focus_state(&focus_for_caret, |s| {
+                                        s.x_for_byte_index(s.cursor)
+                                    }) else {
+                                        return;
+                                    };
+                                    let caret_bounds = Bounds::new(
+                                        point(
+                                            bounds.origin.x + px(caret_x),
+                                            bounds.origin.y + px(2.0),
+                                        ),
+                                        size(px(1.5), (bounds.size.height - px(4.0)).max(px(1.0))),
+                                    );
+                                    window.paint_quad(fill(caret_bounds, Theme::ACCENT_PRIMARY()));
+                                },
+                            )
+                            .absolute()
+                            .inset_0(),
                         )
                     },
                 ),
