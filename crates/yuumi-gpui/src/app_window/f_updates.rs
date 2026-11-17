@@ -1,5 +1,6 @@
 //! GPUI 更新和发布说明接线。签名发布通道由打包构建注入。
 use super::*;
+use crate::components::markdown;
 use gpui::Entity;
 use std::time::Duration;
 use yuumi_core::update::{self, StagedInstaller, StagedPortable, UpdateInfo, UpdateService};
@@ -358,8 +359,10 @@ impl MainWindow {
                             .id("update-notes")
                             .max_h(px(160.0))
                             .overflow_y_scroll()
-                            .text_sm()
-                            .child(notes.clone()),
+                            .flex()
+                            .flex_col()
+                            .gap(px(6.0))
+                            .children(markdown::render_markdown(notes)),
                     )
                 },
             )
