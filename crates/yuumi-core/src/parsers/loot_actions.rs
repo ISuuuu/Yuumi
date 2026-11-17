@@ -610,7 +610,7 @@ pub async fn reroll_loot(
     }
     let total = (ids.len() / 3) as i32;
     let mut progress = Vec::new();
-    for (g, group) in ids.chunks_exact(3).enumerate() {
+    for (g, group) in ids.as_chunks::<3>().0.iter().enumerate() {
         let current = g as i32 + 1;
         let keyword = if group[0].to_ascii_uppercase().contains("EMOTE") {
             "forge"

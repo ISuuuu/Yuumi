@@ -2,6 +2,7 @@
 name = "yuumi-gpui"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 build = "build.rs"
 
 [[bin]]

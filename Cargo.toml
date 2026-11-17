@@ -5,6 +5,11 @@ members = [
 ]
 resolver = "2"
 
+# 最低支持的 Rust 版本（MSRV）：slice::as_chunks 于 1.88.0 稳定，
+# crates/yuumi-core 的 loot_actions 与 yuumi-gpui 的 asset_loader 已使用该 API。
+[workspace.package]
+rust-version = "1.88"
+
 # 开发构建默认 opt-level=0 时，gpui 的布局/绘制（taffy layout + paint）极慢：
 # 对局信息页一次整页重绘要 330ms，拖动窗口起始那一次重绘就是肉眼可见的卡顿。
 # 这里让依赖（gpui/taffy 等）以 opt-level=2 编译，本地 crate 保持 0，增量编译只需 ~10s。

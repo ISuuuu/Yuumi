@@ -95,11 +95,7 @@ pub fn is_identity_compatible(entry: Option<EntryIdentity>, incoming: IdentityPa
     let incoming_has_identity = !in_puuid.is_empty() || in_sid_real;
     let entry_has_identity = !e_puuid.is_empty() || e_sid != 0;
 
-    if incoming_has_identity != entry_has_identity {
-        return false;
-    }
-
-    true
+    incoming_has_identity == entry_has_identity
 }
 
 #[cfg(test)]

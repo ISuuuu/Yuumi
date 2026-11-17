@@ -156,7 +156,7 @@ impl AssetLoader {
 
         let mut rgba = dyn_img.into_rgba8();
         // GPUI DirectX/Metal 渲染管线要求像素格式为 BGRA
-        for pixel in rgba.chunks_exact_mut(4) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
 
